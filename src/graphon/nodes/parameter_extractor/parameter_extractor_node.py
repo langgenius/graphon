@@ -804,7 +804,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
             system_prompt_messages = LLMNodeChatModelMessage(
                 role=PromptMessageRole.SYSTEM,
                 text=CHAT_GENERATE_JSON_PROMPT.format(
-                    histories=memory_str, instructions=instruction
+                    histories=memory_str, instruction=instruction
                 ),
             )
             user_prompt_message = LLMNodeChatModelMessage(

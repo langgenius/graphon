@@ -7,7 +7,7 @@ FUNCTION_CALLING_EXTRACTOR_SYSTEM_PROMPT = (
     "based on specific criteria provided. Follow the guidelines below to ensure "
     "consistency and accuracy.\n"
     "### Task\n"
-    "Always call the `{FUNCTION_CALLING_EXTRACTOR_NAME}` function with the "
+    f"Always call the `{FUNCTION_CALLING_EXTRACTOR_NAME}` function with the "
     "correct parameters. Ensure that the information extraction is contextual "
     "and aligns with the provided criteria.\n"
     "### Memory\n"
@@ -29,7 +29,8 @@ FUNCTION_CALLING_EXTRACTOR_SYSTEM_PROMPT = (
     "criteria in the given text.\n"
     "3. Generate a well-formatted output using the defined functions and "
     "arguments.\n"
-    "4. Use the `extract_parameter` function to create structured outputs with "
+    f"4. Use the `{FUNCTION_CALLING_EXTRACTOR_NAME}` function to create "
+    "structured outputs with "
     "appropriate parameters.\n"
     "5. Do not include any XML tags in your output.\n"
     "### Example\n"
@@ -180,7 +181,7 @@ CHAT_GENERATE_JSON_PROMPT = (
     "Some extra information are provided below, you should always follow the "
     "instructions as possible as I can.\n"
     "<instructions>\n"
-    "{instructions}\n"
+    "{instruction}\n"
     "</instructions>"
 )
 
