@@ -611,7 +611,7 @@ wheels = [
 
 [[package]]
 name = "graphon"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "charset-normalizer" },
@@ -817,11 +817,11 @@ wheels = [
 
 [[package]]
 name = "json-repair"
-version = "0.58.6"
+version = "0.58.7"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/76/70/484f97a744d2614218a2b162004accda3f3c4ccc8c5d688712624567ebec/json_repair-0.58.6.tar.gz", hash = "sha256:aa740113a1c9dede4ba84c29aa8f81493253aede6f0e4edde9a560ec4b1d7762", size = 44804, upload-time = "2026-03-16T13:43:34.722Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7b/68/119efc8f5f9fc8cf4f35bbfe28c5b84a14e237be4647a53cb29390e06102/json_repair-0.58.7.tar.gz", hash = "sha256:2ea5c841cc1d91dbbe79e9ed4b2b77a5cc04d20892d62a15261b70ce999ec758", size = 46312, upload-time = "2026-03-26T19:12:13.654Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/da/bb/c019ac05a6923c5776fa134c65e5b19d216ef17227618d93b1f608bc2806/json_repair-0.58.6-py3-none-any.whl", hash = "sha256:e438a1e4ea03179dfe9a05dfd738e678e888f1ea5b4a40398f8f220925df1c5c", size = 43482, upload-time = "2026-03-16T13:43:33.569Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/70/1c3d2304b7972a3e9430f1672b4fe20061c0ffc56662ad7c63d0e77a7d1a/json_repair-0.58.7-py3-none-any.whl", hash = "sha256:af0c7ff6a2ddd80bb1e7e6121c1a86d8bb57a539aa211acbfb25c64087b7116f", size = 44545, upload-time = "2026-03-26T19:12:12.445Z" },
 ]
 
 [[package]]

@@ -2,6 +2,19 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## v0.1.1 - 2026-03-27
+#### Documentation
+- (**readme**) simplify command reference - (fa0f3bd) - WH-2099
+#### Build system
+- support automatic bump - (127b249) - WH-2099
+#### Refactoring
+- (**graph-engine**) relocate command channel protocol - (ecfeea4) - WH-2099
+- import symbols from defining modules - (35c172f) - WH-2099
+#### Miscellaneous Chores
+- add missing init files - (2be637c) - WH-2099
+
+- - -
+
 ## v0.1.0 - 2026-03-27
 #### Features
 - add py.typed file - (ba63ee2) - WH-2099
