@@ -95,27 +95,13 @@ After that, the repository will have a local `.venv`, the project will be instal
 
 Use these commands by default:
 
-```bash
-make dev
-make format
-make lint
-make check
-make test
-make pre
-```
-
-What they do:
-
 - `make dev`: run `uv sync` and ensure `prek` is installed
 - `make format`: run `ruff format`
 - `make lint`: run `ruff check --fix`
 - `make check`: run `ruff format --check && ruff check`
 - `make test`: run `uv run --frozen pytest`
+- `make build`: build the package distributions
 - `make pre`: run `format`, `lint`, and `test` in sequence
-
-Additional targets:
-
-- `make build`: build the package
 - `make clean`: remove build artifacts, caches, and `__pycache__`
 
 ## Recommended Daily Flow
