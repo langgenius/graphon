@@ -26,6 +26,13 @@ test:
 build:
 	uv build --no-create-gitignore --no-sources
 
+
+.PHONY: bump
+bump:
+	uv version --upgrade --bump $(SEM)
+	cog bump --skip-untracked --version "$$(uv version --short)"
+
+
 .PHONY: clean
 clean:
 	rm -rf dist/ .pytest_cache/
