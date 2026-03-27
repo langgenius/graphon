@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## v0.1.2 - 2026-03-27
+#### Bug Fixes
+- (**parameter-extractor**) align prompt placeholders - (d456361) - WH-2099
+
+- - -
+
 ## v0.1.1 - 2026-03-27
 #### Documentation
 - (**readme**) simplify command reference - (fa0f3bd) - WH-2099
