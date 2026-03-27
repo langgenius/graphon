@@ -35,6 +35,7 @@ from graphon.runtime.graph_runtime_state import ChildGraphEngineBuilderProtocol
 if TYPE_CHECKING:  # pragma: no cover - used only for static analysis
     from graphon.runtime.graph_runtime_state import GraphProtocol
 
+from .command_channels import CommandChannel
 from .command_processing import (
     AbortCommandHandler,
     CommandProcessor,
@@ -49,7 +50,6 @@ from .graph_state_manager import GraphStateManager
 from .graph_traversal import EdgeProcessor, SkipPropagator
 from .layers.base import GraphEngineLayer
 from .orchestration import Dispatcher, ExecutionCoordinator
-from .protocols.command_channel import CommandChannel
 from .worker_management import WorkerPool
 
 if TYPE_CHECKING:

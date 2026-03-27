@@ -7,7 +7,7 @@ intercept and respond to GraphEngine events.
 
 from abc import ABC, abstractmethod
 
-from graphon.graph_engine.protocols.command_channel import CommandChannel
+from graphon.graph_engine.command_channels import CommandChannel
 from graphon.graph_events import GraphEngineEvent, GraphNodeEventBase
 from graphon.nodes.base.node import Node
 from graphon.runtime import ReadOnlyGraphRuntimeState

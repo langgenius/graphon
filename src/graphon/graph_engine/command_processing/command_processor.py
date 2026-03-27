@@ -5,9 +5,9 @@ Main command processor for handling external commands.
 import logging
 from typing import Protocol, final
 
+from ..command_channels import CommandChannel
 from ..domain.graph_execution import GraphExecution
 from ..entities.commands import GraphEngineCommand
-from ..protocols.command_channel import CommandChannel
 
 logger = logging.getLogger(__name__)
 
