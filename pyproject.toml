@@ -1,5 +1,6 @@
 [project]
 name = 'graphon'
+description = 'Graph execution engine for agentic AI workflows.'
 readme = 'README.md'
 version = '0.1.0'
 requires-python = '>=3.11,<3.13'
@@ -24,9 +25,9 @@ dependencies = [
 ]
 
 [project.urls]
-source = 'https://pypi.org/project/graphon'
-issues = 'https://github.com/langgenius/graphon/issues'
+source = 'https://github.com/langgenius/graphon'
 homepage = 'https://github.com/langgenius/graphon'
+issues = 'https://github.com/langgenius/graphon/issues'
 
 [dependency-groups]
 dev = ['pytest', 'pytest-cov', 'pytest-mock', 'pytest-xdist', 'ruff', 'prek']
