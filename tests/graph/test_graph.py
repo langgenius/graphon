@@ -1,8 +1,11 @@
 from unittest.mock import Mock
 
+import pytest
+
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType, NodeState
 from graphon.graph.edge import Edge
 from graphon.graph.graph import Graph
+from graphon.graph.validation import GraphValidationError
 from graphon.nodes.base.node import Node
 
 
@@ -17,6 +20,16 @@ def create_mock_node(
     node.state = state
     node.node_type = BuiltinNodeTypes.START
     return node
+
+
+class TestGraphBuilder:
+    def test_build_runs_default_validators(self):
+        root = create_mock_node("root", NodeExecutionType.EXECUTABLE)
+
+        with pytest.raises(GraphValidationError) as exc:
+            Graph.new().add_root(root).build()
+
+        assert any(issue.code == "INVALID_ROOT" for issue in exc.value.issues)
 
 
 class TestMarkInactiveRootBranches:
