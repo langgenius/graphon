@@ -443,13 +443,17 @@ class GraphBuilder:
             out_edges[edge.tail].append(edge.id)
             in_edges[edge.head].append(edge.id)
 
-        return self._graph_cls(
+        graph = self._graph_cls(
             nodes=nodes,
             edges=edges,
             in_edges=dict(in_edges),
             out_edges=dict(out_edges),
             root_node=self._nodes[0],
         )
+
+        get_graph_validator().validate(graph)
+
+        return graph
 
     def _register_node(self, node: Node) -> None:
         if not node.id:
