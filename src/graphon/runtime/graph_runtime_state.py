@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from pydantic import BaseModel, Field
-from pydantic.json import pydantic_encoder
+from pydantic_core import to_jsonable_python
 
 from graphon.enums import NodeExecutionType, NodeState, NodeType
 from graphon.model_runtime.entities.llm_entities import LLMUsage
@@ -461,7 +461,7 @@ class GraphRuntimeState:
         if self._response_coordinator is not None and self._graph is not None:
             snapshot["response_coordinator"] = self._response_coordinator.dumps()
 
-        return json.dumps(snapshot, default=pydantic_encoder)
+        return json.dumps(to_jsonable_python(snapshot))
 
     @classmethod
     def from_snapshot(cls, data: str | Mapping[str, Any]) -> GraphRuntimeState:
