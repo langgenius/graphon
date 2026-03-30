@@ -26,9 +26,9 @@ from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.file import file_manager
 from graphon.file.enums import FileTransferMethod
 from graphon.file.models import File
+from graphon.http import HttpClientProtocol, get_http_client
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.node import Node
-from graphon.nodes.protocols import HttpClientProtocol
 from graphon.variables.segments import ArrayFileSegment, ArrayStringSegment, FileSegment
 
 from .entities import DocumentExtractorNodeData, UnstructuredApiConfig
@@ -66,7 +66,7 @@ class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
         graph_runtime_state: "GraphRuntimeState",
         *,
         unstructured_api_config: UnstructuredApiConfig | None = None,
-        http_client: HttpClientProtocol,
+        http_client: HttpClientProtocol | None = None,
     ) -> None:
         super().__init__(
             id=id,
@@ -77,7 +77,7 @@ class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
         self._unstructured_api_config = (
             unstructured_api_config or UnstructuredApiConfig()
         )
-        self._http_client = http_client
+        self._http_client = http_client or get_http_client()
 
     def _run(self):
         variable_selector = self.node_data.variable_selector

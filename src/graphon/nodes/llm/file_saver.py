@@ -7,9 +7,9 @@ from graphon.file.enums import (
     FileType,
 )
 from graphon.file.models import File
+from graphon.http import HttpClientProtocol, get_http_client
 from graphon.nodes.protocols import (
     FileReferenceFactoryProtocol,
-    HttpClientProtocol,
     ToolFileManagerProtocol,
 )
 
@@ -77,11 +77,11 @@ class FileSaverImpl(LLMFileSaver):
         *,
         tool_file_manager: ToolFileManagerProtocol,
         file_reference_factory: FileReferenceFactoryProtocol,
-        http_client: HttpClientProtocol,
+        http_client: HttpClientProtocol | None = None,
     ):
         self._tool_file_manager = tool_file_manager
         self._file_reference_factory = file_reference_factory
-        self._http_client = http_client
+        self._http_client = http_client or get_http_client()
 
     def save_remote_url(self, url: str, file_type: FileType) -> File:
         http_response = self._http_client.get(url)

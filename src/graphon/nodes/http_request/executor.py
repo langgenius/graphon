@@ -7,14 +7,14 @@ from copy import deepcopy
 from typing import Any, Literal
 from urllib.parse import urlencode, urlparse
 
-import httpx
 from json_repair import repair_json
 
 from graphon.file.enums import FileTransferMethod
+from graphon.http import HttpClientProtocol, HttpResponse
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import ArrayFileSegment, FileSegment
 
-from ..protocols import FileManagerProtocol, HttpClientProtocol
+from ..protocols import FileManagerProtocol
 from .entities import (
     HttpRequestNodeAuthorization,
     HttpRequestNodeConfig,
@@ -366,7 +366,7 @@ class Executor:
 
         return headers
 
-    def _validate_and_parse_response(self, response: httpx.Response) -> Response:
+    def _validate_and_parse_response(self, response: HttpResponse) -> Response:
         executor_response = Response(response)
 
         threshold_size = (
@@ -383,11 +383,11 @@ class Executor:
 
         return executor_response
 
-    def _do_http_request(self, headers: dict[str, Any]) -> httpx.Response:
+    def _do_http_request(self, headers: dict[str, Any]) -> HttpResponse:
         """
         do http request depending on api bundle
         """
-        _METHOD_MAP: dict[str, Callable[..., httpx.Response]] = {
+        _METHOD_MAP: dict[str, Callable[..., HttpResponse]] = {
             "get": self._http_client.get,
             "head": self._http_client.head,
             "post": self._http_client.post,

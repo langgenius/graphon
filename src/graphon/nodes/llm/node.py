@@ -20,6 +20,7 @@ from graphon.enums import (
 from graphon.file import file_manager
 from graphon.file.enums import FileType
 from graphon.file.models import File
+from graphon.http import HttpClientProtocol
 from graphon.model_runtime.entities.llm_entities import (
     LLMResult,
     LLMResultChunk,
@@ -60,7 +61,6 @@ from graphon.nodes.llm.runtime_protocols import (
     PromptMessageSerializerProtocol,
     RetrieverAttachmentLoaderProtocol,
 )
-from graphon.nodes.protocols import HttpClientProtocol
 from graphon.prompt_entities import CompletionModelPromptTemplate, MemoryConfig
 from graphon.runtime.variable_pool import VariablePool
 from graphon.template_rendering import Jinja2TemplateRenderer, TemplateRenderError
@@ -125,7 +125,7 @@ class LLMNode(Node[LLMNodeData]):
         credentials_provider: object | None = None,
         model_factory: object | None = None,
         model_instance: PreparedLLMProtocol,
-        http_client: HttpClientProtocol,
+        http_client: HttpClientProtocol | None = None,
         memory: PromptMessageMemory | None = None,
         llm_file_saver: LLMFileSaver,
         prompt_message_serializer: PromptMessageSerializerProtocol,

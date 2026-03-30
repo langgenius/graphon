@@ -7,6 +7,7 @@ from graphon.entities.graph_config import NodeConfigDict
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.file.enums import FileTransferMethod
 from graphon.file.models import File
+from graphon.http import HttpClientProtocol, get_http_client
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base import variable_template_parser
 from graphon.nodes.base.entities import VariableSelector
@@ -15,7 +16,6 @@ from graphon.nodes.http_request.executor import Executor
 from graphon.nodes.protocols import (
     FileManagerProtocol,
     FileReferenceFactoryProtocol,
-    HttpClientProtocol,
     ToolFileManagerProtocol,
 )
 from graphon.variables.segments import ArrayFileSegment
@@ -48,7 +48,7 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
         graph_runtime_state: "GraphRuntimeState",
         *,
         http_request_config: HttpRequestNodeConfig,
-        http_client: HttpClientProtocol,
+        http_client: HttpClientProtocol | None = None,
         tool_file_manager_factory: Callable[[], ToolFileManagerProtocol],
         file_manager: FileManagerProtocol,
         file_reference_factory: FileReferenceFactoryProtocol,
@@ -61,7 +61,7 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
         )
 
         self._http_request_config = http_request_config
-        self._http_client = http_client
+        self._http_client = http_client or get_http_client()
         self._tool_file_manager_factory = tool_file_manager_factory
         self._file_manager = file_manager
         self._file_reference_factory = file_reference_factory

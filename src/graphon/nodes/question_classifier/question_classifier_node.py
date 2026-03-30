@@ -11,6 +11,7 @@ from graphon.enums import (
     WorkflowNodeExecutionMetadataKey,
     WorkflowNodeExecutionStatus,
 )
+from graphon.http import HttpClientProtocol
 from graphon.model_runtime.entities.llm_entities import (
     LLMMode,
     LLMUsage,
@@ -35,7 +36,6 @@ from graphon.nodes.llm.runtime_protocols import (
     PreparedLLMProtocol,
     PromptMessageSerializerProtocol,
 )
-from graphon.nodes.protocols import HttpClientProtocol
 from graphon.template_rendering import Jinja2TemplateRenderer
 from graphon.utils.json_in_md_parser import parse_and_check_json_markdown
 
@@ -83,7 +83,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         credentials_provider: object | None = None,
         model_factory: object | None = None,
         model_instance: PreparedLLMProtocol,
-        http_client: HttpClientProtocol,
+        http_client: HttpClientProtocol | None = None,
         template_renderer: Jinja2TemplateRenderer,
         memory: PromptMessageMemory | None = None,
         llm_file_saver: LLMFileSaver,

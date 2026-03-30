@@ -3,17 +3,10 @@ from __future__ import annotations
 from collections.abc import Generator
 from typing import TYPE_CHECKING, Literal, Protocol
 
+from graphon.http.protocols import HttpResponseProtocol
+
 if TYPE_CHECKING:
     from .models import File
-
-
-class HttpResponseProtocol(Protocol):
-    """Subset of response behavior needed by workflow file helpers."""
-
-    @property
-    def content(self) -> bytes: ...
-
-    def raise_for_status(self) -> object: ...
 
 
 class WorkflowFileRuntimeProtocol(Protocol):
