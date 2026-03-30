@@ -151,7 +151,9 @@ def test_http_request_node_uses_default_http_client_when_not_injected():
                 "body": {"type": "none", "data": []},
             },
         },
-        graph_init_params=build_graph_init_params(graph_config={"nodes": [], "edges": []}),
+        graph_init_params=build_graph_init_params(
+            graph_config={"nodes": [], "edges": []}
+        ),
         graph_runtime_state=_build_runtime_state(),
         http_request_config=build_http_request_config(),
         tool_file_manager_factory=_ToolFileManager,
@@ -173,7 +175,9 @@ def test_document_extractor_node_uses_default_http_client_when_not_injected():
                 "variable_selector": ["inputs", "file"],
             },
         },
-        graph_init_params=build_graph_init_params(graph_config={"nodes": [], "edges": []}),
+        graph_init_params=build_graph_init_params(
+            graph_config={"nodes": [], "edges": []}
+        ),
         graph_runtime_state=_build_runtime_state(),
     )
 
