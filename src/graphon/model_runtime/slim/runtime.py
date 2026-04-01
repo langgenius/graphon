@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import subprocess
 import tempfile
 from collections.abc import Generator, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from threading import Lock
 from typing import IO, Any
 
@@ -61,6 +63,7 @@ from .package_loader import LoadedSlimProvider, SlimPackageLoader
 
 logger = logging.getLogger(__name__)
 _SLIM_BINARY_NAME = "dify-plugin-daemon-slim"
+_SLIM_BINARY_PATH_ENV = "SLIM_BINARY_PATH"
 
 _PROMPT_MESSAGE_ROLE_TO_CLASS = {
     "system": SystemPromptMessage,
@@ -102,17 +105,40 @@ class _SlimErrorEvent:
 
 class SlimRuntime(ModelRuntime):
     def __init__(self, config: SlimConfig) -> None:
-        binary_path = shutil.which(_SLIM_BINARY_NAME)
-        if binary_path is None:
-            message = f"{_SLIM_BINARY_NAME} is not available in PATH."
-            logger.error(message)
-            raise RuntimeError(message)
-
         self._config = config
-        self._binary_path = binary_path
+        self._binary_path = self._resolve_binary_path()
         self._package_loader = SlimPackageLoader(config)
         self._providers_by_name: dict[str, LoadedSlimProvider] = {}
         self._lock = Lock()
+
+    def _resolve_binary_path(self) -> str:
+        configured_path = os.environ.get(_SLIM_BINARY_PATH_ENV, "").strip()
+        if configured_path:
+            binary_path = Path(configured_path).expanduser().resolve()
+            if not binary_path.is_file():
+                message = (
+                    f"{_SLIM_BINARY_PATH_ENV} points to a missing file: {binary_path}"
+                )
+                logger.error(message)
+                raise RuntimeError(message)
+            if not os.access(binary_path, os.X_OK):
+                message = (
+                    f"{_SLIM_BINARY_PATH_ENV} points to a non-executable file: "
+                    f"{binary_path}"
+                )
+                logger.error(message)
+                raise RuntimeError(message)
+            return str(binary_path)
+
+        binary_path = shutil.which(_SLIM_BINARY_NAME)
+        if binary_path is None:
+            message = (
+                f"{_SLIM_BINARY_NAME} is not available in PATH. "
+                f"Set {_SLIM_BINARY_PATH_ENV} to override it."
+            )
+            logger.error(message)
+            raise RuntimeError(message)
+        return binary_path
 
     def fetch_model_providers(self) -> Sequence[ProviderEntity]:
         self._ensure_loaded()

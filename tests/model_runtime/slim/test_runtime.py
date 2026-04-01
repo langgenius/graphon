@@ -22,6 +22,11 @@ from graphon.model_runtime.slim import (
 )
 
 
+@pytest.fixture(autouse=True)
+def clear_slim_binary_path_env(monkeypatch) -> None:
+    monkeypatch.delenv("SLIM_BINARY_PATH", raising=False)
+
+
 def _write_fake_plugin(plugin_root: Path) -> None:
     (plugin_root / "_assets").mkdir(parents=True, exist_ok=True)
     (plugin_root / "provider").mkdir(parents=True, exist_ok=True)
@@ -574,7 +579,10 @@ def test_slim_runtime_panics_when_binary_is_missing(
     with patch("graphon.model_runtime.slim.runtime.shutil.which", return_value=None):
         with pytest.raises(
             RuntimeError,
-            match=r"dify-plugin-daemon-slim is not available in PATH\.",
+            match=(
+                r"dify-plugin-daemon-slim is not available in PATH\. "
+                r"Set SLIM_BINARY_PATH to override it\."
+            ),
         ):
             SlimRuntime(
                 SlimConfig(
@@ -583,4 +591,47 @@ def test_slim_runtime_panics_when_binary_is_missing(
                 )
             )
 
-    assert "dify-plugin-daemon-slim is not available in PATH." in caplog.text
+    assert (
+        "dify-plugin-daemon-slim is not available in PATH. "
+        "Set SLIM_BINARY_PATH to override it."
+    ) in caplog.text
+
+
+def test_slim_runtime_uses_slim_binary_path_env(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    custom_binary = tmp_path / "custom-slim"
+    custom_binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    custom_binary.chmod(0o755)
+
+    monkeypatch.setenv("SLIM_BINARY_PATH", str(custom_binary))
+
+    with patch("graphon.model_runtime.slim.runtime.shutil.which", return_value=None):
+        runtime = SlimRuntime(
+            SlimConfig(
+                bindings=[SlimProviderBinding(plugin_id="author/fake:0.0.1@test")],
+                local=SlimLocalSettings(folder=tmp_path / "plugins"),
+            )
+        )
+
+    assert runtime._binary_path == str(custom_binary)  # pyright: ignore[reportPrivateUsage]
+
+
+def test_slim_runtime_rejects_invalid_slim_binary_path_env(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    missing_binary = tmp_path / "missing-slim"
+    monkeypatch.setenv("SLIM_BINARY_PATH", str(missing_binary))
+
+    with pytest.raises(
+        RuntimeError,
+        match=rf"SLIM_BINARY_PATH points to a missing file: {missing_binary}",
+    ):
+        SlimRuntime(
+            SlimConfig(
+                bindings=[SlimProviderBinding(plugin_id="author/fake:0.0.1@test")],
+                local=SlimLocalSettings(folder=tmp_path / "plugins"),
+            )
+        )
