@@ -10,6 +10,7 @@
 
 - [ ] This pull request title follows Conventional Commits, and any breaking change is marked with `!`
 - [ ] I ran `make pre` before pushing this branch
+- [ ] If CLA Assistant prompted me, I signed [CLA.md](../CLA.md) in the pull request conversation
 - [ ] I added or updated tests for behavior changes, or this change does not require tests
 - [ ] I updated the relevant repository documentation when needed
 - [ ] This change is focused and reviewable
