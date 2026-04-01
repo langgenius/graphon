@@ -28,6 +28,7 @@ import sys
 import time
 from collections.abc import Sequence
 from pathlib import Path
+from typing import IO
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = EXAMPLE_DIR.parents[1]
@@ -66,6 +67,7 @@ from graphon.file.models import File
 from graphon.graph.graph import Graph
 from graphon.graph_engine.command_channels import InMemoryChannel
 from graphon.graph_engine.graph_engine import GraphEngine
+from graphon.graph_events.node import NodeRunStreamChunkEvent
 from graphon.model_runtime.entities.llm_entities import LLMMode
 from graphon.model_runtime.entities.message_entities import (
     PromptMessage,
@@ -106,6 +108,7 @@ PATH_ENV_VARS = {
     "SLIM_PLUGIN_FOLDER",
     "SLIM_PLUGIN_ROOT",
 }
+STREAM_SELECTOR = ("llm", "text")
 
 
 def load_default_env_file() -> None:
@@ -312,7 +315,20 @@ def build_graph(
     )
 
 
-def run_workflow(query: str) -> str:
+def write_stream_chunk(event: object, *, stream_output: IO[str]) -> bool:
+    if not isinstance(event, NodeRunStreamChunkEvent):
+        return False
+    if tuple(event.selector) != STREAM_SELECTOR or not event.chunk:
+        return False
+
+    stream_output.write(event.chunk)
+    stream_output.flush()
+    return True
+
+
+def _execute_workflow(
+    query: str, *, stream_output: IO[str] | None = None
+) -> tuple[str, bool]:
     load_default_env_file()
     runtime, provider = build_runtime()
     workflow_id = "example-start-llm-output"
@@ -348,12 +364,24 @@ def run_workflow(query: str) -> str:
         command_channel=InMemoryChannel(),
     )
 
-    for _ in engine.run():
-        pass
+    streamed = False
+    for event in engine.run():
+        if stream_output is not None and write_stream_chunk(
+            event, stream_output=stream_output
+        ):
+            streamed = True
 
     answer = graph_runtime_state.get_output("answer")
     if not isinstance(answer, str):
         raise RuntimeError("Workflow did not produce a text answer.")
+    if stream_output is not None and streamed and not answer.endswith("\n"):
+        stream_output.write("\n")
+        stream_output.flush()
+    return answer, streamed
+
+
+def run_workflow(query: str) -> str:
+    answer, _ = _execute_workflow(query)
     return answer
 
 
@@ -372,7 +400,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    print(run_workflow(args.query))
+    answer, streamed = _execute_workflow(args.query, stream_output=sys.stdout)
+    if not streamed:
+        print(answer)
     return 0
 
 

@@ -39,6 +39,8 @@ cp .env.example .env
 python3 workflow.py
 ```
 
+The CLI streams LLM text to stdout as chunks arrive.
+
 You can also pass a custom prompt:
 
 ```bash

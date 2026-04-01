@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import os
+from io import StringIO
 from pathlib import Path
 
 import pytest
 
-from examples.graphon_openai_slim.workflow import ALLOWED_ENV_VARS, load_env_file
+from examples.graphon_openai_slim.workflow import (
+    ALLOWED_ENV_VARS,
+    load_env_file,
+    write_stream_chunk,
+)
+from graphon.enums import BuiltinNodeTypes
+from graphon.graph_events.node import NodeRunStreamChunkEvent
 
 
 def test_load_env_file_sets_missing_values(monkeypatch, tmp_path: Path) -> None:
@@ -76,3 +83,33 @@ def test_env_example_matches_allowed_env_vars() -> None:
     }
 
     assert keys == set(ALLOWED_ENV_VARS)
+
+
+def test_write_stream_chunk_writes_llm_text_chunks() -> None:
+    output = StringIO()
+    event = NodeRunStreamChunkEvent(
+        id="event-1",
+        node_id="llm",
+        node_type=BuiltinNodeTypes.LLM,
+        selector=["llm", "text"],
+        chunk="hello",
+        is_final=False,
+    )
+
+    assert write_stream_chunk(event, stream_output=output) is True
+    assert output.getvalue() == "hello"
+
+
+def test_write_stream_chunk_ignores_non_llm_text_chunks() -> None:
+    output = StringIO()
+    event = NodeRunStreamChunkEvent(
+        id="event-2",
+        node_id="output",
+        node_type=BuiltinNodeTypes.ANSWER,
+        selector=["output", "answer"],
+        chunk="hello",
+        is_final=False,
+    )
+
+    assert write_stream_chunk(event, stream_output=output) is False
+    assert output.getvalue() == ""
