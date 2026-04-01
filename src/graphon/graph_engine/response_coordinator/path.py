@@ -6,9 +6,8 @@ to track execution paths to response nodes.
 """
 
 from dataclasses import dataclass, field
-from typing import TypeAlias
 
-EdgeID: TypeAlias = str
+type EdgeID = str
 
 
 @dataclass

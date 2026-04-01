@@ -1,6 +1,6 @@
 import json
 from collections.abc import Generator, Mapping, MutableMapping, Sequence
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, override
 
 from graphon.entities.graph_config import NodeConfigDict
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
@@ -69,6 +69,7 @@ def _source_mapping_from_item(
 class VariableAssignerNode(Node[VariableAssignerNodeData]):
     node_type = BuiltinNodeTypes.VARIABLE_ASSIGNER
 
+    @override
     def __init__(
         self,
         id: str,
@@ -83,6 +84,7 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
             graph_runtime_state=graph_runtime_state,
         )
 
+    @override
     def blocks_variable_output(self, variable_selectors: set[tuple[str, ...]]) -> bool:
         """
         Check if this Variable Assigner node blocks the output of specific variables.
@@ -101,10 +103,12 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
         return False
 
     @classmethod
+    @override
     def version(cls) -> str:
         return "2"
 
     @classmethod
+    @override
     def _extract_variable_selector_to_variable_mapping(
         cls,
         *,
@@ -118,6 +122,7 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
             _source_mapping_from_item(var_mapping, node_id, item)
         return var_mapping
 
+    @override
     def _run(self) -> Generator[NodeEventBase, None, None]:
         inputs = self.node_data.model_dump()
         process_data: dict[str, Any] = {}

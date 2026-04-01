@@ -1,5 +1,3 @@
-from typing import cast
-
 from graphon.model_runtime.entities.provider_entities import (
     CredentialFormSchema,
     FormType,
@@ -76,7 +74,12 @@ class CommonValidator:
             return None
 
         # Get the value corresponding to the variable from credentials
-        value = cast("str", credentials[credential_form_schema.variable])
+        value = credentials[credential_form_schema.variable]
+
+        if not isinstance(value, str):
+            raise ValueError(
+                f"Variable {credential_form_schema.variable} should be string"
+            )
 
         # If max_length=0, no validation is performed
         if (
@@ -86,12 +89,6 @@ class CommonValidator:
             raise ValueError(
                 f"Variable {credential_form_schema.variable} length should not be"
                 f" greater than {credential_form_schema.max_length}"
-            )
-
-        # check the type of value
-        if not isinstance(value, str):
-            raise ValueError(
-                f"Variable {credential_form_schema.variable} should be string"
             )
 
         if (

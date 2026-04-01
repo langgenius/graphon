@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from enum import StrEnum, auto
-from typing import Any
+from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -103,17 +103,14 @@ class DefaultParameterName(StrEnum):
     JSON_SCHEMA = auto()
 
     @classmethod
-    def value_of(cls, value: Any) -> DefaultParameterName:
+    def value_of(cls, value: Any) -> Self:
         """
         Get parameter name from value.
 
         :param value: parameter value
         :return: parameter name
         """
-        for name in cls:
-            if name.value == value:
-                return name
-        raise ValueError(f"invalid parameter name {value}")
+        return cls(value)
 
 
 class ParameterType(StrEnum):

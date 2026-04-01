@@ -6,7 +6,7 @@ containers can operate without importing application-layer packages.
 """
 
 from collections.abc import Mapping, Sequence
-from typing import Any, cast
+from typing import Any
 from uuid import uuid4
 
 from graphon.file.models import File
@@ -43,6 +43,7 @@ from .variables import (
     NoneVariable,
     ObjectVariable,
     StringVariable,
+    Variable,
     VariableBase,
 )
 
@@ -55,7 +56,7 @@ class TypeMismatchError(Exception):
     pass
 
 
-SEGMENT_TO_VARIABLE_MAP: Mapping[type[Segment], type[Any]] = {
+SEGMENT_TO_VARIABLE_MAP: Mapping[type[Segment], type[Variable]] = {
     ArrayAnySegment: ArrayAnyVariable,
     ArrayBooleanSegment: ArrayBooleanVariable,
     ArrayFileSegment: ArrayFileVariable,
@@ -203,13 +204,10 @@ def segment_to_variable(
         raise UnsupportedSegmentTypeError(f"not supported segment type {segment_type}")
 
     variable_class = SEGMENT_TO_VARIABLE_MAP[segment_type]
-    return cast(
-        "VariableBase",
-        variable_class(
-            id=id,
-            name=name,
-            description=description,
-            value=segment.value,
-            selector=list(selector),
-        ),
+    return variable_class(
+        id=id,
+        name=name,
+        description=description,
+        value=segment.value,
+        selector=list(selector),
     )

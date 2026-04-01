@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, override
 
 from jsonschema import Draft7Validator, ValidationError
 
@@ -18,9 +18,11 @@ class StartNode(Node[StartNodeData]):
     execution_type = NodeExecutionType.ROOT
 
     @classmethod
+    @override
     def version(cls) -> str:
         return "1"
 
+    @override
     def _run(self) -> NodeRunResult:
         node_inputs = dict(
             self.graph_runtime_state.variable_pool.get_by_prefix(self.id)

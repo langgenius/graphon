@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Generator, Mapping, Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.nodes.tool_runtime_entities import (
@@ -64,6 +64,7 @@ class ToolNodeRuntimeProtocol(Protocol):
     ) -> tuple[str | Mapping[str, str] | None, str | Mapping[str, str] | None]: ...
 
 
+@runtime_checkable
 class HumanInputNodeRuntimeProtocol(Protocol):
     """Workflow-layer adapter for human-input runtime persistence and delivery."""
 

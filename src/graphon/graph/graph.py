@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from typing import Protocol, cast, final
+from typing import Protocol, final
 
 from pydantic import TypeAdapter
 
@@ -17,6 +17,7 @@ from .validation import get_graph_validator
 logger = logging.getLogger(__name__)
 
 _ListNodeConfigDict = TypeAdapter(list[NodeConfigDict])
+_ListObjectDict = TypeAdapter(list[dict[str, object]])
 
 
 class NodeFactory(Protocol):
@@ -286,8 +287,8 @@ class Graph:
         edge_configs = graph_config.get("edges", [])
         node_configs = graph_config.get("nodes", [])
 
-        edge_configs = cast("list[dict[str, object]]", edge_configs)
-        node_configs = cast("list[dict[str, object]]", node_configs)
+        edge_configs = _ListObjectDict.validate_python(edge_configs)
+        node_configs = _ListObjectDict.validate_python(node_configs)
         node_configs = cls._filter_canvas_only_nodes(node_configs)
         node_configs = _ListNodeConfigDict.validate_python(node_configs)
 

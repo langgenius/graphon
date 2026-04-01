@@ -1,7 +1,5 @@
 import logging
-from typing import final
-
-from typing_extensions import override
+from typing import final, override
 
 from graphon.entities.pause_reason import SchedulingPause
 from graphon.runtime.variable_pool import VariablePool

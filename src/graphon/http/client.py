@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, override
 
 import httpx
 
@@ -17,28 +17,36 @@ class HttpxHttpClient(HttpClientProtocol):
     """HTTPX-backed sync client that matches the workflow HTTP client protocol."""
 
     @property
+    @override
     def max_retries_exceeded_error(self) -> type[Exception]:
         return HttpClientMaxRetriesExceededError
 
     @property
+    @override
     def request_error(self) -> type[Exception]:
         return httpx.RequestError
 
+    @override
     def get(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
         return self._request("GET", url, max_retries=max_retries, **kwargs)
 
+    @override
     def head(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
         return self._request("HEAD", url, max_retries=max_retries, **kwargs)
 
+    @override
     def post(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
         return self._request("POST", url, max_retries=max_retries, **kwargs)
 
+    @override
     def put(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
         return self._request("PUT", url, max_retries=max_retries, **kwargs)
 
+    @override
     def delete(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
         return self._request("DELETE", url, max_retries=max_retries, **kwargs)
 
+    @override
     def patch(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
         return self._request("PATCH", url, max_retries=max_retries, **kwargs)
 

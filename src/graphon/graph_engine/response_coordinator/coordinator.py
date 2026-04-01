@@ -9,7 +9,7 @@ import logging
 from collections import deque
 from collections.abc import Sequence
 from threading import RLock
-from typing import Literal, TypeAlias, final
+from typing import Literal, final
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -29,8 +29,8 @@ from .session import ResponseSession
 logger = logging.getLogger(__name__)
 
 # Type definitions
-NodeID: TypeAlias = str
-EdgeID: TypeAlias = str
+type NodeID = str
+type EdgeID = str
 
 
 class ResponseSessionState(BaseModel):

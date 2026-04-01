@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import ClassVar, TypeAlias
+from typing import ClassVar
 
 
 class NodeState(StrEnum):
@@ -10,7 +10,7 @@ class NodeState(StrEnum):
     SKIPPED = "skipped"
 
 
-NodeType: TypeAlias = str
+type NodeType = str
 
 
 class BuiltinNodeTypes:

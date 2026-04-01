@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from typing import Annotated, Any, TypeAlias
+from typing import Annotated, Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Discriminator, Field, Tag
@@ -160,7 +160,7 @@ class RAGPipelineVariableInput(BaseModel):
 # Note:
 # - All variants in `Variable` must inherit from the `VariableBase` class.
 # - The union must include all non-abstract subclasses of `VariableBase`.
-Variable: TypeAlias = Annotated[
+type Variable = Annotated[
     (
         Annotated[NoneVariable, Tag(SegmentType.NONE)]
         | Annotated[StringVariable, Tag(SegmentType.STRING)]

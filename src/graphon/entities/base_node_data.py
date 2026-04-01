@@ -4,15 +4,14 @@ import json
 from abc import ABC
 from builtins import type as type_
 from enum import StrEnum
-from typing import Any, Union
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from graphon.entities.exc import DefaultValueTypeError
 from graphon.enums import ErrorStrategy, NodeType
 
-# Project supports Python 3.11+, where `typing.Union[...]` is valid in `isinstance`.
-_NumberType = Union[int, float]
+_NumberType = int | float
 
 
 class RetryConfig(BaseModel):

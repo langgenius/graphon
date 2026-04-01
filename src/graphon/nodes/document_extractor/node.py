@@ -6,7 +6,7 @@ import pathlib
 import tempfile
 import zipfile
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 import charset_normalizer
 import docx
@@ -55,9 +55,11 @@ class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
     node_type = BuiltinNodeTypes.DOCUMENT_EXTRACTOR
 
     @classmethod
+    @override
     def version(cls) -> str:
         return "1"
 
+    @override
     def __init__(
         self,
         id: str,
@@ -79,7 +81,8 @@ class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
         )
         self._http_client = http_client or get_http_client()
 
-    def _run(self):
+    @override
+    def _run(self) -> NodeRunResult:
         variable_selector = self.node_data.variable_selector
         variable = self.graph_runtime_state.variable_pool.get(variable_selector)
 
@@ -147,6 +150,7 @@ class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
             )
 
     @classmethod
+    @override
     def _extract_variable_selector_to_variable_mapping(
         cls,
         *,

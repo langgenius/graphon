@@ -1,5 +1,5 @@
 from collections.abc import Mapping, Sequence
-from typing import Any, Literal
+from typing import Any, Literal, override
 
 from typing_extensions import deprecated
 
@@ -21,9 +21,11 @@ class IfElseNode(Node[IfElseNodeData]):
     execution_type = NodeExecutionType.BRANCH
 
     @classmethod
+    @override
     def version(cls) -> str:
         return "1"
 
+    @override
     def _run(self) -> NodeRunResult:
         """
         Run node
@@ -106,6 +108,7 @@ class IfElseNode(Node[IfElseNodeData]):
         return data
 
     @classmethod
+    @override
     def _extract_variable_selector_to_variable_mapping(
         cls,
         *,

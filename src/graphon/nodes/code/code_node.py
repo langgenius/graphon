@@ -1,7 +1,7 @@
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from textwrap import dedent
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, override
 
 from graphon.entities.graph_config import NodeConfigDict
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
@@ -75,6 +75,7 @@ class CodeNode(Node[CodeNodeData]):
     node_type = BuiltinNodeTypes.CODE
     _limits: CodeNodeLimits
 
+    @override
     def __init__(
         self,
         id: str,
@@ -95,6 +96,7 @@ class CodeNode(Node[CodeNodeData]):
         self._limits = code_limits
 
     @classmethod
+    @override
     def get_default_config(
         cls, filters: Mapping[str, object] | None = None
     ) -> Mapping[str, object]:
@@ -105,9 +107,15 @@ class CodeNode(Node[CodeNodeData]):
         """
         code_language = CodeLanguage.PYTHON3
         if filters:
-            code_language = cast(
-                "CodeLanguage", filters.get("code_language", CodeLanguage.PYTHON3)
-            )
+            raw_code_language = filters.get("code_language", CodeLanguage.PYTHON3)
+            if isinstance(raw_code_language, CodeLanguage):
+                code_language = raw_code_language
+            elif isinstance(raw_code_language, str):
+                code_language = CodeLanguage(raw_code_language)
+            else:
+                raise CodeNodeError(
+                    f"Unsupported code language filter: {raw_code_language!r}"
+                )
 
         default_code = _DEFAULT_CODE_BY_LANGUAGE.get(code_language)
         if default_code is None:
@@ -115,9 +123,11 @@ class CodeNode(Node[CodeNodeData]):
         return _build_default_config(language=code_language, code=default_code)
 
     @classmethod
+    @override
     def version(cls) -> str:
         return "1"
 
+    @override
     def _run(self) -> NodeRunResult:
         # Get code language
         code_language = self.node_data.code_language
@@ -538,6 +548,7 @@ class CodeNode(Node[CodeNodeData]):
         return transformed_result
 
     @classmethod
+    @override
     def _extract_variable_selector_to_variable_mapping(
         cls,
         *,

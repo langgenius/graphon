@@ -7,7 +7,7 @@ from collections.abc import Generator, Mapping, Sequence
 from datetime import UTC, datetime
 from functools import singledispatchmethod
 from types import MappingProxyType
-from typing import Any, ClassVar, Generic, TypeVar, cast, get_args, get_origin
+from typing import Any, ClassVar, cast, get_args, get_origin
 from uuid import uuid4
 
 from graphon.entities.base_node_data import BaseNodeData, RetryConfig
@@ -73,13 +73,12 @@ from graphon.node_events.node import (
 )
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
-NodeDataT = TypeVar("NodeDataT", bound=BaseNodeData)
 _MISSING_RUN_CONTEXT_VALUE = object()
 
 logger = logging.getLogger(__name__)
 
 
-class Node(Generic[NodeDataT]):
+class Node[NodeDataT: BaseNodeData]:
     """BaseNode serves as the foundational class for all node implementations.
 
     Nodes are allowed to maintain transient states
@@ -299,7 +298,7 @@ class Node(Generic[NodeDataT]):
 
     def init_node_data(self, data: BaseNodeData | Mapping[str, Any]) -> None:
         """Hydrate `_node_data` for legacy callers that bypass `__init__`."""
-        self._node_data = self.validate_node_data(cast("BaseNodeData", data))
+        self._node_data = self.validate_node_data(data)
 
     def post_init(self) -> None:
         """Optional hook for subclasses requiring extra initialization."""

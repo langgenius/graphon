@@ -3,7 +3,7 @@ import json
 import logging
 from collections.abc import Callable, Generator, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, override
 
 from graphon.entities.graph_config import NodeConfigDictAdapter
 from graphon.enums import (
@@ -62,9 +62,11 @@ class LoopNode(LLMUsageTrackingMixin, Node[LoopNodeData]):
     execution_type = NodeExecutionType.CONTAINER
 
     @classmethod
+    @override
     def version(cls) -> str:
         return "1"
 
+    @override
     def _run(self) -> Generator:
         """Run the node."""
         # Get inputs
@@ -371,6 +373,7 @@ class LoopNode(LLMUsageTrackingMixin, Node[LoopNodeData]):
             variable_pool.remove([node_id])
 
     @classmethod
+    @override
     def _extract_variable_selector_to_variable_mapping(
         cls,
         *,
@@ -408,9 +411,6 @@ class LoopNode(LLMUsageTrackingMixin, Node[LoopNodeData]):
                     node_cls.extract_variable_selector_to_variable_mapping(
                         graph_config=graph_config, config=typed_sub_node_config
                     )
-                )
-                sub_node_variable_mapping = cast(
-                    "dict[str, Sequence[str]]", sub_node_variable_mapping
                 )
             except NotImplementedError:
                 sub_node_variable_mapping = {}

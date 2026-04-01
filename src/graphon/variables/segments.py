@@ -1,7 +1,7 @@
 import json
 import sys
 from collections.abc import Mapping, Sequence
-from typing import Annotated, Any, TypeAlias
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Tag, field_validator
 
@@ -229,7 +229,7 @@ def get_segment_discriminator(v: Any) -> SegmentType | None:
 # - The union must include all non-abstract subclasses of `Segment`, except:
 #   - `SegmentGroup`, which is not added to the variable pool.
 #   - `VariableBase` and its subclasses, which are handled by `Variable`.
-SegmentUnion: TypeAlias = Annotated[
+type SegmentUnion = Annotated[
     (
         Annotated[NoneSegment, Tag(SegmentType.NONE)]
         | Annotated[StringSegment, Tag(SegmentType.STRING)]

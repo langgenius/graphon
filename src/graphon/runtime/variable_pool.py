@@ -4,7 +4,7 @@ import re
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
-from typing import Annotated, Any, Union, cast
+from typing import Annotated, Any, cast
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -20,7 +20,7 @@ from graphon.variables.segment_group import SegmentGroup
 from graphon.variables.segments import FileSegment, ObjectSegment, Segment
 from graphon.variables.variables import RAGPipelineVariableInput, Variable, VariableBase
 
-VariableValue = Union[str, int, float, dict[str, object], list[object], File]
+type VariableValue = str | int | float | dict[str, object] | list[object] | File
 
 VARIABLE_PATTERN = re.compile(
     r"\{\{#([a-zA-Z0-9_]{1,50}(?:\.[a-zA-Z_][a-zA-Z0-9_]{0,29}){1,10})#\}\}"
@@ -203,8 +203,7 @@ class VariablePool(BaseModel):
 
         if isinstance(segment, FileSegment):
             attr = selector[2]
-            # Python support `attr in FileAttribute` after 3.12
-            if attr not in {item.value for item in FileAttribute}:
+            if attr not in FileAttribute:
                 return None
             attr = FileAttribute(attr)
             attr_value = file_manager.get_attr(file=segment.value, attr=attr)

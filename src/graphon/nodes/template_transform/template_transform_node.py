@@ -1,5 +1,5 @@
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 from graphon.entities.graph_config import NodeConfigDict
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
@@ -24,6 +24,7 @@ class TemplateTransformNode(Node[TemplateTransformNodeData]):
     _jinja2_template_renderer: Jinja2TemplateRenderer
     _max_output_length: int
 
+    @override
     def __init__(
         self,
         id: str,
@@ -49,6 +50,7 @@ class TemplateTransformNode(Node[TemplateTransformNodeData]):
         )
 
     @classmethod
+    @override
     def get_default_config(
         cls, filters: Mapping[str, object] | None = None
     ) -> Mapping[str, object]:
@@ -66,9 +68,11 @@ class TemplateTransformNode(Node[TemplateTransformNodeData]):
         }
 
     @classmethod
+    @override
     def version(cls) -> str:
         return "1"
 
+    @override
     def _run(self) -> NodeRunResult:
         # Get variables
         variables: dict[str, Any] = {}
@@ -104,6 +108,7 @@ class TemplateTransformNode(Node[TemplateTransformNodeData]):
         )
 
     @classmethod
+    @override
     def _extract_variable_selector_to_variable_mapping(
         cls,
         *,

@@ -11,9 +11,7 @@ import time
 from collections.abc import Sequence
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
-from typing import final
-
-from typing_extensions import override
+from typing import final, override
 
 from graphon.enums import WorkflowNodeExecutionStatus
 from graphon.graph.graph import Graph

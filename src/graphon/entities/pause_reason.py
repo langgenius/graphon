@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 from enum import StrEnum, auto
-from typing import Annotated, Any, Literal, TypeAlias
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -45,6 +45,6 @@ class SchedulingPause(BaseModel):
     message: str
 
 
-PauseReason: TypeAlias = Annotated[
+type PauseReason = Annotated[
     HumanInputRequired | SchedulingPause, Field(discriminator="TYPE")
 ]

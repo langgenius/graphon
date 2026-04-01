@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
-from typing import TYPE_CHECKING, Literal, NoReturn
+from typing import TYPE_CHECKING, Literal, NoReturn, override
 
 from .protocols import HttpResponseProtocol, WorkflowFileRuntimeProtocol
 
@@ -21,23 +21,29 @@ class _UnconfiguredWorkflowFileRuntime(WorkflowFileRuntimeProtocol):
         )
 
     @property
+    @override
     def multimodal_send_format(self) -> str:
         self._raise()
 
+    @override
     def http_get(
         self, url: str, *, follow_redirects: bool = True
     ) -> HttpResponseProtocol:
         self._raise()
 
+    @override
     def storage_load(self, path: str, *, stream: bool = False) -> bytes | Generator:
         self._raise()
 
+    @override
     def load_file_bytes(self, *, file: File) -> bytes:
         self._raise()
 
+    @override
     def resolve_file_url(self, *, file: File, for_external: bool = True) -> str | None:
         self._raise()
 
+    @override
     def resolve_upload_file_url(
         self,
         *,
@@ -47,11 +53,13 @@ class _UnconfiguredWorkflowFileRuntime(WorkflowFileRuntimeProtocol):
     ) -> str:
         self._raise()
 
+    @override
     def resolve_tool_file_url(
         self, *, tool_file_id: str, extension: str, for_external: bool = True
     ) -> str:
         self._raise()
 
+    @override
     def verify_preview_signature(
         self,
         *,

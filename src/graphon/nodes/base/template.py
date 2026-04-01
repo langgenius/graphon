@@ -9,7 +9,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Union
+from typing import Any
 
 from graphon.nodes.base.variable_template_parser import VariableTemplateParser
 
@@ -44,8 +44,7 @@ class VariableSegment(TemplateSegment):
         return "{{#" + ".".join(self.selector) + "#}}"
 
 
-# Type alias for segments
-TemplateSegmentUnion = Union[TextSegment, VariableSegment]
+type TemplateSegmentUnion = TextSegment | VariableSegment
 
 
 @dataclass(frozen=True)

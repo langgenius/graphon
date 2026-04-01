@@ -1,5 +1,5 @@
 from collections.abc import Mapping, MutableMapping, Sequence
-from typing import Any, TypeVar
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -19,9 +19,6 @@ class UpdatedVariable(BaseModel):
     new_value: Any = None
 
 
-_T = TypeVar("_T", bound=MutableMapping[str, Any])
-
-
 def variable_to_processed_data(
     selector: Sequence[str], seg: Segment
 ) -> UpdatedVariable:
@@ -36,7 +33,9 @@ def variable_to_processed_data(
     )
 
 
-def set_updated_variables(m: _T, updates: Sequence[UpdatedVariable]) -> _T:
+def set_updated_variables[T: MutableMapping[str, Any]](
+    m: T, updates: Sequence[UpdatedVariable]
+) -> T:
     m[_UPDATED_VARIABLES_KEY] = updates
     return m
 

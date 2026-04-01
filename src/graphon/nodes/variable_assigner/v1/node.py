@@ -1,5 +1,5 @@
 from collections.abc import Generator, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, override
 
 from graphon.entities.graph_config import NodeConfigDict
 from graphon.entities.graph_init_params import GraphInitParams
@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 class VariableAssignerNode(Node[VariableAssignerData]):
     node_type = BuiltinNodeTypes.VARIABLE_ASSIGNER
 
+    @override
     def __init__(
         self,
         id: str,
@@ -44,6 +45,7 @@ class VariableAssignerNode(Node[VariableAssignerData]):
             graph_runtime_state=graph_runtime_state,
         )
 
+    @override
     def blocks_variable_output(self, variable_selectors: set[tuple[str, ...]]) -> bool:
         """
         Check if this Variable Assigner node blocks the output of specific variables.
@@ -54,10 +56,12 @@ class VariableAssignerNode(Node[VariableAssignerData]):
         return assigned_selector in variable_selectors
 
     @classmethod
+    @override
     def version(cls) -> str:
         return "1"
 
     @classmethod
+    @override
     def _extract_variable_selector_to_variable_mapping(
         cls,
         *,
@@ -75,6 +79,7 @@ class VariableAssignerNode(Node[VariableAssignerData]):
         mapping[key] = node_data.input_variable_selector
         return mapping
 
+    @override
     def _run(self) -> Generator[NodeEventBase, None, None]:
         assigned_variable_selector = self.node_data.assigned_variable_selector
         # Should be String, Number, Object, ArrayString, ArrayNumber, ArrayObject

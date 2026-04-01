@@ -8,16 +8,9 @@ by ResponseStreamCoordinator to manage streaming sessions.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, cast
 
 from graphon.nodes.base.template import Template
 from graphon.runtime.graph_runtime_state import NodeProtocol
-
-
-class _ResponseSessionNodeProtocol(NodeProtocol, Protocol):
-    """Structural contract required from nodes that can open a response session."""
-
-    def get_streaming_template(self) -> Template: ...
 
 
 @dataclass
@@ -53,14 +46,13 @@ class ResponseSession:
             TypeError: If node does not implement the response-session
             streaming contract.
         """
-        response_node = cast("_ResponseSessionNodeProtocol", node)
-        try:
-            template = response_node.get_streaming_template()
-        except AttributeError as exc:
+        get_streaming_template = getattr(node, "get_streaming_template", None)
+        if not callable(get_streaming_template):
             raise TypeError(
                 "ResponseSession.from_node requires "
                 "get_streaming_template() on response nodes"
-            ) from exc
+            )
+        template = get_streaming_template()
 
         return cls(
             node_id=node.id,

@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-SupportedComparisonOperator = Literal[
+type SupportedComparisonOperator = Literal[
     # for string or array
     "contains",
     "not contains",

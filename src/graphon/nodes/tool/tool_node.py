@@ -1,5 +1,5 @@
 from collections.abc import Generator, Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 from graphon.entities.graph_config import NodeConfigDict
 from graphon.enums import (
@@ -50,6 +50,7 @@ class ToolNode(Node[ToolNodeData]):
 
     node_type = BuiltinNodeTypes.TOOL
 
+    @override
     def __init__(
         self,
         id: str,
@@ -72,13 +73,16 @@ class ToolNode(Node[ToolNodeData]):
         self._runtime = runtime
 
     @classmethod
+    @override
     def version(cls) -> str:
         return "1"
 
+    @override
     def populate_start_event(self, event) -> None:
         event.provider_id = self.node_data.provider_id
         event.provider_type = self.node_data.provider_type
 
+    @override
     def _run(self) -> Generator[NodeEventBase, None, None]:
         """
         Run the tool node
@@ -440,6 +444,7 @@ class ToolNode(Node[ToolNodeData]):
         return usage
 
     @classmethod
+    @override
     def _extract_variable_selector_to_variable_mapping(
         cls,
         *,

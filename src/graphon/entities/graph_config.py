@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-import sys
+from typing import TypedDict
 
 from pydantic import TypeAdapter, with_config
 
 from graphon.entities.base_node_data import BaseNodeData
-
-if sys.version_info >= (3, 12):
-    from typing import TypedDict
-else:
-    from typing_extensions import TypedDict
 
 
 @with_config(extra="allow")

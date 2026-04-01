@@ -1,5 +1,5 @@
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, override
 
 from graphon.enums import (
     BuiltinNodeTypes,
@@ -23,9 +23,11 @@ class AnswerNode(Node[AnswerNodeData]):
     execution_type = NodeExecutionType.RESPONSE
 
     @classmethod
+    @override
     def version(cls) -> str:
         return "1"
 
+    @override
     def _run(self) -> NodeRunResult:
         segments = self.graph_runtime_state.variable_pool.convert_template(
             self.node_data.answer
@@ -57,6 +59,7 @@ class AnswerNode(Node[AnswerNodeData]):
         return files
 
     @classmethod
+    @override
     def _extract_variable_selector_to_variable_mapping(
         cls,
         *,

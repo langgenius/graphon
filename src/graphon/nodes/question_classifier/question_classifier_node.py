@@ -1,7 +1,7 @@
 import json
 import re
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 from graphon.entities.graph_config import NodeConfigDict
 from graphon.entities.graph_init_params import GraphInitParams
@@ -73,6 +73,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
     _memory: PromptMessageMemory | None
     _template_renderer: Jinja2TemplateRenderer
 
+    @override
     def __init__(
         self,
         id: str,
@@ -109,10 +110,12 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         )
 
     @classmethod
-    def version(cls):
+    @override
+    def version(cls) -> str:
         return "1"
 
-    def _run(self):
+    @override
+    def _run(self) -> NodeRunResult:
         node_data = self.node_data
         variable_pool = self.graph_runtime_state.variable_pool
 
@@ -282,6 +285,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         return self._model_instance
 
     @classmethod
+    @override
     def _extract_variable_selector_to_variable_mapping(
         cls,
         *,
@@ -311,6 +315,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         return variable_mapping
 
     @classmethod
+    @override
     def get_default_config(
         cls, filters: Mapping[str, object] | None = None
     ) -> Mapping[str, object]:

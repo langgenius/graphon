@@ -3,7 +3,7 @@ import json
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, override
 
 from graphon.entities.graph_config import NodeConfigDict
 from graphon.enums import (
@@ -12,7 +12,7 @@ from graphon.enums import (
     WorkflowNodeExecutionStatus,
 )
 from graphon.file.models import File
-from graphon.model_runtime.entities.llm_entities import LLMMode, LLMResult, LLMUsage
+from graphon.model_runtime.entities.llm_entities import LLMMode, LLMUsage
 from graphon.model_runtime.entities.message_entities import (
     AssistantPromptMessage,
     ImagePromptMessageContent,
@@ -109,6 +109,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
     _prompt_message_serializer: PromptMessageSerializerProtocol
     _memory: PromptMessageMemory | None
 
+    @override
     def __init__(
         self,
         id: str,
@@ -134,6 +135,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         self._memory = memory
 
     @classmethod
+    @override
     def get_default_config(
         cls, filters: Mapping[str, object] | None = None
     ) -> Mapping[str, object]:
@@ -152,10 +154,12 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         }
 
     @classmethod
+    @override
     def version(cls) -> str:
         return "1"
 
-    def _run(self):
+    @override
+    def _run(self) -> NodeRunResult:
         """
         Run the node.
         """
@@ -317,15 +321,12 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         tools: list[PromptMessageTool],
         stop: Sequence[str] | None,
     ) -> tuple[str, LLMUsage, AssistantPromptMessage.ToolCall | None]:
-        invoke_result = cast(
-            "LLMResult",
-            model_instance.invoke_llm(
-                prompt_messages=prompt_messages,
-                model_parameters=dict(model_instance.parameters),
-                tools=tools or None,
-                stop=stop,
-                stream=False,
-            ),
+        invoke_result = model_instance.invoke_llm(
+            prompt_messages=prompt_messages,
+            model_parameters=dict(model_instance.parameters),
+            tools=tools or None,
+            stop=stop,
+            stream=False,
         )
 
         # handle invoke result
@@ -711,7 +712,9 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
                 json_str = extract_json(result[idx:])
                 if json_str:
                     with contextlib.suppress(Exception):
-                        return cast("dict", json.loads(json_str))
+                        parsed = json.loads(json_str)
+                        if isinstance(parsed, dict):
+                            return parsed
         logger.info("extra error: %s", result)
         return None
 
@@ -731,7 +734,9 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
                 json_str = extract_json(result[idx:])
                 if json_str:
                     with contextlib.suppress(Exception):
-                        return cast("dict", json.loads(json_str))
+                        parsed = json.loads(json_str)
+                        if isinstance(parsed, dict):
+                            return parsed
 
         logger.info("extra error: %s", result)
         return None
@@ -917,6 +922,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         return self._model_instance
 
     @classmethod
+    @override
     def _extract_variable_selector_to_variable_mapping(
         cls,
         *,

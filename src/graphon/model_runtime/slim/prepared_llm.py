@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Generator, Mapping, Sequence
-from typing import Any, cast
+from typing import Any, Literal, overload, override
 
 from graphon.model_runtime.entities.llm_entities import (
     LLMResult,
@@ -21,6 +21,7 @@ from .runtime import SlimRuntime
 
 
 class SlimPreparedLLM(PreparedLLMProtocol):
+    @override
     def __init__(
         self,
         *,
@@ -39,25 +40,31 @@ class SlimPreparedLLM(PreparedLLMProtocol):
         self._stop = list(stop) if stop is not None else None
 
     @property
+    @override
     def provider(self) -> str:
         return self._provider
 
     @property
+    @override
     def model_name(self) -> str:
         return self._model_name
 
     @property
+    @override
     def parameters(self) -> Mapping[str, Any]:
         return dict(self._parameters)
 
     @parameters.setter
+    @override
     def parameters(self, value: Mapping[str, Any]) -> None:
         self._parameters = dict(value)
 
     @property
+    @override
     def stop(self) -> Sequence[str] | None:
         return None if self._stop is None else list(self._stop)
 
+    @override
     def get_model_schema(self) -> AIModelEntity:
         schema = self._runtime.get_model_schema(
             provider=self._provider,
@@ -71,6 +78,7 @@ class SlimPreparedLLM(PreparedLLMProtocol):
             )
         return schema
 
+    @override
     def get_llm_num_tokens(self, prompt_messages: Sequence[PromptMessage]) -> int:
         return self._runtime.get_llm_num_tokens(
             provider=self._provider,
@@ -81,6 +89,29 @@ class SlimPreparedLLM(PreparedLLMProtocol):
             tools=None,
         )
 
+    @overload
+    def invoke_llm(
+        self,
+        *,
+        prompt_messages: Sequence[PromptMessage],
+        model_parameters: Mapping[str, Any],
+        tools: Sequence[PromptMessageTool] | None,
+        stop: Sequence[str] | None,
+        stream: Literal[False],
+    ) -> LLMResult: ...
+
+    @overload
+    def invoke_llm(
+        self,
+        *,
+        prompt_messages: Sequence[PromptMessage],
+        model_parameters: Mapping[str, Any],
+        tools: Sequence[PromptMessageTool] | None,
+        stop: Sequence[str] | None,
+        stream: Literal[True],
+    ) -> Generator[LLMResultChunk, None, None]: ...
+
+    @override
     def invoke_llm(
         self,
         *,
@@ -103,6 +134,29 @@ class SlimPreparedLLM(PreparedLLMProtocol):
             stream=stream,
         )
 
+    @overload
+    def invoke_llm_with_structured_output(
+        self,
+        *,
+        prompt_messages: Sequence[PromptMessage],
+        json_schema: Mapping[str, Any],
+        model_parameters: Mapping[str, Any],
+        stop: Sequence[str] | None,
+        stream: Literal[False],
+    ) -> LLMResultWithStructuredOutput: ...
+
+    @overload
+    def invoke_llm_with_structured_output(
+        self,
+        *,
+        prompt_messages: Sequence[PromptMessage],
+        json_schema: Mapping[str, Any],
+        model_parameters: Mapping[str, Any],
+        stop: Sequence[str] | None,
+        stream: Literal[True],
+    ) -> Generator[LLMResultChunkWithStructuredOutput, None, None]: ...
+
+    @override
     def invoke_llm_with_structured_output(
         self,
         *,
@@ -117,18 +171,24 @@ class SlimPreparedLLM(PreparedLLMProtocol):
     ):
         structured_parameters = dict(model_parameters)
         structured_parameters["json_schema"] = json.dumps(json_schema)
-        return cast(
-            "LLMResultWithStructuredOutput | Generator[LLMResultChunkWithStructuredOutput, None, None]",
-            self.invoke_llm(
+        if stream:
+            return self.invoke_llm(
                 prompt_messages=prompt_messages,
                 model_parameters=structured_parameters,
                 tools=None,
                 stop=stop,
-                stream=stream,
-            ),
+                stream=True,
+            )
+        return self.invoke_llm(
+            prompt_messages=prompt_messages,
+            model_parameters=structured_parameters,
+            tools=None,
+            stop=stop,
+            stream=False,
         )
 
     @staticmethod
+    @override
     def is_structured_output_parse_error(error: Exception) -> bool:
         _ = error
         return False

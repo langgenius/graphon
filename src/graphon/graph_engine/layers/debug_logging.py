@@ -7,9 +7,7 @@ graph execution for debugging purposes.
 
 import logging
 from collections.abc import Mapping
-from typing import Any, final
-
-from typing_extensions import override
+from typing import Any, final, override
 
 from graphon.graph_events.base import GraphEngineEvent
 from graphon.graph_events.graph import (
@@ -107,7 +105,9 @@ class DebugLoggingLayer(GraphEngineLayer):
             formatted_value = self._truncate_value(value)
             formatted_items.append(f"  {key}: {formatted_value}")
 
-        return "{\n" + ",\n".join(formatted_items) + "\n}"
+        return f"""{{
+{",\n".join(formatted_items)}
+}}"""
 
     @override
     def on_graph_start(self) -> None:

@@ -4,7 +4,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextlib import suppress
 from datetime import UTC, datetime
 from threading import Lock
-from typing import TYPE_CHECKING, Any, NewType, cast
+from typing import TYPE_CHECKING, Any, NewType, override
 
 from typing_extensions import TypeIs
 
@@ -69,6 +69,7 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
     execution_type = NodeExecutionType.CONTAINER
 
     @classmethod
+    @override
     def get_default_config(
         cls, filters: Mapping[str, object] | None = None
     ) -> Mapping[str, object]:
@@ -83,9 +84,11 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
         }
 
     @classmethod
+    @override
     def version(cls) -> str:
         return "1"
 
+    @override
     def _run(self) -> Generator[GraphNodeEventBase | NodeEventBase, None, None]:  # type: ignore
         variable = self._get_iterator_variable()
 
@@ -190,7 +193,7 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
                 f"Invalid iterator value: {iterator_list_value}, please provide a list."
             )
 
-        return cast("list[object]", iterator_list_value)
+        return iterator_list_value
 
     def _validate_start_node(self) -> None:
         if not self.node_data.start_node_id:
@@ -586,6 +589,7 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
         )
 
     @classmethod
+    @override
     def _extract_variable_selector_to_variable_mapping(
         cls,
         *,
@@ -631,9 +635,6 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
                     node_cls.extract_variable_selector_to_variable_mapping(
                         graph_config=graph_config, config=typed_sub_node_config
                     )
-                )
-                sub_node_variable_mapping = cast(
-                    "dict[str, Sequence[str]]", sub_node_variable_mapping
                 )
             except NotImplementedError:
                 sub_node_variable_mapping = {}

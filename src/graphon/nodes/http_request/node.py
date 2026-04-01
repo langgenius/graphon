@@ -1,7 +1,7 @@
 import logging
 import mimetypes
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 from graphon.entities.graph_config import NodeConfigDict
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
@@ -40,6 +40,7 @@ if TYPE_CHECKING:
 class HttpRequestNode(Node[HttpRequestNodeData]):
     node_type = BuiltinNodeTypes.HTTP_REQUEST
 
+    @override
     def __init__(
         self,
         id: str,
@@ -67,6 +68,7 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
         self._file_reference_factory = file_reference_factory
 
     @classmethod
+    @override
     def get_default_config(
         cls, filters: Mapping[str, object] | None = None
     ) -> Mapping[str, object]:
@@ -99,9 +101,11 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
         }
 
     @classmethod
+    @override
     def version(cls) -> str:
         return "1"
 
+    @override
     def _run(self) -> NodeRunResult:
         process_data = {}
         try:
@@ -173,6 +177,7 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
         )
 
     @classmethod
+    @override
     def _extract_variable_selector_to_variable_mapping(
         cls,
         *,

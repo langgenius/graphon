@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import queue
 from collections.abc import Generator
-from typing import TYPE_CHECKING, cast, final
+from typing import TYPE_CHECKING, final
 
 from graphon.entities.workflow_start_reason import WorkflowStartReason
 from graphon.enums import NodeExecutionType
@@ -34,9 +34,6 @@ from graphon.runtime.graph_runtime_state import (
 from graphon.runtime.read_only_wrappers import ReadOnlyGraphRuntimeStateWrapper
 from graphon.runtime.variable_pool import VariablePool
 
-if TYPE_CHECKING:  # pragma: no cover - used only for static analysis
-    from graphon.runtime.graph_runtime_state import GraphProtocol
-
 from .command_channels import CommandChannel
 from .command_processing import (
     AbortCommandHandler,
@@ -56,10 +53,6 @@ from .worker_management import WorkerPool
 
 if TYPE_CHECKING:
     from graphon.entities.graph_init_params import GraphInitParams
-    from graphon.graph_engine.domain.graph_execution import GraphExecution
-    from graphon.graph_engine.response_coordinator.coordinator import (
-        ResponseStreamCoordinator,
-    )
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +83,7 @@ class GraphEngine:
         # Bind runtime state to current workflow context
         self._graph = graph
         self._graph_runtime_state = graph_runtime_state
-        self._graph_runtime_state.configure(graph=cast("GraphProtocol", graph))
+        self._graph_runtime_state.configure(graph=graph)
         self._command_channel = command_channel
         self._config = config
         self._layers: list[GraphEngineLayer] = []
@@ -99,9 +92,7 @@ class GraphEngine:
             self._graph_runtime_state.bind_child_engine_builder(child_engine_builder)
 
         # Graph execution tracks the overall execution state
-        self._graph_execution = cast(
-            "GraphExecution", self._graph_runtime_state.graph_execution
-        )
+        self._graph_execution = self._graph_runtime_state.graph_execution
         self._graph_execution.workflow_id = workflow_id
 
         # === Execution Queues ===
@@ -116,9 +107,7 @@ class GraphEngine:
 
         # === Response Coordination ===
         # Coordinates response streaming from response nodes
-        self._response_coordinator = cast(
-            "ResponseStreamCoordinator", self._graph_runtime_state.response_coordinator
-        )
+        self._response_coordinator = self._graph_runtime_state.response_coordinator
 
         # === Event Management ===
         # Event manager handles both collection and emission of events

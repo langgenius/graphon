@@ -11,9 +11,7 @@ When limits are exceeded, the layer automatically aborts execution.
 import logging
 import time
 from enum import StrEnum
-from typing import final
-
-from typing_extensions import override
+from typing import final, override
 
 from graphon.graph_engine.entities.commands import AbortCommand, CommandType
 from graphon.graph_engine.layers.base import GraphEngineLayer

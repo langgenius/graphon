@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC
 from collections.abc import Mapping, Sequence
 from enum import StrEnum, auto
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, Field, field_serializer, field_validator
 
@@ -19,17 +19,14 @@ class PromptMessageRole(StrEnum):
     TOOL = auto()
 
     @classmethod
-    def value_of(cls, value: str) -> PromptMessageRole:
+    def value_of(cls, value: str) -> Self:
         """
         Get value of given mode.
 
         :param value: mode value
         :return: mode
         """
-        for mode in cls:
-            if mode.value == value:
-                return mode
-        raise ValueError(f"invalid prompt message type value {value}")
+        return cls(value)
 
 
 class PromptMessageTool(BaseModel):
@@ -123,7 +120,7 @@ class DocumentPromptMessageContent(MultiModalPromptMessageContent):
     type: Literal[PromptMessageContentType.DOCUMENT] = PromptMessageContentType.DOCUMENT  # type: ignore
 
 
-PromptMessageContentUnionTypes = Annotated[
+type PromptMessageContentUnionTypes = Annotated[
     TextPromptMessageContent
     | ImagePromptMessageContent
     | DocumentPromptMessageContent

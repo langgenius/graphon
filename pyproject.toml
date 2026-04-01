@@ -5,7 +5,7 @@ description = 'Graph execution engine for agentic AI workflows.'
 readme = 'README.md'
 license = 'Apache-2.0'
 license-files = ['LICENSE']
-requires-python = '>=3.11'
+requires-python = '>=3.12'
 dependencies = [
     'charset-normalizer>=3.4.4',
     'httpx~=0.28.0',

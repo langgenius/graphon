@@ -2,7 +2,7 @@ import json
 import logging
 from collections.abc import Generator, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, override
 
 from graphon.entities.graph_config import NodeConfigDict
 from graphon.entities.pause_reason import HumanInputRequired
@@ -60,6 +60,7 @@ class HumanInputNode(Node[HumanInputNodeData]):
     _OUTPUT_FIELD_RENDERED_CONTENT = "__rendered_content"
     _TIMEOUT_HANDLE = _TIMEOUT_ACTION_ID = "__timeout"
 
+    @override
     def __init__(
         self,
         id: str,
@@ -83,13 +84,16 @@ class HumanInputNode(Node[HumanInputNodeData]):
                 resolved_runtime, "with_form_repository", None
             )
             if callable(with_form_repository):
-                resolved_runtime = cast(
-                    "HumanInputNodeRuntimeProtocol",
-                    with_form_repository(form_repository),
-                )
+                updated_runtime = with_form_repository(form_repository)
+                if not isinstance(updated_runtime, HumanInputNodeRuntimeProtocol):
+                    raise TypeError(
+                        "with_form_repository() must return a HumanInput runtime"
+                    )
+                resolved_runtime = updated_runtime
         self._runtime: HumanInputNodeRuntimeProtocol = resolved_runtime
 
     @classmethod
+    @override
     def version(cls) -> str:
         return "1"
 
@@ -189,6 +193,7 @@ class HumanInputNode(Node[HumanInputNodeData]):
             resolved_default_values=resolved_default_values,
         )
 
+    @override
     def _run(self) -> Generator[NodeEventBase, None, None]:
         """
         Execute the human input node.
@@ -309,6 +314,7 @@ class HumanInputNode(Node[HumanInputNodeData]):
         return rendered_content
 
     @classmethod
+    @override
     def _extract_variable_selector_to_variable_mapping(
         cls,
         *,

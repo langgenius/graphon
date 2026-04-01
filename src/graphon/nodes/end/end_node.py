@@ -1,3 +1,5 @@
+from typing import override
+
 from graphon.enums import (
     BuiltinNodeTypes,
     NodeExecutionType,
@@ -14,9 +16,11 @@ class EndNode(Node[EndNodeData]):
     execution_type = NodeExecutionType.RESPONSE
 
     @classmethod
+    @override
     def version(cls) -> str:
         return "1"
 
+    @override
     def _run(self) -> NodeRunResult:
         """
         Run node - collect all outputs at once.

@@ -2,7 +2,6 @@ import json
 import logging
 import sys
 from collections.abc import Mapping, Sequence
-from typing import cast
 
 from graphon.model_runtime.callbacks.base_callback import Callback
 from graphon.model_runtime.entities.llm_entities import LLMResult, LLMResultChunk
@@ -106,8 +105,9 @@ class LoggingCallback(Callback):
         :param invocation_context: opaque request metadata for the current invocation
         """
         _ = user, invocation_context
-        sys.stdout.write(cast("str", chunk.delta.message.content))
-        sys.stdout.flush()
+        if isinstance(chunk.delta.message.content, str):
+            sys.stdout.write(chunk.delta.message.content)
+            sys.stdout.flush()
 
     def on_after_invoke(
         self,

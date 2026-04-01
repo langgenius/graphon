@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator, Mapping, Sequence
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol, overload
 
 from graphon.file.models import File
 from graphon.model_runtime.entities.llm_entities import (
@@ -40,6 +40,28 @@ class PreparedLLMProtocol(Protocol):
 
     def get_llm_num_tokens(self, prompt_messages: Sequence[PromptMessage]) -> int: ...
 
+    @overload
+    def invoke_llm(
+        self,
+        *,
+        prompt_messages: Sequence[PromptMessage],
+        model_parameters: Mapping[str, Any],
+        tools: Sequence[PromptMessageTool] | None,
+        stop: Sequence[str] | None,
+        stream: Literal[False],
+    ) -> LLMResult: ...
+
+    @overload
+    def invoke_llm(
+        self,
+        *,
+        prompt_messages: Sequence[PromptMessage],
+        model_parameters: Mapping[str, Any],
+        tools: Sequence[PromptMessageTool] | None,
+        stop: Sequence[str] | None,
+        stream: Literal[True],
+    ) -> Generator[LLMResultChunk, None, None]: ...
+
     def invoke_llm(
         self,
         *,
@@ -49,6 +71,28 @@ class PreparedLLMProtocol(Protocol):
         stop: Sequence[str] | None,
         stream: bool,
     ) -> LLMResult | Generator[LLMResultChunk, None, None]: ...
+
+    @overload
+    def invoke_llm_with_structured_output(
+        self,
+        *,
+        prompt_messages: Sequence[PromptMessage],
+        json_schema: Mapping[str, Any],
+        model_parameters: Mapping[str, Any],
+        stop: Sequence[str] | None,
+        stream: Literal[False],
+    ) -> LLMResultWithStructuredOutput: ...
+
+    @overload
+    def invoke_llm_with_structured_output(
+        self,
+        *,
+        prompt_messages: Sequence[PromptMessage],
+        json_schema: Mapping[str, Any],
+        model_parameters: Mapping[str, Any],
+        stop: Sequence[str] | None,
+        stream: Literal[True],
+    ) -> Generator[LLMResultChunkWithStructuredOutput, None, None]: ...
 
     def invoke_llm_with_structured_output(
         self,

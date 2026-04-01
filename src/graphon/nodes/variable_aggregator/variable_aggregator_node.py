@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from typing import override
 
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.node_events.base import NodeRunResult
@@ -11,9 +12,11 @@ class VariableAggregatorNode(Node[VariableAggregatorNodeData]):
     node_type = BuiltinNodeTypes.VARIABLE_AGGREGATOR
 
     @classmethod
+    @override
     def version(cls) -> str:
         return "1"
 
+    @override
     def _run(self) -> NodeRunResult:
         # Get variables
         outputs: dict[str, Segment | Mapping[str, Segment]] = {}

@@ -1,5 +1,5 @@
 from collections.abc import Callable, Sequence
-from typing import Any, TypeAlias, TypeVar
+from typing import Any, override
 
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.file.models import File
@@ -28,20 +28,17 @@ _SUPPORTED_TYPES_TUPLE = (
     ArrayStringSegment,
     ArrayBooleanSegment,
 )
-_SUPPORTED_TYPES_ALIAS: TypeAlias = (
+type _SUPPORTED_TYPES_ALIAS = (
     ArrayFileSegment | ArrayNumberSegment | ArrayStringSegment | ArrayBooleanSegment
 )
 
 
-_T = TypeVar("_T")
-
-
-def _negation(filter_: Callable[[_T], bool]) -> Callable[[_T], bool]:
+def _negation[T](filter_: Callable[[T], bool]) -> Callable[[T], bool]:
     """Returns the negation of a given filter function. If the original filter
     returns `True` for a value, the negated filter will return `False`, and vice versa.
     """
 
-    def wrapper(value: _T) -> bool:
+    def wrapper(value: T) -> bool:
         return not filter_(value)
 
     return wrapper
@@ -51,10 +48,12 @@ class ListOperatorNode(Node[ListOperatorNodeData]):
     node_type = BuiltinNodeTypes.LIST_OPERATOR
 
     @classmethod
+    @override
     def version(cls) -> str:
         return "1"
 
-    def _run(self):
+    @override
+    def _run(self) -> NodeRunResult:
         inputs: dict[str, Sequence[object]] = {}
         process_data: dict[str, Sequence[object]] = {}
         outputs: dict[str, Any] = {}
@@ -376,7 +375,7 @@ def _endswith(value: str) -> Callable[[str], bool]:
     return lambda x: x.endswith(value)
 
 
-def _is(value: _T) -> Callable[[_T], bool]:
+def _is[T](value: T) -> Callable[[T], bool]:
     return lambda x: x == value
 
 
