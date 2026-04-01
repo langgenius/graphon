@@ -70,10 +70,27 @@ When you open a pull request:
 
 - keep the change focused and reviewable
 - run `make pre` before you push
+- if CLA Assistant asks you to sign the repository CLA, read [CLA.md](CLA.md)
+  and add the requested signature comment in the pull request
 - use Conventional Commits for the branch's commit history and the pull request
   title
 - call out breaking changes clearly and mark them with `!`
 - make sure the pull request title matches the final change being merged
+
+## Contributor License Agreement
+
+This repository uses CLA Assistant to record contributor signatures in pull
+requests.
+
+If the action asks you to sign, read [CLA.md](CLA.md) and post the exact
+comment shown by the bot in the pull request conversation.
+
+Repository maintainers store CLA signatures on the dedicated `cla-signatures`
+branch so the protected default branch does not need to accept workflow writes.
+That branch must be created in the repository before the first CLA workflow run
+and left writable to GitHub Actions.
+
+Bot pull requests that are explicitly allowlisted in the workflow are exempt.
 
 ## Common Commands
 

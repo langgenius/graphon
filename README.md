@@ -16,4 +16,5 @@ make pre
 ```
 
 Use Conventional Commits for both commit messages and pull request titles. Mark
-breaking changes with `!`.
+breaking changes with `!`. If CLA Assistant prompts you on a pull request, read
+[CLA.md](CLA.md) and add the requested signature comment.
