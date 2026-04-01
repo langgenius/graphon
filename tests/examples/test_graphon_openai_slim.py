@@ -85,6 +85,23 @@ def test_env_example_matches_allowed_env_vars() -> None:
     assert keys == set(ALLOWED_ENV_VARS)
 
 
+def test_env_example_leaves_slim_binary_path_empty() -> None:
+    env_example = (
+        Path(__file__).resolve().parents[2]
+        / "examples"
+        / "graphon_openai_slim"
+        / ".env.example"
+    )
+    values = {
+        key.strip(): value.strip()
+        for raw_line in env_example.read_text(encoding="utf-8").splitlines()
+        if (line := raw_line.strip()) and not line.startswith("#") and "=" in line
+        for key, value in [line.removeprefix("export ").split("=", 1)]
+    }
+
+    assert values["SLIM_BINARY_PATH"] == ""
+
+
 def test_write_stream_chunk_writes_llm_text_chunks() -> None:
     output = StringIO()
     event = NodeRunStreamChunkEvent(
