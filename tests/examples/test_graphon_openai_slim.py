@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from example.workflow import ALLOWED_ENV_VARS, load_env_file
+from examples.graphon_openai_slim.workflow import ALLOWED_ENV_VARS, load_env_file
 
 
 def test_load_env_file_sets_missing_values(monkeypatch, tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
         "OPENAI_API_KEY=secret\n"
-        'SLIM_BINARY_PATH="/tmp/dify-plugin-daemon-slim"\n'
+        'SLIM_BINARY_PATH="../bin/dify-plugin-daemon-slim"\n'
         "export SLIM_PROVIDER=openai\n",
         encoding="utf-8",
     )
@@ -26,7 +26,9 @@ def test_load_env_file_sets_missing_values(monkeypatch, tmp_path: Path) -> None:
 
         assert env_file.is_file()
         assert os.environ["OPENAI_API_KEY"] == "secret"
-        assert os.environ["SLIM_BINARY_PATH"] == "/tmp/dify-plugin-daemon-slim"
+        assert os.environ["SLIM_BINARY_PATH"] == str(
+            (tmp_path / ".." / "bin" / "dify-plugin-daemon-slim").resolve()
+        )
         assert os.environ["SLIM_PROVIDER"] == "openai"
 
 
@@ -61,7 +63,12 @@ def test_load_env_file_rejects_unknown_key(tmp_path: Path) -> None:
 
 
 def test_env_example_matches_allowed_env_vars() -> None:
-    env_example = Path(__file__).resolve().parents[2] / ".env.example"
+    env_example = (
+        Path(__file__).resolve().parents[2]
+        / "examples"
+        / "graphon_openai_slim"
+        / ".env.example"
+    )
     keys = {
         line.split("=", 1)[0].removeprefix("export ").strip()
         for line in env_example.read_text(encoding="utf-8").splitlines()

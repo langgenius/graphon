@@ -1,15 +1,11 @@
-"""Minimal `start -> LLM -> output` workflow example for Slim.
+"""Minimal Graphon `start -> LLM -> output` workflow example for Slim.
 
-Run from the repository root with `PYTHONPATH=src`, for example:
+Run from this directory:
 
-    PYTHONPATH=src \
-    OPENAI_API_KEY=... \
-    SLIM_PLUGIN_ID=... \
-    python3 example/workflow.py "Explain Graphon in one short sentence."
+    python3 workflow.py "Explain Graphon in one short sentence."
 
-The script automatically loads a `.env` file from the current working
-directory or the repository root. Existing environment variables take
-precedence over `.env` values.
+The script automatically loads `examples/graphon_openai_slim/.env`. Existing environment variables
+take precedence over `.env` values.
 
 Required environment variables:
 - `OPENAI_API_KEY`
@@ -18,17 +14,51 @@ Required environment variables:
 Optional environment variables:
 - `SLIM_BINARY_PATH` points at a custom `dify-plugin-daemon-slim` binary
 - `SLIM_PROVIDER` defaults to `openai`
-- `SLIM_PLUGIN_FOLDER` defaults to `.slim/plugins`
+- `SLIM_PLUGIN_FOLDER` defaults to the repository `.slim/plugins` cache
 - `SLIM_PLUGIN_ROOT` points at an already unpacked local plugin directory
 """
 
 from __future__ import annotations
 
+# ruff: noqa: E402
 import argparse
+import importlib.util
 import os
+import sys
 import time
 from collections.abc import Sequence
 from pathlib import Path
+
+EXAMPLE_DIR = Path(__file__).resolve().parent
+REPO_ROOT = EXAMPLE_DIR.parents[1]
+LOCAL_SRC_DIR = REPO_ROOT / "src"
+LOCAL_VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
+DEFAULT_ENV_FILE = EXAMPLE_DIR / ".env"
+BOOTSTRAP_ENV_VAR = "GRAPHON_EXAMPLE_BOOTSTRAPPED"
+RUNTIME_MODULES = ("pydantic", "httpx", "yaml")
+
+
+def bootstrap_local_python() -> None:
+    if os.environ.get(BOOTSTRAP_ENV_VAR) == "1":
+        return
+    if all(importlib.util.find_spec(module) is not None for module in RUNTIME_MODULES):
+        return
+    if not LOCAL_VENV_PYTHON.is_file():
+        return
+
+    env = dict(os.environ)
+    env[BOOTSTRAP_ENV_VAR] = "1"
+    os.execve(
+        str(LOCAL_VENV_PYTHON),
+        [str(LOCAL_VENV_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]],
+        env,
+    )
+
+
+bootstrap_local_python()
+
+if importlib.util.find_spec("graphon") is None and str(LOCAL_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(LOCAL_SRC_DIR))
 
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.file.enums import FileType
@@ -68,35 +98,23 @@ ALLOWED_ENV_VARS: dict[str, str] = {
     "SLIM_PLUGIN_ID": "",
     "SLIM_BINARY_PATH": "",
     "SLIM_PROVIDER": "openai",
-    "SLIM_PLUGIN_FOLDER": ".slim/plugins",
+    "SLIM_PLUGIN_FOLDER": "../../.slim/plugins",
     "SLIM_PLUGIN_ROOT": "",
+}
+PATH_ENV_VARS = {
+    "SLIM_BINARY_PATH",
+    "SLIM_PLUGIN_FOLDER",
+    "SLIM_PLUGIN_ROOT",
 }
 
 
 def load_default_env_file() -> None:
-    for path in env_file_candidates():
-        if path.is_file():
-            load_env_file(path)
-            return
-
-
-def env_file_candidates() -> list[Path]:
-    candidates = [
-        Path.cwd() / ".env",
-        Path(__file__).resolve().parent.parent / ".env",
-    ]
-    unique_candidates: list[Path] = []
-    seen_paths: set[Path] = set()
-    for candidate in candidates:
-        resolved_candidate = candidate.resolve()
-        if resolved_candidate in seen_paths:
-            continue
-        seen_paths.add(resolved_candidate)
-        unique_candidates.append(candidate)
-    return unique_candidates
+    if DEFAULT_ENV_FILE.is_file():
+        load_env_file(DEFAULT_ENV_FILE)
 
 
 def load_env_file(path: Path) -> None:
+    env_dir = path.resolve().parent
     for line_number, raw_line in enumerate(
         path.read_text(encoding="utf-8").splitlines(), start=1
     ):
@@ -117,13 +135,32 @@ def load_env_file(path: Path) -> None:
                 f"Unsupported .env key {key!r} on line {line_number} in {path}"
             )
 
-        os.environ.setdefault(key, strip_optional_quotes(value.strip()))
+        os.environ.setdefault(
+            key,
+            normalize_env_value(
+                key,
+                strip_optional_quotes(value.strip()),
+                base_dir=env_dir,
+            ),
+        )
 
 
 def strip_optional_quotes(value: str) -> str:
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
         return value[1:-1]
     return value
+
+
+def normalize_env_value(name: str, value: str, *, base_dir: Path) -> str:
+    if name not in PATH_ENV_VARS or not value:
+        return value
+
+    path_value = Path(value).expanduser()
+    if not path_value.is_absolute():
+        path_value = (base_dir / path_value).resolve()
+    else:
+        path_value = path_value.resolve()
+    return str(path_value)
 
 
 class PassthroughPromptMessageSerializer:
@@ -161,7 +198,12 @@ def require_env(name: str) -> str:
 
 
 def env_value(name: str) -> str:
-    return os.environ.get(name, ALLOWED_ENV_VARS[name]).strip()
+    raw_value = os.environ.get(name)
+    if raw_value is not None:
+        return raw_value.strip()
+    return normalize_env_value(
+        name, ALLOWED_ENV_VARS[name], base_dir=EXAMPLE_DIR
+    ).strip()
 
 
 def optional_path(name: str) -> Path | None:

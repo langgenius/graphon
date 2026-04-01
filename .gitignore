@@ -9,6 +9,7 @@ dist/
 
 # Environments
 .venv
+examples/*/.env
 
 # Ruff stuff:
 .ruff_cache/
