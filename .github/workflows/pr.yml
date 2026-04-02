@@ -4,11 +4,61 @@ on:
   pull_request:
     branches:
       - main
+    types:
+      - opened
+      - reopened
+      - edited
+      - synchronize
+
+permissions: {}
 
 jobs:
+  validate-pr-title:
+    name: Validate PR title
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Validate PR title against CONTRIBUTING.md
+        uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            perf
+            test
+            build
+            ci
+            chore
+            revert
+
+  validate-commit-messages:
+    name: Validate commit messages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Validate commit history against CONTRIBUTING.md
+        uses: cocogitto/cocogitto-action@v4
+        with:
+          command: check
+
   check:
     name: Check
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -21,4 +71,6 @@ jobs:
 
   test:
     needs: check
+    permissions:
+      contents: read
     uses: ./.github/workflows/test.yml
