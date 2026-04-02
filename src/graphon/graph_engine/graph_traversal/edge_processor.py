@@ -7,9 +7,9 @@ from graphon.enums import NodeExecutionType
 from graphon.graph.edge import Edge
 from graphon.graph.graph import Graph
 from graphon.graph_events.node import NodeRunStreamChunkEvent
+from graphon.runtime.graph_runtime_state import ResponseStreamCoordinatorProtocol
 
 from ..graph_state_manager import GraphStateManager
-from ..response_coordinator import ResponseStreamCoordinator
 
 if TYPE_CHECKING:
     from .skip_propagator import SkipPropagator
@@ -28,7 +28,7 @@ class EdgeProcessor:
         self,
         graph: Graph,
         state_manager: GraphStateManager,
-        response_coordinator: ResponseStreamCoordinator,
+        response_coordinator: ResponseStreamCoordinatorProtocol,
         skip_propagator: "SkipPropagator",
     ) -> None:
         """Initialize the edge processor.

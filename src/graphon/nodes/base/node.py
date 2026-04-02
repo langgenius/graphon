@@ -82,12 +82,12 @@ class _NodeRegistryMixin[NodeDataT: BaseNodeData]:
     """Node registry and config helpers kept separate from execution flow."""
 
     @classmethod
-    def get_registry_version(cls) -> int:
+    def get_registry_version(cls: type[Node[NodeDataT]]) -> int:
         return cls._registry_version
 
     @classmethod
     def extract_variable_selector_to_variable_mapping(
-        cls,
+        cls: type[Node[NodeDataT]],
         *,
         graph_config: Mapping[str, Any],
         config: NodeConfigDict,
@@ -144,7 +144,7 @@ class _NodeRegistryMixin[NodeDataT: BaseNodeData]:
 
     @classmethod
     def get_default_config(
-        cls,
+        cls: type[Node[NodeDataT]],
         filters: Mapping[str, object] | None = None,
     ) -> Mapping[str, object]:
         _ = filters
@@ -152,7 +152,7 @@ class _NodeRegistryMixin[NodeDataT: BaseNodeData]:
 
     @classmethod
     def get_node_type_classes_mapping(
-        cls,
+        cls: type[Node[NodeDataT]],
     ) -> Mapping[NodeType, Mapping[str, type[Node]]]:
         """Return a read-only view of the currently registered node classes.
 
@@ -176,7 +176,7 @@ class _NodeDataModelMixin[NodeDataT: BaseNodeData]:
 
     @classmethod
     def validate_node_data(
-        cls,
+        cls: type[Node[NodeDataT]],
         node_data: BaseNodeData | Mapping[str, Any],
     ) -> NodeDataT:
         """Validate shared graph node payloads against the subclass-declared
@@ -197,7 +197,10 @@ class _NodeDataModelMixin[NodeDataT: BaseNodeData]:
             payload = dict(node_data)
         return cast("NodeDataT", cls._node_data_type.model_validate(payload))
 
-    def init_node_data(self, data: BaseNodeData | Mapping[str, Any]) -> None:
+    def init_node_data(
+        self: Node[NodeDataT],
+        data: BaseNodeData | Mapping[str, Any],
+    ) -> None:
         """Hydrate `_node_data` for legacy callers that bypass `__init__`."""
         self._node_data = self.validate_node_data(cast("BaseNodeData", data))
 
@@ -259,22 +262,26 @@ class _NodeDataModelMixin[NodeDataT: BaseNodeData]:
 class _NodeRuntimeMixin[NodeDataT: BaseNodeData]:
     """Run-context and execution-lifecycle accessors."""
 
-    def post_init(self) -> None:
+    def post_init(self: Node[NodeDataT]) -> None:
         """Optional hook for subclasses requiring extra initialization."""
         return
 
     @property
-    def graph_init_params(self) -> GraphInitParams:
+    def graph_init_params(self: Node[NodeDataT]) -> GraphInitParams:
         return self._graph_init_params
 
     @property
-    def run_context(self) -> Mapping[str, Any]:
+    def run_context(self: Node[NodeDataT]) -> Mapping[str, Any]:
         return self._run_context
 
-    def get_run_context_value(self, key: str, default: Any = None) -> Any:
+    def get_run_context_value(
+        self: Node[NodeDataT],
+        key: str,
+        default: Any = None,
+    ) -> Any:
         return self._run_context.get(key, default)
 
-    def require_run_context_value(self, key: str) -> Any:
+    def require_run_context_value(self: Node[NodeDataT], key: str) -> Any:
         value = self.get_run_context_value(key, _MISSING_RUN_CONTEXT_VALUE)
         if value is _MISSING_RUN_CONTEXT_VALUE:
             msg = f"run_context missing required key: {key}"
@@ -282,10 +289,10 @@ class _NodeRuntimeMixin[NodeDataT: BaseNodeData]:
         return value
 
     @property
-    def execution_id(self) -> str:
+    def execution_id(self: Node[NodeDataT]) -> str:
         return self._node_execution_id
 
-    def ensure_execution_id(self) -> str:
+    def ensure_execution_id(self: Node[NodeDataT]) -> str:
         if self._node_execution_id:
             return self._node_execution_id
 
@@ -297,13 +304,19 @@ class _NodeRuntimeMixin[NodeDataT: BaseNodeData]:
         self._node_execution_id = str(uuid4())
         return self._node_execution_id
 
-    def populate_start_event(self, event: NodeRunStartedEvent) -> None:
+    def populate_start_event(
+        self: Node[NodeDataT],
+        event: NodeRunStartedEvent,
+    ) -> None:
         """Allow subclasses to enrich the started event without cross-node imports
         in the base class.
         """
         _ = event
 
-    def blocks_variable_output(self, variable_selectors: set[tuple[str, ...]]) -> bool:
+    def blocks_variable_output(
+        self: Node[NodeDataT],
+        variable_selectors: set[tuple[str, ...]],
+    ) -> bool:
         """Check if this node blocks the output of specific variables.
 
         This method is used to determine if a node must complete execution before

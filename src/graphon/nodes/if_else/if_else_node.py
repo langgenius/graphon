@@ -13,7 +13,7 @@ from graphon.nodes.base.node import Node
 from graphon.nodes.if_else.entities import IfElseNodeData
 from graphon.runtime.variable_pool import VariablePool
 from graphon.utils.condition.entities import Condition
-from graphon.utils.condition.processor import ConditionProcessor
+from graphon.utils.condition.processor import ConditionCheckResult, ConditionProcessor
 
 
 class IfElseNode(Node[IfElseNodeData]):
@@ -66,8 +66,7 @@ class IfElseNode(Node[IfElseNodeData]):
                 # the `cases` structure.
                 # Fallback to the legacy node shape when `cases` are not defined.
                 input_conditions, group_result, final_result = (
-                    _should_not_use_old_function(  # pyright: ignore [reportDeprecated]
-                        condition_processor=condition_processor,
+                    condition_processor.process_conditions(
                         variable_pool=self.graph_runtime_state.variable_pool,
                         conditions=self.node_data.conditions or [],
                         operator=self.node_data.logical_operator or "and",
@@ -128,7 +127,7 @@ def _should_not_use_old_function(
     variable_pool: VariablePool,
     conditions: list[Condition],
     operator: Literal["and", "or"],
-) -> bool:
+) -> ConditionCheckResult:
     return condition_processor.process_conditions(
         variable_pool=variable_pool,
         conditions=conditions,

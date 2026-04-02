@@ -3,8 +3,9 @@
 import logging
 from typing import Protocol, final
 
+from graphon.runtime.graph_runtime_state import GraphExecutionProtocol
+
 from ..command_channels import CommandChannel
-from ..domain.graph_execution import GraphExecution
 from ..entities.commands import GraphEngineCommand
 
 logger = logging.getLogger(__name__)
@@ -16,7 +17,7 @@ class CommandHandler(Protocol):
     def handle(
         self,
         command: GraphEngineCommand,
-        execution: GraphExecution,
+        execution: GraphExecutionProtocol,
     ) -> None: ...
 
 
@@ -31,7 +32,7 @@ class CommandProcessor:
     def __init__(
         self,
         command_channel: CommandChannel,
-        graph_execution: GraphExecution,
+        graph_execution: GraphExecutionProtocol,
     ) -> None:
         """Initialize the command processor.
 

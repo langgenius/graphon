@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 from collections import defaultdict, deque
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from decimal import Decimal
 from enum import Enum
 from ipaddress import (
@@ -58,7 +58,8 @@ def decimal_encoder(dec_value: Decimal) -> int | float:
         An `int` for integral decimals, otherwise a `float`.
 
     """
-    if dec_value.as_tuple().exponent >= 0:  # type: ignore[operator]
+    exponent = dec_value.as_tuple().exponent
+    if isinstance(exponent, int) and exponent >= 0:
         return int(dec_value)
     return float(dec_value)
 
@@ -94,7 +95,7 @@ ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
 
 
 def generate_encoders_by_class_tuples(
-    type_encoder_map: dict[Any, Callable[[Any], Any]],
+    type_encoder_map: Mapping[type[Any], Callable[[Any], Any]],
 ) -> dict[Callable[[Any], Any], tuple[Any, ...]]:
     encoders_by_class_tuples: dict[Callable[[Any], Any], tuple[Any, ...]] = defaultdict(
         tuple,
@@ -110,7 +111,7 @@ _ENCODER_UNSET = object()
 
 def _encode_with_custom_encoder(
     obj: Any,
-    custom_encoder: dict[Any, Callable[[Any], Any]],
+    custom_encoder: Mapping[type[Any], Callable[[Any], Any]],
 ) -> Any:
     if type(obj) in custom_encoder:
         return custom_encoder[type(obj)](obj)
@@ -156,7 +157,7 @@ def _encode_dataclass(
     exclude_unset: bool,
     exclude_defaults: bool,
     exclude_none: bool,
-    custom_encoder: dict[Any, Callable[[Any], Any]],
+    custom_encoder: Mapping[type[Any], Callable[[Any], Any]],
     excluded_key_prefixes: Sequence[str],
 ) -> Any:
     obj_dict = dataclasses.asdict(obj)
@@ -172,12 +173,12 @@ def _encode_dataclass(
 
 
 def _encode_mapping(
-    obj: dict[Any, Any],
+    obj: Mapping[Any, Any],
     *,
     by_alias: bool,
     exclude_unset: bool,
     exclude_none: bool,
-    custom_encoder: dict[Any, Callable[[Any], Any]],
+    custom_encoder: Mapping[type[Any], Callable[[Any], Any]],
     excluded_key_prefixes: Sequence[str],
 ) -> dict[Any, Any]:
     encoded_dict = {}
@@ -221,7 +222,7 @@ def _encode_collection(
     exclude_unset: bool,
     exclude_defaults: bool,
     exclude_none: bool,
-    custom_encoder: dict[Any, Callable[[Any], Any]],
+    custom_encoder: Mapping[type[Any], Callable[[Any], Any]],
     excluded_key_prefixes: Sequence[str],
 ) -> list[Any]:
     return [
@@ -265,7 +266,7 @@ def jsonable_encoder(
     exclude_unset: bool = False,
     exclude_defaults: bool = False,
     exclude_none: bool = False,
-    custom_encoder: dict[Any, Callable[[Any], Any]] | None = None,
+    custom_encoder: Mapping[type[Any], Callable[[Any], Any]] | None = None,
     excluded_key_prefixes: Sequence[str] = (),
 ) -> Any:
     custom_encoder = custom_encoder or {}

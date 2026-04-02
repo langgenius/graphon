@@ -2,8 +2,9 @@
 
 from typing import final
 
+from graphon.runtime.graph_runtime_state import GraphExecutionProtocol
+
 from ..command_processing import CommandProcessor
-from ..domain import GraphExecution
 from ..graph_state_manager import GraphStateManager
 from ..worker_management import WorkerPool
 
@@ -18,7 +19,7 @@ class ExecutionCoordinator:
 
     def __init__(
         self,
-        graph_execution: GraphExecution,
+        graph_execution: GraphExecutionProtocol,
         state_manager: GraphStateManager,
         command_processor: CommandProcessor,
         worker_pool: WorkerPool,

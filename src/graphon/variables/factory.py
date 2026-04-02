@@ -5,7 +5,7 @@ independent from top-level API factory modules so graph nodes and state
 containers can operate without importing application-layer packages.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
 from uuid import uuid4
 
@@ -96,6 +96,8 @@ _EMPTY_ARRAY_SEGMENT_FACTORY: Mapping[SegmentType, type[Segment]] = {
     SegmentType.ARRAY_FILE: ArrayFileSegment,
 }
 
+type SegmentFactory = Callable[..., Segment]
+
 
 def _build_non_list_segment(value: Any) -> Segment | None:
     match value:
@@ -137,7 +139,7 @@ def _build_list_segment(value: list[Any]) -> Segment:
     if segment_class is None:
         msg = f"not supported value {value}"
         raise ValueError(msg)
-    return segment_class(value=value)
+    return cast(SegmentFactory, segment_class)(value=value)
 
 
 def _build_empty_array_segment(
@@ -146,7 +148,13 @@ def _build_empty_array_segment(
     value: list[Any],
 ) -> Segment | None:
     segment_class = _EMPTY_ARRAY_SEGMENT_FACTORY.get(segment_type)
-    return None if segment_class is None else segment_class(value=value)
+    return (
+        None
+        if segment_class is None
+        else cast(SegmentFactory, segment_class)(
+            value=value,
+        )
+    )
 
 
 def _resolve_segment_class_for_type_match(

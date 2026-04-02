@@ -33,10 +33,11 @@ from graphon.graph_events.node import (
     NodeRunVariableUpdatedEvent,
 )
 from graphon.model_runtime.entities.llm_entities import LLMUsage
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
-
-from ..domain.graph_execution import GraphExecution
-from ..response_coordinator import ResponseStreamCoordinator
+from graphon.runtime.graph_runtime_state import (
+    GraphExecutionProtocol,
+    GraphRuntimeState,
+    ResponseStreamCoordinatorProtocol,
+)
 
 if TYPE_CHECKING:
     from ..error_handler import ErrorHandler
@@ -59,8 +60,8 @@ class EventHandler:
         self,
         graph: Graph,
         graph_runtime_state: GraphRuntimeState,
-        graph_execution: GraphExecution,
-        response_coordinator: ResponseStreamCoordinator,
+        graph_execution: GraphExecutionProtocol,
+        response_coordinator: ResponseStreamCoordinatorProtocol,
         event_collector: "EventManager",
         edge_processor: "EdgeProcessor",
         state_manager: "GraphStateManager",

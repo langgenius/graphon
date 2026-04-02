@@ -1,5 +1,5 @@
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any, cast, override
 
 from graphon.entities.graph_config import NodeConfigDict
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
@@ -142,6 +142,9 @@ class TemplateTransformNode(Node[TemplateTransformNodeData]):
                     isinstance(selector_part, str) for selector_part in value_selector
                 )
             ):
-                variable_mapping[node_id + "." + variable] = list(value_selector)
+                variable_mapping[node_id + "." + variable] = cast(
+                    Sequence[str],
+                    value_selector,
+                )
 
         return variable_mapping

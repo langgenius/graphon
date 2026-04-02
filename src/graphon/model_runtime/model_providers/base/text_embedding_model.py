@@ -1,5 +1,3 @@
-from collections.abc import Callable
-
 from graphon.model_runtime.entities.model_entities import ModelPropertyKey, ModelType
 from graphon.model_runtime.entities.text_embedding_entities import (
     EmbeddingInputType,
@@ -26,30 +24,24 @@ class TextEmbeddingModel(AIModel):
             msg = "No texts or files provided"
             raise ValueError(msg)
 
-        invoke_embedding: Callable[..., EmbeddingResult]
-        invoke_kwargs: dict[str, object]
-        if texts:
-            invoke_embedding = self.model_runtime.invoke_text_embedding
-            invoke_kwargs = {
-                "provider": self.provider,
-                "model": model,
-                "credentials": credentials,
-                "texts": texts,
-                "input_type": input_type,
-            }
-        else:
-            assert multimodel_documents is not None
-            invoke_embedding = self.model_runtime.invoke_multimodal_embedding
-            invoke_kwargs = {
-                "provider": self.provider,
-                "model": model,
-                "credentials": credentials,
-                "documents": multimodel_documents,
-                "input_type": input_type,
-            }
-
         try:
-            return invoke_embedding(**invoke_kwargs)
+            if texts:
+                return self.model_runtime.invoke_text_embedding(
+                    provider=self.provider,
+                    model=model,
+                    credentials=credentials,
+                    texts=texts,
+                    input_type=input_type,
+                )
+
+            assert multimodel_documents is not None
+            return self.model_runtime.invoke_multimodal_embedding(
+                provider=self.provider,
+                model=model,
+                credentials=credentials,
+                documents=multimodel_documents,
+                input_type=input_type,
+            )
         except Exception as e:
             raise self._transform_invoke_error(e) from e
 

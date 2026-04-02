@@ -2,7 +2,7 @@
 
 import logging
 import time
-from typing import TYPE_CHECKING, final
+from typing import final
 
 from graphon.enums import (
     ErrorStrategy as ErrorStrategyEnum,
@@ -19,9 +19,7 @@ from graphon.graph_events.node import (
     NodeRunRetryEvent,
 )
 from graphon.node_events.base import NodeRunResult
-
-if TYPE_CHECKING:
-    from .domain import GraphExecution
+from graphon.runtime.graph_runtime_state import GraphExecutionProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +33,11 @@ class ErrorHandler:
     node configuration.
     """
 
-    def __init__(self, graph: Graph, graph_execution: "GraphExecution") -> None:
+    def __init__(
+        self,
+        graph: Graph,
+        graph_execution: GraphExecutionProtocol,
+    ) -> None:
         """Initialize the error handler.
 
         Args:
