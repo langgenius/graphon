@@ -33,3 +33,21 @@ def test_transform_result_reports_nested_missing_field_without_leading_dot() -> 
 
     with pytest.raises(OutputValidationError, match=r"Output root\.child is missing\."):
         node._transform_result(result={"root": {}}, output_schema=output_schema)
+
+
+def test_transform_result_rejects_non_string_array_elements_with_validation_error() -> (
+    None
+):
+    node = _build_code_node()
+    output_schema = {
+        "items": CodeNodeData.Output(type=SegmentType.ARRAY_STRING),
+    }
+
+    with pytest.raises(
+        OutputValidationError,
+        match=r"Output items\[1\] must be a string, got int instead\.",
+    ):
+        node._transform_result(
+            result={"items": ["valid", 1]},
+            output_schema=output_schema,
+        )

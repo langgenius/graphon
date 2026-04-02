@@ -10,7 +10,7 @@ from collections.abc import Generator, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
-from typing import IO, Any
+from typing import IO, Any, cast
 
 from graphon.model_runtime.entities.llm_entities import (
     LLMResult,
@@ -19,6 +19,7 @@ from graphon.model_runtime.entities.llm_entities import (
     LLMResultChunkWithStructuredOutput,
     LLMResultWithStructuredOutput,
     LLMUsage,
+    LLMUsageMetadata,
 )
 from graphon.model_runtime.entities.message_entities import (
     AssistantPromptMessage,
@@ -777,22 +778,27 @@ class SlimRuntime(ModelRuntime):
                 system_fingerprint = chunk.system_fingerprint
 
         _ = finish_reason
-        result_kwargs = {
-            "model": model,
-            "prompt_messages": list(prompt_messages),
-            "message": AssistantPromptMessage(
-                content=content_text or content_parts,
-                tool_calls=tool_calls,
-            ),
-            "usage": usage,
-            "system_fingerprint": system_fingerprint,
-        }
+        prompt_messages_list = list(prompt_messages)
+        assistant_message = AssistantPromptMessage(
+            content=content_text or content_parts,
+            tool_calls=tool_calls,
+        )
         if structured_output is not None:
             return LLMResultWithStructuredOutput(
-                **result_kwargs,
+                model=model,
+                prompt_messages=prompt_messages_list,
+                message=assistant_message,
+                usage=usage,
+                system_fingerprint=system_fingerprint,
                 structured_output=structured_output,
             )
-        return LLMResult(**result_kwargs)
+        return LLMResult(
+            model=model,
+            prompt_messages=prompt_messages_list,
+            message=assistant_message,
+            usage=usage,
+            system_fingerprint=system_fingerprint,
+        )
 
     def _parse_llm_chunk(
         self,
@@ -803,29 +809,37 @@ class SlimRuntime(ModelRuntime):
     ) -> LLMResultChunk:
         delta_payload = chunk.get("delta") or {}
         usage_payload = delta_payload.get("usage")
-        message = self._deserialize_prompt_message(delta_payload.get("message") or {})
+        message = cast(
+            AssistantPromptMessage,
+            self._deserialize_prompt_message(delta_payload.get("message") or {}),
+        )
         finish_reason = delta_payload.get("finish_reason")
-        base_kwargs = {
-            "model": model,
-            "prompt_messages": list(prompt_messages),
-            "system_fingerprint": chunk.get("system_fingerprint"),
-            "delta": LLMResultChunkDelta(
-                index=int(delta_payload.get("index", 0)),
-                message=message,
-                usage=(
-                    self._parse_llm_usage(usage_payload)
-                    if usage_payload is not None
-                    else None
-                ),
-                finish_reason=str(finish_reason) if finish_reason is not None else None,
+        delta = LLMResultChunkDelta(
+            index=int(delta_payload.get("index", 0)),
+            message=message,
+            usage=(
+                self._parse_llm_usage(usage_payload)
+                if usage_payload is not None
+                else None
             ),
-        }
+            finish_reason=str(finish_reason) if finish_reason is not None else None,
+        )
+        prompt_messages_list = list(prompt_messages)
+        system_fingerprint = cast("str | None", chunk.get("system_fingerprint"))
         if "structured_output" in chunk:
             return LLMResultChunkWithStructuredOutput(
-                **base_kwargs,
+                model=model,
+                prompt_messages=prompt_messages_list,
+                system_fingerprint=system_fingerprint,
+                delta=delta,
                 structured_output=chunk.get("structured_output"),
             )
-        return LLMResultChunk(**base_kwargs)
+        return LLMResultChunk(
+            model=model,
+            prompt_messages=prompt_messages_list,
+            system_fingerprint=system_fingerprint,
+            delta=delta,
+        )
 
     def _serialize_prompt_message(self, message: PromptMessage) -> dict[str, Any]:
         return jsonable_encoder(message)
@@ -851,7 +865,7 @@ class SlimRuntime(ModelRuntime):
 
     @staticmethod
     def _parse_llm_usage(payload: Mapping[str, Any]) -> LLMUsage:
-        return LLMUsage.from_metadata(dict(payload))
+        return LLMUsage.from_metadata(cast("LLMUsageMetadata", dict(payload)))
 
     @staticmethod
     def _parse_embedding_usage(payload: Mapping[str, Any]) -> EmbeddingUsage:

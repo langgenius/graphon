@@ -1,7 +1,7 @@
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from textwrap import dedent
-from typing import TYPE_CHECKING, Any, Protocol, override
+from typing import TYPE_CHECKING, Any, Protocol, cast, override
 
 from graphon.entities.graph_config import NodeConfigDict
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
@@ -214,11 +214,8 @@ class CodeNode(Node[CodeNodeData]):
 
         if isinstance(value, float):
             decimal_value = Decimal(str(value)).normalize()
-            precision = (
-                -decimal_value.as_tuple().exponent
-                if decimal_value.as_tuple().exponent < 0
-                else 0
-            )  # type: ignore[operator]
+            exponent = decimal_value.as_tuple().exponent
+            precision = -exponent if isinstance(exponent, int) and exponent < 0 else 0
             # raise error if precision is too high
             if precision > self._limits.max_precision:
                 msg = (
@@ -343,7 +340,7 @@ class CodeNode(Node[CodeNodeData]):
         prefix: str,
         depth: int,
         output_schema: dict[str, CodeNodeData.Output] | None,
-    ) -> dict[str, Any] | None:
+    ) -> Mapping[str, Any] | None:
         output_path = self._output_path(prefix, output_name)
         if not isinstance(value, dict):
             if value is None:
@@ -445,13 +442,21 @@ class CodeNode(Node[CodeNodeData]):
             )
             raise OutputValidationError(msg)
 
-        return [
-            self._check_string(
-                value=inner_value,
-                variable=self._output_path_with_index(prefix, output_name, i),
+        normalized_values: list[str | None] = []
+        for i, inner_value in enumerate(value):
+            if inner_value is not None and not isinstance(inner_value, str):
+                msg = (
+                    f"Output {output_path}[{i}] must be a string, got "
+                    f"{type(inner_value).__name__} instead."
+                )
+                raise OutputValidationError(msg)
+            normalized_values.append(
+                self._check_string(
+                    value=inner_value,
+                    variable=self._output_path_with_index(prefix, output_name, i),
+                ),
             )
-            for i, inner_value in enumerate(value)
-        ]
+        return normalized_values
 
     def _transform_array_object_output(
         self,
@@ -461,7 +466,7 @@ class CodeNode(Node[CodeNodeData]):
         prefix: str,
         depth: int,
         output_schema: dict[str, CodeNodeData.Output] | None,
-    ) -> list[dict[str, Any] | None] | None:
+    ) -> list[Mapping[str, Any] | None] | None:
         output_path = self._output_path(prefix, output_name)
         if not isinstance(value, list):
             if value is None:
@@ -486,17 +491,20 @@ class CodeNode(Node[CodeNodeData]):
                 )
                 raise OutputValidationError(msg)
 
-        return [
-            None
-            if inner_value is None
-            else self._transform_result(
-                result=inner_value,
-                output_schema=output_schema,
-                prefix=self._output_path_with_index(prefix, output_name, i),
-                depth=depth + 1,
+        normalized_values: list[Mapping[str, Any] | None] = []
+        for i, inner_value in enumerate(value):
+            if inner_value is None:
+                normalized_values.append(None)
+                continue
+            normalized_values.append(
+                self._transform_result(
+                    result=cast("Mapping[str, Any]", inner_value),
+                    output_schema=output_schema,
+                    prefix=self._output_path_with_index(prefix, output_name, i),
+                    depth=depth + 1,
+                ),
             )
-            for i, inner_value in enumerate(value)
-        ]
+        return normalized_values
 
     def _transform_array_boolean_output(
         self,

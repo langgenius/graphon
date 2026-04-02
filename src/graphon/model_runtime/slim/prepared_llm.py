@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Generator, Mapping, Sequence
-from typing import Any, Literal, overload, override
+from typing import Any, Literal, cast, overload, override
 
 from graphon.model_runtime.entities.llm_entities import (
     LLMResult,
@@ -171,23 +171,29 @@ class SlimPreparedLLM(PreparedLLMProtocol):
         structured_parameters = dict(model_parameters)
         structured_parameters["json_schema"] = json.dumps(json_schema)
         if stream:
-            return self.invoke_llm(
+            return cast(
+                "Generator[LLMResultChunkWithStructuredOutput, None, None]",
+                self.invoke_llm(
+                    prompt_messages=prompt_messages,
+                    model_parameters=structured_parameters,
+                    tools=None,
+                    stop=stop,
+                    stream=True,
+                ),
+            )
+        return cast(
+            "LLMResultWithStructuredOutput",
+            self.invoke_llm(
                 prompt_messages=prompt_messages,
                 model_parameters=structured_parameters,
                 tools=None,
                 stop=stop,
-                stream=True,
-            )
-        return self.invoke_llm(
-            prompt_messages=prompt_messages,
-            model_parameters=structured_parameters,
-            tools=None,
-            stop=stop,
-            stream=False,
+                stream=False,
+            ),
         )
 
-    @staticmethod
     @override
-    def is_structured_output_parse_error(error: Exception) -> bool:
+    def is_structured_output_parse_error(self, error: Exception) -> bool:
+        _ = self
         _ = error
         return False

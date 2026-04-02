@@ -1,6 +1,6 @@
 import json
 from collections.abc import Mapping, Sequence
-from typing import Literal, NamedTuple
+from typing import Literal, NamedTuple, cast
 
 from graphon.file import file_manager
 from graphon.file.enums import FileAttribute
@@ -67,7 +67,7 @@ class ConditionProcessor:
                     msg = "Sub variable is required"
                     raise ValueError(msg)
                 result = _process_sub_conditions(
-                    variable=variable,
+                    variable=cast("ArrayFileSegment", variable),
                     sub_conditions=condition.sub_variable_condition.conditions,
                     operator=condition.sub_variable_condition.logical_operator,
                 )
@@ -193,14 +193,15 @@ def _prepare_expected_value(
     if normalized_expected_value is None:
         return None
 
-    match variable, normalized_expected_value:
-        case ((BooleanSegment() | ArrayBooleanSegment()), list()):
-            result = [_convert_to_bool(item) for item in normalized_expected_value]
-        case ((BooleanSegment() | ArrayBooleanSegment()), _):
-            result = _convert_to_bool(normalized_expected_value)
-        case _:
-            result = normalized_expected_value
-    return result
+    if isinstance(variable, BooleanSegment | ArrayBooleanSegment):
+        if isinstance(normalized_expected_value, list):
+            return [_convert_to_bool(item) for item in normalized_expected_value]
+        return _convert_to_bool(normalized_expected_value)
+
+    return cast(
+        "str | Sequence[str] | bool | list[bool] | None",
+        normalized_expected_value,
+    )
 
 
 def _evaluate_all_of_condition(*, value: object, expected: object) -> bool:
@@ -263,32 +264,26 @@ def _assert_start_with(*, value: object, expected: object) -> bool:
     if not value:
         return False
 
-    match value, expected:
-        case str(), str():
-            result = value.startswith(expected)
-        case str(), _:
-            msg = "Expected value must be a string for startswith"
-            raise ValueError(msg)
-        case _:
-            msg = "Invalid actual value type: string"
-            raise ValueError(msg)
-    return result
+    if not isinstance(value, str):
+        msg = "Invalid actual value type: string"
+        raise ValueError(msg)
+    if not isinstance(expected, str):
+        msg = "Expected value must be a string for startswith"
+        raise ValueError(msg)
+    return value.startswith(expected)
 
 
 def _assert_end_with(*, value: object, expected: object) -> bool:
     if not value:
         return False
 
-    match value, expected:
-        case str(), str():
-            result = value.endswith(expected)
-        case str(), _:
-            msg = "Expected value must be a string for endswith"
-            raise ValueError(msg)
-        case _:
-            msg = "Invalid actual value type: string"
-            raise ValueError(msg)
-    return result
+    if not isinstance(value, str):
+        msg = "Invalid actual value type: string"
+        raise ValueError(msg)
+    if not isinstance(expected, str):
+        msg = "Expected value must be a string for endswith"
+        raise ValueError(msg)
+    return value.endswith(expected)
 
 
 def _assert_is(*, value: object, expected: object) -> bool:

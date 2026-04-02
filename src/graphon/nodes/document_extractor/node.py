@@ -6,7 +6,7 @@ import pathlib
 import tempfile
 import zipfile
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any, cast, override
 
 import charset_normalizer
 import docx
@@ -126,6 +126,7 @@ class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
                 error=error_message,
             )
 
+        assert variable is not None
         value = variable.value
         inputs = {"variable_selector": variable_selector}
         if isinstance(value, list):
@@ -573,15 +574,11 @@ def _iter_docx_content_items(doc: Document) -> list[tuple[str, Table | Paragraph
 
 
 def _extract_docx_item_text(item_type: str, item: Table | Paragraph) -> str | None:
-    result: str | None
-    match item_type, item:
-        case "paragraph", Paragraph():
-            result = item.text
-        case "table", Table():
-            result = _extract_docx_table_text(item)
-        case _:
-            result = None
-    return result
+    if item_type == "paragraph" and isinstance(item, Paragraph):
+        return item.text
+    if item_type == "table" and isinstance(item, Table):
+        return _extract_docx_table_text(item)
+    return None
 
 
 def _extract_docx_table_text(item: Table) -> str | None:
@@ -619,7 +616,9 @@ def _download_file_content(http_client: HttpClientProtocol, file: File) -> bytes
 
     try:
         if file.transfer_method == FileTransferMethod.REMOTE_URL:
-            response = http_client.get(file.remote_url)
+            remote_url = file.remote_url
+            assert remote_url is not None
+            response = http_client.get(remote_url)
             response.raise_for_status()
             return response.content
         return file_manager.download(file)
@@ -721,7 +720,7 @@ def _extract_text_from_excel(file_content: bytes) -> str:
         markdown_table = ""
         for sheet_name in excel_file.sheet_names:
             try:
-                df = excel_file.parse(sheet_name=sheet_name)
+                df = cast("pd.DataFrame", excel_file.parse(sheet_name=sheet_name))
                 df = df.dropna(how="all")
 
                 # Combine multi-line text in each cell into a single line
