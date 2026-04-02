@@ -5,9 +5,13 @@ on:
     tags:
       - "v*"
 
+permissions: {}
+
 jobs:
   test:
     uses: ./.github/workflows/test.yml
+    permissions:
+      contents: read
 
   build:
     name: Build release distributions

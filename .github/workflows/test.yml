@@ -3,6 +3,8 @@ name: Test
 on:
   workflow_call:
 
+permissions: {}
+
 jobs:
   test:
     name: Test (Python ${{ matrix.python-version }})
