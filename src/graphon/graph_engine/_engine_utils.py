@@ -12,5 +12,9 @@ def get_timestamp() -> float:
 
     To address this, the function uses the wall clock as the time source.
     However, it assumes that the clocks of all servers are properly synchronized.
+
+    Returns:
+        Rounded wall-clock seconds since the Unix epoch.
+
     """
     return round(time.time())

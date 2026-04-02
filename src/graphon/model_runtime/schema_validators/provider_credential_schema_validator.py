@@ -3,21 +3,17 @@ from graphon.model_runtime.schema_validators.common_validator import CommonValid
 
 
 class ProviderCredentialSchemaValidator(CommonValidator):
-    def __init__(self, provider_credential_schema: ProviderCredentialSchema):
+    def __init__(self, provider_credential_schema: ProviderCredentialSchema) -> None:
         self.provider_credential_schema = provider_credential_schema
 
     def validate_and_filter(self, credentials: dict):
-        """
-        Validate provider credentials
-
-        :param credentials: provider credentials
-        :return: validated provider credentials
-        """
+        """Validate provider credentials and return the filtered credential map."""
         # get the credential_form_schemas in provider_credential_schema
         credential_form_schemas = (
             self.provider_credential_schema.credential_form_schemas
         )
 
         return self._validate_and_filter_credential_form_schemas(
-            credential_form_schemas, credentials
+            credential_form_schemas,
+            credentials,
         )

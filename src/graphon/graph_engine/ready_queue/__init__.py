@@ -1,5 +1,4 @@
-"""
-Ready queue implementations for GraphEngine.
+"""Ready queue implementations for GraphEngine.
 
 This package contains the protocol and implementations for managing
 the queue of nodes ready for execution.

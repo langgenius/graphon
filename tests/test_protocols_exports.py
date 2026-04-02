@@ -1,3 +1,4 @@
+from graphon import protocols
 from graphon.file.protocols import WorkflowFileRuntimeProtocol
 from graphon.graph.graph import NodeFactory
 from graphon.graph.validation import GraphValidationRule
@@ -94,8 +95,6 @@ def test_public_protocol_exports_match_canonical_definitions():
 
 
 def test_public_protocol_package_exports_are_stable():
-    from graphon import protocols
-
     assert protocols.__all__ == [
         "CredentialsProvider",
         "FileManagerProtocol",

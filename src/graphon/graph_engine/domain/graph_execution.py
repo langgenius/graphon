@@ -47,13 +47,12 @@ class GraphExecutionState(BaseModel):
     error: GraphExecutionErrorState | None = Field(default=None)
     exceptions_count: int = Field(default=0)
     node_executions: list[NodeExecutionState] = Field(
-        default_factory=list[NodeExecutionState]
+        default_factory=list[NodeExecutionState],
     )
 
 
 def _serialize_error(error: Exception | None) -> GraphExecutionErrorState | None:
     """Convert an exception into its serializable representation."""
-
     if error is None:
         return None
 
@@ -66,7 +65,6 @@ def _serialize_error(error: Exception | None) -> GraphExecutionErrorState | None
 
 def _resolve_exception_class(module_name: str, qualname: str) -> type[Exception]:
     """Locate an exception class from its module and qualified name."""
-
     module = import_module(module_name)
     attr: object = module
     for part in qualname.split("."):
@@ -75,12 +73,12 @@ def _resolve_exception_class(module_name: str, qualname: str) -> type[Exception]
     if isinstance(attr, type) and issubclass(attr, Exception):
         return attr
 
-    raise TypeError(f"{qualname} in {module_name} is not an Exception subclass")
+    msg = f"{qualname} in {module_name} is not an Exception subclass"
+    raise TypeError(msg)
 
 
 def _deserialize_error(state: GraphExecutionErrorState | None) -> Exception | None:
     """Reconstruct an exception instance from serialized data."""
-
     if state is None:
         return None
 
@@ -89,7 +87,7 @@ def _deserialize_error(state: GraphExecutionErrorState | None) -> Exception | No
         if state.message is None:
             return exception_class()
         return exception_class(state.message)
-    except Exception:
+    except (ImportError, AttributeError, TypeError, ValueError):
         # Fallback to RuntimeError when reconstruction fails
         if state.message is None:
             return RuntimeError(state.qualname)
@@ -98,8 +96,7 @@ def _deserialize_error(state: GraphExecutionErrorState | None) -> Exception | No
 
 @dataclass
 class GraphExecution:
-    """
-    Aggregate root for graph execution.
+    """Aggregate root for graph execution.
 
     This manages the overall execution state of a workflow graph,
     coordinating between multiple node executions.
@@ -113,22 +110,25 @@ class GraphExecution:
     pause_reasons: list[PauseReason] = field(default_factory=list)
     error: Exception | None = None
     node_executions: dict[str, NodeExecution] = field(
-        default_factory=dict[str, NodeExecution]
+        default_factory=dict[str, NodeExecution],
     )
     exceptions_count: int = 0
 
     def start(self) -> None:
         """Mark the graph execution as started."""
         if self.started:
-            raise RuntimeError("Graph execution already started")
+            msg = "Graph execution already started"
+            raise RuntimeError(msg)
         self.started = True
 
     def complete(self) -> None:
         """Mark the graph execution as completed."""
         if not self.started:
-            raise RuntimeError("Cannot complete execution that hasn't started")
+            msg = "Cannot complete execution that hasn't started"
+            raise RuntimeError(msg)
         if self.completed:
-            raise RuntimeError("Graph execution already completed")
+            msg = "Graph execution already completed"
+            raise RuntimeError(msg)
         self.completed = True
 
     def abort(self, reason: str) -> None:
@@ -139,9 +139,11 @@ class GraphExecution:
     def pause(self, reason: PauseReason) -> None:
         """Pause the graph execution without marking it complete."""
         if self.completed:
-            raise RuntimeError("Cannot pause execution that has completed")
+            msg = "Cannot pause execution that has completed"
+            raise RuntimeError(msg)
         if self.aborted:
-            raise RuntimeError("Cannot pause execution that has been aborted")
+            msg = "Cannot pause execution that has been aborted"
+            raise RuntimeError(msg)
         self.paused = True
         self.pause_reasons.append(reason)
 
@@ -182,7 +184,6 @@ class GraphExecution:
 
     def dumps(self) -> str:
         """Serialize the aggregate state into a JSON string."""
-
         node_states = [
             NodeExecutionState(
                 node_id=node_id,
@@ -210,17 +211,19 @@ class GraphExecution:
 
     def loads(self, data: str) -> None:
         """Restore aggregate state from a serialized JSON string."""
-
         state = GraphExecutionState.model_validate_json(data)
 
         if state.type != "GraphExecution":
-            raise ValueError(f"Invalid serialized data type: {state.type}")
+            msg = f"Invalid serialized data type: {state.type}"
+            raise ValueError(msg)
 
         if state.version != "1.0":
-            raise ValueError(f"Unsupported serialized version: {state.version}")
+            msg = f"Unsupported serialized version: {state.version}"
+            raise ValueError(msg)
 
         if self.workflow_id != state.workflow_id:
-            raise ValueError("Serialized workflow_id does not match aggregate identity")
+            msg = "Serialized workflow_id does not match aggregate identity"
+            raise ValueError(msg)
 
         self.started = state.started
         self.completed = state.completed

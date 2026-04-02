@@ -13,17 +13,26 @@ from graphon.variables.segments import (
 
 from .entities import Condition, SubCondition, SupportedComparisonOperator
 
+_FILE_SUB_CONDITION_OPERATORS = frozenset(("contains", "not contains", "all of"))
+_EXISTENCE_OPERATORS = frozenset(("exists", "not exists"))
+
 
 def _convert_to_bool(value: object) -> bool:
-    if isinstance(value, int):
-        return bool(value)
-
-    if isinstance(value, str):
-        loaded = json.loads(value)
-        if isinstance(loaded, (int, bool)):
-            return bool(loaded)
-
-    raise TypeError(f"unexpected value: type={type(value)}, value={value}")
+    match value:
+        case int():
+            result = bool(value)
+        case str():
+            loaded = json.loads(value)
+            match loaded:
+                case int() | bool():
+                    result = bool(loaded)
+                case _:
+                    msg = f"unexpected value: type={type(value)}, value={value}"
+                    raise TypeError(msg)
+        case _:
+            msg = f"unexpected value: type={type(value)}, value={value}"
+            raise TypeError(msg)
+    return result
 
 
 class ConditionCheckResult(NamedTuple):
@@ -46,50 +55,35 @@ class ConditionProcessor:
         for condition in conditions:
             variable = variable_pool.get(condition.variable_selector)
             if variable is None:
-                raise ValueError(f"Variable {condition.variable_selector} not found")
+                msg = f"Variable {condition.variable_selector} not found"
+                raise ValueError(msg)
 
-            if isinstance(
-                variable, ArrayFileSegment
-            ) and condition.comparison_operator in {
-                "contains",
-                "not contains",
-                "all of",
-            }:
+            if _should_process_file_sub_conditions(
+                variable=variable,
+                comparison_operator=condition.comparison_operator,
+            ):
                 # check sub conditions
                 if not condition.sub_variable_condition:
-                    raise ValueError("Sub variable is required")
+                    msg = "Sub variable is required"
+                    raise ValueError(msg)
                 result = _process_sub_conditions(
                     variable=variable,
                     sub_conditions=condition.sub_variable_condition.conditions,
                     operator=condition.sub_variable_condition.logical_operator,
                 )
-            elif condition.comparison_operator in {
-                "exists",
-                "not exists",
-            }:
+            elif condition.comparison_operator in _EXISTENCE_OPERATORS:
                 result = _evaluate_condition(
                     value=variable.value,
                     operator=condition.comparison_operator,
                     expected=None,
                 )
             else:
-                actual_value = variable.value if variable else None
-                expected_value: str | Sequence[str] | bool | list[bool] | None = (
-                    condition.value
+                actual_value = variable.value
+                expected_value = _prepare_expected_value(
+                    variable=variable,
+                    variable_pool=variable_pool,
+                    expected_value=condition.value,
                 )
-                if isinstance(expected_value, str):
-                    expected_value = variable_pool.convert_template(expected_value).text
-                # Here we need to explicit convet the input string to boolean.
-                if (
-                    isinstance(variable, (BooleanSegment, ArrayBooleanSegment))
-                    and expected_value is not None
-                ):
-                    # The following two lines are for compatibility
-                    # with existing workflows.
-                    if isinstance(expected_value, list):
-                        expected_value = [_convert_to_bool(i) for i in expected_value]
-                    else:
-                        expected_value = _convert_to_bool(expected_value)
                 input_conditions.append({
                     "actual_value": actual_value,
                     "expected_value": expected_value,
@@ -105,7 +99,9 @@ class ConditionProcessor:
             if (operator == "and" and not result) or (operator == "or" and result):
                 final_result = result
                 return ConditionCheckResult(
-                    input_conditions, group_results, final_result
+                    input_conditions,
+                    group_results,
+                    final_result,
                 )
 
         final_result = all(group_results) if operator == "and" else any(group_results)
@@ -120,144 +116,205 @@ def _evaluate_condition(
 ) -> bool:
     match operator:
         case "contains":
-            return _assert_contains(value=value, expected=expected)
+            result = _assert_contains(value=value, expected=expected)
         case "not contains":
-            return _assert_not_contains(value=value, expected=expected)
+            result = _assert_not_contains(value=value, expected=expected)
         case "start with":
-            return _assert_start_with(value=value, expected=expected)
+            result = _assert_start_with(value=value, expected=expected)
         case "end with":
-            return _assert_end_with(value=value, expected=expected)
+            result = _assert_end_with(value=value, expected=expected)
         case "is":
-            return _assert_is(value=value, expected=expected)
+            result = _assert_is(value=value, expected=expected)
         case "is not":
-            return _assert_is_not(value=value, expected=expected)
+            result = _assert_is_not(value=value, expected=expected)
         case "empty":
-            return _assert_empty(value=value)
+            result = _assert_empty(value=value)
         case "not empty":
-            return _assert_not_empty(value=value)
+            result = _assert_not_empty(value=value)
         case "=":
-            return _assert_equal(value=value, expected=expected)
+            result = _assert_equal(value=value, expected=expected)
         case "≠":
-            return _assert_not_equal(value=value, expected=expected)
+            result = _assert_not_equal(value=value, expected=expected)
         case ">":
-            return _assert_greater_than(value=value, expected=expected)
+            result = _assert_greater_than(value=value, expected=expected)
         case "<":
-            return _assert_less_than(value=value, expected=expected)
+            result = _assert_less_than(value=value, expected=expected)
         case "≥":
-            return _assert_greater_than_or_equal(value=value, expected=expected)
+            result = _assert_greater_than_or_equal(value=value, expected=expected)
         case "≤":
-            return _assert_less_than_or_equal(value=value, expected=expected)
+            result = _assert_less_than_or_equal(value=value, expected=expected)
         case "null":
-            return _assert_null(value=value)
+            result = _assert_null(value=value)
         case "not null":
-            return _assert_not_null(value=value)
+            result = _assert_not_null(value=value)
         case "in":
-            return _assert_in(value=value, expected=expected)
+            result = _assert_in(value=value, expected=expected)
         case "not in":
-            return _assert_not_in(value=value, expected=expected)
-        case "all of" if isinstance(expected, list):
-            # Type narrowing: expected is a list, either list[str] or list[bool].
-            if all(isinstance(item, str) for item in expected):
-                # Create a new typed list to satisfy type checker
-                str_list: list[str] = [
-                    item for item in expected if isinstance(item, str)
-                ]
-                return _assert_all_of(value=value, expected=str_list)
-            if all(isinstance(item, bool) for item in expected):
-                # Create a new typed list to satisfy type checker
-                bool_list: list[bool] = [
-                    item for item in expected if isinstance(item, bool)
-                ]
-                return _assert_all_of_bool(value=value, expected=bool_list)
-            raise ValueError(
-                "all of operator expects homogeneous list of strings or booleans"
-            )
+            result = _assert_not_in(value=value, expected=expected)
+        case "all of":
+            result = _evaluate_all_of_condition(value=value, expected=expected)
         case "exists":
-            return _assert_exists(value=value)
+            result = _assert_exists(value=value)
         case "not exists":
-            return _assert_not_exists(value=value)
+            result = _assert_not_exists(value=value)
         case _:
-            raise ValueError(f"Unsupported operator: {operator}")
+            msg = f"Unsupported operator: {operator}"
+            raise ValueError(msg)
+    return result
+
+
+def _should_process_file_sub_conditions(
+    *,
+    variable: object,
+    comparison_operator: SupportedComparisonOperator,
+) -> bool:
+    match variable:
+        case ArrayFileSegment():
+            result = comparison_operator in _FILE_SUB_CONDITION_OPERATORS
+        case _:
+            result = False
+    return result
+
+
+def _prepare_expected_value(
+    *,
+    variable: object,
+    variable_pool: VariablePool,
+    expected_value: str | Sequence[str] | bool | Sequence[bool] | None,
+) -> str | Sequence[str] | bool | list[bool] | None:
+    match expected_value:
+        case str():
+            normalized_expected_value = variable_pool.convert_template(
+                expected_value,
+            ).text
+        case _:
+            normalized_expected_value = expected_value
+
+    if normalized_expected_value is None:
+        return None
+
+    match variable, normalized_expected_value:
+        case ((BooleanSegment() | ArrayBooleanSegment()), list()):
+            result = [_convert_to_bool(item) for item in normalized_expected_value]
+        case ((BooleanSegment() | ArrayBooleanSegment()), _):
+            result = _convert_to_bool(normalized_expected_value)
+        case _:
+            result = normalized_expected_value
+    return result
+
+
+def _evaluate_all_of_condition(*, value: object, expected: object) -> bool:
+    match expected:
+        case list() if all(isinstance(item, str) for item in expected):
+            str_list: list[str] = [item for item in expected if isinstance(item, str)]
+            result = _assert_all_of(value=value, expected=str_list)
+        case list() if all(isinstance(item, bool) for item in expected):
+            bool_list: list[bool] = [
+                item for item in expected if isinstance(item, bool)
+            ]
+            result = _assert_all_of_bool(value=value, expected=bool_list)
+        case _:
+            msg = "all of operator expects homogeneous list of strings or booleans"
+            raise ValueError(msg)
+    return result
 
 
 def _assert_contains(*, value: object, expected: object) -> bool:
     if not value:
         return False
 
-    if not isinstance(value, (str, list)):
-        raise ValueError("Invalid actual value type: string or array")
-
-    # Type checking ensures value is str or list at this point
-    if isinstance(value, str):
-        if not isinstance(expected, str):
-            expected = str(expected)
-        if expected not in value:
-            return False
-    elif expected not in value:
-        return False
-    return True
+    match value:
+        case str():
+            match expected:
+                case str():
+                    normalized_expected = expected
+                case _:
+                    normalized_expected = str(expected)
+            result = normalized_expected in value
+        case list():
+            result = expected in value
+        case _:
+            msg = "Invalid actual value type: string or array"
+            raise ValueError(msg)
+    return result
 
 
 def _assert_not_contains(*, value: object, expected: object) -> bool:
     if not value:
         return True
 
-    if not isinstance(value, (str, list)):
-        raise ValueError("Invalid actual value type: string or array")
-
-    # Type checking ensures value is str or list at this point
-    if isinstance(value, str):
-        if not isinstance(expected, str):
-            expected = str(expected)
-        if expected in value:
-            return False
-    elif expected in value:
-        return False
-    return True
+    match value:
+        case str():
+            match expected:
+                case str():
+                    normalized_expected = expected
+                case _:
+                    normalized_expected = str(expected)
+            result = normalized_expected not in value
+        case list():
+            result = expected not in value
+        case _:
+            msg = "Invalid actual value type: string or array"
+            raise ValueError(msg)
+    return result
 
 
 def _assert_start_with(*, value: object, expected: object) -> bool:
     if not value:
         return False
 
-    if not isinstance(value, str):
-        raise ValueError("Invalid actual value type: string")
-
-    if not isinstance(expected, str):
-        raise ValueError("Expected value must be a string for startswith")
-    return value.startswith(expected)
+    match value, expected:
+        case str(), str():
+            result = value.startswith(expected)
+        case str(), _:
+            msg = "Expected value must be a string for startswith"
+            raise ValueError(msg)
+        case _:
+            msg = "Invalid actual value type: string"
+            raise ValueError(msg)
+    return result
 
 
 def _assert_end_with(*, value: object, expected: object) -> bool:
     if not value:
         return False
 
-    if not isinstance(value, str):
-        raise ValueError("Invalid actual value type: string")
-
-    if not isinstance(expected, str):
-        raise ValueError("Expected value must be a string for endswith")
-    return value.endswith(expected)
+    match value, expected:
+        case str(), str():
+            result = value.endswith(expected)
+        case str(), _:
+            msg = "Expected value must be a string for endswith"
+            raise ValueError(msg)
+        case _:
+            msg = "Invalid actual value type: string"
+            raise ValueError(msg)
+    return result
 
 
 def _assert_is(*, value: object, expected: object) -> bool:
     if value is None:
         return False
 
-    if not isinstance(value, (str, bool)):
-        raise ValueError("Invalid actual value type: string or boolean")
-
-    return value == expected
+    match value:
+        case str() | bool():
+            result = value == expected
+        case _:
+            msg = "Invalid actual value type: string or boolean"
+            raise ValueError(msg)
+    return result
 
 
 def _assert_is_not(*, value: object, expected: object) -> bool:
     if value is None:
         return False
 
-    if not isinstance(value, (str, bool)):
-        raise ValueError("Invalid actual value type: string or boolean")
-
-    return value != expected
+    match value:
+        case str() | bool():
+            result = value != expected
+        case _:
+            msg = "Invalid actual value type: string or boolean"
+            raise ValueError(msg)
+    return result
 
 
 def _assert_empty(*, value: object) -> bool:
@@ -269,10 +326,10 @@ def _assert_not_empty(*, value: object) -> bool:
 
 
 def _normalize_numeric_values(
-    value: float, expected: object
+    value: float,
+    expected: object,
 ) -> tuple[int | float, int | float]:
-    """
-    Normalize value and expected to compatible numeric types for comparison.
+    """Normalize value and expected to compatible numeric types for comparison.
 
     Args:
         value: The actual numeric value (int or float)
@@ -283,120 +340,154 @@ def _normalize_numeric_values(
 
     Raises:
         ValueError: If expected cannot be converted to a number
+
     """
-    if not isinstance(expected, (int, float, str)):
-        raise ValueError(f"Cannot convert {type(expected)} to number")
+    match expected:
+        case str():
+            try:
+                expected_float = float(expected)
+            except ValueError as e:
+                msg = f"Cannot convert '{expected}' to number"
+                raise ValueError(msg) from e
 
-    # Convert expected to appropriate numeric type
-    if isinstance(expected, str):
-        # Try to convert to float first to handle decimal strings
-        try:
-            expected_float = float(expected)
-        except ValueError as e:
-            raise ValueError(f"Cannot convert '{expected}' to number") from e
+            match value:
+                case int() if expected_float.is_integer():
+                    normalized_values = (value, int(expected_float))
+                case int():
+                    normalized_values = (float(value), expected_float)
+                case _:
+                    normalized_values = (value, expected_float)
+        case float():
+            match value:
+                case int():
+                    normalized_values = (float(value), expected)
+                case _:
+                    normalized_values = (value, expected)
+        case int():
+            normalized_values = (value, expected)
+        case _:
+            msg = f"Cannot convert {type(expected)} to number"
+            raise ValueError(msg)
+    return normalized_values
 
-        # If value is int and expected is a whole number, keep as int comparison
-        if isinstance(value, int) and expected_float.is_integer():
-            return value, int(expected_float)
-        # Otherwise convert value to float for comparison
-        return float(value) if isinstance(value, int) else value, expected_float
-    if isinstance(expected, float):
-        # If expected is already float, convert int value to float
-        return float(value) if isinstance(value, int) else value, expected
-    # expected is int
-    return value, expected
+
+def _normalize_numeric_equality_expected(*, value: object, expected: object) -> object:
+    match value:
+        case bool():
+            match expected:
+                case bool() | int() | str():
+                    normalized_expected = bool(expected)
+                case _:
+                    msg = f"Cannot convert {type(expected)} to bool"
+                    raise ValueError(msg)
+        case int():
+            match expected:
+                case int() | float() | str():
+                    normalized_expected = int(expected)
+                case _:
+                    msg = f"Cannot convert {type(expected)} to int"
+                    raise ValueError(msg)
+        case float():
+            match expected:
+                case int() | float() | str():
+                    normalized_expected = float(expected)
+                case _:
+                    msg = f"Cannot convert {type(expected)} to float"
+                    raise ValueError(msg)
+        case _:
+            msg = "Invalid actual value type: number or boolean"
+            raise ValueError(msg)
+    return normalized_expected
 
 
 def _assert_equal(*, value: object, expected: object) -> bool:
     if value is None:
         return False
 
-    if not isinstance(value, (int, float, bool)):
-        raise ValueError("Invalid actual value type: number or boolean")
-
-    # Handle boolean comparison
-    if isinstance(value, bool):
-        if not isinstance(expected, (bool, int, str)):
-            raise ValueError(f"Cannot convert {type(expected)} to bool")
-        expected = bool(expected)
-    elif isinstance(value, int):
-        if not isinstance(expected, (int, float, str)):
-            raise ValueError(f"Cannot convert {type(expected)} to int")
-        expected = int(expected)
-    else:
-        if not isinstance(expected, (int, float, str)):
-            raise ValueError(f"Cannot convert {type(expected)} to float")
-        expected = float(expected)
-
-    return value == expected
+    normalized_expected = _normalize_numeric_equality_expected(
+        value=value,
+        expected=expected,
+    )
+    return value == normalized_expected
 
 
 def _assert_not_equal(*, value: object, expected: object) -> bool:
     if value is None:
         return False
 
-    if not isinstance(value, (int, float, bool)):
-        raise ValueError("Invalid actual value type: number or boolean")
-
-    # Handle boolean comparison
-    if isinstance(value, bool):
-        if not isinstance(expected, (bool, int, str)):
-            raise ValueError(f"Cannot convert {type(expected)} to bool")
-        expected = bool(expected)
-    elif isinstance(value, int):
-        if not isinstance(expected, (int, float, str)):
-            raise ValueError(f"Cannot convert {type(expected)} to int")
-        expected = int(expected)
-    else:
-        if not isinstance(expected, (int, float, str)):
-            raise ValueError(f"Cannot convert {type(expected)} to float")
-        expected = float(expected)
-
-    return value != expected
+    normalized_expected = _normalize_numeric_equality_expected(
+        value=value,
+        expected=expected,
+    )
+    return value != normalized_expected
 
 
 def _assert_greater_than(*, value: object, expected: object) -> bool:
     if value is None:
         return False
 
-    if not isinstance(value, (int, float)):
-        raise ValueError("Invalid actual value type: number")
-
-    value, expected = _normalize_numeric_values(value, expected)
-    return value > expected
+    match value:
+        case int() | float():
+            normalized_value, normalized_expected = _normalize_numeric_values(
+                value,
+                expected,
+            )
+            result = normalized_value > normalized_expected
+        case _:
+            msg = "Invalid actual value type: number"
+            raise ValueError(msg)
+    return result
 
 
 def _assert_less_than(*, value: object, expected: object) -> bool:
     if value is None:
         return False
 
-    if not isinstance(value, (int, float)):
-        raise ValueError("Invalid actual value type: number")
-
-    value, expected = _normalize_numeric_values(value, expected)
-    return value < expected
+    match value:
+        case int() | float():
+            normalized_value, normalized_expected = _normalize_numeric_values(
+                value,
+                expected,
+            )
+            result = normalized_value < normalized_expected
+        case _:
+            msg = "Invalid actual value type: number"
+            raise ValueError(msg)
+    return result
 
 
 def _assert_greater_than_or_equal(*, value: object, expected: object) -> bool:
     if value is None:
         return False
 
-    if not isinstance(value, (int, float)):
-        raise ValueError("Invalid actual value type: number")
-
-    value, expected = _normalize_numeric_values(value, expected)
-    return value >= expected
+    match value:
+        case int() | float():
+            normalized_value, normalized_expected = _normalize_numeric_values(
+                value,
+                expected,
+            )
+            result = normalized_value >= normalized_expected
+        case _:
+            msg = "Invalid actual value type: number"
+            raise ValueError(msg)
+    return result
 
 
 def _assert_less_than_or_equal(*, value: object, expected: object) -> bool:
     if value is None:
         return False
 
-    if not isinstance(value, (int, float)):
-        raise ValueError("Invalid actual value type: number")
-
-    value, expected = _normalize_numeric_values(value, expected)
-    return value <= expected
+    match value:
+        case int() | float():
+            normalized_value, normalized_expected = _normalize_numeric_values(
+                value,
+                expected,
+            )
+            result = normalized_value <= normalized_expected
+        case _:
+            msg = "Invalid actual value type: number"
+            raise ValueError(msg)
+    return result
 
 
 def _assert_null(*, value: object) -> bool:
@@ -411,40 +502,50 @@ def _assert_in(*, value: object, expected: object) -> bool:
     if not value:
         return False
 
-    if not isinstance(expected, list):
-        raise ValueError("Invalid expected value type: array")
-    return value in expected
+    match expected:
+        case list():
+            result = value in expected
+        case _:
+            msg = "Invalid expected value type: array"
+            raise ValueError(msg)
+    return result
 
 
 def _assert_not_in(*, value: object, expected: object) -> bool:
     if not value:
         return True
 
-    if not isinstance(expected, list):
-        raise ValueError("Invalid expected value type: array")
-    return value not in expected
+    match expected:
+        case list():
+            result = value not in expected
+        case _:
+            msg = "Invalid expected value type: array"
+            raise ValueError(msg)
+    return result
 
 
 def _assert_all_of(*, value: object, expected: Sequence[str]) -> bool:
     if not value:
         return False
 
-    # Ensure value is a container that supports 'in' operator
-    if not isinstance(value, (list, tuple, set, str)):
-        return False
-
-    return all(item in value for item in expected)
+    match value:
+        case list() | tuple() | set() | str():
+            result = all(item in value for item in expected)
+        case _:
+            result = False
+    return result
 
 
 def _assert_all_of_bool(*, value: object, expected: Sequence[bool]) -> bool:
     if not value:
         return False
 
-    # Ensure value is a container that supports 'in' operator
-    if not isinstance(value, (list, tuple, set)):
-        return False
-
-    return all(item in value for item in expected)
+    match value:
+        case list() | tuple() | set():
+            result = all(item in value for item in expected)
+        case _:
+            result = False
+    return result
 
 
 def _assert_exists(*, value: object) -> bool:
@@ -468,18 +569,21 @@ def _process_sub_conditions(
         expected_value = condition.value
         if key == FileAttribute.EXTENSION:
             if not isinstance(expected_value, str):
-                raise TypeError(
+                msg = (
                     "Expected value must be a string when key is "
                     "FileAttribute.EXTENSION"
                 )
+                raise TypeError(msg)
             if expected_value and not expected_value.startswith("."):
                 expected_value = "." + expected_value
 
             normalized_values: list[object] = []
             for value in values:
                 if value and isinstance(value, str) and not value.startswith("."):
-                    value = "." + value
-                normalized_values.append(value)
+                    normalized_value = "." + value
+                else:
+                    normalized_value = value
+                normalized_values.append(normalized_value)
             values = normalized_values
         sub_group_results: list[bool] = [
             _evaluate_condition(

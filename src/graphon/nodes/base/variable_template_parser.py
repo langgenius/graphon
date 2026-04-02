@@ -5,11 +5,11 @@ from typing import Any
 from .entities import VariableSelector
 
 REGEX = re.compile(
-    r"\{\{(#[a-zA-Z0-9_]{1,50}(\.[a-zA-Z_][a-zA-Z0-9_]{0,29}){1,10}#)\}\}"
+    r"\{\{(#[a-zA-Z0-9_]{1,50}(\.[a-zA-Z_][a-zA-Z0-9_]{0,29}){1,10}#)\}\}",
 )
 
 SELECTOR_PATTERN = re.compile(
-    r"\{\{(#[a-zA-Z0-9_]{1,50}(?:\.[a-zA-Z_][a-zA-Z0-9_]{0,29}){1,10}#)\}\}"
+    r"\{\{(#[a-zA-Z0-9_]{1,50}(?:\.[a-zA-Z_][a-zA-Z0-9_]{0,29}){1,10}#)\}\}",
 )
 
 
@@ -23,8 +23,7 @@ def extract_selectors_from_template(template: str, /) -> Sequence[VariableSelect
 
 
 class VariableTemplateParser:
-    """
-    !NOTE: Consider to use the new `segments` module instead of this class.
+    """!NOTE: Consider to use the new `segments` module instead of this class.
 
     A class for parsing and manipulating template variables in a string.
 
@@ -61,16 +60,16 @@ class VariableTemplateParser:
     # Output: "Hello, John! Your age is 25."
     """
 
-    def __init__(self, template: str):
+    def __init__(self, template: str) -> None:
         self.template = template
         self.variable_keys = self.extract()
 
     def extract(self):
-        """
-        Extracts all the template variable keys from the template string.
+        """Extracts all the template variable keys from the template string.
 
         Returns:
             A list of template variable keys.
+
         """
         # Regular expression to match the template rules
         matches = re.findall(REGEX, self.template)
@@ -80,11 +79,11 @@ class VariableTemplateParser:
         return list(set(first_group_matches))
 
     def extract_variable_selectors(self) -> list[VariableSelector]:
-        """
-        Extracts the variable selectors from the template variable keys.
+        """Extracts the variable selectors from the template variable keys.
 
         Returns:
             A list of VariableSelector objects representing the variable selectors.
+
         """
         variable_selectors = []
         for variable_key in self.variable_keys:
@@ -94,14 +93,13 @@ class VariableTemplateParser:
                 continue
 
             variable_selectors.append(
-                VariableSelector(variable=variable_key, value_selector=split_result)
+                VariableSelector(variable=variable_key, value_selector=split_result),
             )
 
         return variable_selectors
 
     def format(self, inputs: Mapping[str, Any]) -> str:
-        """
-        Formats the template string by replacing the template variables
+        """Formats the template string by replacing the template variables
         with their corresponding values.
 
         Args:
@@ -109,12 +107,14 @@ class VariableTemplateParser:
 
         Returns:
             The formatted string with template variables replaced by their values.
+
         """
 
-        def replacer(match):
+        def replacer(match: re.Match[str]) -> str:
             key = match.group(1)
             value = inputs.get(
-                key, match.group(0)
+                key,
+                match.group(0),
             )  # return original matched string if key not found
 
             if value is None:
@@ -130,14 +130,14 @@ class VariableTemplateParser:
         return re.sub(r"<\|.*?\|>", "", prompt)
 
     @classmethod
-    def remove_template_variables(cls, text: str):
-        """
-        Removes the template variables from the given text.
+    def remove_template_variables(cls, text: str) -> str:
+        """Removes the template variables from the given text.
 
         Args:
             text: The text from which to remove the template variables.
 
         Returns:
             The text with template variables removed.
+
         """
         return re.sub(REGEX, r"{\1}", text)

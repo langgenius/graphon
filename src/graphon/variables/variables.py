@@ -34,8 +34,7 @@ def _obfuscated_token(token: str) -> str:
 
 
 class VariableBase(Segment):
-    """
-    A variable is a segment that has a name.
+    """A variable is a segment that has a name.
 
     It is mainly used to store segments and their selector in VariablePool.
 
@@ -118,12 +117,12 @@ class ArrayBooleanVariable(ArrayBooleanSegment, ArrayVariable):
 
 class RAGPipelineVariable(BaseModel):
     belong_to_node_id: str = Field(
-        description="belong to which node id, shared means public"
+        description="belong to which node id, shared means public",
     )
     type: str = Field(
         description=(
             "variable type, text-input, paragraph, select, number, file, file-list"
-        )
+        ),
     )
     label: str = Field(description="label")
     description: str | None = Field(description="description", default="")
@@ -137,13 +136,16 @@ class RAGPipelineVariable(BaseModel):
     unit: str | None = Field(description="unit, applicable to Number", default="")
     tooltips: str | None = Field(description="helpful text", default="")
     allowed_file_types: list[str] | None = Field(
-        description="image, document, audio, video, custom.", default_factory=list
+        description="image, document, audio, video, custom.",
+        default_factory=list,
     )
     allowed_file_extensions: list[str] | None = Field(
-        description="e.g. ['.jpg', '.mp3']", default_factory=list
+        description="e.g. ['.jpg', '.mp3']",
+        default_factory=list,
     )
     allowed_file_upload_methods: list[str] | None = Field(
-        description="remote_url, local_file, tool_file.", default_factory=list
+        description="remote_url, local_file, tool_file.",
+        default_factory=list,
     )
     required: bool = Field(description="optional, default false", default=False)
     options: list[str] | None = Field(default_factory=list)

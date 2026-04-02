@@ -4,25 +4,24 @@ from collections.abc import Sequence
 
 from graphon.model_runtime.entities.model_entities import AIModelEntity, ModelType
 from graphon.model_runtime.entities.provider_entities import (
-    ProviderConfig,
     ProviderEntity,
     SimpleProviderEntity,
 )
-from graphon.model_runtime.model_providers.__base.ai_model import AIModel
-from graphon.model_runtime.model_providers.__base.large_language_model import (
+from graphon.model_runtime.model_providers.base.ai_model import AIModel
+from graphon.model_runtime.model_providers.base.large_language_model import (
     LargeLanguageModel,
 )
-from graphon.model_runtime.model_providers.__base.moderation_model import (
+from graphon.model_runtime.model_providers.base.moderation_model import (
     ModerationModel,
 )
-from graphon.model_runtime.model_providers.__base.rerank_model import RerankModel
-from graphon.model_runtime.model_providers.__base.speech2text_model import (
+from graphon.model_runtime.model_providers.base.rerank_model import RerankModel
+from graphon.model_runtime.model_providers.base.speech2text_model import (
     Speech2TextModel,
 )
-from graphon.model_runtime.model_providers.__base.text_embedding_model import (
+from graphon.model_runtime.model_providers.base.text_embedding_model import (
     TextEmbeddingModel,
 )
-from graphon.model_runtime.model_providers.__base.tts_model import TTSModel
+from graphon.model_runtime.model_providers.base.tts_model import TTSModel
 from graphon.model_runtime.runtime import ModelRuntime
 from graphon.model_runtime.schema_validators.model_credential_schema_validator import (
     ModelCredentialSchemaValidator,
@@ -32,55 +31,56 @@ from ..schema_validators.provider_credential_schema_validator import (
     ProviderCredentialSchemaValidator,
 )
 
+_MODEL_CLASS_BY_TYPE: dict[ModelType, type[AIModel]] = {
+    ModelType.LLM: LargeLanguageModel,
+    ModelType.TEXT_EMBEDDING: TextEmbeddingModel,
+    ModelType.RERANK: RerankModel,
+    ModelType.SPEECH2TEXT: Speech2TextModel,
+    ModelType.MODERATION: ModerationModel,
+    ModelType.TTS: TTSModel,
+}
+
 
 class ModelProviderFactory:
     """Factory for provider schemas and model-type instances
-    backed by a runtime adapter."""
+    backed by a runtime adapter.
+    """
 
-    def __init__(self, model_runtime: ModelRuntime):
+    def __init__(self, model_runtime: ModelRuntime) -> None:
         if model_runtime is None:
-            raise ValueError("model_runtime is required.")
+            msg = "model_runtime is required."
+            raise ValueError(msg)
         self.model_runtime = model_runtime
 
     def get_providers(self) -> Sequence[ProviderEntity]:
-        """
-        Get all providers.
-        """
+        """Get all providers."""
         return list(self.get_model_providers())
 
     def get_model_providers(self) -> Sequence[ProviderEntity]:
-        """
-        Get all model providers exposed by the runtime adapter.
-        """
+        """Get all model providers exposed by the runtime adapter."""
         return self.model_runtime.fetch_model_providers()
 
     def get_provider_schema(self, provider: str) -> ProviderEntity:
-        """
-        Get provider schema.
-        """
+        """Get provider schema."""
         return self.get_model_provider(provider=provider)
 
     def get_model_provider(self, provider: str) -> ProviderEntity:
-        """
-        Get provider schema.
-        """
+        """Get provider schema."""
         provider_entity = self._resolve_provider(provider)
         if provider_entity is None:
-            raise ValueError(f"Invalid provider: {provider}")
+            msg = f"Invalid provider: {provider}"
+            raise ValueError(msg)
 
         return provider_entity
 
     def provider_credentials_validate(self, *, provider: str, credentials: dict):
-        """
-        Validate provider credentials.
-        """
+        """Validate provider credentials."""
         provider_entity = self.get_model_provider(provider=provider)
 
         provider_credential_schema = provider_entity.provider_credential_schema
         if not provider_credential_schema:
-            raise ValueError(
-                f"Provider {provider} does not have provider_credential_schema"
-            )
+            msg = f"Provider {provider} does not have provider_credential_schema"
+            raise ValueError(msg)
 
         validator = ProviderCredentialSchemaValidator(provider_credential_schema)
         filtered_credentials = validator.validate_and_filter(credentials)
@@ -93,18 +93,20 @@ class ModelProviderFactory:
         return filtered_credentials
 
     def model_credentials_validate(
-        self, *, provider: str, model_type: ModelType, model: str, credentials: dict
+        self,
+        *,
+        provider: str,
+        model_type: ModelType,
+        model: str,
+        credentials: dict,
     ):
-        """
-        Validate model credentials.
-        """
+        """Validate model credentials."""
         provider_entity = self.get_model_provider(provider=provider)
 
         model_credential_schema = provider_entity.model_credential_schema
         if not model_credential_schema:
-            raise ValueError(
-                f"Provider {provider} does not have model_credential_schema"
-            )
+            msg = f"Provider {provider} does not have model_credential_schema"
+            raise ValueError(msg)
 
         validator = ModelCredentialSchemaValidator(model_type, model_credential_schema)
         filtered_credentials = validator.validate_and_filter(credentials)
@@ -126,9 +128,7 @@ class ModelProviderFactory:
         model: str,
         credentials: dict | None,
     ) -> AIModelEntity | None:
-        """
-        Get model schema.
-        """
+        """Get model schema."""
         provider_entity = self.get_model_provider(provider)
         return self.model_runtime.get_model_schema(
             provider=provider_entity.provider,
@@ -142,11 +142,8 @@ class ModelProviderFactory:
         *,
         provider: str | None = None,
         model_type: ModelType | None = None,
-        provider_configs: list[ProviderConfig] | None = None,
     ) -> list[SimpleProviderEntity]:
-        """
-        Get all models for given model type.
-        """
+        """Get all models for given model type."""
         providers = []
         for provider_entity in self.get_model_providers():
             if provider and not self._matches_provider(provider_entity, provider):
@@ -167,47 +164,29 @@ class ModelProviderFactory:
         return providers
 
     def get_model_type_instance(self, provider: str, model_type: ModelType) -> AIModel:
-        """
-        Get model type instance by provider name and model type.
-        """
+        """Get model type instance by provider name and model type."""
         provider_schema = self.get_model_provider(provider)
-
-        if model_type == ModelType.LLM:
-            return LargeLanguageModel(
-                provider_schema=provider_schema, model_runtime=self.model_runtime
-            )
-        if model_type == ModelType.TEXT_EMBEDDING:
-            return TextEmbeddingModel(
-                provider_schema=provider_schema, model_runtime=self.model_runtime
-            )
-        if model_type == ModelType.RERANK:
-            return RerankModel(
-                provider_schema=provider_schema, model_runtime=self.model_runtime
-            )
-        if model_type == ModelType.SPEECH2TEXT:
-            return Speech2TextModel(
-                provider_schema=provider_schema, model_runtime=self.model_runtime
-            )
-        if model_type == ModelType.MODERATION:
-            return ModerationModel(
-                provider_schema=provider_schema, model_runtime=self.model_runtime
-            )
-        if model_type == ModelType.TTS:
-            return TTSModel(
-                provider_schema=provider_schema, model_runtime=self.model_runtime
-            )
-
-        raise ValueError(f"Unsupported model type: {model_type}")
+        model_class = _MODEL_CLASS_BY_TYPE.get(model_type)
+        if model_class is None:
+            msg = f"Unsupported model type: {model_type}"
+            raise ValueError(msg)
+        return model_class(
+            provider_schema=provider_schema,
+            model_runtime=self.model_runtime,
+        )
 
     def get_provider_icon(
-        self, provider: str, icon_type: str, lang: str
+        self,
+        provider: str,
+        icon_type: str,
+        lang: str,
     ) -> tuple[bytes, str]:
-        """
-        Get provider icon.
-        """
+        """Get provider icon."""
         provider_entity = self.get_model_provider(provider)
         return self.model_runtime.get_provider_icon(
-            provider=provider_entity.provider, icon_type=icon_type, lang=lang
+            provider=provider_entity.provider,
+            icon_type=icon_type,
+            lang=lang,
         )
 
     def _resolve_provider(self, provider: str) -> ProviderEntity | None:
@@ -222,4 +201,4 @@ class ModelProviderFactory:
 
     @staticmethod
     def _matches_provider(provider_entity: ProviderEntity, provider: str) -> bool:
-        return provider in (provider_entity.provider, provider_entity.provider_name)
+        return provider in {provider_entity.provider, provider_entity.provider_name}

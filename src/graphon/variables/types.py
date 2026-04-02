@@ -10,12 +10,47 @@ if TYPE_CHECKING:
     from graphon.variables.segments import Segment
 
 
+def _infer_scalar_segment_type(value: Any) -> SegmentType | None:
+    match value:
+        case None:
+            inferred_type = SegmentType.NONE
+        case bool():
+            inferred_type = SegmentType.BOOLEAN
+        case int():
+            inferred_type = SegmentType.INTEGER
+        case float():
+            inferred_type = SegmentType.FLOAT
+        case str():
+            inferred_type = SegmentType.STRING
+        case dict():
+            inferred_type = SegmentType.OBJECT
+        case File():
+            inferred_type = SegmentType.FILE
+        case _:
+            inferred_type = None
+    return inferred_type
+
+
+def _is_group_value_valid(value: Any) -> bool:
+    from .segment_group import SegmentGroup  # noqa: PLC0415
+    from .segments import Segment  # noqa: PLC0415
+
+    match value:
+        case SegmentGroup():
+            return all(isinstance(item, Segment) for item in value.value)
+        case list():
+            return all(isinstance(item, Segment) for item in value)
+        case _:
+            return False
+
+
 class ArrayValidation(StrEnum):
     """Strategy for validating array elements.
 
     Note:
         The `NONE` and `FIRST` strategies are primarily for compatibility purposes.
         Avoid using them in new code whenever possible.
+
     """
 
     # Skip element validation (only check array container)
@@ -55,63 +90,45 @@ class SegmentType(StrEnum):
 
     @classmethod
     def infer_segment_type(cls, value: Any) -> SegmentType | None:
-        """
-        Attempt to infer the `SegmentType` based on the Python type of the
+        """Attempt to infer the `SegmentType` based on the Python type of the
         `value` parameter.
 
         Returns `None` if no appropriate `SegmentType` can be determined for
         the given `value`. For example, this may occur if the input is a
         generic Python object of type `object`.
-        """
 
+        Returns:
+            The inferred `SegmentType`, or `None` when no runtime type matches.
+
+        Raises:
+            ValueError: If an unsupported homogeneous list element type reaches the
+                internal exhaustive match.
+
+        """
         if isinstance(value, list):
             elem_types: set[SegmentType] = set()
-            for i in value:
-                segment_type = cls.infer_segment_type(i)
+            for item in value:
+                segment_type = cls.infer_segment_type(item)
                 if segment_type is None:
                     return None
-
                 elem_types.add(segment_type)
 
             if len(elem_types) != 1:
-                if elem_types.issubset(_NUMERICAL_TYPES):
-                    return SegmentType.ARRAY_NUMBER
+                return (
+                    SegmentType.ARRAY_NUMBER
+                    if elem_types.issubset(_NUMERICAL_TYPES)
+                    else SegmentType.ARRAY_ANY
+                )
+            if all(item.is_array_type() for item in elem_types):
                 return SegmentType.ARRAY_ANY
-            if all(i.is_array_type() for i in elem_types):
-                return SegmentType.ARRAY_ANY
-            match elem_types.pop():
-                case SegmentType.STRING:
-                    return SegmentType.ARRAY_STRING
-                case SegmentType.NUMBER | SegmentType.INTEGER | SegmentType.FLOAT:
-                    return SegmentType.ARRAY_NUMBER
-                case SegmentType.OBJECT:
-                    return SegmentType.ARRAY_OBJECT
-                case SegmentType.FILE:
-                    return SegmentType.ARRAY_FILE
-                case SegmentType.NONE:
-                    return SegmentType.ARRAY_ANY
-                case SegmentType.BOOLEAN:
-                    return SegmentType.ARRAY_BOOLEAN
-                case _:
-                    # This should be unreachable.
-                    raise ValueError(f"not supported value {value}")
-        if value is None:
-            return SegmentType.NONE
-        # Important: The check for `bool` must precede the check for `int`,
-        # as `bool` is a subclass of `int` in Python's type hierarchy.
-        if isinstance(value, bool):
-            return SegmentType.BOOLEAN
-        if isinstance(value, int):
-            return SegmentType.INTEGER
-        if isinstance(value, float):
-            return SegmentType.FLOAT
-        if isinstance(value, str):
-            return SegmentType.STRING
-        if isinstance(value, dict):
-            return SegmentType.OBJECT
-        if isinstance(value, File):
-            return SegmentType.FILE
-        return None
+
+            inferred_type = _ARRAY_SEGMENT_TYPE_BY_ELEMENT_TYPE.get(elem_types.pop())
+            if inferred_type is None:
+                msg = f"not supported value {value}"
+                raise ValueError(msg)
+            return inferred_type
+
+        return _infer_scalar_segment_type(value)
 
     def _validate_array(self, value: Any, array_validation: ArrayValidation) -> bool:
         if not isinstance(value, list):
@@ -133,10 +150,11 @@ class SegmentType(StrEnum):
         )
 
     def is_valid(
-        self, value: Any, array_validation: ArrayValidation = ArrayValidation.ALL
+        self,
+        value: Any,
+        array_validation: ArrayValidation = ArrayValidation.ALL,
     ) -> bool:
-        """
-        Check if a value matches the segment type.
+        """Check if a value matches the segment type.
         Users of `SegmentType` should call this method, instead of using
         `isinstance` manually.
 
@@ -147,37 +165,33 @@ class SegmentType(StrEnum):
 
         Returns:
             True if the value matches the type under the given validation strategy
+
+        Raises:
+            AssertionError: If an unsupported `SegmentType` reaches this method.
+
         """
         if self.is_array_type():
-            return self._validate_array(value, array_validation)
-        # Important: The check for `bool` must precede the check for `int`,
-        # as `bool` is a subclass of `int` in Python's type hierarchy.
-        if self == SegmentType.BOOLEAN:
-            return isinstance(value, bool)
-        if self in [SegmentType.INTEGER, SegmentType.FLOAT, SegmentType.NUMBER]:
-            return isinstance(value, (int, float))
-        if self == SegmentType.STRING:
-            return isinstance(value, str)
-        if self == SegmentType.OBJECT:
-            return isinstance(value, dict)
-        if self == SegmentType.SECRET:
-            return isinstance(value, str)
-        if self == SegmentType.FILE:
-            return isinstance(value, File)
-        if self == SegmentType.NONE:
-            return value is None
-        if self == SegmentType.GROUP:
-            from .segment_group import SegmentGroup
-            from .segments import Segment
-
-            if isinstance(value, SegmentGroup):
-                return all(isinstance(item, Segment) for item in value.value)
-
-            if isinstance(value, list):
-                return all(isinstance(item, Segment) for item in value)
-
-            return False
-        raise AssertionError("this statement should be unreachable.")
+            result = self._validate_array(value, array_validation)
+        else:
+            match self:
+                case SegmentType.GROUP:
+                    result = _is_group_value_valid(value)
+                case SegmentType.BOOLEAN:
+                    result = isinstance(value, bool)
+                case SegmentType.NUMBER | SegmentType.INTEGER | SegmentType.FLOAT:
+                    result = isinstance(value, (int, float))
+                case SegmentType.STRING | SegmentType.SECRET:
+                    result = isinstance(value, str)
+                case SegmentType.OBJECT:
+                    result = isinstance(value, dict)
+                case SegmentType.FILE:
+                    result = isinstance(value, File)
+                case SegmentType.NONE:
+                    result = value is None
+                case _:
+                    msg = "this statement should be unreachable."
+                    raise AssertionError(msg)
+        return result
 
     @staticmethod
     def cast_value(value: Any, type_: SegmentType):
@@ -191,10 +205,7 @@ class SegmentType(StrEnum):
         # It should not be used to compromise the integrity of the runtime type system.
         # No additional casting rules should be introduced to this function.
 
-        if type_ in (
-            SegmentType.INTEGER,
-            SegmentType.NUMBER,
-        ) and isinstance(value, bool):
+        if type_ in _BOOL_CASTABLE_TYPES and isinstance(value, bool):
             return int(value)
         if type_ == SegmentType.ARRAY_NUMBER and all(
             isinstance(i, bool) for i in value
@@ -207,14 +218,21 @@ class SegmentType(StrEnum):
 
         The frontend treats `INTEGER` and `FLOAT` as `NUMBER`,
         so these are returned as `NUMBER` here.
+
+        Returns:
+            The frontend-facing type for this runtime segment type.
+
         """
-        if self in (SegmentType.INTEGER, SegmentType.FLOAT):
+        if self in _EXPOSED_NUMBER_TYPES:
             return SegmentType.NUMBER
         return self
 
     def element_type(self) -> SegmentType | None:
         """Return the element type of the current segment type, or `None` if the
         element type is undefined.
+
+        Returns:
+            The array element `SegmentType`, or `None` when the array is untyped.
 
         Raises:
             ValueError: If the current segment type is not an array type.
@@ -223,42 +241,57 @@ class SegmentType(StrEnum):
             For certain array types, such as `SegmentType.ARRAY_ANY`, their
             element types are not defined
             by the runtime system. In such cases, this method will return `None`.
+
         """
         if not self.is_array_type():
-            raise ValueError(
-                f"element_type is only supported by array type, got {self}"
-            )
+            msg = f"element_type is only supported by array type, got {self}"
+            raise ValueError(msg)
         return _ARRAY_ELEMENT_TYPES_MAPPING.get(self)
 
     @staticmethod
     def get_zero_value(t: SegmentType) -> Segment:
         # Lazy import to avoid circular dependency between segment types
         # and factory helpers.
-        from graphon.variables.factory import build_segment, build_segment_with_type
+        from .factory import build_segment, build_segment_with_type  # noqa: PLC0415
 
-        match t:
-            case (
-                SegmentType.ARRAY_OBJECT
-                | SegmentType.ARRAY_ANY
-                | SegmentType.ARRAY_STRING
-                | SegmentType.ARRAY_NUMBER
-                | SegmentType.ARRAY_BOOLEAN
-            ):
-                return build_segment_with_type(t, [])
-            case SegmentType.OBJECT:
-                return build_segment({})
-            case SegmentType.STRING:
-                return build_segment("")
-            case SegmentType.INTEGER:
-                return build_segment(0)
-            case SegmentType.FLOAT:
-                return build_segment(0.0)
-            case SegmentType.NUMBER:
-                return build_segment(0)
-            case SegmentType.BOOLEAN:
-                return build_segment(False)
-            case _:
-                raise ValueError(f"unsupported variable type: {t}")
+        if t in _EMPTY_ARRAY_ZERO_VALUE_TYPES:
+            return build_segment_with_type(t, [])
+
+        zero_value = _SCALAR_ZERO_VALUES_BY_SEGMENT_TYPE.get(t)
+        if zero_value is None:
+            msg = f"unsupported variable type: {t}"
+            raise ValueError(msg)
+        return build_segment(zero_value)
+
+
+_ARRAY_SEGMENT_TYPE_BY_ELEMENT_TYPE: Mapping[SegmentType, SegmentType] = {
+    SegmentType.STRING: SegmentType.ARRAY_STRING,
+    SegmentType.NUMBER: SegmentType.ARRAY_NUMBER,
+    SegmentType.INTEGER: SegmentType.ARRAY_NUMBER,
+    SegmentType.FLOAT: SegmentType.ARRAY_NUMBER,
+    SegmentType.OBJECT: SegmentType.ARRAY_OBJECT,
+    SegmentType.FILE: SegmentType.ARRAY_FILE,
+    SegmentType.NONE: SegmentType.ARRAY_ANY,
+    SegmentType.BOOLEAN: SegmentType.ARRAY_BOOLEAN,
+}
+_EMPTY_ARRAY_ZERO_VALUE_TYPES = frozenset((
+    SegmentType.ARRAY_OBJECT,
+    SegmentType.ARRAY_ANY,
+    SegmentType.ARRAY_STRING,
+    SegmentType.ARRAY_NUMBER,
+    SegmentType.ARRAY_BOOLEAN,
+))
+_SCALAR_ZERO_VALUES_BY_SEGMENT_TYPE: Mapping[
+    SegmentType,
+    dict[Any, Any] | str | int | float | bool,
+] = {
+    SegmentType.OBJECT: {},
+    SegmentType.STRING: "",
+    SegmentType.INTEGER: 0,
+    SegmentType.FLOAT: 0.0,
+    SegmentType.NUMBER: 0,
+    SegmentType.BOOLEAN: False,
+}
 
 
 _ARRAY_ELEMENT_TYPES_MAPPING: Mapping[SegmentType, SegmentType] = {
@@ -270,15 +303,23 @@ _ARRAY_ELEMENT_TYPES_MAPPING: Mapping[SegmentType, SegmentType] = {
     SegmentType.ARRAY_BOOLEAN: SegmentType.BOOLEAN,
 }
 
-_ARRAY_TYPES = frozenset(
-    list(_ARRAY_ELEMENT_TYPES_MAPPING.keys())
-    + [
-        SegmentType.ARRAY_ANY,
-    ]
-)
+_ARRAY_TYPES = frozenset([
+    *_ARRAY_ELEMENT_TYPES_MAPPING.keys(),
+    SegmentType.ARRAY_ANY,
+])
 
 _NUMERICAL_TYPES = frozenset([
     SegmentType.NUMBER,
+    SegmentType.INTEGER,
+    SegmentType.FLOAT,
+])
+
+_BOOL_CASTABLE_TYPES = frozenset([
+    SegmentType.INTEGER,
+    SegmentType.NUMBER,
+])
+
+_EXPOSED_NUMBER_TYPES = frozenset([
     SegmentType.INTEGER,
     SegmentType.FLOAT,
 ])

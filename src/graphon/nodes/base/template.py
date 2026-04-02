@@ -6,6 +6,7 @@ similar to SegmentGroup but focused on template representation without values.
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -71,6 +72,7 @@ class Template:
 
         Returns:
             Template instance
+
         """
         parser = VariableTemplateParser(template_str)
         segments: list[TemplateSegmentUnion] = []
@@ -81,8 +83,6 @@ class Template:
 
         # Parse template to get ordered segments
         # We need to split the template by variable placeholders while preserving order
-        import re
-
         # Create a regex pattern that matches variable placeholders
         pattern = (
             r"\{\{(#[a-zA-Z0-9_]{1,50}(?:\.[a-zA-Z_][a-zA-Z0-9_]{0,29}){1,10}#)\}\}"
@@ -112,7 +112,7 @@ class Template:
 
     @classmethod
     def from_end_outputs(cls, outputs_config: list[dict[str, Any]]) -> Template:
-        """Create a Template from an End node outputs configuration.
+        r"""Create a Template from an End node outputs configuration.
 
         End nodes are treated as templates of concatenated variables with newlines.
 
@@ -130,6 +130,7 @@ class Template:
 
         Returns:
             Template instance
+
         """
         segments: list[TemplateSegmentUnion] = []
 
@@ -143,8 +144,9 @@ class Template:
             if value_selector:
                 segments.append(
                     VariableSegment(
-                        selector=list(value_selector), variable_name=variable_name
-                    )
+                        selector=list(value_selector),
+                        variable_name=variable_name,
+                    ),
                 )
 
         if len(segments) > 0 and isinstance(segments[-1], TextSegment):

@@ -46,7 +46,7 @@ from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.factory import build_segment_with_type
 from graphon.variables.types import ArrayValidation, SegmentType
 
-from .entities import ParameterExtractorNodeData
+from .entities import ParameterConfig, ParameterExtractorNodeData
 from .exc import (
     InvalidModelModeError,
     InvalidModelTypeError,
@@ -75,16 +75,34 @@ if TYPE_CHECKING:
     from graphon.entities.graph_init_params import GraphInitParams
     from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
+_JSON_OPEN_TOKENS = frozenset(("{", "["))
+_JSON_CLOSE_TOKENS = frozenset(("}", "]"))
+_EMPTY_STRING_SEGMENT_TYPES = frozenset((
+    SegmentType.STRING,
+    SegmentType.SECRET,
+))
+_EMPTY_STRING_PARAMETER_TYPES = frozenset(("string", "select"))
+_TRANSFORM_RESULT_UNSET = object()
+_VALUE_TRANSFORMER_NAMES: dict[SegmentType, str] = {
+    SegmentType.NUMBER: "_transform_number_value",
+    SegmentType.BOOLEAN: "_transform_boolean_value",
+    SegmentType.STRING: "_transform_string_value",
+}
+_ARRAY_ITEM_TRANSFORMER_NAMES: dict[SegmentType, str] = {
+    SegmentType.NUMBER: "_transform_number_value",
+    SegmentType.STRING: "_transform_string_value",
+    SegmentType.OBJECT: "_transform_object_value",
+    SegmentType.BOOLEAN: "_transform_boolean_item_value",
+}
 
-def extract_json(text):
-    """
-    From a given JSON started from '{' or '[' extract the complete JSON object.
-    """
+
+def extract_json(text: str) -> str | None:
+    """From a given JSON started from '{' or '[' extract the complete JSON object."""
     stack = []
     for i, c in enumerate(text):
-        if c in {"{", "["}:
+        if c in _JSON_OPEN_TOKENS:
             stack.append(c)
-        elif c in {"}", "]"}:
+        elif c in _JSON_CLOSE_TOKENS:
             # check if stack is empty
             if not stack:
                 return text[:i]
@@ -99,9 +117,7 @@ def extract_json(text):
 
 
 class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
-    """
-    Parameter Extractor Node.
-    """
+    """Parameter Extractor Node."""
 
     node_type = BuiltinNodeTypes.PARAMETER_EXTRACTOR
 
@@ -112,7 +128,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
     @override
     def __init__(
         self,
-        id: str,
+        node_id: str,
         config: NodeConfigDict,
         graph_init_params: "GraphInitParams",
         graph_runtime_state: "GraphRuntimeState",
@@ -124,7 +140,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         prompt_message_serializer: PromptMessageSerializerProtocol,
     ) -> None:
         super().__init__(
-            id=id,
+            node_id=node_id,
             config=config,
             graph_init_params=graph_init_params,
             graph_runtime_state=graph_runtime_state,
@@ -137,8 +153,10 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
     @classmethod
     @override
     def get_default_config(
-        cls, filters: Mapping[str, object] | None = None
+        cls,
+        filters: Mapping[str, object] | None = None,
     ) -> Mapping[str, object]:
+        _ = filters
         return {
             "model": {
                 "prompt_templates": {
@@ -148,9 +166,9 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
                             "assistant_prefix": "Assistant",
                         },
                         "stop": ["Human:"],
-                    }
-                }
-            }
+                    },
+                },
+            },
         }
 
     @classmethod
@@ -160,9 +178,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
 
     @override
     def _run(self) -> NodeRunResult:
-        """
-        Run the node.
-        """
+        """Run the node."""
         node_data = self.node_data
         variable = self.graph_runtime_state.variable_pool.get(node_data.query)
         query = variable.text if variable else ""
@@ -181,19 +197,22 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         model_instance = self._model_instance
         # Resolve variable references in string-typed completion params
         model_instance.parameters = llm_utils.resolve_completion_params_variables(
-            model_instance.parameters, variable_pool
+            model_instance.parameters,
+            variable_pool,
         )
         try:
             model_schema = llm_utils.fetch_model_schema(model_instance=model_instance)
         except ValueError as exc:
-            raise ModelSchemaNotFoundError("Model schema not found") from exc
+            msg = "Model schema not found"
+            raise ModelSchemaNotFoundError(msg) from exc
         if model_schema.model_type != ModelType.LLM:
-            raise InvalidModelTypeError("Model is not a Large Language Model")
+            msg = "Model is not a Large Language Model"
+            raise InvalidModelTypeError(msg)
         memory = self._memory
 
         if (
             set(model_schema.features or [])
-            & {ModelFeature.TOOL_CALL, ModelFeature.MULTI_TOOL_CALL}
+            & frozenset((ModelFeature.TOOL_CALL, ModelFeature.MULTI_TOOL_CALL))
             and node_data.reasoning_mode == "function_call"
         ):
             # use function call
@@ -262,6 +281,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
                 metadata={},
             )
         except Exception as e:
+            logger.exception("Failed to invoke parameter extractor model")
             return NodeRunResult(
                 status=WorkflowNodeExecutionStatus.FAILED,
                 inputs=inputs,
@@ -333,9 +353,8 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
 
         text = invoke_result.message.get_text_content()
         if not isinstance(text, str):
-            raise InvalidTextContentTypeError(
-                f"Invalid text content type: {type(text)}. Expected str."
-            )
+            msg = f"Invalid text content type: {type(text)}. Expected str."
+            raise InvalidTextContentTypeError(msg)
 
         usage = invoke_result.usage
         tool_call = (
@@ -356,11 +375,10 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         files: Sequence[File],
         vision_detail: ImagePromptMessageContent.DETAIL | None = None,
     ) -> tuple[list[PromptMessage], list[PromptMessageTool]]:
-        """
-        Generate function call prompt.
-        """
+        """Generate function call prompt."""
         query = FUNCTION_CALLING_EXTRACTOR_USER_TEMPLATE.format(
-            content=query, structure=json.dumps(node_data.get_parameter_json_schema())
+            content=query,
+            structure=json.dumps(node_data.get_parameter_json_schema()),
         )
 
         rest_token = self._calculate_rest_token(
@@ -371,7 +389,11 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
             context="",
         )
         prompt_template = self._get_function_calling_prompt_template(
-            node_data, query, variable_pool, memory, rest_token
+            node_data,
+            query,
+            variable_pool,
+            memory,
+            rest_token,
         )
         prompt_messages = self._compile_prompt_messages(
             model_instance=model_instance,
@@ -390,22 +412,22 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         # add function call messages before last user message
         example_messages = []
         for example in FUNCTION_CALLING_EXTRACTOR_EXAMPLE:
-            id = uuid.uuid4().hex
+            tool_call_id = uuid.uuid4().hex
             example_messages.extend([
                 UserPromptMessage(content=example["user"]["query"]),
                 AssistantPromptMessage(
                     content=example["assistant"]["text"],
                     tool_calls=[
                         AssistantPromptMessage.ToolCall(
-                            id=id,
+                            id=tool_call_id,
                             type="function",
                             function=AssistantPromptMessage.ToolCall.ToolCallFunction(
                                 name=example["assistant"]["function_call"]["name"],
                                 arguments=json.dumps(
-                                    example["assistant"]["function_call"]["parameters"]
+                                    example["assistant"]["function_call"]["parameters"],
                                 ),
                             ),
-                        )
+                        ),
                     ],
                 ),
                 ToolPromptMessage(
@@ -413,7 +435,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
                         "Great! You have called the function with the correct "
                         "parameters."
                     ),
-                    tool_call_id=id,
+                    tool_call_id=tool_call_id,
                 ),
                 AssistantPromptMessage(
                     content="I have extracted the parameters, let's move on.",
@@ -445,9 +467,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         files: Sequence[File],
         vision_detail: ImagePromptMessageContent.DETAIL | None = None,
     ) -> list[PromptMessage]:
-        """
-        Generate prompt engineering prompt.
-        """
+        """Generate prompt engineering prompt."""
         if data.model.mode == LLMMode.COMPLETION:
             return self._generate_prompt_engineering_completion_prompt(
                 node_data=data,
@@ -468,7 +488,8 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
                 files=files,
                 vision_detail=vision_detail,
             )
-        raise InvalidModelModeError(f"Invalid model mode: {data.model.mode}")
+        msg = f"Invalid model mode: {data.model.mode}"
+        raise InvalidModelModeError(msg)
 
     def _generate_prompt_engineering_completion_prompt(
         self,
@@ -480,9 +501,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         files: Sequence[File],
         vision_detail: ImagePromptMessageContent.DETAIL | None = None,
     ) -> list[PromptMessage]:
-        """
-        Generate completion prompt.
-        """
+        """Generate completion prompt."""
         rest_token = self._calculate_rest_token(
             node_data=node_data,
             query=query,
@@ -515,9 +534,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         files: Sequence[File],
         vision_detail: ImagePromptMessageContent.DETAIL | None = None,
     ) -> list[PromptMessage]:
-        """
-        Generate chat prompt.
-        """
+        """Generate chat prompt."""
         rest_token = self._calculate_rest_token(
             node_data=node_data,
             query=query,
@@ -528,7 +545,8 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         prompt_template = self._get_prompt_engineering_prompt_template(
             node_data=node_data,
             query=CHAT_GENERATE_JSON_USER_MESSAGE_TEMPLATE.format(
-                structure=json.dumps(node_data.get_parameter_json_schema()), text=query
+                structure=json.dumps(node_data.get_parameter_json_schema()),
+                text=query,
             ),
             variable_pool=variable_pool,
             memory=memory,
@@ -557,34 +575,37 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
                     content=CHAT_GENERATE_JSON_USER_MESSAGE_TEMPLATE.format(
                         structure=json.dumps(example["user"]["json"]),
                         text=example["user"]["query"],
-                    )
+                    ),
                 ),
                 AssistantPromptMessage(
                     content=json.dumps(example["assistant"]["json"]),
                 ),
             ])
 
-        prompt_messages = (
+        return (
             prompt_messages[:last_user_message_idx]
             + example_messages
             + prompt_messages[last_user_message_idx:]
         )
 
-        return prompt_messages
-
-    def _validate_result(self, data: ParameterExtractorNodeData, result: dict):
+    def _validate_result(
+        self,
+        data: ParameterExtractorNodeData,
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
         if len(data.parameters) != len(result):
-            raise InvalidNumberOfParametersError("Invalid number of parameters")
+            msg = "Invalid number of parameters"
+            raise InvalidNumberOfParametersError(msg)
 
         for parameter in data.parameters:
             if parameter.required and parameter.name not in result:
-                raise RequiredParameterMissingError(
-                    f"Parameter {parameter.name} is required"
-                )
+                msg = f"Parameter {parameter.name} is required"
+                raise RequiredParameterMissingError(msg)
 
             param_value = result.get(parameter.name)
             if not parameter.type.is_valid(
-                param_value, array_validation=ArrayValidation.ALL
+                param_value,
+                array_validation=ArrayValidation.ALL,
             ):
                 inferred_type = SegmentType.infer_segment_type(param_value)
                 raise InvalidValueTypeError(
@@ -598,15 +619,13 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
                 and parameter.options
                 and param_value not in parameter.options
             ):
-                raise InvalidSelectValueError(
-                    f"Invalid `select` value for parameter {parameter.name}"
-                )
+                msg = f"Invalid `select` value for parameter {parameter.name}"
+                raise InvalidSelectValueError(msg)
         return result
 
     @staticmethod
     def _transform_number(value: float | str | bool) -> int | float | None:
-        """
-        Attempts to transform the input into an integer or float.
+        """Attempts to transform the input into an integer or float.
 
         Returns:
             int or float: The transformed number if the conversion is successful.
@@ -617,98 +636,132 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
             `0`, respectively.
             This behavior ensures compatibility with existing workflows that may
             use boolean types as integers.
-        """
-        if isinstance(value, bool):
-            return int(value)
-        if isinstance(value, (int, float)):
-            return value
-        if isinstance(value, str):
-            if "." in value:
-                try:
-                    return float(value)
-                except ValueError:
-                    return None
-            else:
-                try:
-                    return int(value)
-                except ValueError:
-                    return None
-        else:
-            return None
 
-    def _transform_result(self, data: ParameterExtractorNodeData, result: dict):
         """
-        Transform result into standard format.
-        """
+        transformed_value: int | float | None = None
+        match value:
+            case bool():
+                transformed_value = int(value)
+            case int() | float():
+                transformed_value = value
+            case str():
+                transform = float if "." in value else int
+                try:
+                    transformed_value = transform(value)
+                except ValueError:
+                    transformed_value = None
+        return transformed_value
+
+    def _transform_result(
+        self,
+        data: ParameterExtractorNodeData,
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Transform result into standard format."""
         transformed_result: dict[str, Any] = {}
         for parameter in data.parameters:
-            if parameter.name in result:
-                param_value = result[parameter.name]
-                # transform value
-                if parameter.type == SegmentType.NUMBER:
-                    transformed = self._transform_number(param_value)
-                    if transformed is not None:
-                        transformed_result[parameter.name] = transformed
-                elif parameter.type == SegmentType.BOOLEAN:
-                    if isinstance(result[parameter.name], (bool, int)):
-                        transformed_result[parameter.name] = bool(
-                            result[parameter.name]
-                        )
-                    # elif isinstance(result[parameter.name], str):
-                    #     if result[parameter.name].lower() in ["true", "false"]:
-                    #         transformed_result[parameter.name] = bool(
-                    #             result[parameter.name].lower() == "true"
-                    #         )
-                elif parameter.type == SegmentType.STRING:
-                    if isinstance(param_value, str):
-                        transformed_result[parameter.name] = param_value
-                elif parameter.is_array_type():
-                    if isinstance(param_value, list):
-                        nested_type = parameter.element_type()
-                        assert nested_type is not None
-                        segment_value = build_segment_with_type(
-                            segment_type=SegmentType(parameter.type), value=[]
-                        )
-                        transformed_result[parameter.name] = segment_value
-                        for item in param_value:
-                            if nested_type == SegmentType.NUMBER:
-                                transformed = self._transform_number(item)
-                                if transformed is not None:
-                                    segment_value.value.append(transformed)
-                            elif nested_type == SegmentType.STRING:
-                                if isinstance(item, str):
-                                    segment_value.value.append(item)
-                            elif nested_type == SegmentType.OBJECT:
-                                if isinstance(item, dict):
-                                    segment_value.value.append(item)
-                            elif nested_type == SegmentType.BOOLEAN:
-                                if isinstance(item, bool):
-                                    segment_value.value.append(item)
-
-            if parameter.name not in transformed_result:
-                if parameter.type.is_array_type():
-                    transformed_result[parameter.name] = build_segment_with_type(
-                        segment_type=SegmentType(parameter.type), value=[]
-                    )
-                elif parameter.type in (SegmentType.STRING, SegmentType.SECRET):
-                    transformed_result[parameter.name] = ""
-                elif parameter.type == SegmentType.NUMBER:
-                    transformed_result[parameter.name] = 0
-                elif parameter.type == SegmentType.BOOLEAN:
-                    transformed_result[parameter.name] = False
-                else:
-                    raise AssertionError("this statement should be unreachable.")
+            transformed_value = self._transform_parameter_value(
+                parameter=parameter,
+                param_value=result.get(parameter.name, _TRANSFORM_RESULT_UNSET),
+            )
+            if transformed_value is _TRANSFORM_RESULT_UNSET:
+                transformed_result[parameter.name] = (
+                    self._build_default_parameter_value(parameter.type)
+                )
+                continue
+            transformed_result[parameter.name] = transformed_value
 
         return transformed_result
 
-    def _extract_complete_json_response(self, result: str) -> dict | None:
-        """
-        Extract complete json response.
-        """
+    def _transform_parameter_value(
+        self,
+        *,
+        parameter: ParameterConfig,
+        param_value: Any,
+    ) -> Any:
+        if param_value is _TRANSFORM_RESULT_UNSET:
+            return _TRANSFORM_RESULT_UNSET
+        if parameter.type.is_array_type():
+            return self._transform_array_parameter_value(
+                parameter_type=parameter.type,
+                element_type=parameter.element_type(),
+                param_value=param_value,
+            )
 
+        handler_name = _VALUE_TRANSFORMER_NAMES.get(parameter.type)
+        if handler_name is None:
+            return _TRANSFORM_RESULT_UNSET
+        return getattr(self, handler_name)(param_value)
+
+    def _transform_array_parameter_value(
+        self,
+        *,
+        parameter_type: SegmentType,
+        element_type: SegmentType,
+        param_value: Any,
+    ) -> Any:
+        if not isinstance(param_value, list):
+            return _TRANSFORM_RESULT_UNSET
+
+        segment_value = build_segment_with_type(segment_type=parameter_type, value=[])
+        handler_name = _ARRAY_ITEM_TRANSFORMER_NAMES.get(element_type)
+        if handler_name is None:
+            return segment_value
+
+        for item in param_value:
+            transformed_item = getattr(self, handler_name)(item)
+            if transformed_item is not _TRANSFORM_RESULT_UNSET:
+                segment_value.value.append(transformed_item)
+        return segment_value
+
+    def _transform_number_value(self, value: Any) -> Any:
+        transformed = self._transform_number(value)
+        if transformed is None:
+            return _TRANSFORM_RESULT_UNSET
+        return transformed
+
+    @staticmethod
+    def _transform_boolean_value(value: Any) -> Any:
+        if isinstance(value, (bool, int)):
+            return bool(value)
+        return _TRANSFORM_RESULT_UNSET
+
+    @staticmethod
+    def _transform_boolean_item_value(value: Any) -> Any:
+        if isinstance(value, bool):
+            return value
+        return _TRANSFORM_RESULT_UNSET
+
+    @staticmethod
+    def _transform_string_value(value: Any) -> Any:
+        if isinstance(value, str):
+            return value
+        return _TRANSFORM_RESULT_UNSET
+
+    @staticmethod
+    def _transform_object_value(value: Any) -> Any:
+        if isinstance(value, dict):
+            return value
+        return _TRANSFORM_RESULT_UNSET
+
+    @staticmethod
+    def _build_default_parameter_value(parameter_type: SegmentType) -> Any:
+        if parameter_type.is_array_type():
+            return build_segment_with_type(segment_type=parameter_type, value=[])
+        if parameter_type in _EMPTY_STRING_SEGMENT_TYPES:
+            return ""
+        if parameter_type == SegmentType.NUMBER:
+            return 0
+        if parameter_type == SegmentType.BOOLEAN:
+            return False
+        msg = "this statement should be unreachable."
+        raise AssertionError(msg)
+
+    def _extract_complete_json_response(self, result: str) -> dict | None:
+        """Extract complete json response."""
         # extract json from the text
         for idx in range(len(result)):
-            if result[idx] == "{" or result[idx] == "[":
+            if result[idx] in _JSON_OPEN_TOKENS:
                 json_str = extract_json(result[idx:])
                 if json_str:
                     with contextlib.suppress(Exception):
@@ -719,18 +772,17 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         return None
 
     def _extract_json_from_tool_call(
-        self, tool_call: AssistantPromptMessage.ToolCall
+        self,
+        tool_call: AssistantPromptMessage.ToolCall,
     ) -> dict | None:
-        """
-        Extract json from tool call.
-        """
+        """Extract json from tool call."""
         if not tool_call or not tool_call.function.arguments:
             return None
 
         result = tool_call.function.arguments
         # extract json from the arguments
         for idx in range(len(result)):
-            if result[idx] == "{" or result[idx] == "[":
+            if result[idx] in _JSON_OPEN_TOKENS:
                 json_str = extract_json(result[idx:])
                 if json_str:
                     with contextlib.suppress(Exception):
@@ -741,17 +793,18 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         logger.info("extra error: %s", result)
         return None
 
-    def _generate_default_result(self, data: ParameterExtractorNodeData):
-        """
-        Generate default result.
-        """
+    def _generate_default_result(
+        self,
+        data: ParameterExtractorNodeData,
+    ) -> dict[str, Any]:
+        """Generate default result."""
         result: dict[str, Any] = {}
         for parameter in data.parameters:
             if parameter.type == "number":
                 result[parameter.name] = 0
             elif parameter.type == "boolean":
                 result[parameter.name] = False
-            elif parameter.type in {"string", "select"}:
+            elif parameter.type in _EMPTY_STRING_PARAMETER_TYPES:
                 result[parameter.name] = ""
 
         return result
@@ -778,14 +831,17 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
             system_prompt_messages = LLMNodeChatModelMessage(
                 role=PromptMessageRole.SYSTEM,
                 text=FUNCTION_CALLING_EXTRACTOR_SYSTEM_PROMPT.format(
-                    histories=memory_str, instruction=instruction
+                    histories=memory_str,
+                    instruction=instruction,
                 ),
             )
             user_prompt_message = LLMNodeChatModelMessage(
-                role=PromptMessageRole.USER, text=input_text
+                role=PromptMessageRole.USER,
+                text=input_text,
             )
             return [system_prompt_messages, user_prompt_message]
-        raise InvalidModelModeError(f"Model mode {node_data.model.mode} not support.")
+        msg = f"Model mode {node_data.model.mode} not support."
+        raise InvalidModelModeError(msg)
 
     def _get_prompt_engineering_prompt_template(
         self,
@@ -809,24 +865,28 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
             system_prompt_messages = LLMNodeChatModelMessage(
                 role=PromptMessageRole.SYSTEM,
                 text=CHAT_GENERATE_JSON_PROMPT.format(
-                    histories=memory_str, instruction=instruction
+                    histories=memory_str,
+                    instruction=instruction,
                 ),
             )
             user_prompt_message = LLMNodeChatModelMessage(
-                role=PromptMessageRole.USER, text=input_text
+                role=PromptMessageRole.USER,
+                text=input_text,
             )
             return [system_prompt_messages, user_prompt_message]
         if node_data.model.mode == LLMMode.COMPLETION:
             return LLMNodeCompletionModelPromptTemplate(
                 text=COMPLETION_GENERATE_JSON_PROMPT
                 .format(histories=memory_str, text=input_text, instruction=instruction)
-                .replace("{γγγ", "")
-                .replace("}γγγ", "")
+                .replace("{γγγ", "")  # noqa: RUF001
+                .replace("}γγγ", "")  # noqa: RUF001
                 .replace(
-                    "{ structure }", json.dumps(node_data.get_parameter_json_schema())
+                    "{ structure }",
+                    json.dumps(node_data.get_parameter_json_schema()),
                 ),
             )
-        raise InvalidModelModeError(f"Model mode {node_data.model.mode} not support.")
+        msg = f"Model mode {node_data.model.mode} not support."
+        raise InvalidModelModeError(msg)
 
     def _calculate_rest_token(
         self,
@@ -839,21 +899,30 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         try:
             model_schema = llm_utils.fetch_model_schema(model_instance=model_instance)
         except ValueError as exc:
-            raise ModelSchemaNotFoundError("Model schema not found") from exc
+            msg = "Model schema not found"
+            raise ModelSchemaNotFoundError(msg) from exc
 
         prompt_template: (
             list[LLMNodeChatModelMessage] | LLMNodeCompletionModelPromptTemplate
         )
-        if set(model_schema.features or []) & {
+        if set(model_schema.features or []) & frozenset((
             ModelFeature.TOOL_CALL,
             ModelFeature.MULTI_TOOL_CALL,
-        }:
+        )):
             prompt_template = self._get_function_calling_prompt_template(
-                node_data, query, variable_pool, None, 2000
+                node_data,
+                query,
+                variable_pool,
+                None,
+                2000,
             )
         else:
             prompt_template = self._get_prompt_engineering_prompt_template(
-                node_data, query, variable_pool, None, 2000
+                node_data,
+                query,
+                variable_pool,
+                None,
+                2000,
             )
 
         prompt_messages = self._compile_prompt_messages(
@@ -865,7 +934,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         )
         rest_tokens = 2000
         model_context_tokens = model_schema.model_properties.get(
-            ModelPropertyKey.CONTEXT_SIZE
+            ModelPropertyKey.CONTEXT_SIZE,
         )
         if model_context_tokens:
             curr_message_tokens = (
@@ -881,7 +950,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
                     max_tokens = (
                         model_instance.parameters.get(parameter_rule.name)
                         or model_instance.parameters.get(
-                            parameter_rule.use_template or ""
+                            parameter_rule.use_template or "",
                         )
                     ) or 0
 
@@ -935,13 +1004,9 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
 
         if node_data.instruction:
             selectors = variable_template_parser.extract_selectors_from_template(
-                node_data.instruction
+                node_data.instruction,
             )
             for selector in selectors:
                 variable_mapping[selector.variable] = selector.value_selector
 
-        variable_mapping = {
-            node_id + "." + key: value for key, value in variable_mapping.items()
-        }
-
-        return variable_mapping
+        return {node_id + "." + key: value for key, value in variable_mapping.items()}

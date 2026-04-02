@@ -24,9 +24,7 @@ class VariableEntityType(StrEnum):
 
 
 class VariableEntity(BaseModel):
-    """
-    Shared variable entity used by workflow runtime and app configuration.
-    """
+    """Shared variable entity used by workflow runtime and app configuration."""
 
     # `variable` records the name of the variable in user inputs.
     variable: str
@@ -41,7 +39,7 @@ class VariableEntity(BaseModel):
     allowed_file_types: Sequence[FileType] | None = Field(default_factory=list)
     allowed_file_extensions: Sequence[str] | None = Field(default_factory=list)
     allowed_file_upload_methods: Sequence[FileTransferMethod] | None = Field(
-        default_factory=list
+        default_factory=list,
     )
     json_schema: dict[str, Any] | None = Field(default=None)
 
@@ -58,12 +56,14 @@ class VariableEntity(BaseModel):
     @field_validator("json_schema")
     @classmethod
     def validate_json_schema(
-        cls, schema: dict[str, Any] | None
+        cls,
+        schema: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
         if schema is None:
             return None
         try:
             Draft7Validator.check_schema(schema)
         except SchemaError as error:
-            raise ValueError(f"Invalid JSON schema: {error.message}")
+            msg = f"Invalid JSON schema: {error.message}"
+            raise ValueError(msg) from error
         return schema

@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from enum import StrEnum, auto
+from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -8,18 +9,14 @@ from graphon.model_runtime.entities.model_entities import AIModelEntity, ModelTy
 
 
 class ConfigurateMethod(StrEnum):
-    """
-    Enum class for configurate method of provider model.
-    """
+    """Enum class for configurate method of provider model."""
 
     PREDEFINED_MODEL = "predefined-model"
     CUSTOMIZABLE_MODEL = "customizable-model"
 
 
 class FormType(StrEnum):
-    """
-    Enum class for form type.
-    """
+    """Enum class for form type."""
 
     TEXT_INPUT = "text-input"
     SECRET_INPUT = "secret-input"
@@ -29,34 +26,28 @@ class FormType(StrEnum):
 
 
 class FormShowOnObject(BaseModel):
-    """
-    Model class for form show on.
-    """
+    """Model class for form show on."""
 
     variable: str
     value: str
 
 
 class FormOption(BaseModel):
-    """
-    Model class for form option.
-    """
+    """Model class for form option."""
 
     label: I18nObject
     value: str
     show_on: list[FormShowOnObject] = []
 
     @model_validator(mode="after")
-    def _(self):
+    def _(self) -> Self:
         if not self.label:
-            self.label = I18nObject(en_US=self.value)
+            self.label = I18nObject(en_us=self.value)
         return self
 
 
 class CredentialFormSchema(BaseModel):
-    """
-    Model class for credential form schema.
-    """
+    """Model class for credential form schema."""
 
     variable: str
     label: I18nObject
@@ -70,9 +61,7 @@ class CredentialFormSchema(BaseModel):
 
 
 class ProviderCredentialSchema(BaseModel):
-    """
-    Model class for provider credential schema.
-    """
+    """Model class for provider credential schema."""
 
     credential_form_schemas: list[CredentialFormSchema]
 
@@ -83,17 +72,14 @@ class FieldModelSchema(BaseModel):
 
 
 class ModelCredentialSchema(BaseModel):
-    """
-    Model class for model credential schema.
-    """
+    """Model class for model credential schema."""
 
     model: FieldModelSchema
     credential_form_schemas: list[CredentialFormSchema]
 
 
 class SimpleProviderEntity(BaseModel):
-    """
-    Simplified provider schema exposed to callers.
+    """Simplified provider schema exposed to callers.
 
     `provider` is the canonical runtime identifier. `provider_name` is an optional
     compatibility alias for short-name lookups and is empty when no alias exists.
@@ -109,17 +95,14 @@ class SimpleProviderEntity(BaseModel):
 
 
 class ProviderHelpEntity(BaseModel):
-    """
-    Model class for provider help.
-    """
+    """Model class for provider help."""
 
     title: I18nObject
     url: I18nObject
 
 
 class ProviderEntity(BaseModel):
-    """
-    Runtime-native provider schema.
+    """Runtime-native provider schema.
 
     `provider` is the canonical runtime identifier. `provider_name` is a
     compatibility alias for callers that still resolve providers by short name and
@@ -148,18 +131,14 @@ class ProviderEntity(BaseModel):
 
     @field_validator("models", mode="before")
     @classmethod
-    def validate_models(cls, v):
+    def validate_models(cls, v: Any) -> Any:
         # returns EmptyList if v is empty
         if not v:
             return []
         return v
 
     def to_simple_provider(self) -> SimpleProviderEntity:
-        """
-        Convert to simple provider.
-
-        :return: simple provider
-        """
+        """Convert the full provider entity into its simplified public form."""
         return SimpleProviderEntity(
             provider=self.provider,
             provider_name=self.provider_name,
@@ -171,9 +150,7 @@ class ProviderEntity(BaseModel):
 
 
 class ProviderConfig(BaseModel):
-    """
-    Model class for provider config.
-    """
+    """Model class for provider config."""
 
     provider: str
     credentials: dict

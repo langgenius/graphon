@@ -8,9 +8,7 @@ from .enums import FileType
 
 
 def standardize_file_type(*, extension: str = "", mime_type: str = "") -> FileType:
-    """
-    Infer the actual file type from extension and mime type.
-    """
+    """Infer the actual file type from extension and mime type."""
     guessed_type = None
     if extension:
         guessed_type = _get_file_type_by_extension(extension)

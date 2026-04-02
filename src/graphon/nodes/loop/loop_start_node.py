@@ -7,9 +7,7 @@ from graphon.nodes.loop.entities import LoopStartNodeData
 
 
 class LoopStartNode(Node[LoopStartNodeData]):
-    """
-    Loop Start Node.
-    """
+    """Loop Start Node."""
 
     node_type = BuiltinNodeTypes.LOOP_START
 
@@ -20,7 +18,5 @@ class LoopStartNode(Node[LoopStartNodeData]):
 
     @override
     def _run(self) -> NodeRunResult:
-        """
-        Run the node.
-        """
+        """Run the node."""
         return NodeRunResult(status=WorkflowNodeExecutionStatus.SUCCEEDED)

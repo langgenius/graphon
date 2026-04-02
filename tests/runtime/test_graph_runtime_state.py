@@ -4,6 +4,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from graphon.graph_engine.domain.graph_execution import GraphExecution
+from graphon.graph_engine.ready_queue.in_memory import InMemoryReadyQueue
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.runtime.read_only_wrappers import ReadOnlyGraphRuntimeStateWrapper
@@ -87,10 +89,10 @@ class TestGraphRuntimeState:
     def test_type_validation(self):
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="total_tokens must be non-negative"):
             state.total_tokens = -1
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="node_run_steps must be non-negative"):
             state.node_run_steps = -1
 
     def test_helper_methods(self):
@@ -104,15 +106,13 @@ class TestGraphRuntimeState:
         state.add_tokens(50)
         assert state.total_tokens == initial_tokens + 50
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="tokens must be non-negative"):
             state.add_tokens(-1)
 
     def test_ready_queue_default_instantiation(self):
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
 
         queue = state.ready_queue
-
-        from graphon.graph_engine.ready_queue.in_memory import InMemoryReadyQueue
 
         assert isinstance(queue, InMemoryReadyQueue)
 
@@ -121,17 +121,18 @@ class TestGraphRuntimeState:
 
         execution = state.graph_execution
 
-        from graphon.graph_engine.domain.graph_execution import GraphExecution
-
         assert isinstance(execution, GraphExecution)
-        assert execution.workflow_id == ""
+        assert not execution.workflow_id
         assert state.graph_execution is execution
 
     def test_response_coordinator_configuration(self):
         variable_pool = VariablePool()
         state = GraphRuntimeState(variable_pool=variable_pool, start_at=time())
 
-        with pytest.raises(ValueError):
+        with pytest.raises(
+            ValueError,
+            match="Graph must be attached before accessing response coordinator",
+        ):
             _ = state.response_coordinator
 
         mock_graph = MagicMock()
@@ -144,13 +145,17 @@ class TestGraphRuntimeState:
 
             assert state.response_coordinator is coordinator_instance
             coordinator_cls.assert_called_once_with(
-                variable_pool=variable_pool, graph=mock_graph
+                variable_pool=variable_pool,
+                graph=mock_graph,
             )
 
             state.configure(graph=mock_graph)
 
         other_graph = MagicMock()
-        with pytest.raises(ValueError):
+        with pytest.raises(
+            ValueError,
+            match="GraphRuntimeState already attached to a different graph instance",
+        ):
             state.attach_graph(other_graph)
 
     def test_read_only_wrapper_exposes_additional_state(self):
@@ -299,7 +304,7 @@ class TestGraphRuntimeState:
     def test_snapshot_restore_preserves_updated_conversation_variable(self):
         variable_pool = VariablePool(
             conversation_variables=[
-                StringVariable(name="session_name", value="before")
+                StringVariable(name="session_name", value="before"),
             ],
         )
         variable_pool.add((CONVERSATION_VARIABLE_NODE_ID, "session_name"), "after")

@@ -152,7 +152,7 @@ class TestSkipPropagator:
 
         mock_graph.edges = {"edge_1": edge1, "edge_3": edge3}
 
-        def get_incoming_edges_side_effect(node_id):
+        def get_incoming_edges_side_effect(node_id: str) -> list[Edge]:
             if node_id == "node_2":
                 return [edge1]
             if node_id == "node_4":
@@ -161,7 +161,7 @@ class TestSkipPropagator:
 
         mock_graph.get_incoming_edges.side_effect = get_incoming_edges_side_effect
 
-        def get_outgoing_edges_side_effect(node_id):
+        def get_outgoing_edges_side_effect(node_id: str) -> list[Edge]:
             if node_id == "node_2":
                 return [edge3]
             if node_id == "node_4":

@@ -1,6 +1,7 @@
 import dataclasses
 import datetime
 from collections import deque
+from collections.abc import Iterator
 from decimal import Decimal
 from enum import Enum
 from ipaddress import (
@@ -12,7 +13,7 @@ from ipaddress import (
     IPv6Network,
 )
 from pathlib import Path, PurePath
-from re import compile
+from re import compile as re_compile
 from typing import Any
 from unittest.mock import MagicMock
 from uuid import UUID
@@ -25,11 +26,11 @@ from pydantic_core import Url
 from pydantic_extra_types.color import Color
 
 from graphon.model_runtime.utils.encoders import (
-    _model_dump,
     decimal_encoder,
     generate_encoders_by_class_tuples,
     isoformat,
     jsonable_encoder,
+    model_dump,
 )
 
 
@@ -51,15 +52,15 @@ class MockDataclass:
 
 
 class MockWithDict:
-    def __init__(self, data):
+    def __init__(self, data: dict[str, Any]) -> None:
         self.data = data
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[tuple[str, Any]]:
         return iter(self.data.items())
 
 
 class MockWithVars:
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():
             setattr(self, k, v)
 
@@ -67,7 +68,7 @@ class MockWithVars:
 class TestEncoders:
     def test_model_dump(self):
         model = MockPydanticModel(name="test", age=20)
-        result = _model_dump(model)
+        result = model_dump(model)
         assert result == {"name": "test", "age": 20}
 
     def test_isoformat(self):
@@ -77,9 +78,9 @@ class TestEncoders:
         assert isoformat(t) == "12:00:00"
 
     def test_decimal_encoder(self):
-        assert decimal_encoder(Decimal("1.0")) == 1.0
+        assert decimal_encoder(Decimal("1.0")) == pytest.approx(1.0)
         assert decimal_encoder(Decimal(1)) == 1
-        assert decimal_encoder(Decimal("1.5")) == 1.5
+        assert decimal_encoder(Decimal("1.5")) == pytest.approx(1.5)
         assert decimal_encoder(Decimal(0)) == 0
         assert decimal_encoder(Decimal(-1)) == -1
 
@@ -92,7 +93,7 @@ class TestEncoders:
     def test_jsonable_encoder_basic_types(self):
         assert jsonable_encoder("string") == "string"
         assert jsonable_encoder(123) == 123
-        assert jsonable_encoder(1.23) == 1.23
+        assert jsonable_encoder(1.23) == pytest.approx(1.23)
         assert jsonable_encoder(None) is None
 
     def test_jsonable_encoder_pydantic(self):
@@ -107,7 +108,7 @@ class TestEncoders:
     def test_jsonable_encoder_dataclass(self):
         obj = MockDataclass(name="test", value=1)
         assert jsonable_encoder(obj) == {"name": "test", "value": 1}
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="__dict__ attribute"):
             jsonable_encoder(MockDataclass)
 
     def test_jsonable_encoder_enum(self):
@@ -140,7 +141,7 @@ class TestEncoders:
         assert jsonable_encoder(frozenset([1, 2])) == [1, 2]
         assert jsonable_encoder(deque([1, 2])) == [1, 2]
 
-        def gen():
+        def gen() -> Iterator[int]:
             yield 1
             yield 2
 
@@ -159,7 +160,7 @@ class TestEncoders:
         assert jsonable_encoder(b"bytes") == "bytes"
         assert jsonable_encoder(Color("red")) == "red"
 
-        dt = datetime.datetime(2023, 1, 1, 12, 0, 0)
+        dt = datetime.datetime(2023, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
         assert jsonable_encoder(dt) == dt.isoformat()
 
         date = datetime.date(2023, 1, 1)
@@ -169,7 +170,7 @@ class TestEncoders:
         assert jsonable_encoder(time) == time.isoformat()
 
         td = datetime.timedelta(seconds=60)
-        assert jsonable_encoder(td) == 60.0
+        assert jsonable_encoder(td) == pytest.approx(60.0)
 
         assert jsonable_encoder(IPv4Address("127.0.0.1")) == "127.0.0.1"
         assert jsonable_encoder(IPv4Interface("127.0.0.1/24")) == "127.0.0.1/24"
@@ -183,7 +184,7 @@ class TestEncoders:
             == "test <test@example.com>"
         )
 
-        assert jsonable_encoder(compile(r"abc")) == "abc"
+        assert jsonable_encoder(re_compile(r"abc")) == "abc"
 
         res_bytes = jsonable_encoder(SecretBytes(b"secret"))
         assert "**********" in res_bytes
@@ -210,10 +211,11 @@ class TestEncoders:
         class ReallyUnserializable:
             __slots__ = ["__weakref__"]
 
-            def __iter__(self):
-                raise TypeError("not iterable")
+            def __iter__(self) -> Iterator[Any]:
+                msg = "not iterable"
+                raise TypeError(msg)
 
-        with pytest.raises(ValueError) as exc:
+        with pytest.raises(ValueError, match="not iterable") as exc:
             jsonable_encoder(ReallyUnserializable())
         assert "not iterable" in str(exc.value)
 

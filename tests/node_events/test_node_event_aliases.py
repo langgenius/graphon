@@ -13,7 +13,7 @@ def test_variable_alias_still_validates_in_event_models() -> None:
             "value": "hello",
             "name": "greeting",
             "selector": ["start", "greeting"],
-        }
+        },
     }
 
     node_event = VariableUpdatedEvent.model_validate(payload)

@@ -18,7 +18,7 @@ def build_file_reference(*, record_id: str, storage_key: str | None = None) -> s
         payload["storage_key"] = storage_key
 
     encoded_payload = base64.urlsafe_b64encode(
-        json.dumps(payload, separators=(",", ":")).encode()
+        json.dumps(payload, separators=(",", ":")).encode(),
     ).decode()
     return f"{_FILE_REFERENCE_PREFIX}{encoded_payload}"
 

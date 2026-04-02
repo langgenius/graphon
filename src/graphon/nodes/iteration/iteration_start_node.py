@@ -7,9 +7,7 @@ from graphon.nodes.iteration.entities import IterationStartNodeData
 
 
 class IterationStartNode(Node[IterationStartNodeData]):
-    """
-    Iteration Start Node.
-    """
+    """Iteration Start Node."""
 
     node_type = BuiltinNodeTypes.ITERATION_START
 
@@ -20,7 +18,5 @@ class IterationStartNode(Node[IterationStartNodeData]):
 
     @override
     def _run(self) -> NodeRunResult:
-        """
-        Run the node.
-        """
+        """Run the node."""
         return NodeRunResult(status=WorkflowNodeExecutionStatus.SUCCEEDED)

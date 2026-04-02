@@ -24,7 +24,8 @@ class GraphValidationError(ValueError):
 
     def __init__(self, issues: Sequence[GraphValidationIssue]) -> None:
         if not issues:
-            raise ValueError("GraphValidationError requires at least one issue.")
+            msg = "GraphValidationError requires at least one issue."
+            raise ValueError(msg)
         self.issues: tuple[GraphValidationIssue, ...] = tuple(issues)
         message = "; ".join(f"[{issue.code}] {issue.message}" for issue in self.issues)
         super().__init__(message)
@@ -56,7 +57,7 @@ class _EdgeEndpointValidator:
                             f"'{edge.tail}'."
                         ),
                         node_id=edge.tail,
-                    )
+                    ),
                 )
             if edge.head not in graph.nodes:
                 issues.append(
@@ -67,7 +68,7 @@ class _EdgeEndpointValidator:
                             f"'{edge.head}'."
                         ),
                         node_id=edge.head,
-                    )
+                    ),
                 )
         return issues
 
@@ -93,7 +94,7 @@ class _RootNodeValidator:
                         f"Root node '{root_node.id}' is missing from the node registry."
                     ),
                     node_id=root_node.id,
-                )
+                ),
             )
             return issues
 
@@ -110,7 +111,7 @@ class _RootNodeValidator:
                         "type 'root'."
                     ),
                     node_id=root_node.id,
-                )
+                ),
             )
         return issues
 

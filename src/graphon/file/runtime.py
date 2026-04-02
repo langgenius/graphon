@@ -15,32 +15,43 @@ class WorkflowFileRuntimeNotConfiguredError(RuntimeError):
 
 class _UnconfiguredWorkflowFileRuntime(WorkflowFileRuntimeProtocol):
     def _raise(self) -> NoReturn:
-        raise WorkflowFileRuntimeNotConfiguredError(
+        msg = (
             "workflow file runtime is not configured, call "
             "set_workflow_file_runtime(...) first"
         )
+        raise WorkflowFileRuntimeNotConfiguredError(msg)
 
     @property
     @override
     def multimodal_send_format(self) -> str:
-        self._raise()
+        return self._raise()
 
     @override
     def http_get(
-        self, url: str, *, follow_redirects: bool = True
+        self,
+        url: str,
+        *,
+        follow_redirects: bool = True,
     ) -> HttpResponseProtocol:
+        _ = url
+        _ = follow_redirects
         self._raise()
 
     @override
     def storage_load(self, path: str, *, stream: bool = False) -> bytes | Generator:
+        _ = path
+        _ = stream
         self._raise()
 
     @override
     def load_file_bytes(self, *, file: File) -> bytes:
+        _ = file
         self._raise()
 
     @override
     def resolve_file_url(self, *, file: File, for_external: bool = True) -> str | None:
+        _ = file
+        _ = for_external
         self._raise()
 
     @override
@@ -51,12 +62,22 @@ class _UnconfiguredWorkflowFileRuntime(WorkflowFileRuntimeProtocol):
         as_attachment: bool = False,
         for_external: bool = True,
     ) -> str:
+        _ = upload_file_id
+        _ = as_attachment
+        _ = for_external
         self._raise()
 
     @override
     def resolve_tool_file_url(
-        self, *, tool_file_id: str, extension: str, for_external: bool = True
+        self,
+        *,
+        tool_file_id: str,
+        extension: str,
+        for_external: bool = True,
     ) -> str:
+        _ = tool_file_id
+        _ = extension
+        _ = for_external
         self._raise()
 
     @override
@@ -69,6 +90,11 @@ class _UnconfiguredWorkflowFileRuntime(WorkflowFileRuntimeProtocol):
         nonce: str,
         sign: str,
     ) -> bool:
+        _ = preview_kind
+        _ = file_id
+        _ = timestamp
+        _ = nonce
+        _ = sign
         self._raise()
 
 

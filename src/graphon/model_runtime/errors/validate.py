@@ -1,4 +1,2 @@
 class CredentialsValidateFailedError(ValueError):
-    """
-    Credentials validate failed error
-    """
+    """Credentials validate failed error"""

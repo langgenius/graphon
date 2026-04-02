@@ -10,9 +10,7 @@ from graphon.entities.base_node_data import BaseNodeData
 
 
 class VariableSelector(BaseModel):
-    """
-    Variable Selector.
-    """
+    """Variable Selector."""
 
     variable: str
     value_selector: Sequence[str]
@@ -37,9 +35,7 @@ class OutputVariableType(StrEnum):
 
 
 class OutputVariableEntity(BaseModel):
-    """
-    Output Variable Entity.
-    """
+    """Output Variable Entity."""
 
     variable: str
     value_type: OutputVariableType = OutputVariableType.ANY
@@ -48,10 +44,7 @@ class OutputVariableEntity(BaseModel):
     @field_validator("value_type", mode="before")
     @classmethod
     def normalize_value_type(cls, v: Any) -> Any:
-        """
-        Normalize value_type to handle case-insensitive array types.
-        Converts 'Array[...]' to 'array[...]' for backward compatibility.
-        """
+        """Normalize `Array[...]` literals to lowercase for backward compatibility."""
         if isinstance(v, str) and v.startswith("Array["):
             return v.lower()
         return v
@@ -67,7 +60,7 @@ class BaseIterationState(BaseModel):
     inputs: dict
 
     class MetaData(BaseModel):
-        pass
+        """Metadata associated with an iteration state."""
 
     metadata: MetaData
 
@@ -82,6 +75,6 @@ class BaseLoopState(BaseModel):
     inputs: dict
 
     class MetaData(BaseModel):
-        pass
+        """Metadata associated with a loop state."""
 
     metadata: MetaData

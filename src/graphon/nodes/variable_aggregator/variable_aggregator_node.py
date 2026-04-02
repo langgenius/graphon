@@ -44,5 +44,7 @@ class VariableAggregatorNode(Node[VariableAggregatorNodeData]):
                         break
 
         return NodeRunResult(
-            status=WorkflowNodeExecutionStatus.SUCCEEDED, outputs=outputs, inputs=inputs
+            status=WorkflowNodeExecutionStatus.SUCCEEDED,
+            outputs=outputs,
+            inputs=inputs,
         )

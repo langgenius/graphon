@@ -3,11 +3,11 @@ class InvokeError(ValueError):
 
     description: str | None = None
 
-    def __init__(self, description: str | None = None):
+    def __init__(self, description: str | None = None) -> None:
         if description is not None:
             self.description = description
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.description or self.__class__.__name__
 
 

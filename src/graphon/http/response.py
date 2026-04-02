@@ -87,9 +87,10 @@ class HttpResponse:
         if detected_encoding and detected_encoding.encoding:
             try:
                 self._cached_text = self.content.decode(detected_encoding.encoding)
-                return self._cached_text
             except (UnicodeDecodeError, TypeError, LookupError):
                 pass
+            else:
+                return self._cached_text
 
         if self._fallback_text is not None:
             self._cached_text = self._fallback_text

@@ -6,6 +6,7 @@ from graphon.enums import (
     NodeExecutionType,
     WorkflowNodeExecutionStatus,
 )
+from graphon.file.models import File
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.answer.entities import AnswerNodeData
 from graphon.nodes.base.node import Node
@@ -30,7 +31,7 @@ class AnswerNode(Node[AnswerNodeData]):
     @override
     def _run(self) -> NodeRunResult:
         segments = self.graph_runtime_state.variable_pool.convert_template(
-            self.node_data.answer
+            self.node_data.answer,
         )
         files = self._extract_files_from_segments(segments.value)
         return NodeRunResult(
@@ -41,12 +42,16 @@ class AnswerNode(Node[AnswerNodeData]):
             },
         )
 
-    def _extract_files_from_segments(self, segments: Sequence[Segment]):
+    def _extract_files_from_segments(self, segments: Sequence[Segment]) -> list[File]:
         """Extract all files from segments containing FileSegment or
         ArrayFileSegment instances.
 
         FileSegment contains a single file, while ArrayFileSegment contains
         multiple files. This method flattens all files into a single list.
+
+        Returns:
+            A flat list of `File` objects extracted from the segments.
+
         """
         files = []
         for segment in segments:
@@ -80,10 +85,10 @@ class AnswerNode(Node[AnswerNodeData]):
         return variable_mapping
 
     def get_streaming_template(self) -> Template:
-        """
-        Get the template for streaming.
+        """Get the template for streaming.
 
         Returns:
             Template instance for this Answer node
+
         """
         return Template.from_answer_template(self.node_data.answer)

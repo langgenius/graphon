@@ -27,10 +27,7 @@ class IfElseNode(Node[IfElseNodeData]):
 
     @override
     def _run(self) -> NodeRunResult:
-        """
-        Run node
-        :return:
-        """
+        """Evaluate the configured cases and return the matching branch result."""
         node_inputs: dict[str, Sequence[Mapping[str, Any]]] = {"conditions": []}
 
         process_data: dict[str, list] = {"condition_results": []}
@@ -87,7 +84,7 @@ class IfElseNode(Node[IfElseNodeData]):
 
             node_inputs["conditions"] = input_conditions
 
-        except Exception as e:
+        except (TypeError, ValueError) as e:
             return NodeRunResult(
                 status=WorkflowNodeExecutionStatus.FAILED,
                 inputs=node_inputs,
@@ -97,15 +94,13 @@ class IfElseNode(Node[IfElseNodeData]):
 
         outputs = {"result": final_result, "selected_case_id": selected_case_id}
 
-        data = NodeRunResult(
+        return NodeRunResult(
             status=WorkflowNodeExecutionStatus.SUCCEEDED,
             inputs=node_inputs,
             process_data=process_data,
             edge_source_handle=selected_case_id or "false",  # Use case ID or 'default'
             outputs=outputs,
         )
-
-        return data
 
     @classmethod
     @override
@@ -133,7 +128,7 @@ def _should_not_use_old_function(
     variable_pool: VariablePool,
     conditions: list[Condition],
     operator: Literal["and", "or"],
-):
+) -> bool:
     return condition_processor.process_conditions(
         variable_pool=variable_pool,
         conditions=conditions,

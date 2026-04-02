@@ -1,5 +1,4 @@
-"""
-Internal path representation for response coordinator.
+"""Internal path representation for response coordinator.
 
 This module contains the private Path class used internally by ResponseStreamCoordinator
 to track execution paths to response nodes.
@@ -12,8 +11,7 @@ type EdgeID = str
 
 @dataclass
 class Path:
-    """
-    Represents a path of branch edges that must be taken to reach a response node.
+    """Represents a path of branch edges that must be taken to reach a response node.
 
     Note: This is an internal class not exposed in the public API.
     """

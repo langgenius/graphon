@@ -23,7 +23,7 @@ from graphon.variables.variables import RAGPipelineVariableInput, Variable, Vari
 type VariableValue = str | int | float | dict[str, object] | list[object] | File
 
 VARIABLE_PATTERN = re.compile(
-    r"\{\{#([a-zA-Z0-9_]{1,50}(?:\.[a-zA-Z_][a-zA-Z0-9_]{0,29}){1,10})#\}\}"
+    r"\{\{#([a-zA-Z0-9_]{1,50}(?:\.[a-zA-Z_][a-zA-Z0-9_]{0,29}){1,10})#\}\}",
 )
 
 
@@ -43,38 +43,47 @@ class VariablePool(BaseModel):
     # Other elements of the selector are keys in the second-level dictionary.
     # To get the key, we hash the elements of the selector except the first one.
     variable_dictionary: defaultdict[
-        str, Annotated[dict[str, Variable], Field(default_factory=dict)]
+        str,
+        Annotated[dict[str, Variable], Field(default_factory=dict)],
     ] = Field(
         description="Variables mapping",
         default_factory=_default_variable_dictionary,
     )
     system_variables: Sequence[Variable] = Field(default_factory=tuple, exclude=True)
     environment_variables: Sequence[Variable] = Field(
-        default_factory=tuple, exclude=True
+        default_factory=tuple,
+        exclude=True,
     )
     conversation_variables: Sequence[Variable] = Field(
-        default_factory=tuple, exclude=True
+        default_factory=tuple,
+        exclude=True,
     )
     rag_pipeline_variables: Sequence[RAGPipelineVariableInput] = Field(
-        default_factory=tuple, exclude=True
+        default_factory=tuple,
+        exclude=True,
     )
     user_inputs: Mapping[str, Any] = Field(default_factory=dict, exclude=True)
 
     @model_validator(mode="after")
     def _load_legacy_bootstrap_inputs(self) -> VariablePool:
-        """
-        Accept legacy constructor kwargs that still appear throughout the workflow
+        """Accept legacy constructor kwargs that still appear throughout the workflow
         layer while keeping serialized state focused on `variable_dictionary`.
-        """
 
+        Returns:
+            The normalized `VariablePool` instance after ingesting legacy inputs.
+
+        """
         self._ingest_legacy_variables(
-            self.system_variables, node_id=self._SYSTEM_VARIABLE_NODE_ID
+            self.system_variables,
+            node_id=self._SYSTEM_VARIABLE_NODE_ID,
         )
         self._ingest_legacy_variables(
-            self.environment_variables, node_id=self._ENVIRONMENT_VARIABLE_NODE_ID
+            self.environment_variables,
+            node_id=self._ENVIRONMENT_VARIABLE_NODE_ID,
         )
         self._ingest_legacy_variables(
-            self.conversation_variables, node_id=self._CONVERSATION_VARIABLE_NODE_ID
+            self.conversation_variables,
+            node_id=self._CONVERSATION_VARIABLE_NODE_ID,
         )
         self._ingest_legacy_rag_variables(self.rag_pipeline_variables)
 
@@ -88,7 +97,10 @@ class VariablePool(BaseModel):
         return self
 
     def _ingest_legacy_variables(
-        self, variables: Sequence[Variable], *, node_id: str
+        self,
+        variables: Sequence[Variable],
+        *,
+        node_id: str,
     ) -> None:
         for variable in variables:
             selector = [node_id, variable.name]
@@ -98,7 +110,8 @@ class VariablePool(BaseModel):
             self.add(normalized_variable.selector, normalized_variable)
 
     def _ingest_legacy_rag_variables(
-        self, rag_pipeline_variables: Sequence[RAGPipelineVariableInput]
+        self,
+        rag_pipeline_variables: Sequence[RAGPipelineVariableInput],
     ) -> None:
         if not rag_pipeline_variables:
             return
@@ -113,8 +126,7 @@ class VariablePool(BaseModel):
             self.add((self._RAG_PIPELINE_VARIABLE_NODE_ID, node_id), value)
 
     def add(self, selector: Sequence[str], value: Any, /):
-        """
-        Add a variable to the variable pool.
+        """Add a variable to the variable pool.
 
         This method accepts a selector path and a value, converting the value
         to a Variable object if necessary before storing it in the pool.
@@ -132,20 +144,23 @@ class VariablePool(BaseModel):
         Note:
             While non-Segment values are currently accepted and automatically
             converted, it's recommended to pass Segment or Variable objects directly.
+
         """
         if len(selector) != SELECTORS_LENGTH:
-            raise ValueError(
+            msg = (
                 f"Invalid selector: expected {SELECTORS_LENGTH} elements "
                 f"(node_id, variable_name), got {len(selector)} elements"
             )
+            raise ValueError(msg)
 
-        if isinstance(value, VariableBase):
-            variable = value
-        elif isinstance(value, Segment):
-            variable = segment_to_variable(segment=value, selector=selector)
-        else:
-            segment = build_segment(value)
-            variable = segment_to_variable(segment=segment, selector=selector)
+        match value:
+            case VariableBase():
+                variable = value
+            case Segment():
+                variable = segment_to_variable(segment=value, selector=selector)
+            case _:
+                segment = build_segment(value)
+                variable = segment_to_variable(segment=segment, selector=selector)
 
         node_id, name = self._selector_to_keys(selector)
         # Based on the definition of `Variable`,
@@ -165,8 +180,7 @@ class VariablePool(BaseModel):
         )
 
     def get(self, selector: Sequence[str], /) -> Segment | None:
-        """
-        Retrieve a variable's value from the pool as a Segment.
+        """Retrieve a variable's value from the pool as a Segment.
 
         This method supports both simple selectors [node_id, variable_name] and
         extended selectors that include attribute access for FileSegment and
@@ -180,55 +194,78 @@ class VariablePool(BaseModel):
 
         Returns:
             The Segment associated with the selector, or None if not found.
-            Returns None if selector has fewer than 2 elements.
+            Returns None if selector has fewer than 2 elements or if an invalid
+            file attribute is requested.
 
-        Raises:
-            ValueError: If attempting to access an invalid FileAttribute.
         """
         if len(selector) < SELECTORS_LENGTH:
             return None
 
         node_id, name = self._selector_to_keys(selector)
         node_map = self.variable_dictionary.get(node_id)
-        if node_map is None:
-            return None
-
-        segment: Segment | None = node_map.get(name)
-
-        if segment is None:
-            return None
-
-        if len(selector) == 2:
+        segment = node_map.get(name) if node_map is not None else None
+        if segment is None or len(selector) == SELECTORS_LENGTH:
             return segment
 
-        if isinstance(segment, FileSegment):
-            attr = selector[2]
-            if attr not in FileAttribute:
-                return None
-            attr = FileAttribute(attr)
-            attr_value = file_manager.get_attr(file=segment.value, attr=attr)
-            return build_segment(attr_value)
+        match segment:
+            case FileSegment():
+                result = self._get_file_attribute_segment(
+                    segment=segment,
+                    attr=selector[2],
+                )
+            case _:
+                result = self._get_nested_segment(
+                    segment=segment,
+                    selector=selector[2:],
+                )
+        return result
 
-        # Navigate through nested attributes
+    def _get_file_attribute_segment(
+        self,
+        *,
+        segment: FileSegment,
+        attr: str,
+    ) -> Segment | None:
+        if attr not in FileAttribute:
+            return None
+        file_attr = FileAttribute(attr)
+        attr_value = file_manager.get_attr(file=segment.value, attr=file_attr)
+        return build_segment(attr_value)
+
+    def _get_nested_segment(
+        self,
+        *,
+        segment: Segment,
+        selector: Sequence[str],
+    ) -> Segment | None:
         result: Any = segment
-        for attr in selector[2:]:
+        for attr in selector:
             result = self._extract_value(result)
             result = self._get_nested_attribute(result, attr)
             if result is None:
                 return None
+        match result:
+            case Segment():
+                nested_segment = result
+            case _:
+                nested_segment = build_segment(result)
+        return nested_segment
 
-        # Return result as Segment
-        return result if isinstance(result, Segment) else build_segment(result)
-
-    def _extract_value(self, obj: Any):
+    def _extract_value(self, obj: Any) -> Any:
         """Extract the actual value from an ObjectSegment."""
-        return obj.value if isinstance(obj, ObjectSegment) else obj
+        match obj:
+            case ObjectSegment():
+                result = obj.value
+            case _:
+                result = obj
+        return result
 
     def _get_nested_attribute(
-        self, obj: Mapping[str, Any], attr: str
+        self,
+        obj: Mapping[str, Any],
+        attr: str,
     ) -> Segment | None:
-        """
-        Get a nested attribute from a dictionary-like object.
+        """Get a nested attribute from a dictionary-like object.
 
         Args:
             obj: The dictionary-like object to search.
@@ -238,20 +275,21 @@ class VariablePool(BaseModel):
             Segment | None:
                 The corresponding Segment built from the attribute value if the
                 key exists, otherwise None.
+
         """
-        if not isinstance(obj, dict) or attr not in obj:
-            return None
-        return build_segment(obj.get(attr))
+        match obj:
+            case dict() if attr in obj:
+                result = build_segment(obj.get(attr))
+            case _:
+                result = None
+        return result
 
     def remove(self, selector: Sequence[str], /):
-        """
-        Remove variables from the variable pool based on the given selector.
+        """Remove variables from the variable pool based on the given selector.
 
         Args:
             selector (Sequence[str]): A sequence of strings representing the selector.
 
-        Returns:
-            None
         """
         if not selector:
             return
@@ -273,13 +311,15 @@ class VariablePool(BaseModel):
 
     def get_file(self, selector: Sequence[str], /) -> FileSegment | None:
         segment = self.get(selector)
-        if isinstance(segment, FileSegment):
-            return segment
-        return None
+        match segment:
+            case FileSegment():
+                result = segment
+            case _:
+                result = None
+        return result
 
     def get_by_prefix(self, prefix: str, /) -> Mapping[str, object]:
         """Return a copy of all variables stored under the given node prefix."""
-
         nodes = self.variable_dictionary.get(prefix)
         if not nodes:
             return {}
@@ -293,7 +333,6 @@ class VariablePool(BaseModel):
 
     def flatten(self, *, unprefixed_node_id: str | None = None) -> Mapping[str, object]:
         """Return a selector-style snapshot of the entire variable pool."""
-
         result: dict[str, object] = {}
         for node_id, variables in self.variable_dictionary.items():
             for name, variable in variables.items():

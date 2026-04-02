@@ -32,11 +32,18 @@ class ModelRuntime(Protocol):
     def fetch_model_providers(self) -> Sequence[ProviderEntity]: ...
 
     def get_provider_icon(
-        self, *, provider: str, icon_type: str, lang: str
+        self,
+        *,
+        provider: str,
+        icon_type: str,
+        lang: str,
     ) -> tuple[bytes, str]: ...
 
     def validate_provider_credentials(
-        self, *, provider: str, credentials: dict[str, Any]
+        self,
+        *,
+        provider: str,
+        credentials: dict[str, Any],
     ) -> None: ...
 
     def validate_model_credentials(

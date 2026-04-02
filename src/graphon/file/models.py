@@ -17,10 +17,12 @@ _FILE_REFERENCE_PREFIX = "dify-file-ref:"
 
 
 def sign_tool_file(
-    *, tool_file_id: str, extension: str, for_external: bool = True
+    *,
+    tool_file_id: str,
+    extension: str,
+    for_external: bool = True,
 ) -> str:
-    """Compatibility shim for tests and legacy callers patching
-    ``models.sign_tool_file``."""
+    """Return a signed tool-file URL shim for tests and legacy patches."""
     return helpers.get_signed_tool_file_url(
         tool_file_id=tool_file_id,
         extension=extension,
@@ -29,8 +31,7 @@ def sign_tool_file(
 
 
 class ImageConfig(BaseModel):
-    """
-    NOTE: This part of validation is deprecated, but still used in app
+    """NOTE: This part of validation is deprecated, but still used in app
     features "Image Upload".
     """
 
@@ -40,15 +41,13 @@ class ImageConfig(BaseModel):
 
 
 class FileUploadConfig(BaseModel):
-    """
-    File Upload Entity.
-    """
+    """File Upload Entity."""
 
     image_config: ImageConfig | None = None
     allowed_file_types: Sequence[FileType] = Field(default_factory=list)
     allowed_file_extensions: Sequence[str] = Field(default_factory=list)
     allowed_file_upload_methods: Sequence[FileTransferMethod] = Field(
-        default_factory=list
+        default_factory=list,
     )
     number_limits: int = 0
 
@@ -102,7 +101,8 @@ class File(BaseModel):
     reference: str | None = None
     filename: str | None = None
     extension: str | None = Field(
-        default=None, description="File extension, should contain dot"
+        default=None,
+        description="File extension, should contain dot",
     )
     mime_type: str | None = None
     size: int = -1
@@ -111,9 +111,9 @@ class File(BaseModel):
     def __init__(
         self,
         *,
-        id: str | None = None,
+        file_id: str | None = None,
         tenant_id: str | None = None,
-        type: FileType,
+        file_type: FileType,
         transfer_method: FileTransferMethod,
         remote_url: str | None = None,
         reference: str | None = None,
@@ -129,7 +129,7 @@ class File(BaseModel):
         tool_file_id: str | None = None,
         upload_file_id: str | None = None,
         datasource_file_id: str | None = None,
-    ):
+    ) -> None:
         legacy_record_id = (
             related_id or tool_file_id or upload_file_id or datasource_file_id
         )
@@ -139,8 +139,8 @@ class File(BaseModel):
         _, parsed_storage_key = _parse_reference(normalized_reference)
 
         super().__init__(
-            id=id,
-            type=type,
+            id=file_id,
+            type=file_type,
             transfer_method=transfer_method,
             remote_url=remote_url,
             reference=normalized_reference,
@@ -193,20 +193,26 @@ class File(BaseModel):
         match self.transfer_method:
             case FileTransferMethod.REMOTE_URL:
                 if not self.remote_url:
-                    raise ValueError("Missing file url")
+                    msg = "Missing file url"
+                    raise ValueError(msg)
                 if not isinstance(
-                    self.remote_url, str
+                    self.remote_url,
+                    str,
                 ) or not self.remote_url.startswith("http"):
-                    raise ValueError("Invalid file url")
+                    msg = "Invalid file url"
+                    raise ValueError(msg)
             case FileTransferMethod.LOCAL_FILE:
                 if not self.reference:
-                    raise ValueError("Missing file reference")
+                    msg = "Missing file reference"
+                    raise ValueError(msg)
             case FileTransferMethod.TOOL_FILE:
                 if not self.reference:
-                    raise ValueError("Missing file reference")
+                    msg = "Missing file reference"
+                    raise ValueError(msg)
             case FileTransferMethod.DATASOURCE_FILE:
                 if not self.reference:
-                    raise ValueError("Missing file reference")
+                    msg = "Missing file reference"
+                    raise ValueError(msg)
         return self
 
     @property

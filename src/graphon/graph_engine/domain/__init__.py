@@ -1,5 +1,4 @@
-"""
-Domain models for graph engine.
+"""Domain models for graph engine.
 
 This package contains the core domain entities, value objects, and aggregates
 that represent the business concepts of workflow graph execution.

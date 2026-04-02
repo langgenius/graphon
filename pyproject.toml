@@ -49,110 +49,44 @@ required-version = '>=0.15'
 [tool.ruff.lint]
 select = ['ALL']
 ignore = [
-    'ERA',    # 存在误识别问题
-    'COM',    # 与格式化冲突
-    'ISC001', # 与格式化冲突
-    'ANN',    # 全标注要求太过严苛
-    'S',      # 不适用
-    'D',      # 不适用
-    'PGH003', # 不适用
-    'CPY',    # 不适用
-    'FBT',    # 不适用
-    'SLF',    # 不适用
-    'TID',    # 不适用
-    'FIX',    # 不适用
-    ########### TODO(99): 临时禁用 ###########
-    'TRY003',
-    'TC001',
-    'G004',
-    'T201',
-    'E501',
+    'COM812', # Conflicts with `ruff format`.
+    'ERA',    # False positives are common.
+    'ANN',    # Full annotation coverage is too strict for this codebase.
+    'TC',     # Runtime use of typing constructs is common here.
+    'S',      # Security rules are temporarily handled separately.
+    'D',      # Docstring rules are not applicable here.
+    'PGH003', # Not applicable here.
+    'CPY',    # Not applicable here.
+    'FBT',    # Not applicable here.
+    'SLF',    # Not applicable here.
+    'TID',    # Not applicable here.
+    'FIX',    # Not applicable here.
+    ########### TODO(99): Temporarily disabled ###########
     'C901',
-    'TC003',
     'TRY004',
-    'BLE001',
-    'TRY400',
-    'RUF001',
-    'B904',
-    'A002',
-    'TD003',
-    'RET504',
-    'TRY300',
-    'PLW1514',
-    'TD002',
-    'DTZ005',
-    'PLW2901',
-    'TRY002',
-    'A001',
-    'G003',
-    'RUF005',
-    'PLW0603',
-    'TRY301',
-    'EXE001',
-    'INP001',
-    'N806',
-    'RUF052',
-    'UP007',
-    'B901',
-    'N815',
-    'PLW0108',
-    'TD001',
-    'TD004',
     'TD005',
-    'E721',
-    'FURB101',
-    'ISC004',
-    'LOG004',
-    'PD002',
-    'PERF402',
-    'PIE810',
-    'PLW0602',
-    'PTH100',
-    'PTH118',
-    'PTH120',
-    'RET503',
-    'RUF012',
-    'RUF027',
-    'RUF066',
-    'RUF070',
-    'TRY201',
-    'DOC201',
-    'EM102',
-    'EM101',
+    'TD004',
+    'TD003',
+    'TD002',
+    'TD001',
+    'PLW0603',
     'PLR6301',
-    'DOC501',
-    'ARG002',
     'PLR2004',
+    'PLR1702',
+    'PLR0917',
+    'PLR0915',
+    'PLR0914',
     'PLR0913',
     'PLR0912',
-    'PLR0917',
-    'PLR1702',
-    'PLC0415',
-    'PLR0911',
-    'PLR6201',
-    'PLR0915',
-    'ARG003',
-    'PLR0914',
-    'PLC1901',
-    'PT011',
-    'DOC402',
-    'RUF069',
-    'ARG001',
-    'DOC202',
-    'DOC502',
-    'PLC2701',
-    'PLR0904',
-    'PLR0916',
-    'PLR1714',
-    'A004',
-    'ARG004',
-    'ARG005',
-    'DOC102',
-    'DTZ001',
-    'PLR6104',
-    'SIM117',
 ]
 
+[tool.ruff.lint.pydoclint]
+ignore-one-line-docstrings = true
+
+[tool.ruff.lint.per-file-ignores]
+'tests/**/*.py' = [
+    'S101', # Pytest convention relies on plain assert statements.
+]
 
 [tool.pytest]
 minversion = '9.0'

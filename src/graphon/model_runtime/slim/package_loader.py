@@ -72,13 +72,13 @@ class SlimPackageLoader:
         )
         provider_entity = self._build_provider_entity(
             provider_declaration=provider_declaration,
-            binding=binding,
         )
         if binding.provider and provider_entity.provider != binding.provider:
-            raise ValueError(
+            msg = (
                 "Slim binding provider mismatch: "
                 f"expected {binding.provider}, got {provider_entity.provider}"
             )
+            raise ValueError(msg)
         return LoadedSlimProvider(
             binding=binding,
             plugin_root=plugin_root,
@@ -96,7 +96,10 @@ class SlimPackageLoader:
         return plugin_root
 
     def _download_and_extract_plugin(
-        self, *, plugin_id: str, plugin_root: Path
+        self,
+        *,
+        plugin_id: str,
+        plugin_root: Path,
     ) -> None:
         marketplace_url = self._config.local.marketplace_url
         query = urlencode({"unique_identifier": plugin_id})
@@ -105,10 +108,11 @@ class SlimPackageLoader:
         response = httpx.get(url, timeout=timeout, follow_redirects=True)
         response.raise_for_status()
         if len(response.content) > self._config.marketplace_download_limit_bytes:
-            raise ValueError(
+            msg = (
                 f"Plugin package {plugin_id} exceeds "
                 f"{self._config.marketplace_download_limit_bytes} bytes."
             )
+            raise ValueError(msg)
 
         if plugin_root.exists():
             shutil.rmtree(plugin_root)
@@ -131,9 +135,8 @@ class SlimPackageLoader:
                 target_dir not in resolved_destination.parents
                 and resolved_destination != target_dir
             ):
-                raise ValueError(
-                    f"Unsafe zip entry {member.filename!r} would escape {target_dir}"
-                )
+                msg = f"Unsafe zip entry {member.filename!r} would escape {target_dir}"
+                raise ValueError(msg)
         archive.extractall(target_dir)
 
     def _load_provider_declaration(
@@ -145,13 +148,15 @@ class SlimPackageLoader:
         manifest = self._load_yaml(plugin_root / "manifest.yaml")
         model_provider_paths = manifest.get("plugins", {}).get("models", [])
         if not model_provider_paths:
-            raise ValueError(f"No model provider declarations found in {plugin_root}")
+            msg = f"No model provider declarations found in {plugin_root}"
+            raise ValueError(msg)
 
         if not provider and len(model_provider_paths) > 1:
-            raise ValueError(
+            msg = (
                 "Slim binding provider is required when a plugin declares "
                 "multiple model providers."
             )
+            raise ValueError(msg)
 
         provider_declaration: dict[str, Any] | None = None
         for provider_path in model_provider_paths:
@@ -161,7 +166,8 @@ class SlimPackageLoader:
                 break
 
         if provider_declaration is None:
-            raise ValueError(f"Provider {provider!r} not found in {plugin_root}")
+            msg = f"Provider {provider!r} not found in {plugin_root}"
+            raise ValueError(msg)
 
         models_section = provider_declaration.get("models", {}) or {}
         provider_declaration["models"] = self._load_model_declarations(
@@ -222,7 +228,6 @@ class SlimPackageLoader:
         self,
         *,
         provider_declaration: dict[str, Any],
-        binding: SlimProviderBinding,
     ) -> ProviderEntity:
         supported_model_types = [
             model_type
@@ -240,13 +245,13 @@ class SlimPackageLoader:
             provider_name=str(provider_declaration.get("provider") or ""),
             label=self._convert_i18n(provider_declaration.get("label")),
             description=self._convert_optional_i18n(
-                provider_declaration.get("description")
+                provider_declaration.get("description"),
             ),
             icon_small=self._convert_optional_i18n(
-                provider_declaration.get("icon_small")
+                provider_declaration.get("icon_small"),
             ),
             icon_small_dark=self._convert_optional_i18n(
-                provider_declaration.get("icon_small_dark")
+                provider_declaration.get("icon_small_dark"),
             ),
             background=provider_declaration.get("background"),
             help=self._convert_provider_help(provider_declaration.get("help")),
@@ -258,10 +263,10 @@ class SlimPackageLoader:
                 if (model_entity := self._convert_model_entity(raw_model)) is not None
             ],
             provider_credential_schema=self._convert_provider_credential_schema(
-                provider_declaration.get("provider_credential_schema")
+                provider_declaration.get("provider_credential_schema"),
             ),
             model_credential_schema=self._convert_model_credential_schema(
-                provider_declaration.get("model_credential_schema")
+                provider_declaration.get("model_credential_schema"),
             ),
             position=provider_declaration.get("position") or {},
         )
@@ -303,12 +308,14 @@ class SlimPackageLoader:
     @staticmethod
     def _convert_i18n(value: dict[str, Any] | None) -> I18nObject:
         if value is None:
-            raise ValueError("Missing required i18n object.")
+            msg = "Missing required i18n object."
+            raise ValueError(msg)
         en_us = value.get("en_US") or value.get("en-us") or value.get("en")
         zh_hans = value.get("zh_Hans") or value.get("zh-hans") or value.get("zh_CN")
         if not en_us:
-            raise ValueError(f"Missing en_US translation in {value}")
-        return I18nObject(en_US=str(en_us), zh_Hans=str(zh_hans or en_us))
+            msg = f"Missing en_US translation in {value}"
+            raise ValueError(msg)
+        return I18nObject(en_us=str(en_us), zh_hans=str(zh_hans or en_us))
 
     def _convert_optional_i18n(self, value: dict[str, Any] | None) -> I18nObject | None:
         if value is None:
@@ -316,7 +323,8 @@ class SlimPackageLoader:
         return self._convert_i18n(value)
 
     def _convert_provider_help(
-        self, value: dict[str, Any] | None
+        self,
+        value: dict[str, Any] | None,
     ) -> ProviderHelpEntity | None:
         if value is None:
             return None
@@ -326,7 +334,8 @@ class SlimPackageLoader:
         )
 
     def _convert_provider_credential_schema(
-        self, value: dict[str, Any] | None
+        self,
+        value: dict[str, Any] | None,
     ) -> ProviderCredentialSchema | None:
         if value is None:
             return None
@@ -335,11 +344,12 @@ class SlimPackageLoader:
                 schema
                 for item in value.get("credential_form_schemas", []) or []
                 if (schema := self._convert_credential_form_schema(item)) is not None
-            ]
+            ],
         )
 
     def _convert_model_credential_schema(
-        self, value: dict[str, Any] | None
+        self,
+        value: dict[str, Any] | None,
     ) -> ModelCredentialSchema | None:
         if value is None:
             return None
@@ -347,7 +357,7 @@ class SlimPackageLoader:
             model=FieldModelSchema(
                 label=self._convert_i18n(value.get("model", {}).get("label")),
                 placeholder=self._convert_optional_i18n(
-                    value.get("model", {}).get("placeholder")
+                    value.get("model", {}).get("placeholder"),
                 ),
             ),
             credential_form_schemas=[
@@ -358,7 +368,8 @@ class SlimPackageLoader:
         )
 
     def _convert_credential_form_schema(
-        self, value: dict[str, Any] | None
+        self,
+        value: dict[str, Any] | None,
     ) -> CredentialFormSchema | None:
         if value is None:
             return None
@@ -399,7 +410,8 @@ class SlimPackageLoader:
         )
 
     def _convert_parameter_rule(
-        self, value: dict[str, Any] | None
+        self,
+        value: dict[str, Any] | None,
     ) -> ParameterRule | None:
         if value is None:
             return None

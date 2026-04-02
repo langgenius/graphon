@@ -23,9 +23,9 @@ class TestWorkflowExecutionStatus:
             assert not status.is_ended(), f"{status} should not be considered ended"
 
     def test_ended_values(self):
-        assert set(WorkflowExecutionStatus.ended_values()) == {
+        assert set(WorkflowExecutionStatus.ended_values()) == frozenset((
             WorkflowExecutionStatus.SUCCEEDED.value,
             WorkflowExecutionStatus.FAILED.value,
             WorkflowExecutionStatus.PARTIAL_SUCCEEDED.value,
             WorkflowExecutionStatus.STOPPED.value,
-        }
+        ))

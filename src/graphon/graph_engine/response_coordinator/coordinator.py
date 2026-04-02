@@ -1,5 +1,4 @@
-"""
-Main ResponseStreamCoordinator implementation.
+"""Main ResponseStreamCoordinator implementation.
 
 This module contains the public ResponseStreamCoordinator class that manages
 response streaming sessions and ensures ordered streaming of responses.
@@ -58,7 +57,7 @@ class ResponseStreamCoordinatorState(BaseModel):
     """Serialized snapshot of ResponseStreamCoordinator."""
 
     type: Literal["ResponseStreamCoordinator"] = Field(
-        default="ResponseStreamCoordinator"
+        default="ResponseStreamCoordinator",
     )
     version: str = Field(default="1.0")
     response_nodes: Sequence[str] = Field(default_factory=list)
@@ -74,19 +73,18 @@ class ResponseStreamCoordinatorState(BaseModel):
 
 @final
 class ResponseStreamCoordinator:
-    """
-    Manages response streaming sessions without relying on global state.
+    """Manages response streaming sessions without relying on global state.
 
     Ensures ordered streaming of responses based on upstream node outputs and constants.
     """
 
     def __init__(self, variable_pool: "VariablePool", graph: GraphProtocol) -> None:
-        """
-        Initialize coordinator with variable pool.
+        """Initialize coordinator with variable pool.
 
         Args:
             variable_pool: VariablePool instance for accessing node variables
             graph: Graph instance for looking up node information
+
         """
         self._variable_pool = variable_pool
         self._graph = graph
@@ -110,7 +108,8 @@ class ResponseStreamCoordinator:
 
         # Track response sessions to ensure only one per node
         self._response_sessions: dict[
-            NodeID, ResponseSession
+            NodeID,
+            ResponseSession,
         ] = {}  # node_id -> session
 
     def register(self, response_node_id: NodeID) -> None:
@@ -134,6 +133,7 @@ class ResponseStreamCoordinator:
         Args:
             node_id: The ID of the node
             execution_id: The execution ID from NodeRunStartedEvent
+
         """
         with self._lock:
             self._node_execution_ids[node_id] = execution_id
@@ -146,6 +146,7 @@ class ResponseStreamCoordinator:
 
         Returns:
             The execution ID for the node
+
         """
         with self._lock:
             if node_id not in self._node_execution_ids:
@@ -153,8 +154,7 @@ class ResponseStreamCoordinator:
             return self._node_execution_ids[node_id]
 
     def _build_paths_map(self, response_node_id: NodeID) -> list[Path]:
-        """
-        Build a paths map for a response node by finding all paths from root node
+        """Build a paths map for a response node by finding all paths from root node
         to the response node, recording branch edges along each path.
 
         Args:
@@ -162,6 +162,7 @@ class ResponseStreamCoordinator:
 
         Returns:
             List of Path objects, where each path contains branch edge IDs
+
         """
         # Get root node ID
         root_node_id = self._graph.root_node.id
@@ -208,7 +209,7 @@ class ResponseStreamCoordinator:
                 # Skip if already visited in this path
                 if next_node_id not in visited:
                     # Add edge to path and recurse
-                    new_path = current_path + [edge_id]
+                    new_path = [*current_path, edge_id]
                     find_paths(next_node_id, target_node_id, new_path, visited.copy())
 
         # Start searching from root node
@@ -223,11 +224,11 @@ class ResponseStreamCoordinator:
                 source_node = self._graph.nodes[edge.tail]
 
                 # Check if node is a branch, container, or response node
-                if source_node.execution_type in {
+                if source_node.execution_type in frozenset((
                     NodeExecutionType.BRANCH,
                     NodeExecutionType.CONTAINER,
                     NodeExecutionType.RESPONSE,
-                } or source_node.blocks_variable_output(variable_selectors):
+                )) or source_node.blocks_variable_output(variable_selectors):
                     blocking_edges.append(edge_id)
 
             # Keep the path even if it's empty
@@ -236,8 +237,7 @@ class ResponseStreamCoordinator:
         return filtered_paths
 
     def on_edge_taken(self, edge_id: str) -> Sequence[NodeRunStreamChunkEvent]:
-        """
-        Handle when an edge is taken (selected by a branch node).
+        """Handle when an edge is taken (selected by a branch node).
 
         This method updates the paths for all response nodes by removing
         the taken edge. If any response node has an empty path after removal,
@@ -248,6 +248,7 @@ class ResponseStreamCoordinator:
 
         Returns:
             List of events to emit from starting new sessions
+
         """
         events: list[NodeRunStreamChunkEvent] = []
 
@@ -277,10 +278,10 @@ class ResponseStreamCoordinator:
         return events
 
     def _active_or_queue_session(
-        self, node_id: str
+        self,
+        node_id: str,
     ) -> Sequence[NodeRunStreamChunkEvent]:
-        """
-        Start a session immediately if no active session, otherwise queue it.
+        """Start a session immediately if no active session, otherwise queue it.
         Only activates sessions that exist in the _response_sessions map.
 
         Args:
@@ -288,6 +289,7 @@ class ResponseStreamCoordinator:
 
         Returns:
             List of events from flush attempt if session started immediately
+
         """
         events: list[NodeRunStreamChunkEvent] = []
 
@@ -311,7 +313,8 @@ class ResponseStreamCoordinator:
         return events
 
     def intercept_event(
-        self, event: NodeRunStreamChunkEvent | NodeRunSucceededEvent
+        self,
+        event: NodeRunStreamChunkEvent | NodeRunSucceededEvent,
     ) -> Sequence[NodeRunStreamChunkEvent]:
         with self._lock:
             if isinstance(event, NodeRunStreamChunkEvent):
@@ -340,6 +343,10 @@ class ResponseStreamCoordinator:
 
         For selectors with special prefixes (sys, env, conversation), we use the
         active response node's information since these are not actual node IDs.
+
+        Returns:
+            A stream chunk event attributed to the correct node.
+
         """
         # Check if this is a special selector that doesn't correspond to a node
         if selector and selector[0] not in self._graph.nodes and self._active_session:
@@ -366,13 +373,18 @@ class ResponseStreamCoordinator:
         )
 
     def _process_variable_segment(
-        self, segment: VariableSegment
+        self,
+        segment: VariableSegment,
     ) -> tuple[Sequence[NodeRunStreamChunkEvent], bool]:
-        """Process a variable segment. Returns (events, is_complete).
+        """Process a variable segment.
 
         Handles both regular node selectors and special system selectors
         (sys, env, conversation).
         For special selectors, we attribute the output to the active response node.
+
+        Returns:
+            A tuple of emitted events and whether the segment is complete.
+
         """
         events: list[NodeRunStreamChunkEvent] = []
         source_selector_prefix = segment.selector[0] if segment.selector else ""
@@ -425,7 +437,7 @@ class ResponseStreamCoordinator:
             is_last_segment = bool(
                 self._active_session
                 and self._active_session.index
-                == len(self._active_session.template.segments) - 1
+                == len(self._active_session.template.segments) - 1,
             )
             events.append(
                 self._create_stream_chunk_event(
@@ -434,14 +446,15 @@ class ResponseStreamCoordinator:
                     selector=segment.selector,
                     chunk=value.markdown,
                     is_final=is_last_segment,
-                )
+                ),
             )
             is_complete = True
 
         return events, is_complete
 
     def _process_text_segment(
-        self, segment: TextSegment
+        self,
+        segment: TextSegment,
     ) -> Sequence[NodeRunStreamChunkEvent]:
         """Process a text segment. Returns (events, is_complete)."""
         assert self._active_session is not None
@@ -493,7 +506,7 @@ class ResponseStreamCoordinator:
                             continue
 
                     segment_events, is_complete = self._process_variable_segment(
-                        segment
+                        segment,
                     )
                     events.extend(segment_events)
 
@@ -517,8 +530,7 @@ class ResponseStreamCoordinator:
             return events
 
     def end_session(self, node_id: str) -> list[NodeRunStreamChunkEvent]:
-        """
-        End the active session for a response node.
+        """End the active session for a response node.
         Automatically starts the next waiting session if available.
 
         Args:
@@ -526,6 +538,7 @@ class ResponseStreamCoordinator:
 
         Returns:
             List of events from starting the next session
+
         """
         with self._lock:
             events: list[NodeRunStreamChunkEvent] = []
@@ -546,10 +559,11 @@ class ResponseStreamCoordinator:
     # ============= Internal Stream Management Methods =============
 
     def _append_stream_chunk(
-        self, selector: Sequence[str], event: NodeRunStreamChunkEvent
+        self,
+        selector: Sequence[str],
+        event: NodeRunStreamChunkEvent,
     ) -> None:
-        """
-        Append a stream chunk to the internal buffer.
+        """Append a stream chunk to the internal buffer.
 
         Args:
             selector: List of strings identifying the stream location
@@ -557,11 +571,13 @@ class ResponseStreamCoordinator:
 
         Raises:
             ValueError: If the stream is already closed
+
         """
         key = tuple(selector)
 
         if key in self._closed_streams:
-            raise ValueError(f"Stream {'.'.join(selector)} is already closed")
+            msg = f"Stream {'.'.join(selector)} is already closed"
+            raise ValueError(msg)
 
         if key not in self._stream_buffers:
             self._stream_buffers[key] = []
@@ -570,16 +586,17 @@ class ResponseStreamCoordinator:
         self._stream_buffers[key].append(event)
 
     def _pop_stream_chunk(
-        self, selector: Sequence[str]
+        self,
+        selector: Sequence[str],
     ) -> NodeRunStreamChunkEvent | None:
-        """
-        Pop the next unread stream chunk from the buffer.
+        """Pop the next unread stream chunk from the buffer.
 
         Args:
             selector: List of strings identifying the stream location
 
         Returns:
             The next event, or None if no unread events available
+
         """
         key = tuple(selector)
 
@@ -597,14 +614,14 @@ class ResponseStreamCoordinator:
         return event
 
     def _has_unread_stream(self, selector: Sequence[str]) -> bool:
-        """
-        Check if the stream has unread events.
+        """Check if the stream has unread events.
 
         Args:
             selector: List of strings identifying the stream location
 
         Returns:
             True if there are unread events, False otherwise
+
         """
         key = tuple(selector)
 
@@ -615,47 +632,46 @@ class ResponseStreamCoordinator:
         return position < len(self._stream_buffers[key])
 
     def _close_stream(self, selector: Sequence[str]) -> None:
-        """
-        Mark a stream as closed (no more chunks can be appended).
+        """Mark a stream as closed (no more chunks can be appended).
 
         Args:
             selector: List of strings identifying the stream location
+
         """
         key = tuple(selector)
         self._closed_streams.add(key)
 
     def _is_stream_closed(self, selector: Sequence[str]) -> bool:
-        """
-        Check if a stream is closed.
+        """Check if a stream is closed.
 
         Args:
             selector: List of strings identifying the stream location
 
         Returns:
             True if the stream is closed, False otherwise
+
         """
         key = tuple(selector)
         return key in self._closed_streams
 
     def _serialize_session(
-        self, session: ResponseSession | None
+        self,
+        session: ResponseSession | None,
     ) -> ResponseSessionState | None:
         """Convert an in-memory session into its serializable form."""
-
         if session is None:
             return None
         return ResponseSessionState(node_id=session.node_id, index=session.index)
 
     def _session_from_state(
-        self, session_state: ResponseSessionState
+        self,
+        session_state: ResponseSessionState,
     ) -> ResponseSession:
         """Rebuild a response session from serialized data."""
-
         node = self._graph.nodes.get(session_state.node_id)
         if node is None:
-            raise ValueError(
-                f"Unknown response node '{session_state.node_id}' in serialized state"
-            )
+            msg = f"Unknown response node '{session_state.node_id}' in serialized state"
+            raise ValueError(msg)
 
         session = ResponseSession.from_node(node)
         session.index = session_state.index
@@ -663,7 +679,6 @@ class ResponseStreamCoordinator:
 
     def dumps(self) -> str:
         """Serialize coordinator state to JSON."""
-
         with self._lock:
             state = ResponseStreamCoordinatorState(
                 response_nodes=sorted(self._response_nodes),
@@ -700,14 +715,15 @@ class ResponseStreamCoordinator:
 
     def loads(self, data: str) -> None:
         """Restore coordinator state from JSON."""
-
         state = ResponseStreamCoordinatorState.model_validate_json(data)
 
         if state.type != "ResponseStreamCoordinator":
-            raise ValueError(f"Invalid serialized data type: {state.type}")
+            msg = f"Invalid serialized data type: {state.type}"
+            raise ValueError(msg)
 
         if state.version != "1.0":
-            raise ValueError(f"Unsupported serialized version: {state.version}")
+            msg = f"Unsupported serialized version: {state.version}"
+            raise ValueError(msg)
 
         with self._lock:
             self._response_nodes = set(state.response_nodes)

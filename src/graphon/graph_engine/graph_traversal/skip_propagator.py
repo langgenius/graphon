@@ -1,6 +1,4 @@
-"""
-Skip state propagation through the graph.
-"""
+"""Skip state propagation through the graph."""
 
 from collections.abc import Sequence
 from typing import final
@@ -13,8 +11,7 @@ from ..graph_state_manager import GraphStateManager
 
 @final
 class SkipPropagator:
-    """
-    Propagates skip states through the graph.
+    """Propagates skip states through the graph.
 
     When a node is skipped, this ensures all downstream nodes
     that depend solely on it are also skipped.
@@ -25,19 +22,18 @@ class SkipPropagator:
         graph: Graph,
         state_manager: GraphStateManager,
     ) -> None:
-        """
-        Initialize the skip propagator.
+        """Initialize the skip propagator.
 
         Args:
             graph: The workflow graph
             state_manager: Unified state manager
+
         """
         self._graph = graph
         self._state_manager = state_manager
 
     def propagate_skip_from_edge(self, edge_id: str) -> None:
-        """
-        Recursively propagate skip state from a skipped edge.
+        """Recursively propagate skip state from a skipped edge.
 
         Rules:
         - If a node has any UNKNOWN incoming edges, stop processing
@@ -46,6 +42,7 @@ class SkipPropagator:
 
         Args:
             edge_id: The ID of the skipped edge to start from
+
         """
         downstream_node_id = self._graph.edges[edge_id].head
         incoming_edges = self._graph.get_incoming_edges(downstream_node_id)
@@ -69,11 +66,11 @@ class SkipPropagator:
             self._propagate_skip_to_node(downstream_node_id)
 
     def _propagate_skip_to_node(self, node_id: str) -> None:
-        """
-        Mark a node and all its outgoing edges as skipped.
+        """Mark a node and all its outgoing edges as skipped.
 
         Args:
             node_id: The ID of the node to skip
+
         """
         # Mark node as skipped
         self._state_manager.mark_node_skipped(node_id)
@@ -86,11 +83,11 @@ class SkipPropagator:
             self.propagate_skip_from_edge(edge.id)
 
     def skip_branch_paths(self, unselected_edges: Sequence[Edge]) -> None:
-        """
-        Skip all paths from unselected branch edges.
+        """Skip all paths from unselected branch edges.
 
         Args:
             unselected_edges: List of edges not taken by the branch
+
         """
         for edge in unselected_edges:
             self._state_manager.mark_edge_skipped(edge.id)

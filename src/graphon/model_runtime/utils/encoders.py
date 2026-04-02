@@ -25,8 +25,10 @@ from pydantic_core import Url
 from pydantic_extra_types.color import Color
 
 
-def _model_dump(
-    model: BaseModel, mode: Literal["json", "python"] = "json", **kwargs: Any
+def model_dump(
+    model: BaseModel,
+    mode: Literal["json", "python"] = "json",
+    **kwargs: Any,
 ) -> Any:
     return model.model_dump(mode=mode, **kwargs)
 
@@ -39,8 +41,7 @@ def isoformat(o: datetime.date | datetime.time) -> str:
 # Taken from Pydantic v1 as is
 # TODO: pv2 should this return strings instead?
 def decimal_encoder(dec_value: Decimal) -> int | float:
-    """
-    Encodes a Decimal as int of there's no exponent, otherwise float
+    """Encodes a Decimal as int of there's no exponent, otherwise float
 
     This is useful when we use ConstrainedDecimal to represent Numeric(x,0)
     where a integer (but not int typed) is used. Encoding this as a float
@@ -52,6 +53,10 @@ def decimal_encoder(dec_value: Decimal) -> int | float:
 
     >>> decimal_encoder(Decimal("1"))
     1
+
+    Returns:
+        An `int` for integral decimals, otherwise a `float`.
+
     """
     if dec_value.as_tuple().exponent >= 0:  # type: ignore[operator]
         return int(dec_value)
@@ -92,7 +97,7 @@ def generate_encoders_by_class_tuples(
     type_encoder_map: dict[Any, Callable[[Any], Any]],
 ) -> dict[Callable[[Any], Any], tuple[Any, ...]]:
     encoders_by_class_tuples: dict[Callable[[Any], Any], tuple[Any, ...]] = defaultdict(
-        tuple
+        tuple,
     )
     for type_, encoder in type_encoder_map.items():
         encoders_by_class_tuples[encoder] += (type_,)
@@ -100,6 +105,158 @@ def generate_encoders_by_class_tuples(
 
 
 encoders_by_class_tuples = generate_encoders_by_class_tuples(ENCODERS_BY_TYPE)
+_ENCODER_UNSET = object()
+
+
+def _encode_with_custom_encoder(
+    obj: Any,
+    custom_encoder: dict[Any, Callable[[Any], Any]],
+) -> Any:
+    if type(obj) in custom_encoder:
+        return custom_encoder[type(obj)](obj)
+    for encoder_type, encoder_instance in custom_encoder.items():
+        if isinstance(obj, encoder_type):
+            return encoder_instance(obj)
+    return _ENCODER_UNSET
+
+
+def _encode_pydantic_model(
+    obj: BaseModel,
+    *,
+    by_alias: bool,
+    exclude_unset: bool,
+    exclude_defaults: bool,
+    exclude_none: bool,
+    excluded_key_prefixes: Sequence[str],
+) -> Any:
+    obj_dict = model_dump(
+        obj,
+        mode="json",
+        include=None,
+        exclude=None,
+        by_alias=by_alias,
+        exclude_unset=exclude_unset,
+        exclude_none=exclude_none,
+        exclude_defaults=exclude_defaults,
+    )
+    if "__root__" in obj_dict:
+        obj_dict = obj_dict["__root__"]
+    return jsonable_encoder(
+        obj_dict,
+        exclude_none=exclude_none,
+        exclude_defaults=exclude_defaults,
+        excluded_key_prefixes=excluded_key_prefixes,
+    )
+
+
+def _encode_dataclass(
+    obj: Any,
+    *,
+    by_alias: bool,
+    exclude_unset: bool,
+    exclude_defaults: bool,
+    exclude_none: bool,
+    custom_encoder: dict[Any, Callable[[Any], Any]],
+    excluded_key_prefixes: Sequence[str],
+) -> Any:
+    obj_dict = dataclasses.asdict(obj)
+    return jsonable_encoder(
+        obj_dict,
+        by_alias=by_alias,
+        exclude_unset=exclude_unset,
+        exclude_defaults=exclude_defaults,
+        exclude_none=exclude_none,
+        custom_encoder=custom_encoder,
+        excluded_key_prefixes=excluded_key_prefixes,
+    )
+
+
+def _encode_mapping(
+    obj: dict[Any, Any],
+    *,
+    by_alias: bool,
+    exclude_unset: bool,
+    exclude_none: bool,
+    custom_encoder: dict[Any, Callable[[Any], Any]],
+    excluded_key_prefixes: Sequence[str],
+) -> dict[Any, Any]:
+    encoded_dict = {}
+    for key, value in obj.items():
+        if isinstance(key, str) and any(
+            key.startswith(prefix) for prefix in excluded_key_prefixes
+        ):
+            continue
+        if value is None and exclude_none:
+            continue
+
+        encoded_key = jsonable_encoder(
+            key,
+            by_alias=by_alias,
+            exclude_unset=exclude_unset,
+            exclude_none=exclude_none,
+            custom_encoder=custom_encoder,
+            excluded_key_prefixes=excluded_key_prefixes,
+        )
+        encoded_value = jsonable_encoder(
+            value,
+            by_alias=by_alias,
+            exclude_unset=exclude_unset,
+            exclude_none=exclude_none,
+            custom_encoder=custom_encoder,
+            excluded_key_prefixes=excluded_key_prefixes,
+        )
+        encoded_dict[encoded_key] = encoded_value
+    return encoded_dict
+
+
+def _encode_collection(
+    obj: list[Any]
+    | set[Any]
+    | frozenset[Any]
+    | GeneratorType
+    | tuple[Any, ...]
+    | deque,
+    *,
+    by_alias: bool,
+    exclude_unset: bool,
+    exclude_defaults: bool,
+    exclude_none: bool,
+    custom_encoder: dict[Any, Callable[[Any], Any]],
+    excluded_key_prefixes: Sequence[str],
+) -> list[Any]:
+    return [
+        jsonable_encoder(
+            item,
+            by_alias=by_alias,
+            exclude_unset=exclude_unset,
+            exclude_defaults=exclude_defaults,
+            exclude_none=exclude_none,
+            custom_encoder=custom_encoder,
+            excluded_key_prefixes=excluded_key_prefixes,
+        )
+        for item in obj
+    ]
+
+
+def _find_type_encoder(obj: Any) -> Callable[[Any], Any] | None:
+    if type(obj) in ENCODERS_BY_TYPE:
+        return ENCODERS_BY_TYPE[type(obj)]
+    for encoder, classes_tuple in encoders_by_class_tuples.items():
+        if isinstance(obj, classes_tuple):
+            return encoder
+    return None
+
+
+def _coerce_mapping_like(obj: Any) -> Any:
+    try:
+        return dict(obj)
+    except (TypeError, ValueError) as dict_error:
+        errors = [dict_error]
+        try:
+            return vars(obj)
+        except TypeError as vars_error:
+            errors.append(vars_error)
+            raise ValueError(str(errors)) from vars_error
 
 
 def jsonable_encoder(
@@ -112,115 +269,68 @@ def jsonable_encoder(
     excluded_key_prefixes: Sequence[str] = (),
 ) -> Any:
     custom_encoder = custom_encoder or {}
-    if custom_encoder:
-        if type(obj) in custom_encoder:
-            return custom_encoder[type(obj)](obj)
-        for encoder_type, encoder_instance in custom_encoder.items():
-            if isinstance(obj, encoder_type):
-                return encoder_instance(obj)
-    if isinstance(obj, BaseModel):
-        obj_dict = _model_dump(
-            obj,
-            mode="json",
-            include=None,
-            exclude=None,
-            by_alias=by_alias,
-            exclude_unset=exclude_unset,
-            exclude_none=exclude_none,
-            exclude_defaults=exclude_defaults,
-        )
-        if "__root__" in obj_dict:
-            obj_dict = obj_dict["__root__"]
-        return jsonable_encoder(
-            obj_dict,
-            exclude_none=exclude_none,
-            exclude_defaults=exclude_defaults,
-            excluded_key_prefixes=excluded_key_prefixes,
-        )
-    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-        # Ensure obj is a dataclass instance, not a dataclass type
-        obj_dict = dataclasses.asdict(obj)
-        return jsonable_encoder(
-            obj_dict,
-            by_alias=by_alias,
-            exclude_unset=exclude_unset,
-            exclude_defaults=exclude_defaults,
-            exclude_none=exclude_none,
-            custom_encoder=custom_encoder,
-            excluded_key_prefixes=excluded_key_prefixes,
-        )
-    if isinstance(obj, Enum):
-        return obj.value
-    if isinstance(obj, PurePath):
-        return str(obj)
-    if isinstance(obj, str | int | float | type(None)):
-        return obj
-    if isinstance(obj, Decimal):
-        return format(obj, "f")
-    if isinstance(obj, dict):
-        encoded_dict = {}
-        for key, value in obj.items():
-            if isinstance(key, str) and any(
-                key.startswith(prefix) for prefix in excluded_key_prefixes
-            ):
-                continue
-            if value is None and exclude_none:
-                continue
-
-            encoded_key = jsonable_encoder(
-                key,
-                by_alias=by_alias,
-                exclude_unset=exclude_unset,
-                exclude_none=exclude_none,
-                custom_encoder=custom_encoder,
-                excluded_key_prefixes=excluded_key_prefixes,
-            )
-            encoded_value = jsonable_encoder(
-                value,
-                by_alias=by_alias,
-                exclude_unset=exclude_unset,
-                exclude_none=exclude_none,
-                custom_encoder=custom_encoder,
-                excluded_key_prefixes=excluded_key_prefixes,
-            )
-            encoded_dict[encoded_key] = encoded_value
-        return encoded_dict
-    if isinstance(obj, list | set | frozenset | GeneratorType | tuple | deque):
-        return [
-            jsonable_encoder(
-                item,
-                by_alias=by_alias,
-                exclude_unset=exclude_unset,
-                exclude_defaults=exclude_defaults,
-                exclude_none=exclude_none,
-                custom_encoder=custom_encoder,
-                excluded_key_prefixes=excluded_key_prefixes,
-            )
-            for item in obj
-        ]
-
-    if type(obj) in ENCODERS_BY_TYPE:
-        return ENCODERS_BY_TYPE[type(obj)](obj)
-    for encoder, classes_tuple in encoders_by_class_tuples.items():
-        if isinstance(obj, classes_tuple):
-            return encoder(obj)
-
-    try:
-        data = dict(obj)  # type: ignore
-    except Exception as e:
-        errors: list[Exception] = []
-        errors.append(e)
-        try:
-            data = vars(obj)  # type: ignore
-        except Exception as e:
-            errors.append(e)
-            raise ValueError(str(errors)) from e
-    return jsonable_encoder(
-        data,
-        by_alias=by_alias,
-        exclude_unset=exclude_unset,
-        exclude_defaults=exclude_defaults,
-        exclude_none=exclude_none,
-        custom_encoder=custom_encoder,
-        excluded_key_prefixes=excluded_key_prefixes,
-    )
+    result = _encode_with_custom_encoder(obj, custom_encoder)
+    if result is _ENCODER_UNSET:
+        match obj:
+            case BaseModel():
+                result = _encode_pydantic_model(
+                    obj,
+                    by_alias=by_alias,
+                    exclude_unset=exclude_unset,
+                    exclude_defaults=exclude_defaults,
+                    exclude_none=exclude_none,
+                    excluded_key_prefixes=excluded_key_prefixes,
+                )
+            case _ if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+                result = _encode_dataclass(
+                    obj,
+                    by_alias=by_alias,
+                    exclude_unset=exclude_unset,
+                    exclude_defaults=exclude_defaults,
+                    exclude_none=exclude_none,
+                    custom_encoder=custom_encoder,
+                    excluded_key_prefixes=excluded_key_prefixes,
+                )
+            case Enum():
+                result = obj.value
+            case PurePath():
+                result = str(obj)
+            case None | bool() | str() | int() | float():
+                result = obj
+            case Decimal():
+                result = format(obj, "f")
+            case dict():
+                result = _encode_mapping(
+                    obj,
+                    by_alias=by_alias,
+                    exclude_unset=exclude_unset,
+                    exclude_none=exclude_none,
+                    custom_encoder=custom_encoder,
+                    excluded_key_prefixes=excluded_key_prefixes,
+                )
+            case list() | set() | frozenset() | GeneratorType() | tuple() | deque():
+                result = _encode_collection(
+                    obj,
+                    by_alias=by_alias,
+                    exclude_unset=exclude_unset,
+                    exclude_defaults=exclude_defaults,
+                    exclude_none=exclude_none,
+                    custom_encoder=custom_encoder,
+                    excluded_key_prefixes=excluded_key_prefixes,
+                )
+            case _:
+                type_encoder = _find_type_encoder(obj)
+                if type_encoder is not None:
+                    result = type_encoder(obj)
+                else:
+                    data = _coerce_mapping_like(obj)
+                    result = jsonable_encoder(
+                        data,
+                        by_alias=by_alias,
+                        exclude_unset=exclude_unset,
+                        exclude_defaults=exclude_defaults,
+                        exclude_none=exclude_none,
+                        custom_encoder=custom_encoder,
+                        excluded_key_prefixes=excluded_key_prefixes,
+                    )
+    return result

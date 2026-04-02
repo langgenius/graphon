@@ -1,3 +1,4 @@
+import operator
 from collections.abc import Callable, Sequence
 from typing import Any, override
 
@@ -36,12 +37,55 @@ type _SUPPORTED_TYPES_ALIAS = (
 def _negation[T](filter_: Callable[[T], bool]) -> Callable[[T], bool]:
     """Returns the negation of a given filter function. If the original filter
     returns `True` for a value, the negated filter will return `False`, and vice versa.
+
+    Returns:
+        A predicate that inverts the boolean result of `filter_`.
+
     """
 
     def wrapper(value: T) -> bool:
         return not filter_(value)
 
     return wrapper
+
+
+def _extract_file_name(file: File) -> str:
+    return file.filename or ""
+
+
+def _extract_file_type(file: File) -> str:
+    return str(file.type)
+
+
+def _extract_file_extension(file: File) -> str:
+    return file.extension or ""
+
+
+def _extract_file_mime_type(file: File) -> str:
+    return file.mime_type or ""
+
+
+def _extract_file_transfer_method(file: File) -> str:
+    return str(file.transfer_method)
+
+
+def _extract_file_url(file: File) -> str:
+    return file.remote_url or ""
+
+
+def _extract_file_related_id(file: File) -> str:
+    return file.related_id or ""
+
+
+_FILE_STRING_EXTRACTORS: dict[str, Callable[[File], str]] = {
+    "name": _extract_file_name,
+    "type": _extract_file_type,
+    "extension": _extract_file_extension,
+    "mime_type": _extract_file_mime_type,
+    "transfer_method": _extract_file_transfer_method,
+    "url": _extract_file_url,
+    "related_id": _extract_file_related_id,
+}
 
 
 class ListOperatorNode(Node[ListOperatorNodeData]):
@@ -145,40 +189,41 @@ class ListOperatorNode(Node[ListOperatorNodeData]):
         for condition in self.node_data.filter_by.conditions:
             if isinstance(variable, ArrayStringSegment):
                 if not isinstance(condition.value, str):
-                    raise InvalidFilterValueError(
-                        f"Invalid filter value: {condition.value}"
-                    )
+                    msg = f"Invalid filter value: {condition.value}"
+                    raise InvalidFilterValueError(msg)
                 value = self.graph_runtime_state.variable_pool.convert_template(
-                    condition.value
+                    condition.value,
                 ).text
                 filter_func = _get_string_filter_func(
-                    condition=condition.comparison_operator, value=value
+                    condition=condition.comparison_operator,
+                    value=value,
                 )
                 result = list(filter(filter_func, variable.value))
                 variable = variable.model_copy(update={"value": result})
             elif isinstance(variable, ArrayNumberSegment):
                 if not isinstance(condition.value, str):
-                    raise InvalidFilterValueError(
-                        f"Invalid filter value: {condition.value}"
-                    )
+                    msg = f"Invalid filter value: {condition.value}"
+                    raise InvalidFilterValueError(msg)
                 value = self.graph_runtime_state.variable_pool.convert_template(
-                    condition.value
+                    condition.value,
                 ).text
                 filter_func = _get_number_filter_func(
-                    condition=condition.comparison_operator, value=float(value)
+                    condition=condition.comparison_operator,
+                    value=float(value),
                 )
                 result = list(filter(filter_func, variable.value))
                 variable = variable.model_copy(update={"value": result})
             elif isinstance(variable, ArrayFileSegment):
                 if isinstance(condition.value, str):
                     value = self.graph_runtime_state.variable_pool.convert_template(
-                        condition.value
+                        condition.value,
                     ).text
                 elif isinstance(condition.value, bool):
-                    raise ValueError(
+                    msg = (
                         "File filter expects a string value, "
                         f"got {type(condition.value)}"
                     )
+                    raise TypeError(msg)
                 else:
                     value = condition.value
                 filter_func = _get_file_filter_func(
@@ -190,12 +235,14 @@ class ListOperatorNode(Node[ListOperatorNodeData]):
                 variable = variable.model_copy(update={"value": result})
             else:
                 if not isinstance(condition.value, bool):
-                    raise ValueError(
+                    msg = (
                         "Boolean filter expects a boolean value, "
                         f"got {type(condition.value)}"
                     )
+                    raise TypeError(msg)
                 filter_func = _get_boolean_filter_func(
-                    condition=condition.comparison_operator, value=condition.value
+                    condition=condition.comparison_operator,
+                    value=condition.value,
                 )
                 result = list(filter(filter_func, variable.value))
                 variable = variable.model_copy(update={"value": result})
@@ -203,10 +250,12 @@ class ListOperatorNode(Node[ListOperatorNodeData]):
 
     def _apply_order(self, variable: _SUPPORTED_TYPES_ALIAS) -> _SUPPORTED_TYPES_ALIAS:
         if isinstance(
-            variable, (ArrayStringSegment, ArrayNumberSegment, ArrayBooleanSegment)
+            variable,
+            (ArrayStringSegment, ArrayNumberSegment, ArrayBooleanSegment),
         ):
             result = sorted(
-                variable.value, reverse=self.node_data.order_by.value == Order.DESC
+                variable.value,
+                reverse=self.node_data.order_by.value == Order.DESC,
             )
             variable = variable.model_copy(update={"value": result})
         else:
@@ -224,19 +273,20 @@ class ListOperatorNode(Node[ListOperatorNodeData]):
         return variable.model_copy(update={"value": result})
 
     def _extract_slice(
-        self, variable: _SUPPORTED_TYPES_ALIAS
+        self,
+        variable: _SUPPORTED_TYPES_ALIAS,
     ) -> _SUPPORTED_TYPES_ALIAS:
         value = int(
             self.graph_runtime_state.variable_pool.convert_template(
-                self.node_data.extract_by.serial
-            ).text
+                self.node_data.extract_by.serial,
+            ).text,
         )
         if value < 1:
-            raise ValueError(f"Invalid serial index: must be >= 1, got {value}")
+            msg = f"Invalid serial index: must be >= 1, got {value}"
+            raise ValueError(msg)
         if value > len(variable.value):
-            raise InvalidKeyError(
-                f"Invalid serial index: must be <= {len(variable.value)}, got {value}"
-            )
+            msg = f"Invalid serial index: must be <= {len(variable.value)}, got {value}"
+            raise InvalidKeyError(msg)
         value -= 1
         result = variable.value[value]
         return variable.model_copy(update={"value": [result]})
@@ -247,57 +297,50 @@ def _get_file_extract_number_func(*, key: str) -> Callable[[File], int]:
         case "size":
             return lambda x: x.size
         case _:
-            raise InvalidKeyError(f"Invalid key: {key}")
+            msg = f"Invalid key: {key}"
+            raise InvalidKeyError(msg)
 
 
 def _get_file_extract_string_func(*, key: str) -> Callable[[File], str]:
-    match key:
-        case "name":
-            return lambda x: x.filename or ""
-        case "type":
-            return lambda x: str(x.type)
-        case "extension":
-            return lambda x: x.extension or ""
-        case "mime_type":
-            return lambda x: x.mime_type or ""
-        case "transfer_method":
-            return lambda x: str(x.transfer_method)
-        case "url":
-            return lambda x: x.remote_url or ""
-        case "related_id":
-            return lambda x: x.related_id or ""
-        case _:
-            raise InvalidKeyError(f"Invalid key: {key}")
+    extractor = _FILE_STRING_EXTRACTORS.get(key)
+    if extractor is None:
+        msg = f"Invalid key: {key}"
+        raise InvalidKeyError(msg)
+    return extractor
 
 
 def _get_string_filter_func(*, condition: str, value: str) -> Callable[[str], bool]:
     match condition:
         case "contains":
-            return _contains(value)
+            filter_func = _contains(value)
         case "start with":
-            return _startswith(value)
+            filter_func = _startswith(value)
         case "end with":
-            return _endswith(value)
+            filter_func = _endswith(value)
         case "is":
-            return _is(value)
+            filter_func = _is(value)
         case "in":
-            return _in(value)
+            filter_func = _in(value)
         case "empty":
-            return lambda x: x == ""
+            filter_func = operator.not_
         case "not contains":
-            return _negation(_contains(value))
+            filter_func = _negation(_contains(value))
         case "is not":
-            return _negation(_is(value))
+            filter_func = _negation(_is(value))
         case "not in":
-            return _negation(_in(value))
+            filter_func = _negation(_in(value))
         case "not empty":
-            return lambda x: x != ""
+            filter_func = bool
         case _:
-            raise InvalidConditionError(f"Invalid condition: {condition}")
+            msg = f"Invalid condition: {condition}"
+            raise InvalidConditionError(msg)
+    return filter_func
 
 
 def _get_sequence_filter_func(
-    *, condition: str, value: Sequence[str]
+    *,
+    condition: str,
+    value: Sequence[str],
 ) -> Callable[[str], bool]:
     match condition:
         case "in":
@@ -305,11 +348,14 @@ def _get_sequence_filter_func(
         case "not in":
             return _negation(_in(value))
         case _:
-            raise InvalidConditionError(f"Invalid condition: {condition}")
+            msg = f"Invalid condition: {condition}"
+            raise InvalidConditionError(msg)
 
 
 def _get_number_filter_func(
-    *, condition: str, value: float
+    *,
+    condition: str,
+    value: float,
 ) -> Callable[[int | float], bool]:
     match condition:
         case "=":
@@ -325,11 +371,14 @@ def _get_number_filter_func(
         case "≥":
             return _ge(value)
         case _:
-            raise InvalidConditionError(f"Invalid condition: {condition}")
+            msg = f"Invalid condition: {condition}"
+            raise InvalidConditionError(msg)
 
 
 def _get_boolean_filter_func(
-    *, condition: FilterOperator, value: bool
+    *,
+    condition: FilterOperator,
+    value: bool,
 ) -> Callable[[bool], bool]:
     match condition:
         case FilterOperator.IS:
@@ -337,30 +386,40 @@ def _get_boolean_filter_func(
         case FilterOperator.IS_NOT:
             return _negation(_is(value))
         case _:
-            raise InvalidConditionError(f"Invalid condition: {condition}")
+            msg = f"Invalid condition: {condition}"
+            raise InvalidConditionError(msg)
 
 
 def _get_file_filter_func(
-    *, key: str, condition: str, value: str | Sequence[str]
+    *,
+    key: str,
+    condition: str,
+    value: str | Sequence[str],
 ) -> Callable[[File], bool]:
-    if key in {"name", "extension", "mime_type", "url", "related_id"} and isinstance(
-        value, str
-    ):
+    if key in frozenset((
+        "name",
+        "extension",
+        "mime_type",
+        "url",
+        "related_id",
+    )) and isinstance(value, str):
         extract_func = _get_file_extract_string_func(key=key)
         return lambda x: _get_string_filter_func(condition=condition, value=value)(
-            extract_func(x)
+            extract_func(x),
         )
-    if key in {"type", "transfer_method"}:
+    if key in frozenset(("type", "transfer_method")):
         extract_func = _get_file_extract_string_func(key=key)
         return lambda x: _get_sequence_filter_func(condition=condition, value=value)(
-            extract_func(x)
+            extract_func(x),
         )
     if key == "size" and isinstance(value, str):
         extract_number = _get_file_extract_number_func(key=key)
         return lambda x: _get_number_filter_func(
-            condition=condition, value=float(value)
+            condition=condition,
+            value=float(value),
         )(extract_number(x))
-    raise InvalidKeyError(f"Invalid key: {key}")
+    msg = f"Invalid key: {key}"
+    raise InvalidKeyError(msg)
 
 
 def _contains(value: str) -> Callable[[str], bool]:
@@ -407,9 +466,14 @@ def _ge(value: float) -> Callable[[int | float], bool]:
     return lambda x: x >= value
 
 
-def _order_file(*, order: Order, order_by: str = "", array: Sequence[File]):
+def _order_file(
+    *,
+    order: Order,
+    order_by: str = "",
+    array: Sequence[File],
+) -> list[File]:
     extract_func: Callable[[File], Any]
-    if order_by in {
+    if order_by in frozenset((
         "name",
         "type",
         "extension",
@@ -417,10 +481,11 @@ def _order_file(*, order: Order, order_by: str = "", array: Sequence[File]):
         "transfer_method",
         "url",
         "related_id",
-    }:
+    )):
         extract_func = _get_file_extract_string_func(key=order_by)
-        return sorted(array, key=lambda x: extract_func(x), reverse=order == Order.DESC)
+        return sorted(array, key=extract_func, reverse=order == Order.DESC)
     if order_by == "size":
         extract_func = _get_file_extract_number_func(key=order_by)
-        return sorted(array, key=lambda x: extract_func(x), reverse=order == Order.DESC)
-    raise InvalidKeyError(f"Invalid order key: {order_by}")
+        return sorted(array, key=extract_func, reverse=order == Order.DESC)
+    msg = f"Invalid order key: {order_by}"
+    raise InvalidKeyError(msg)

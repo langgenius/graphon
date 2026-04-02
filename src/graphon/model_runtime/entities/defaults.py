@@ -16,7 +16,7 @@ PARAMETER_RULE_TEMPLATE: dict[DefaultParameterName, dict] = {
             ),
             "zh_Hans": (
                 "温度控制随机性。较低的温度会导致较少的随机完成。"
-                "随着温度接近零，模型将变得确定性和重复性。"
+                "随着温度接近零，模型将变得确定性和重复性。"  # noqa: RUF001
                 "较高的温度会导致更多的随机完成。"
             ),
         },
@@ -38,7 +38,7 @@ PARAMETER_RULE_TEMPLATE: dict[DefaultParameterName, dict] = {
                 "likelihood-weighted options are considered."
             ),
             "zh_Hans": (
-                "通过核心采样控制多样性：0.5 表示考虑了一半的所有可能性加权选项。"
+                "通过核心采样控制多样性：0.5 表示考虑了一半的所有可能性加权选项。"  # noqa: RUF001
             ),
         },
         "required": False,
@@ -116,7 +116,7 @@ PARAMETER_RULE_TEMPLATE: dict[DefaultParameterName, dict] = {
                 "If the generated results are truncated, you can increase this "
                 "parameter."
             ),
-            "zh_Hans": "指定生成结果长度的上限。如果生成结果截断，可以调大该参数。",
+            "zh_Hans": "指定生成结果长度的上限。如果生成结果截断，可以调大该参数。",  # noqa: RUF001
         },
         "required": False,
         "default": 64,
@@ -136,7 +136,7 @@ PARAMETER_RULE_TEMPLATE: dict[DefaultParameterName, dict] = {
                 "block as possible, such as JSON, XML, etc."
             ),
             "zh_Hans": (
-                "设置一个返回格式，确保 llm 的输出尽可能是有效的代码块，如 "
+                "设置一个返回格式，确保 llm 的输出尽可能是有效的代码块，如 "  # noqa: RUF001
                 "JSON、XML 等。"
             ),
         },
@@ -150,7 +150,7 @@ PARAMETER_RULE_TEMPLATE: dict[DefaultParameterName, dict] = {
         "type": "text",
         "help": {
             "en_US": "Set a response json schema will ensure LLM to adhere it.",
-            "zh_Hans": "设置返回的 json schema，llm 将按照它返回",
+            "zh_Hans": "设置返回的 json schema，llm 将按照它返回",  # noqa: RUF001
         },
         "required": False,
     },

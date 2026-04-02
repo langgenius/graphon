@@ -1,6 +1,4 @@
-"""
-Unified event manager for collecting and emitting events.
-"""
+"""Unified event manager for collecting and emitting events."""
 
 import logging
 import threading
@@ -18,8 +16,7 @@ _logger = logging.getLogger(__name__)
 
 @final
 class ReadWriteLock:
-    """
-    A read-write lock implementation that allows multiple concurrent readers
+    """A read-write lock implementation that allows multiple concurrent readers
     but only one writer at a time.
     """
 
@@ -76,8 +73,7 @@ class ReadWriteLock:
 
 @final
 class EventManager:
-    """
-    Unified event manager that collects, buffers, and emits events.
+    """Unified event manager that collects, buffers, and emits events.
 
     This class combines event collection with event emission, providing
     thread-safe event management with support for notifying layers and
@@ -92,11 +88,11 @@ class EventManager:
         self._execution_complete = threading.Event()
 
     def set_layers(self, layers: list[GraphEngineLayer]) -> None:
-        """
-        Set the layers to notify on event collection.
+        """Set the layers to notify on event collection.
 
         Args:
             layers: List of layers to notify
+
         """
         self._layers = layers
 
@@ -105,11 +101,11 @@ class EventManager:
         self._notify_layers(event)
 
     def collect(self, event: GraphEngineEvent) -> None:
-        """
-        Thread-safe method to collect an event.
+        """Thread-safe method to collect an event.
 
         Args:
             event: The event to collect
+
         """
         with self._lock.write_lock():
             self._events.append(event)
@@ -122,24 +118,24 @@ class EventManager:
         self._notify_layers(event)
 
     def _get_new_events(self, start_index: int) -> list[GraphEngineEvent]:
-        """
-        Get new events starting from a specific index.
+        """Get new events starting from a specific index.
 
         Args:
             start_index: The index to start from
 
         Returns:
             List of new events
+
         """
         with self._lock.read_lock():
             return list(self._events[start_index:])
 
     def _event_count(self) -> int:
-        """
-        Get the current count of collected events.
+        """Get the current count of collected events.
 
         Returns:
             Number of collected events
+
         """
         with self._lock.read_lock():
             return len(self._events)
@@ -149,11 +145,11 @@ class EventManager:
         self._execution_complete.set()
 
     def emit_events(self) -> Generator[GraphEngineEvent, None, None]:
-        """
-        Generator that yields events as they're collected.
+        """Generator that yields events as they're collected.
 
         Yields:
             GraphEngineEvent instances as they're processed
+
         """
         yielded_count = 0
 
@@ -173,13 +169,13 @@ class EventManager:
                 time.sleep(0.001)
 
     def _notify_layers(self, event: GraphEngineEvent) -> None:
-        """
-        Notify all layers of an event.
+        """Notify all layers of an event.
 
         Layer exceptions are caught and logged to prevent disrupting collection.
 
         Args:
             event: The event to send to layers
+
         """
         for layer in self._layers:
             try:

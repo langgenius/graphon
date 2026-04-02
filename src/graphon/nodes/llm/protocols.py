@@ -17,7 +17,9 @@ class ModelFactory(Protocol):
     """Port for creating prepared graph-facing LLM runtimes for execution."""
 
     def init_model_instance(
-        self, provider_name: str, model_name: str
+        self,
+        provider_name: str,
+        model_name: str,
     ) -> PreparedLLMProtocol:
         """Create a prepared LLM runtime that is ready for graph execution."""
         ...

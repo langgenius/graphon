@@ -3,13 +3,11 @@ from graphon.model_runtime.entities.text_embedding_entities import (
     EmbeddingInputType,
     EmbeddingResult,
 )
-from graphon.model_runtime.model_providers.__base.ai_model import AIModel
+from graphon.model_runtime.model_providers.base.ai_model import AIModel
 
 
 class TextEmbeddingModel(AIModel):
-    """
-    Model class for text embedding model.
-    """
+    """Model class for text embedding model."""
 
     model_type: ModelType = ModelType.TEXT_EMBEDDING
 
@@ -21,16 +19,11 @@ class TextEmbeddingModel(AIModel):
         multimodel_documents: list[dict] | None = None,
         input_type: EmbeddingInputType = EmbeddingInputType.DOCUMENT,
     ) -> EmbeddingResult:
-        """
-        Invoke text embedding model
+        """Invoke text or multimodal embedding generation for the provided inputs."""
+        if not texts and not multimodel_documents:
+            msg = "No texts or files provided"
+            raise ValueError(msg)
 
-        :param model: model name
-        :param credentials: model credentials
-        :param texts: texts to embed
-        :param files: files to embed
-        :param input_type: input type
-        :return: embeddings result
-        """
         try:
             if texts:
                 return self.model_runtime.invoke_text_embedding(
@@ -48,21 +41,16 @@ class TextEmbeddingModel(AIModel):
                     documents=multimodel_documents,
                     input_type=input_type,
                 )
-            raise ValueError("No texts or files provided")
         except Exception as e:
-            raise self._transform_invoke_error(e)
+            raise self._transform_invoke_error(e) from e
 
     def get_num_tokens(
-        self, model: str, credentials: dict, texts: list[str]
+        self,
+        model: str,
+        credentials: dict,
+        texts: list[str],
     ) -> list[int]:
-        """
-        Get number of tokens for given prompt messages
-
-        :param model: model name
-        :param credentials: model credentials
-        :param texts: texts to embed
-        :return:
-        """
+        """Count tokens for each text input sent to the embedding model."""
         return self.model_runtime.get_text_embedding_num_tokens(
             provider=self.provider,
             model=model,
@@ -71,13 +59,7 @@ class TextEmbeddingModel(AIModel):
         )
 
     def _get_context_size(self, model: str, credentials: dict) -> int:
-        """
-        Get context size for given embedding model
-
-        :param model: model name
-        :param credentials: model credentials
-        :return: context size
-        """
+        """Get the embedding model context size, falling back to the default."""
         model_schema = self.get_model_schema(model, credentials)
 
         if (
@@ -92,13 +74,7 @@ class TextEmbeddingModel(AIModel):
         return 1000
 
     def _get_max_chunks(self, model: str, credentials: dict) -> int:
-        """
-        Get max chunks for given embedding model
-
-        :param model: model name
-        :param credentials: model credentials
-        :return: max chunks
-        """
+        """Get the maximum chunk count supported by the embedding model."""
         model_schema = self.get_model_schema(model, credentials)
 
         if (

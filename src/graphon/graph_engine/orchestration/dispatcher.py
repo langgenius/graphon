@@ -1,6 +1,4 @@
-"""
-Main dispatcher for processing events from workers.
-"""
+"""Main dispatcher for processing events from workers."""
 
 import logging
 import queue
@@ -26,8 +24,7 @@ logger = logging.getLogger(__name__)
 
 @final
 class Dispatcher:
-    """
-    Main dispatcher that processes events from the event queue.
+    """Main dispatcher that processes events from the event queue.
 
     This runs in a separate thread and coordinates event processing
     with timeout and completion detection.
@@ -46,14 +43,14 @@ class Dispatcher:
         execution_coordinator: ExecutionCoordinator,
         event_emitter: EventManager | None = None,
     ) -> None:
-        """
-        Initialize the dispatcher.
+        """Initialize the dispatcher.
 
         Args:
             event_queue: Queue of events from workers
             event_handler: Event handler registry for processing events
             execution_coordinator: Coordinator for execution flow
             event_emitter: Optional event manager to signal completion
+
         """
         self._event_queue = event_queue
         self._event_handler = event_handler
@@ -72,7 +69,9 @@ class Dispatcher:
         self._stop_event.clear()
         self._start_time = time.time()
         self._thread = threading.Thread(
-            target=self._dispatcher_loop, name="GraphDispatcher", daemon=True
+            target=self._dispatcher_loop,
+            name="GraphDispatcher",
+            daemon=True,
         )
         self._thread.start()
 
@@ -122,7 +121,7 @@ class Dispatcher:
             if self._event_emitter:
                 self._event_emitter.mark_complete()
 
-    def _process_commands(self, event: GraphNodeEventBase | None = None):
+    def _process_commands(self, event: GraphNodeEventBase | None = None) -> None:
         if event is None or isinstance(event, self._COMMAND_TRIGGER_EVENTS):
             self._execution_coordinator.process_commands()
 

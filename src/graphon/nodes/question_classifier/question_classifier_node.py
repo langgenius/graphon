@@ -76,7 +76,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
     @override
     def __init__(
         self,
-        id: str,
+        node_id: str,
         config: NodeConfigDict,
         graph_init_params: "GraphInitParams",
         graph_runtime_state: "GraphRuntimeState",
@@ -89,9 +89,9 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         memory: PromptMessageMemory | None = None,
         llm_file_saver: LLMFileSaver,
         prompt_message_serializer: PromptMessageSerializerProtocol | None = None,
-    ):
+    ) -> None:
         super().__init__(
-            id=id,
+            node_id=node_id,
             config=config,
             graph_init_params=graph_init_params,
             graph_runtime_state=graph_runtime_state,
@@ -131,13 +131,14 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         model_instance = self._model_instance
         # Resolve variable references in string-typed completion params
         model_instance.parameters = llm_utils.resolve_completion_params_variables(
-            model_instance.parameters, variable_pool
+            model_instance.parameters,
+            variable_pool,
         )
         memory = self._memory
         # fetch instruction
         node_data.instruction = node_data.instruction or ""
         node_data.instruction = variable_pool.convert_template(
-            node_data.instruction
+            node_data.instruction,
         ).text
 
         files = (
@@ -198,7 +199,6 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
                 file_saver=self._llm_file_saver,
                 file_outputs=self._file_outputs,
                 node_id=self._node_id,
-                node_type=self.node_type,
             )
 
             for event in generator:
@@ -210,7 +210,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
 
             rendered_classes = [
                 c.model_copy(
-                    update={"name": variable_pool.convert_template(c.name).text}
+                    update={"name": variable_pool.convert_template(c.name).text},
                 )
                 for c in node_data.classes
             ]
@@ -233,14 +233,15 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
                 category_id_result = result_text_json["category_id"]
                 classes = rendered_classes
                 classes_map = {class_.id: class_.name for class_ in classes}
-                category_ids = [_class.id for _class in classes]
+                category_ids = [class_.id for class_ in classes]
                 if category_id_result in category_ids:
                     category_name = classes_map[category_id_result]
                     category_id = category_id_result
             process_data = {
                 "model_mode": node_data.model.mode,
                 "prompts": self._prompt_message_serializer.serialize(
-                    model_mode=node_data.model.mode, prompt_messages=prompt_messages
+                    model_mode=node_data.model.mode,
+                    prompt_messages=prompt_messages,
                 ),
                 "usage": jsonable_encoder(usage),
                 "finish_reason": finish_reason,
@@ -293,39 +294,31 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         node_id: str,
         node_data: QuestionClassifierNodeData,
     ) -> Mapping[str, Sequence[str]]:
-        # graph_config is not used in this node type
+        _ = graph_config
         variable_mapping = {"query": node_data.query_variable_selector}
         variable_selectors: list[VariableSelector] = []
         if node_data.instruction:
             variable_template_parser = VariableTemplateParser(
-                template=node_data.instruction
+                template=node_data.instruction,
             )
             variable_selectors.extend(
-                variable_template_parser.extract_variable_selectors()
+                variable_template_parser.extract_variable_selectors(),
             )
         for variable_selector in variable_selectors:
             variable_mapping[variable_selector.variable] = list(
-                variable_selector.value_selector
+                variable_selector.value_selector,
             )
 
-        variable_mapping = {
-            node_id + "." + key: value for key, value in variable_mapping.items()
-        }
-
-        return variable_mapping
+        return {node_id + "." + key: value for key, value in variable_mapping.items()}
 
     @classmethod
     @override
     def get_default_config(
-        cls, filters: Mapping[str, object] | None = None
+        cls,
+        filters: Mapping[str, object] | None = None,
     ) -> Mapping[str, object]:
-        """
-        Get default config of node.
-        :param filters: filter by node config parameters (not used in this
-            implementation).
-        :return:
-        """
-        # filters parameter is not used in this node type
+        """Build the default question-classifier node config."""
+        _ = filters
         return {"type": "question-classifier", "config": {"instructions": ""}}
 
     def _calculate_rest_token(
@@ -356,7 +349,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         rest_tokens = 2000
 
         model_context_tokens = model_schema.model_properties.get(
-            ModelPropertyKey.CONTEXT_SIZE
+            ModelPropertyKey.CONTEXT_SIZE,
         )
         if model_context_tokens:
             curr_message_tokens = model_instance.get_llm_num_tokens(prompt_messages)
@@ -370,7 +363,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
                     max_tokens = (
                         model_instance.parameters.get(parameter_rule.name)
                         or model_instance.parameters.get(
-                            parameter_rule.use_template or ""
+                            parameter_rule.use_template or "",
                         )
                     ) or 0
 
@@ -385,7 +378,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         query: str,
         memory: PromptMessageMemory | None,
         max_token_limit: int = 2000,
-    ):
+    ) -> list[LLMNodeChatModelMessage] | LLMNodeCompletionModelPromptTemplate:
         model_mode = LLMMode(node_data.model.mode)
         classes = node_data.classes
         categories = []
@@ -411,7 +404,8 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
             )
             prompt_messages.append(system_prompt_messages)
             user_prompt_message_1 = LLMNodeChatModelMessage(
-                role=PromptMessageRole.USER, text=QUESTION_CLASSIFIER_USER_PROMPT_1
+                role=PromptMessageRole.USER,
+                text=QUESTION_CLASSIFIER_USER_PROMPT_1,
             )
             prompt_messages.append(user_prompt_message_1)
             assistant_prompt_message_1 = LLMNodeChatModelMessage(
@@ -420,7 +414,8 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
             )
             prompt_messages.append(assistant_prompt_message_1)
             user_prompt_message_2 = LLMNodeChatModelMessage(
-                role=PromptMessageRole.USER, text=QUESTION_CLASSIFIER_USER_PROMPT_2
+                role=PromptMessageRole.USER,
+                text=QUESTION_CLASSIFIER_USER_PROMPT_2,
             )
             prompt_messages.append(user_prompt_message_2)
             assistant_prompt_message_2 = LLMNodeChatModelMessage(
@@ -445,7 +440,8 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
                     input_text=input_text,
                     categories=json.dumps(categories, ensure_ascii=False),
                     classification_instructions=instruction,
-                )
+                ),
             )
 
-        raise InvalidModelTypeError(f"Model mode {model_mode} not support.")
+        msg = f"Model mode {model_mode} not support."
+        raise InvalidModelTypeError(msg)

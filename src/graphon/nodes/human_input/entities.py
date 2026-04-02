@@ -20,7 +20,7 @@ from graphon.variables.consts import SELECTORS_LENGTH
 from .enums import ButtonStyle, FormInputType, PlaceholderType, TimeoutUnit
 
 _OUTPUT_VARIABLE_PATTERN = re.compile(
-    r"\{\{#\$output\.(?P<field_name>[a-zA-Z_][a-zA-Z0-9_]{0,29})#\}\}"
+    r"\{\{#\$output\.(?P<field_name>[a-zA-Z_][a-zA-Z0-9_]{0,29})#\}\}",
 )
 
 
@@ -46,10 +46,11 @@ class FormInputDefault(BaseModel):
         if self.type == PlaceholderType.CONSTANT:
             return self
         if len(self.selector) < SELECTORS_LENGTH:
-            raise ValueError(
+            msg = (
                 f"the length of selector should be at least {SELECTORS_LENGTH}, "
                 f"selector={self.selector}"
             )
+            raise ValueError(msg)
         return self
 
 
@@ -79,11 +80,12 @@ class UserAction(BaseModel):
     @classmethod
     def _validate_id(cls, value: str) -> str:
         if not _IDENTIFIER_PATTERN.match(value):
-            raise ValueError(
+            msg = (
                 f"'{value}' is not a valid identifier. It must start with "
                 f"a letter or underscore, and contain only letters, "
                 f"numbers, or underscores."
             )
+            raise ValueError(msg)
         return value
 
 
@@ -104,7 +106,8 @@ class HumanInputNodeData(BaseNodeData):
         for form_input in inputs:
             name = form_input.output_variable_name
             if name in seen_names:
-                raise ValueError(f"duplicated output_variable_name '{name}' in inputs")
+                msg = f"duplicated output_variable_name '{name}' in inputs"
+                raise ValueError(msg)
             seen_names.add(name)
         return inputs
 
@@ -115,7 +118,8 @@ class HumanInputNodeData(BaseNodeData):
         for action in user_actions:
             action_id = action.id
             if action_id in seen_ids:
-                raise ValueError(f"duplicated user action id '{action_id}'")
+                msg = f"duplicated user action id '{action_id}'"
+                raise ValueError(msg)
             seen_ids.add(action_id)
         return user_actions
 
@@ -124,7 +128,8 @@ class HumanInputNodeData(BaseNodeData):
             return start_time + timedelta(hours=self.timeout)
         if self.timeout_unit == TimeoutUnit.DAY:
             return start_time + timedelta(days=self.timeout)
-        raise AssertionError("unknown timeout unit.")
+        msg = "unknown timeout unit."
+        raise AssertionError(msg)
 
     def outputs_field_names(self) -> Sequence[str]:
         return [
@@ -133,7 +138,8 @@ class HumanInputNodeData(BaseNodeData):
         ]
 
     def extract_variable_selector_to_variable_mapping(
-        self, node_id: str
+        self,
+        node_id: str,
     ) -> Mapping[str, Sequence[str]]:
         variable_mappings: dict[str, Sequence[str]] = {}
 
@@ -145,7 +151,7 @@ class HumanInputNodeData(BaseNodeData):
                     f"{node_id}.#{'.'.join(selector[:SELECTORS_LENGTH])}#"
                 )
                 variable_mappings[qualified_variable_mapping_key] = list(
-                    selector[:SELECTORS_LENGTH]
+                    selector[:SELECTORS_LENGTH],
                 )
 
         form_template_parser = VariableTemplateParser(template=self.form_content)
@@ -154,8 +160,8 @@ class HumanInputNodeData(BaseNodeData):
             for selector in form_template_parser.extract_variable_selectors()
         ])
 
-        for input in self.inputs:
-            default_value = input.default
+        for form_input in self.inputs:
+            default_value = form_input.default
             if default_value is None:
                 continue
             if default_value.type == PlaceholderType.CONSTANT:
@@ -167,9 +173,7 @@ class HumanInputNodeData(BaseNodeData):
         return variable_mappings
 
     def find_action_text(self, action_id: str) -> str:
-        """
-        Resolve action display text by id.
-        """
+        """Resolve action display text by id."""
         for action in self.user_actions:
             if action.id == action_id:
                 return action.title
@@ -206,9 +210,8 @@ def validate_human_input_submission(
 ) -> None:
     available_actions = {action.id for action in user_actions}
     if selected_action_id not in available_actions:
-        raise HumanInputSubmissionValidationError(
-            f"Invalid action: {selected_action_id}"
-        )
+        msg = f"Invalid action: {selected_action_id}"
+        raise HumanInputSubmissionValidationError(msg)
 
     provided_inputs = set(form_data.keys())
     missing_inputs = [
@@ -219,6 +222,5 @@ def validate_human_input_submission(
 
     if missing_inputs:
         missing_list = ", ".join(missing_inputs)
-        raise HumanInputSubmissionValidationError(
-            f"Missing required inputs: {missing_list}"
-        )
+        msg = f"Missing required inputs: {missing_list}"
+        raise HumanInputSubmissionValidationError(msg)

@@ -1,5 +1,4 @@
-"""
-Domain entities for workflow node execution.
+"""Domain entities for workflow node execution.
 
 These models capture node-level execution state for the graph runtime without
 describing storage or application-layer concerns.
@@ -19,8 +18,7 @@ from graphon.enums import (
 
 
 class WorkflowNodeExecution(BaseModel):
-    """
-    Domain model for workflow node execution.
+    """Domain model for workflow node execution.
 
     This model represents the graph-level record of a node execution and
     contains only execution state relevant to the runtime.
@@ -96,7 +94,8 @@ class WorkflowNodeExecution(BaseModel):
         self._truncated_outputs = truncated_outputs
 
     def set_truncated_process_data(
-        self, truncated_process_data: Mapping[str, Any] | None
+        self,
+        truncated_process_data: Mapping[str, Any] | None,
     ):
         self._truncated_process_data = truncated_process_data
 
@@ -137,14 +136,14 @@ class WorkflowNodeExecution(BaseModel):
         outputs: Mapping[str, Any] | None = None,
         metadata: Mapping[WorkflowNodeExecutionMetadataKey, Any] | None = None,
     ):
-        """
-        Update the model from mappings.
+        """Update the model from mappings.
 
         Args:
             inputs: The inputs to update
             process_data: The process data to update
             outputs: The outputs to update
             metadata: The metadata to update
+
         """
         if inputs is not None:
             self.inputs = dict(inputs)

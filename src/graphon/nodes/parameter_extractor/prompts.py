@@ -100,7 +100,7 @@ FUNCTION_CALLING_EXTRACTOR_EXAMPLE: list[dict[str, Any]] = [
                             "type": "string",
                             "description": "The food to eat",
                             "required": True,
-                        }
+                        },
                     },
                     "required": ["food"],
                 },
@@ -152,10 +152,10 @@ COMPLETION_GENERATE_JSON_PROMPT = (
     "### Structure\n"
     "Here is the structure of the expected output, I should always follow the "
     "output structure.\n"
-    "{{γγγ\n"
+    "{{γγγ\n"  # noqa: RUF001
     "  'properties1': 'relevant text extracted from input',\n"
     "  'properties2': 'relevant text extracted from input',\n"
-    "}}γγγ\n\n"
+    "}}γγγ\n\n"  # noqa: RUF001
     "### Input Text\n"
     "Inside <text></text> XML tags, there is a text that I should extract "
     "parameters and convert to a JSON object.\n"
@@ -211,7 +211,7 @@ CHAT_EXAMPLE = [
                         "type": "string",
                         "description": ("The location to get the weather information"),
                         "required": True,
-                    }
+                    },
                 },
                 "required": ["location"],
             },
@@ -231,7 +231,7 @@ CHAT_EXAMPLE = [
                         "type": "string",
                         "description": "The food to eat",
                         "required": True,
-                    }
+                    },
                 },
                 "required": ["food"],
             },

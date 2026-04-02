@@ -1,5 +1,4 @@
-"""
-Command processing subsystem for graph engine.
+"""Command processing subsystem for graph engine.
 
 This package handles external commands sent to the engine
 during execution.

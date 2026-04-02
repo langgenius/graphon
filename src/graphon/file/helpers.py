@@ -10,12 +10,15 @@ if TYPE_CHECKING:
 
 def resolve_file_url(file: File, /, *, for_external: bool = True) -> str | None:
     return get_workflow_file_runtime().resolve_file_url(
-        file=file, for_external=for_external
+        file=file,
+        for_external=for_external,
     )
 
 
 def get_signed_file_url(
-    upload_file_id: str, as_attachment: bool = False, for_external: bool = True
+    upload_file_id: str,
+    as_attachment: bool = False,
+    for_external: bool = True,
 ) -> str:
     return get_workflow_file_runtime().resolve_upload_file_url(
         upload_file_id=upload_file_id,
@@ -25,7 +28,9 @@ def get_signed_file_url(
 
 
 def get_signed_tool_file_url(
-    tool_file_id: str, extension: str, for_external: bool = True
+    tool_file_id: str,
+    extension: str,
+    for_external: bool = True,
 ) -> str:
     return get_workflow_file_runtime().resolve_tool_file_url(
         tool_file_id=tool_file_id,
@@ -35,7 +40,11 @@ def get_signed_tool_file_url(
 
 
 def verify_image_signature(
-    *, upload_file_id: str, timestamp: str, nonce: str, sign: str
+    *,
+    upload_file_id: str,
+    timestamp: str,
+    nonce: str,
+    sign: str,
 ) -> bool:
     return get_workflow_file_runtime().verify_preview_signature(
         preview_kind="image",
@@ -47,7 +56,11 @@ def verify_image_signature(
 
 
 def verify_file_signature(
-    *, upload_file_id: str, timestamp: str, nonce: str, sign: str
+    *,
+    upload_file_id: str,
+    timestamp: str,
+    nonce: str,
+    sign: str,
 ) -> bool:
     return get_workflow_file_runtime().verify_preview_signature(
         preview_kind="file",

@@ -1,5 +1,4 @@
-"""
-Graph traversal subsystem for graph engine.
+"""Graph traversal subsystem for graph engine.
 
 This package handles graph navigation, edge processing,
 and skip propagation logic.

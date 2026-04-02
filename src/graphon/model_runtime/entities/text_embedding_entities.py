@@ -14,9 +14,7 @@ class EmbeddingInputType(StrEnum):
 
 
 class EmbeddingUsage(ModelUsage):
-    """
-    Model class for embedding usage.
-    """
+    """Model class for embedding usage."""
 
     tokens: int
     total_tokens: int
@@ -28,9 +26,7 @@ class EmbeddingUsage(ModelUsage):
 
 
 class EmbeddingResult(BaseModel):
-    """
-    Model class for text embedding result.
-    """
+    """Model class for text embedding result."""
 
     model: str
     embeddings: list[list[float]]
@@ -38,9 +34,7 @@ class EmbeddingResult(BaseModel):
 
 
 class FileEmbeddingResult(BaseModel):
-    """
-    Model class for file embedding result.
-    """
+    """Model class for file embedding result."""
 
     model: str
     embeddings: list[list[float]]

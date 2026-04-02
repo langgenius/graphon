@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -21,7 +21,7 @@ class TestWorkflowNodeExecutionProcessDataTruncation:
             node_type=BuiltinNodeTypes.LLM,
             title="Test Node",
             process_data=process_data,
-            created_at=datetime.now(),
+            created_at=datetime.now(UTC).replace(tzinfo=None),
         )
 
     def test_initial_process_data_truncated_state(self):
@@ -105,7 +105,10 @@ class TestWorkflowNodeExecutionProcessDataTruncation:
             {},
         ],
     )
-    def test_truncated_process_data_with_various_data_types(self, test_data):
+    def test_truncated_process_data_with_various_data_types(
+        self,
+        test_data: dict[str, Any],
+    ) -> None:
         execution = self.create_workflow_node_execution()
 
         execution.set_truncated_process_data(test_data)
@@ -190,7 +193,7 @@ class TestWorkflowNodeExecutionProcessDataScenarios:
             node_type=BuiltinNodeTypes.LLM,
             title="Test Node",
             process_data=scenario.original_data,
-            created_at=datetime.now(),
+            created_at=datetime.now(UTC).replace(tzinfo=None),
         )
 
         if scenario.truncated_data is not None:

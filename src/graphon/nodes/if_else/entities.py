@@ -8,16 +8,12 @@ from graphon.utils.condition.entities import Condition
 
 
 class IfElseNodeData(BaseNodeData):
-    """
-    If Else Node Data.
-    """
+    """If Else Node Data."""
 
     type: NodeType = BuiltinNodeTypes.IF_ELSE
 
     class Case(BaseModel):
-        """
-        Case entity representing a single logical condition group
-        """
+        """Case entity representing a single logical condition group"""
 
         case_id: str
         logical_operator: Literal["and", "or"]

@@ -1,5 +1,4 @@
-"""
-Simple worker pool that consolidates functionality.
+"""Simple worker pool that consolidates functionality.
 
 This is a simpler implementation that merges WorkerPool, ActivityTracker,
 DynamicScaler, and WorkerFactory into a single class.
@@ -24,8 +23,7 @@ logger = logging.getLogger(__name__)
 
 @final
 class WorkerPool:
-    """
-    Simple worker pool with integrated management.
+    """Simple worker pool with integrated management.
 
     This class consolidates all worker management functionality into
     a single, simpler implementation without excessive abstraction.
@@ -40,8 +38,7 @@ class WorkerPool:
         config: GraphEngineConfig,
         execution_context: AbstractContextManager[object] | None = None,
     ) -> None:
-        """
-        Initialize the simple worker pool.
+        """Initialize the simple worker pool.
 
         Args:
             ready_queue: Ready queue for nodes ready for execution
@@ -50,6 +47,7 @@ class WorkerPool:
             layers: Graph engine layers for node execution hooks
             config: GraphEngine worker pool configuration
             execution_context: Optional execution context for context preservation
+
         """
         self._ready_queue = ready_queue
         self._event_queue = event_queue
@@ -67,11 +65,11 @@ class WorkerPool:
         # No longer tracking worker states with callbacks to avoid lock contention
 
     def start(self, initial_count: int | None = None) -> None:
-        """
-        Start the worker pool.
+        """Start the worker pool.
 
         Args:
             initial_count: Number of workers to start with (auto-calculated if None)
+
         """
         with self._lock:
             if self._running:
@@ -86,11 +84,13 @@ class WorkerPool:
                     initial_count = self._config.min_workers
                 elif node_count < 50:
                     initial_count = min(
-                        self._config.min_workers + 1, self._config.max_workers
+                        self._config.min_workers + 1,
+                        self._config.max_workers,
                     )
                 else:
                     initial_count = min(
-                        self._config.min_workers + 2, self._config.max_workers
+                        self._config.min_workers + 2,
+                        self._config.max_workers,
                     )
 
                 logger.debug(
@@ -142,7 +142,7 @@ class WorkerPool:
         worker.start()
         self._workers.append(worker)
 
-    def _remove_worker(self, worker: Worker, worker_id: int) -> None:
+    def _remove_worker(self, worker: Worker) -> None:
         """Remove a specific worker from the pool."""
         # Stop the worker
         worker.stop()
@@ -156,8 +156,7 @@ class WorkerPool:
             self._workers.remove(worker)
 
     def _try_scale_up(self, queue_depth: int, current_count: int) -> bool:
-        """
-        Try to scale up workers if needed.
+        """Try to scale up workers if needed.
 
         Args:
             queue_depth: Current queue depth
@@ -165,6 +164,7 @@ class WorkerPool:
 
         Returns:
             True if scaled up, False otherwise
+
         """
         if (
             queue_depth > self._config.scale_up_threshold
@@ -184,10 +184,13 @@ class WorkerPool:
         return False
 
     def _try_scale_down(
-        self, queue_depth: int, current_count: int, active_count: int, idle_count: int
+        self,
+        queue_depth: int,
+        current_count: int,
+        active_count: int,
+        idle_count: int,
     ) -> bool:
-        """
-        Try to scale down workers if we have excess capacity.
+        """Try to scale down workers if we have excess capacity.
 
         Args:
             queue_depth: Current queue depth
@@ -197,6 +200,7 @@ class WorkerPool:
 
         Returns:
             True if scaled down, False otherwise
+
         """
         # Skip if we're at minimum or have no idle workers
         if current_count <= self._config.min_workers or idle_count == 0:
@@ -235,7 +239,8 @@ class WorkerPool:
         if workers_to_remove:
             old_count = current_count
             for worker, worker_id in workers_to_remove:
-                self._remove_worker(worker, worker_id)
+                _ = worker_id
+                self._remove_worker(worker)
 
             logger.debug(
                 "Scaled down workers: %d -> %d (removed %d idle workers after %.1fs, "
@@ -277,11 +282,11 @@ class WorkerPool:
             return len(self._workers)
 
     def get_status(self) -> dict[str, int]:
-        """
-        Get pool status information.
+        """Get pool status information.
 
         Returns:
             Dictionary with status information
+
         """
         with self._lock:
             return {

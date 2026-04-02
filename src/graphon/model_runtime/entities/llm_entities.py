@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any, TypedDict
+from typing import Any, Self, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -15,17 +15,14 @@ from graphon.model_runtime.entities.model_entities import ModelUsage, PriceInfo
 
 
 class LLMMode(StrEnum):
-    """
-    Enum class for large language model mode.
-    """
+    """Enum class for large language model mode."""
 
     COMPLETION = "completion"
     CHAT = "chat"
 
 
 class LLMUsageMetadata(TypedDict, total=False):
-    """
-    TypedDict for LLM usage metadata.
+    """TypedDict for LLM usage metadata.
     All fields are optional.
     """
 
@@ -46,9 +43,7 @@ class LLMUsageMetadata(TypedDict, total=False):
 
 
 class LLMUsage(ModelUsage):
-    """
-    Model class for llm usage.
-    """
+    """Model class for llm usage."""
 
     prompt_tokens: int
     prompt_unit_price: Decimal
@@ -66,7 +61,7 @@ class LLMUsage(ModelUsage):
     time_to_generate: float | None = None
 
     @classmethod
-    def empty_usage(cls):
+    def empty_usage(cls) -> Self:
         return cls(
             prompt_tokens=0,
             prompt_unit_price=Decimal("0.0"),
@@ -86,14 +81,14 @@ class LLMUsage(ModelUsage):
 
     @classmethod
     def from_metadata(cls, metadata: LLMUsageMetadata) -> LLMUsage:
-        """
-        Create LLMUsage instance from metadata dictionary with default values.
+        """Create LLMUsage instance from metadata dictionary with default values.
 
         Args:
             metadata: TypedDict containing usage metadata
 
         Returns:
             LLMUsage instance with values from metadata or defaults
+
         """
         prompt_tokens = metadata.get("prompt_tokens", 0)
         completion_tokens = metadata.get("completion_tokens", 0)
@@ -110,13 +105,13 @@ class LLMUsage(ModelUsage):
             total_tokens=total_tokens,
             prompt_unit_price=Decimal(str(metadata.get("prompt_unit_price", 0))),
             completion_unit_price=Decimal(
-                str(metadata.get("completion_unit_price", 0))
+                str(metadata.get("completion_unit_price", 0)),
             ),
             total_price=Decimal(str(metadata.get("total_price", 0))),
             currency=metadata.get("currency", "USD"),
             prompt_price_unit=Decimal(str(metadata.get("prompt_price_unit", 0))),
             completion_price_unit=Decimal(
-                str(metadata.get("completion_price_unit", 0))
+                str(metadata.get("completion_price_unit", 0)),
             ),
             prompt_price=Decimal(str(metadata.get("prompt_price", 0))),
             completion_price=Decimal(str(metadata.get("completion_price", 0))),
@@ -126,11 +121,13 @@ class LLMUsage(ModelUsage):
         )
 
     def plus(self, other: LLMUsage) -> LLMUsage:
-        """
-        Add two LLMUsage instances together.
+        """Add two LLMUsage instances together.
 
         :param other: Another LLMUsage instance to add
-        :return: A new LLMUsage instance with summed values
+
+        Returns:
+            A new `LLMUsage` instance with summed counters and pricing data.
+
         """
         if self.total_tokens == 0:
             return other
@@ -152,19 +149,19 @@ class LLMUsage(ModelUsage):
         )
 
     def __add__(self, other: LLMUsage) -> LLMUsage:
-        """
-        Overload the + operator to add two LLMUsage instances.
+        """Overload the + operator to add two LLMUsage instances.
 
         :param other: Another LLMUsage instance to add
-        :return: A new LLMUsage instance with summed values
+
+        Returns:
+            A new `LLMUsage` instance with summed counters and pricing data.
+
         """
         return self.plus(other)
 
 
 class LLMResult(BaseModel):
-    """
-    Model class for llm result.
-    """
+    """Model class for llm result."""
 
     id: str | None = None
     model: str
@@ -176,23 +173,17 @@ class LLMResult(BaseModel):
 
 
 class LLMStructuredOutput(BaseModel):
-    """
-    Model class for llm structured output.
-    """
+    """Model class for llm structured output."""
 
     structured_output: Mapping[str, Any] | None = None
 
 
 class LLMResultWithStructuredOutput(LLMResult, LLMStructuredOutput):
-    """
-    Model class for llm result with structured output.
-    """
+    """Model class for llm result with structured output."""
 
 
 class LLMResultChunkDelta(BaseModel):
-    """
-    Model class for llm result chunk delta.
-    """
+    """Model class for llm result chunk delta."""
 
     index: int
     message: AssistantPromptMessage
@@ -201,9 +192,7 @@ class LLMResultChunkDelta(BaseModel):
 
 
 class LLMResultChunk(BaseModel):
-    """
-    Model class for llm result chunk.
-    """
+    """Model class for llm result chunk."""
 
     model: str
     prompt_messages: Sequence[PromptMessage] = Field(default_factory=list)
@@ -212,14 +201,10 @@ class LLMResultChunk(BaseModel):
 
 
 class LLMResultChunkWithStructuredOutput(LLMResultChunk, LLMStructuredOutput):
-    """
-    Model class for llm result chunk with structured output.
-    """
+    """Model class for llm result chunk with structured output."""
 
 
 class NumTokensResult(PriceInfo):
-    """
-    Model class for number of tokens result.
-    """
+    """Model class for number of tokens result."""
 
     tokens: int

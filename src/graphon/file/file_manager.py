@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import base64
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from operator import attrgetter
 
 from graphon.model_runtime.entities.message_entities import (
     AudioPromptMessageContent,
@@ -16,25 +17,52 @@ from .enums import FileAttribute, FileTransferMethod, FileType
 from .models import File
 from .runtime import get_workflow_file_runtime
 
+_DOWNLOAD_TRANSFER_METHODS = frozenset((
+    FileTransferMethod.TOOL_FILE,
+    FileTransferMethod.LOCAL_FILE,
+    FileTransferMethod.DATASOURCE_FILE,
+))
+
+
+def _to_url(f: File, /) -> str:
+    url = f.generate_url()
+    if url is None:
+        msg = f"Unsupported transfer method: {f.transfer_method}"
+        raise ValueError(msg)
+    return url
+
+
+def _get_file_type_value(file: File) -> str:
+    return file.type.value
+
+
+def _get_file_transfer_method_value(file: File) -> str:
+    return file.transfer_method.value
+
+
+_FILE_ATTRIBUTE_GETTERS: Mapping[FileAttribute, Callable[[File], object]] = {
+    FileAttribute.TYPE: _get_file_type_value,
+    FileAttribute.SIZE: attrgetter("size"),
+    FileAttribute.NAME: attrgetter("filename"),
+    FileAttribute.MIME_TYPE: attrgetter("mime_type"),
+    FileAttribute.TRANSFER_METHOD: _get_file_transfer_method_value,
+    FileAttribute.URL: _to_url,
+    FileAttribute.EXTENSION: attrgetter("extension"),
+    FileAttribute.RELATED_ID: attrgetter("related_id"),
+}
+_PROMPT_CONTENT_CLASS_BY_FILE_TYPE: Mapping[
+    FileType,
+    type[PromptMessageContentUnionTypes],
+] = {
+    FileType.IMAGE: ImagePromptMessageContent,
+    FileType.AUDIO: AudioPromptMessageContent,
+    FileType.VIDEO: VideoPromptMessageContent,
+    FileType.DOCUMENT: DocumentPromptMessageContent,
+}
+
 
 def get_attr(*, file: File, attr: FileAttribute):
-    match attr:
-        case FileAttribute.TYPE:
-            return file.type.value
-        case FileAttribute.SIZE:
-            return file.size
-        case FileAttribute.NAME:
-            return file.filename
-        case FileAttribute.MIME_TYPE:
-            return file.mime_type
-        case FileAttribute.TRANSFER_METHOD:
-            return file.transfer_method.value
-        case FileAttribute.URL:
-            return _to_url(file)
-        case FileAttribute.EXTENSION:
-            return file.extension
-        case FileAttribute.RELATED_ID:
-            return file.related_id
+    return _FILE_ATTRIBUTE_GETTERS[attr](file)
 
 
 def to_prompt_message_content(
@@ -45,20 +73,15 @@ def to_prompt_message_content(
 ) -> PromptMessageContentUnionTypes:
     """Convert a file to prompt message content."""
     if f.extension is None:
-        raise ValueError("Missing file extension")
+        msg = "Missing file extension"
+        raise ValueError(msg)
     if f.mime_type is None:
-        raise ValueError("Missing file mime_type")
+        msg = "Missing file mime_type"
+        raise ValueError(msg)
 
-    prompt_class_map: Mapping[FileType, type[PromptMessageContentUnionTypes]] = {
-        FileType.IMAGE: ImagePromptMessageContent,
-        FileType.AUDIO: AudioPromptMessageContent,
-        FileType.VIDEO: VideoPromptMessageContent,
-        FileType.DOCUMENT: DocumentPromptMessageContent,
-    }
-
-    if f.type not in prompt_class_map:
+    if f.type not in _PROMPT_CONTENT_CLASS_BY_FILE_TYPE:
         return TextPromptMessageContent(
-            data=f"[Unsupported file type: {f.filename} ({f.type.value})]"
+            data=f"[Unsupported file type: {f.filename} ({f.type.value})]",
         )
 
     send_format = get_workflow_file_runtime().multimodal_send_format
@@ -72,25 +95,24 @@ def to_prompt_message_content(
     if f.type == FileType.IMAGE:
         params["detail"] = image_detail_config or ImagePromptMessageContent.DETAIL.LOW
 
-    return prompt_class_map[f.type].model_validate(params)
+    return _PROMPT_CONTENT_CLASS_BY_FILE_TYPE[f.type].model_validate(params)
 
 
 def download(f: File, /) -> bytes:
-    if f.transfer_method in (
-        FileTransferMethod.TOOL_FILE,
-        FileTransferMethod.LOCAL_FILE,
-        FileTransferMethod.DATASOURCE_FILE,
-    ):
+    if f.transfer_method in _DOWNLOAD_TRANSFER_METHODS:
         return _download_file_content(f)
     if f.transfer_method == FileTransferMethod.REMOTE_URL:
         if f.remote_url is None:
-            raise ValueError("Missing file remote_url")
+            msg = "Missing file remote_url"
+            raise ValueError(msg)
         response = get_workflow_file_runtime().http_get(
-            f.remote_url, follow_redirects=True
+            f.remote_url,
+            follow_redirects=True,
         )
         response.raise_for_status()
         return response.content
-    raise ValueError(f"unsupported transfer method: {f.transfer_method}")
+    msg = f"unsupported transfer method: {f.transfer_method}"
+    raise ValueError(msg)
 
 
 def _download_file_content(file: File, /) -> bytes:
@@ -102,9 +124,11 @@ def _get_encoded_string(f: File, /) -> str:
     match f.transfer_method:
         case FileTransferMethod.REMOTE_URL:
             if f.remote_url is None:
-                raise ValueError("Missing file remote_url")
+                msg = "Missing file remote_url"
+                raise ValueError(msg)
             response = get_workflow_file_runtime().http_get(
-                f.remote_url, follow_redirects=True
+                f.remote_url,
+                follow_redirects=True,
             )
             response.raise_for_status()
             data = response.content
@@ -116,13 +140,6 @@ def _get_encoded_string(f: File, /) -> str:
             data = _download_file_content(f)
 
     return base64.b64encode(data).decode("utf-8")
-
-
-def _to_url(f: File, /):
-    url = f.generate_url()
-    if url is None:
-        raise ValueError(f"Unsupported transfer method: {f.transfer_method}")
-    return url
 
 
 class FileManager:

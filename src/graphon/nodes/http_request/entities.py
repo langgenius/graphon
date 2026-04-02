@@ -11,6 +11,12 @@ from graphon.enums import BuiltinNodeTypes, NodeType
 from graphon.http import HttpResponse
 
 HTTP_REQUEST_CONFIG_FILTER_KEY = "http_request_config"
+_BINARY_CONTENT_MAIN_TYPES = frozenset((
+    "application",
+    "image",
+    "audio",
+    "video",
+))
 
 
 class HttpRequestNodeAuthorizationConfig(BaseModel):
@@ -26,16 +32,16 @@ class HttpRequestNodeAuthorization(BaseModel):
     @field_validator("config", mode="before")
     @classmethod
     def check_config(
-        cls, v: HttpRequestNodeAuthorizationConfig, values: ValidationInfo
-    ):
-        """
-        Check config:
-        if type is no-auth, config should be None, otherwise it should be a dict.
-        """
+        cls,
+        v: Any,
+        values: ValidationInfo,
+    ) -> Any:
+        """Validate auth config for `no-auth` and API-key modes."""
         if values.data["type"] == "no-auth":
             return None
         if not v or not isinstance(v, dict):
-            raise ValueError("config should be a dict")
+            msg = "config should be a dict"
+            raise ValueError(msg)
 
         return v
 
@@ -49,13 +55,18 @@ class BodyData(BaseModel):
 
 class HttpRequestNodeBody(BaseModel):
     type: Literal[
-        "none", "form-data", "x-www-form-urlencoded", "raw-text", "json", "binary"
+        "none",
+        "form-data",
+        "x-www-form-urlencoded",
+        "raw-text",
+        "json",
+        "binary",
     ]
     data: Sequence[BodyData] = Field(default_factory=list)
 
     @field_validator("data", mode="before")
     @classmethod
-    def check_data(cls, v: Any):
+    def check_data(cls, v: Any) -> Any:
         """For compatibility, if body is not set, return empty list."""
         if not v:
             return []
@@ -89,9 +100,7 @@ class HttpRequestNodeConfig:
 
 
 class HttpRequestNodeData(BaseNodeData):
-    """
-    Code Node Data.
-    """
+    """Code Node Data."""
 
     type: NodeType = BuiltinNodeTypes.HTTP_REQUEST
     method: Literal[
@@ -123,20 +132,20 @@ class Response:
     headers: dict[str, str]
     response: HttpResponse
 
-    def __init__(self, response: HttpResponse):
+    def __init__(self, response: HttpResponse) -> None:
         self.response = response
         self.headers = dict(response.headers)
 
     @property
     def is_file(self):
-        """
-        Determine if the response contains a file by checking:
+        """Determine if the response contains a file by checking:
         1. Content-Disposition header (RFC 6266)
         2. Content characteristics
         3. MIME type analysis
         """
         content_type = self.content_type.split(";")[0].strip().lower()
         parsed_content_disposition = self.parsed_content_disposition
+        is_file = False
 
         # Check if it's explicitly marked as an attachment
         if parsed_content_disposition:
@@ -147,11 +156,13 @@ class Response:
                 parsed_content_disposition.get_filename()
             )  # Returns filename if present, None otherwise
             if disp_type == "attachment" or filename is not None:
-                return True
+                is_file = True
 
         # For 'text/' types, only 'csv' should be downloaded as file
+        if is_file:
+            return is_file
         if content_type.startswith("text/") and "csv" not in content_type:
-            return False
+            return is_file
 
         # For application types, try to detect if it's a text-based format
         if content_type.startswith("application/"):
@@ -167,7 +178,7 @@ class Response:
                     "graphql",
                 )
             ):
-                return False
+                return is_file
 
             # Try to detect if content is text-based by sampling first few bytes
             try:
@@ -186,22 +197,25 @@ class Response:
                     b"let ",
                 )
                 if any(marker in content_sample for marker in text_markers):
-                    return False
+                    return is_file
             except UnicodeDecodeError:
                 # If we can't decode as UTF-8, likely a binary file
-                return True
+                is_file = True
 
         # For other types, use MIME type analysis
         main_type, _ = mimetypes.guess_type(
-            "dummy" + (mimetypes.guess_extension(content_type) or "")
+            "dummy" + (mimetypes.guess_extension(content_type) or ""),
         )
         if main_type:
-            return main_type.split("/")[0] in ("application", "image", "audio", "video")
+            is_file = main_type.split("/")[0] in _BINARY_CONTENT_MAIN_TYPES
 
         # For unknown types, check if it's a media type
-        return any(
-            media_type in content_type for media_type in ("image/", "audio/", "video/")
-        )
+        if not is_file:
+            is_file = any(
+                media_type in content_type
+                for media_type in ("image/", "audio/", "video/")
+            )
+        return is_file
 
     @property
     def content_type(self) -> str:

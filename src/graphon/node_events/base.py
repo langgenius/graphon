@@ -11,15 +11,13 @@ class NodeEventBase(BaseModel):
     """Base class for all node events"""
 
 
-def _default_metadata():
+def _default_metadata() -> Mapping[WorkflowNodeExecutionMetadataKey, Any]:
     v: Mapping[WorkflowNodeExecutionMetadataKey, Any] = {}
     return v
 
 
 class NodeRunResult(BaseModel):
-    """
-    Node Run Result.
-    """
+    """Node Run Result."""
 
     status: WorkflowNodeExecutionStatus = WorkflowNodeExecutionStatus.PENDING
 
@@ -27,7 +25,7 @@ class NodeRunResult(BaseModel):
     process_data: Mapping[str, Any] = Field(default_factory=dict)
     outputs: Mapping[str, Any] = Field(default_factory=dict)
     metadata: Mapping[WorkflowNodeExecutionMetadataKey, Any] = Field(
-        default_factory=_default_metadata
+        default_factory=_default_metadata,
     )
     llm_usage: LLMUsage = Field(default_factory=LLMUsage.empty_usage)
 

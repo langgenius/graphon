@@ -21,16 +21,14 @@ _ListObjectDict = TypeAdapter(list[dict[str, object]])
 
 
 class NodeFactory(Protocol):
-    """
-    Protocol for creating Node instances from node data dictionaries.
+    """Protocol for creating Node instances from node data dictionaries.
 
     This protocol decouples the Graph class from specific node mapping implementations,
     allowing for different node creation strategies while maintaining type safety.
     """
 
     def create_node(self, node_config: NodeConfigDict) -> Node:
-        """
-        Create a Node instance from node configuration data.
+        """Create a Node instance from node configuration data.
 
         :param node_config: node configuration dictionary containing type and other data
         :return: initialized Node instance
@@ -54,9 +52,8 @@ class Graph:
         in_edges: dict[str, list[str]] | None = None,
         out_edges: dict[str, list[str]] | None = None,
         root_node: Node,
-    ):
-        """
-        Initialize Graph instance.
+    ) -> None:
+        """Initialize Graph instance.
 
         :param nodes: graph nodes mapping (node id: node object)
         :param edges: graph edges mapping (edge id: edge object)
@@ -72,13 +69,16 @@ class Graph:
 
     @classmethod
     def _parse_node_configs(
-        cls, node_configs: list[NodeConfigDict]
+        cls,
+        node_configs: list[NodeConfigDict],
     ) -> dict[str, NodeConfigDict]:
-        """
-        Parse node configurations and build a mapping of node IDs to configs.
+        """Parse node configurations and build a mapping of node IDs to configs.
 
         :param node_configs: list of node configuration dictionaries
-        :return: mapping of node ID to node config
+
+        Returns:
+            Mapping of node ID to node config.
+
         """
         node_configs_map: dict[str, NodeConfigDict] = {}
 
@@ -89,13 +89,16 @@ class Graph:
 
     @classmethod
     def _build_edges(
-        cls, edge_configs: list[dict[str, object]]
+        cls,
+        edge_configs: list[dict[str, object]],
     ) -> tuple[dict[str, Edge], dict[str, list[str]], dict[str, list[str]]]:
-        """
-        Build edge objects and mappings from edge configurations.
+        """Build edge objects and mappings from edge configurations.
 
         :param edge_configs: list of edge configurations
-        :return: tuple of (edges dict, in_edges dict, out_edges dict)
+
+        Returns:
+            Tuple of `edges`, `in_edges`, and `out_edges` mappings.
+
         """
         edges: dict[str, Edge] = {}
         in_edges: dict[str, list[str]] = defaultdict(list)
@@ -136,12 +139,14 @@ class Graph:
         node_configs_map: dict[str, NodeConfigDict],
         node_factory: NodeFactory,
     ) -> dict[str, Node]:
-        """
-        Create node instances from configurations using the node factory.
+        """Create node instances from configurations using the node factory.
 
         :param node_configs_map: mapping of node ID to node config
         :param node_factory: factory for creating node instances
-        :return: mapping of node ID to node instance
+
+        Returns:
+            Mapping of node ID to node instance.
+
         """
         nodes: dict[str, Node] = {}
 
@@ -150,7 +155,8 @@ class Graph:
                 node_instance = node_factory.create_node(node_config)
             except Exception:
                 logger.exception(
-                    "Failed to create node instance for node_id %s", node_id
+                    "Failed to create node instance for node_id %s",
+                    node_id,
                 )
                 raise
             nodes[node_id] = node_instance
@@ -160,20 +166,22 @@ class Graph:
     @classmethod
     def new(cls) -> GraphBuilder:
         """Create a fluent builder for assembling a graph programmatically."""
-
         return GraphBuilder(graph_cls=cls)
 
     @staticmethod
     def _filter_canvas_only_nodes(
         node_configs: Sequence[Mapping[str, object]],
     ) -> list[dict[str, object]]:
-        """
-        Remove editor-only nodes before `NodeConfigDict` validation.
+        """Remove editor-only nodes before `NodeConfigDict` validation.
 
         Persisted note widgets use a top-level `type == "custom-note"` but leave
         `data.type` empty because they are never executable graph nodes. Filter
         them while configs are still raw dicts so Pydantic does not validate
         their placeholder payloads against `BaseNodeData.type: NodeType`.
+
+        Returns:
+            Raw node configs with editor-only note widgets removed.
+
         """
         filtered_node_configs: list[dict[str, object]] = []
         for node_config in node_configs:
@@ -184,8 +192,7 @@ class Graph:
 
     @classmethod
     def _promote_fail_branch_nodes(cls, nodes: dict[str, Node]) -> None:
-        """
-        Promote nodes configured with FAIL_BRANCH error strategy
+        """Promote nodes configured with FAIL_BRANCH error strategy
         to branch execution type.
 
         :param nodes: mapping of node ID to node instance
@@ -203,8 +210,7 @@ class Graph:
         out_edges: dict[str, list[str]],
         active_root_id: str,
     ) -> None:
-        """
-        Mark nodes and edges from inactive root branches as skipped.
+        """Mark nodes and edges from inactive root branches as skipped.
 
         Algorithm:
         1. Mark inactive root nodes as skipped
@@ -275,13 +281,18 @@ class Graph:
         root_node_id: str,
         skip_validation: bool = False,
     ) -> Graph:
-        """
-        Initialize a graph with an explicit execution entry point.
+        """Initialize a graph with an explicit execution entry point.
 
         :param graph_config: graph config containing nodes and edges
         :param node_factory: factory for creating node instances from config data
         :param root_node_id: active root node id
-        :return: graph instance
+
+        Returns:
+            Initialized graph instance rooted at `root_node_id`.
+
+        Raises:
+            ValueError: If the graph has no nodes or `root_node_id` does not exist.
+
         """
         # Parse configs
         edge_configs = graph_config.get("edges", [])
@@ -293,13 +304,15 @@ class Graph:
         node_configs = _ListNodeConfigDict.validate_python(node_configs)
 
         if not node_configs:
-            raise ValueError("Graph must have at least one node")
+            msg = "Graph must have at least one node"
+            raise ValueError(msg)
 
         # Parse node configurations
         node_configs_map = cls._parse_node_configs(node_configs)
 
         if root_node_id not in node_configs_map:
-            raise ValueError(f"Root node id {root_node_id} not found in the graph")
+            msg = f"Root node id {root_node_id} not found in the graph"
+            raise ValueError(msg)
 
         # Build edges
         edges, in_edges, out_edges = cls._build_edges(edge_configs)
@@ -315,7 +328,11 @@ class Graph:
 
         # Mark inactive root branches as skipped
         cls._mark_inactive_root_branches(
-            nodes, edges, in_edges, out_edges, root_node_id
+            nodes,
+            edges,
+            in_edges,
+            out_edges,
+            root_node_id,
         )
 
         # Create and return the graph
@@ -335,29 +352,32 @@ class Graph:
 
     @property
     def node_ids(self) -> list[str]:
-        """
-        Get list of node IDs (compatibility property for existing code)
+        """Get list of node IDs (compatibility property for existing code)
 
         :return: list of node IDs
         """
         return list(self.nodes.keys())
 
     def get_outgoing_edges(self, node_id: str) -> list[Edge]:
-        """
-        Get all outgoing edges from a node (V2 method)
+        """Get all outgoing edges from a node (V2 method)
 
         :param node_id: node id
-        :return: list of outgoing edges
+
+        Returns:
+            All edges whose tail is `node_id`.
+
         """
         edge_ids = self.out_edges.get(node_id, [])
         return [self.edges[eid] for eid in edge_ids if eid in self.edges]
 
     def get_incoming_edges(self, node_id: str) -> list[Edge]:
-        """
-        Get all incoming edges to a node (V2 method)
+        """Get all incoming edges to a node (V2 method)
 
         :param node_id: node id
-        :return: list of incoming edges
+
+        Returns:
+            All edges whose head is `node_id`.
+
         """
         edge_ids = self.in_edges.get(node_id, [])
         return [self.edges[eid] for eid in edge_ids if eid in self.edges]
@@ -367,7 +387,7 @@ class Graph:
 class GraphBuilder:
     """Fluent helper for constructing simple graphs, primarily for tests."""
 
-    def __init__(self, *, graph_cls: type[Graph]):
+    def __init__(self, *, graph_cls: type[Graph]) -> None:
         self._graph_cls = graph_cls
         self._nodes: list[Node] = []
         self._nodes_by_id: dict[str, Node] = {}
@@ -376,9 +396,9 @@ class GraphBuilder:
 
     def add_root(self, node: Node) -> GraphBuilder:
         """Register the root node. Must be called exactly once."""
-
         if self._nodes:
-            raise ValueError("Root node has already been added")
+            msg = "Root node has already been added"
+            raise ValueError(msg)
         self._register_node(node)
         self._nodes.append(node)
         return self
@@ -391,13 +411,14 @@ class GraphBuilder:
         source_handle: str = "source",
     ) -> GraphBuilder:
         """Append a node and connect it from the specified predecessor."""
-
         if not self._nodes:
-            raise ValueError("Root node must be added before adding other nodes")
+            msg = "Root node must be added before adding other nodes"
+            raise ValueError(msg)
 
         predecessor_id = from_node_id or self._nodes[-1].id
         if predecessor_id not in self._nodes_by_id:
-            raise ValueError(f"Predecessor node '{predecessor_id}' not found")
+            msg = f"Predecessor node '{predecessor_id}' not found"
+            raise ValueError(msg)
 
         predecessor = self._nodes_by_id[predecessor_id]
         self._register_node(node)
@@ -406,21 +427,29 @@ class GraphBuilder:
         edge_id = f"edge_{self._edge_counter}"
         self._edge_counter += 1
         edge = Edge(
-            id=edge_id, tail=predecessor.id, head=node.id, source_handle=source_handle
+            id=edge_id,
+            tail=predecessor.id,
+            head=node.id,
+            source_handle=source_handle,
         )
         self._edges.append(edge)
 
         return self
 
     def connect(
-        self, *, tail: str, head: str, source_handle: str = "source"
+        self,
+        *,
+        tail: str,
+        head: str,
+        source_handle: str = "source",
     ) -> GraphBuilder:
         """Connect two existing nodes without adding a new node."""
-
         if tail not in self._nodes_by_id:
-            raise ValueError(f"Tail node '{tail}' not found")
+            msg = f"Tail node '{tail}' not found"
+            raise ValueError(msg)
         if head not in self._nodes_by_id:
-            raise ValueError(f"Head node '{head}' not found")
+            msg = f"Head node '{head}' not found"
+            raise ValueError(msg)
 
         edge_id = f"edge_{self._edge_counter}"
         self._edge_counter += 1
@@ -431,9 +460,9 @@ class GraphBuilder:
 
     def build(self) -> Graph:
         """Materialize the graph instance from the accumulated nodes and edges."""
-
         if not self._nodes:
-            raise ValueError("Cannot build an empty graph")
+            msg = "Cannot build an empty graph"
+            raise ValueError(msg)
 
         nodes = {node.id: node for node in self._nodes}
         edges = {edge.id: edge for edge in self._edges}
@@ -458,7 +487,9 @@ class GraphBuilder:
 
     def _register_node(self, node: Node) -> None:
         if not node.id:
-            raise ValueError("Node must have a non-empty id")
+            msg = "Node must have a non-empty id"
+            raise ValueError(msg)
         if node.id in self._nodes_by_id:
-            raise ValueError(f"Duplicate node id detected: {node.id}")
+            msg = f"Duplicate node id detected: {node.id}"
+            raise ValueError(msg)
         self._nodes_by_id[node.id] = node

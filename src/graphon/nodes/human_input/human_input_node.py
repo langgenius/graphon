@@ -63,7 +63,7 @@ class HumanInputNode(Node[HumanInputNodeData]):
     @override
     def __init__(
         self,
-        id: str,
+        node_id: str,
         config: NodeConfigDict,
         graph_init_params: "GraphInitParams",
         graph_runtime_state: "GraphRuntimeState",
@@ -71,24 +71,26 @@ class HumanInputNode(Node[HumanInputNodeData]):
         form_repository: object | None = None,
     ) -> None:
         super().__init__(
-            id=id,
+            node_id=node_id,
             config=config,
             graph_init_params=graph_init_params,
             graph_runtime_state=graph_runtime_state,
         )
         resolved_runtime = runtime
         if resolved_runtime is None:
-            raise ValueError("runtime is required")
+            msg = "runtime is required"
+            raise ValueError(msg)
         if form_repository is not None:
             with_form_repository = getattr(
-                resolved_runtime, "with_form_repository", None
+                resolved_runtime,
+                "with_form_repository",
+                None,
             )
             if callable(with_form_repository):
                 updated_runtime = with_form_repository(form_repository)
                 if not isinstance(updated_runtime, HumanInputNodeRuntimeProtocol):
-                    raise TypeError(
-                        "with_form_repository() must return a HumanInput runtime"
-                    )
+                    msg = "with_form_repository() must return a HumanInput runtime"
+                    raise TypeError(msg)
                 resolved_runtime = updated_runtime
         self._runtime: HumanInputNodeRuntimeProtocol = resolved_runtime
 
@@ -99,7 +101,6 @@ class HumanInputNode(Node[HumanInputNodeData]):
 
     def _resolve_branch_selection(self) -> str | None:
         """Determine the branch handle selected by human input if available."""
-
         variable_pool = self.graph_runtime_state.variable_pool
 
         for key in self._BRANCH_SELECTION_KEYS:
@@ -153,16 +154,18 @@ class HumanInputNode(Node[HumanInputNodeData]):
 
         return None
 
-    def _form_to_pause_event(self, form_entity: HumanInputFormStateProtocol):
+    def _form_to_pause_event(
+        self,
+        form_entity: HumanInputFormStateProtocol,
+    ) -> PauseRequestedEvent:
         required_event = self._human_input_required_event(form_entity)
-        pause_requested_event = PauseRequestedEvent(reason=required_event)
-        return pause_requested_event
+        return PauseRequestedEvent(reason=required_event)
 
     def resolve_default_values(self) -> Mapping[str, Any]:
         variable_pool = self.graph_runtime_state.variable_pool
         resolved_defaults: dict[str, Any] = {}
-        for input in self._node_data.inputs:
-            if (default_value := input.default) is None:
+        for form_input in self._node_data.inputs:
+            if (default_value := form_input.default) is None:
                 continue
             if default_value.type == PlaceholderType.CONSTANT:
                 continue
@@ -170,16 +173,17 @@ class HumanInputNode(Node[HumanInputNodeData]):
             if resolved_value is None:
                 # TODO: How should we handle this?
                 continue
-            resolved_defaults[input.output_variable_name] = (
+            resolved_defaults[form_input.output_variable_name] = (
                 WorkflowRuntimeTypeConverter().value_to_json_encodable_recursive(
-                    resolved_value.value
+                    resolved_value.value,
                 )
             )
 
         return resolved_defaults
 
     def _human_input_required_event(
-        self, form_entity: HumanInputFormStateProtocol
+        self,
+        form_entity: HumanInputFormStateProtocol,
     ) -> HumanInputRequired:
         node_data = self._node_data
         resolved_default_values = self.resolve_default_values()
@@ -195,8 +199,7 @@ class HumanInputNode(Node[HumanInputNodeData]):
 
     @override
     def _run(self) -> Generator[NodeEventBase, None, None]:
-        """
-        Execute the human input node.
+        """Execute the human input node.
 
         This method will:
         1. Generate a unique form ID
@@ -205,6 +208,13 @@ class HumanInputNode(Node[HumanInputNodeData]):
         4. Send form via configured delivery methods
         5. Suspend workflow execution
         6. Wait for form submission to resume
+
+        Yields:
+            Node events describing form suspension, timeout, or submitted output.
+
+        Raises:
+            AssertionError: If a submitted form is missing its selected action id.
+
         """
         form = self._runtime.get_form(node_id=self.id)
         if form is None:
@@ -223,10 +233,10 @@ class HumanInputNode(Node[HumanInputNodeData]):
             yield self._form_to_pause_event(form_entity)
             return
 
-        if form.status in {
+        if form.status in frozenset((
             HumanInputFormStatus.TIMEOUT,
             HumanInputFormStatus.EXPIRED,
-        } or form.expiration_time <= datetime.now(UTC).replace(tzinfo=None):
+        )) or form.expiration_time <= datetime.now(UTC).replace(tzinfo=None):
             yield HumanInputFormTimeoutEvent(
                 node_title=self._node_data.title,
                 expiration_time=form.expiration_time,
@@ -236,7 +246,7 @@ class HumanInputNode(Node[HumanInputNodeData]):
                     status=WorkflowNodeExecutionStatus.SUCCEEDED,
                     outputs={self._OUTPUT_FIELD_ACTION_ID: ""},
                     edge_source_handle=self._TIMEOUT_HANDLE,
-                )
+                ),
             )
             return
 
@@ -246,10 +256,11 @@ class HumanInputNode(Node[HumanInputNodeData]):
 
         selected_action_id = form.selected_action_id
         if selected_action_id is None:
-            raise AssertionError(
+            msg = (
                 f"selected_action_id should not be None when form submitted, "
                 f"form_id={form.id}"
             )
+            raise AssertionError(msg)
         submitted_data = form.submitted_data or {}
         outputs: dict[str, Any] = dict(submitted_data)
         outputs[self._OUTPUT_FIELD_ACTION_ID] = selected_action_id
@@ -274,17 +285,20 @@ class HumanInputNode(Node[HumanInputNodeData]):
                 status=WorkflowNodeExecutionStatus.SUCCEEDED,
                 outputs=outputs,
                 edge_source_handle=selected_action_id,
-            )
+            ),
         )
 
     def render_form_content_before_submission(self) -> str:
-        """
-        Process form content by substituting variables.
+        """Process form content by substituting variables.
 
         This method should:
         1. Parse the form_content markdown
         2. Substitute {{#node_name.var_name#}} with actual values
         3. Keep {{#$output.field_name#}} placeholders for form inputs
+
+        Returns:
+            Rendered markdown with runtime variable references resolved.
+
         """
         rendered_form_content = self.graph_runtime_state.variable_pool.convert_template(
             self._node_data.form_content,
@@ -297,9 +311,7 @@ class HumanInputNode(Node[HumanInputNodeData]):
         outputs: Mapping[str, Any],
         field_names: Sequence[str],
     ) -> str:
-        """
-        Replace {{#$output.xxx#}} placeholders with submitted values.
-        """
+        """Replace {{#$output.xxx#}} placeholders with submitted values."""
         rendered_content = form_content
         for field_name in field_names:
             placeholder = "{{#$output." + field_name + "#}}"
@@ -322,11 +334,16 @@ class HumanInputNode(Node[HumanInputNodeData]):
         node_id: str,
         node_data: HumanInputNodeData,
     ) -> Mapping[str, Sequence[str]]:
-        """
-        Extract variable selectors referenced in form content and input default values.
+        """Extract variable selectors referenced in form content
+        and input default values.
 
         This method should parse:
         1. Variables referenced in form_content ({{#node_name.var_name#}})
         2. Variables referenced in input default values
+
+        Returns:
+            Mapping of local reference keys to the referenced variable selectors.
+
         """
+        _ = graph_config
         return node_data.extract_variable_selector_to_variable_mapping(node_id)

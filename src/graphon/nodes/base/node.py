@@ -78,7 +78,253 @@ _MISSING_RUN_CONTEXT_VALUE = object()
 logger = logging.getLogger(__name__)
 
 
-class Node[NodeDataT: BaseNodeData]:
+class _NodeRegistryMixin[NodeDataT: BaseNodeData]:
+    """Node registry and config helpers kept separate from execution flow."""
+
+    @classmethod
+    def get_registry_version(cls) -> int:
+        return cls._registry_version
+
+    @classmethod
+    def extract_variable_selector_to_variable_mapping(
+        cls,
+        *,
+        graph_config: Mapping[str, Any],
+        config: NodeConfigDict,
+    ) -> Mapping[str, Sequence[str]]:
+        """Extracts references variable selectors from node configuration.
+
+        The `config` parameter represents the configuration for a specific node
+        type and corresponds to the `data` field in the node definition object.
+
+        The returned mapping has the following structure:
+
+            {'1747829548239.#1747829667553.result#': ['1747829667553', 'result']}
+
+        For loop and iteration nodes, the mapping may look like this:
+
+            {
+                "1748332301644.input_selector": ["1748332363630", "result"],
+                "1748332325079.1748332325079.#sys.workflow_id#": ["sys", "workflow_id"],
+            }
+
+        where `1748332301644` is the ID of the loop / iteration node,
+        and `1748332325079` is the ID of the node inside the loop or iteration node.
+
+        Here, the key consists of two parts: the current node ID (provided as the
+        `node_id` parameter to `_extract_variable_selector_to_variable_mapping`)
+        and the variable selector,
+        enclosed in `#` symbols. These two parts are separated by a dot (`.`).
+
+        The value is a list of string representing the variable selector, where the
+        first element is the node ID of the referenced variable, and the second
+        element is the variable name within that node.
+
+        The meaning of the above response is:
+
+        The node with ID `1747829548239` references the variable `result` from the
+        node with ID `1747829667553`. For example, if `1747829548239` is a LLM
+        node, its prompt may contain a reference to the `result` output variable
+        of node `1747829667553`.
+
+        :param graph_config: graph config
+        :param config: node config
+
+        Returns:
+            A mapping from node-local reference keys to concrete variable selectors.
+
+        """
+        node_id = config["id"]
+        node_data = cls.validate_node_data(config["data"])
+        return cls._extract_variable_selector_to_variable_mapping(
+            graph_config=graph_config,
+            node_id=node_id,
+            node_data=node_data,
+        )
+
+    @classmethod
+    def get_default_config(
+        cls,
+        filters: Mapping[str, object] | None = None,
+    ) -> Mapping[str, object]:
+        _ = filters
+        return {}
+
+    @classmethod
+    def get_node_type_classes_mapping(
+        cls,
+    ) -> Mapping[NodeType, Mapping[str, type[Node]]]:
+        """Return a read-only view of the currently registered node classes.
+
+        This accessor intentionally performs no imports. The embedding layer that
+        owns bootstrap (for example `core.workflow.node_factory`) must import any
+        extension node packages before calling it so their subclasses register via
+        `__init_subclass__`.
+
+        Returns:
+            A read-only mapping of node types to versioned node classes.
+
+        """
+        return {
+            node_type: MappingProxyType(version_map)
+            for node_type, version_map in cls._registry.items()
+        }
+
+
+class _NodeDataModelMixin[NodeDataT: BaseNodeData]:
+    """Typed node-data hydration helpers."""
+
+    @classmethod
+    def validate_node_data(
+        cls,
+        node_data: BaseNodeData | Mapping[str, Any],
+    ) -> NodeDataT:
+        """Validate shared graph node payloads against the subclass-declared
+        NodeData model.
+
+        Re-validate from a dumped payload instead of `from_attributes=True` so
+        compatibility extras stored on `BaseNodeData` survive the handoff to the
+        concrete node data model. Human Input delivery methods are one such extra
+        field until graphon owns that schema.
+
+        Returns:
+            The validated node data instance for the concrete node subclass.
+
+        """
+        if isinstance(node_data, BaseNodeData):
+            payload = node_data.model_dump(mode="python")
+        else:
+            payload = dict(node_data)
+        return cast("NodeDataT", cls._node_data_type.model_validate(payload))
+
+    def init_node_data(self, data: BaseNodeData | Mapping[str, Any]) -> None:
+        """Hydrate `_node_data` for legacy callers that bypass `__init__`."""
+        self._node_data = self.validate_node_data(cast("BaseNodeData", data))
+
+    @property
+    def retry(self) -> bool:
+        return False
+
+    def _get_error_strategy(self) -> ErrorStrategy | None:
+        """Get the error strategy for this node."""
+        return self._node_data.error_strategy
+
+    def _get_retry_config(self) -> RetryConfig:
+        """Get the retry configuration for this node."""
+        return self._node_data.retry_config
+
+    def _get_title(self) -> str:
+        """Get the node title."""
+        return self._node_data.title
+
+    def _get_description(self) -> str | None:
+        """Get the node description."""
+        return self._node_data.desc
+
+    def _get_default_value_dict(self) -> dict[str, Any]:
+        """Get the default values dictionary for this node."""
+        return self._node_data.default_value_dict
+
+    @property
+    def error_strategy(self) -> ErrorStrategy | None:
+        """Get the error strategy for this node."""
+        return self._get_error_strategy()
+
+    @property
+    def retry_config(self) -> RetryConfig:
+        """Get the retry configuration for this node."""
+        return self._get_retry_config()
+
+    @property
+    def title(self) -> str:
+        """Get the node title."""
+        return self._get_title()
+
+    @property
+    def description(self) -> str | None:
+        """Get the node description."""
+        return self._get_description()
+
+    @property
+    def default_value_dict(self) -> dict[str, Any]:
+        """Get the default values dictionary for this node."""
+        return self._get_default_value_dict()
+
+    @property
+    def node_data(self) -> NodeDataT:
+        """Typed access to this node's configuration data."""
+        return self._node_data
+
+
+class _NodeRuntimeMixin[NodeDataT: BaseNodeData]:
+    """Run-context and execution-lifecycle accessors."""
+
+    def post_init(self) -> None:
+        """Optional hook for subclasses requiring extra initialization."""
+        return
+
+    @property
+    def graph_init_params(self) -> GraphInitParams:
+        return self._graph_init_params
+
+    @property
+    def run_context(self) -> Mapping[str, Any]:
+        return self._run_context
+
+    def get_run_context_value(self, key: str, default: Any = None) -> Any:
+        return self._run_context.get(key, default)
+
+    def require_run_context_value(self, key: str) -> Any:
+        value = self.get_run_context_value(key, _MISSING_RUN_CONTEXT_VALUE)
+        if value is _MISSING_RUN_CONTEXT_VALUE:
+            msg = f"run_context missing required key: {key}"
+            raise ValueError(msg)
+        return value
+
+    @property
+    def execution_id(self) -> str:
+        return self._node_execution_id
+
+    def ensure_execution_id(self) -> str:
+        if self._node_execution_id:
+            return self._node_execution_id
+
+        resumed_execution_id = self._restore_execution_id_from_runtime_state()
+        if resumed_execution_id:
+            self._node_execution_id = resumed_execution_id
+            return self._node_execution_id
+
+        self._node_execution_id = str(uuid4())
+        return self._node_execution_id
+
+    def populate_start_event(self, event: NodeRunStartedEvent) -> None:
+        """Allow subclasses to enrich the started event without cross-node imports
+        in the base class.
+        """
+        _ = event
+
+    def blocks_variable_output(self, variable_selectors: set[tuple[str, ...]]) -> bool:
+        """Check if this node blocks the output of specific variables.
+
+        This method is used to determine if a node must complete execution before
+        the specified variables can be used in streaming output.
+
+        :param variable_selectors: Set of variable selectors, each as a tuple
+        (e.g., ('conversation', 'str'))
+
+        Returns:
+            `True` if this node blocks any requested selector, otherwise `False`.
+
+        """
+        _ = variable_selectors
+        return False
+
+
+class Node[NodeDataT: BaseNodeData](
+    _NodeRegistryMixin[NodeDataT],
+    _NodeDataModelMixin[NodeDataT],
+    _NodeRuntimeMixin[NodeDataT],
+):
     """BaseNode serves as the foundational class for all node implementations.
 
     Nodes are allowed to maintain transient states
@@ -94,8 +340,7 @@ class Node[NodeDataT: BaseNodeData]:
     _node_data_type: ClassVar[type[BaseNodeData]] = BaseNodeData
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
-        """
-        Automatically extract and validate the node data type from the generic
+        """Automatically extract and validate the node data type from the generic
         parameter.
 
         When a subclass is defined as `class MyNode(Node[MyNodeData])`, this method:
@@ -156,6 +401,11 @@ class Node[NodeDataT: BaseNodeData]:
             class CodeNode(Node[CodeNodeData]):  # CodeNodeData is auto-extracted
                 node_type = BuiltinNodeTypes.CODE
                 # No need to implement _get_title, _get_error_strategy, etc.
+
+        Raises:
+            TypeError: If the subclass does not parameterize `Node` with a valid
+                `BaseNodeData` subtype.
+
         """
         super().__init_subclass__(**kwargs)
 
@@ -165,9 +415,10 @@ class Node[NodeDataT: BaseNodeData]:
         node_data_type = cls._extract_node_data_type_from_generic()
 
         if node_data_type is None:
-            raise TypeError(
+            msg = (
                 f"{cls.__name__} must inherit from Node[T] with a BaseNodeData subtype"
             )
+            raise TypeError(msg)
 
         cls._node_data_type = node_data_type
 
@@ -203,8 +454,7 @@ class Node[NodeDataT: BaseNodeData]:
 
     @classmethod
     def _extract_node_data_type_from_generic(cls) -> type[BaseNodeData] | None:
-        """
-        Extract the node data type from the generic parameter `Node[T]`.
+        """Extract the node data type from the generic parameter `Node[T]`.
 
         Inspects `__orig_bases__` to find the `Node[T]` parameterization and
         extracts `T`.
@@ -215,6 +465,7 @@ class Node[NodeDataT: BaseNodeData]:
         Raises:
             TypeError: If the generic argument is invalid (not exactly one argument,
                       or not a BaseNodeData subtype).
+
         """
         # __orig_bases__ contains the original generic bases before type erasure.
         # For `class CodeNode(Node[CodeNodeData])`, this would be
@@ -223,22 +474,25 @@ class Node[NodeDataT: BaseNodeData]:
             origin = get_origin(base)  # Returns `Node` for `Node[CodeNodeData]`
             if origin is Node:
                 args = get_args(
-                    base
+                    base,
                 )  # Returns `(CodeNodeData,)` for `Node[CodeNodeData]`
                 if len(args) != 1:
-                    raise TypeError(
+                    msg = (
                         f"{cls.__name__} must specify exactly one node data "
                         f"generic argument"
                     )
+                    raise TypeError(msg)
 
                 candidate = args[0]
                 if not isinstance(candidate, type) or not issubclass(
-                    candidate, BaseNodeData
+                    candidate,
+                    BaseNodeData,
                 ):
-                    raise TypeError(
+                    msg = (
                         f"{cls.__name__} must parameterize Node with a "
                         f"BaseNodeData subtype"
                     )
+                    raise TypeError(msg)
 
                 return candidate
 
@@ -248,94 +502,37 @@ class Node[NodeDataT: BaseNodeData]:
     _registry: ClassVar[dict[NodeType, dict[str, type[Node]]]] = {}
     _registry_version: ClassVar[int] = 0
 
-    @classmethod
-    def get_registry_version(cls) -> int:
-        return cls._registry_version
-
     def __init__(
         self,
-        id: str,
+        node_id: str,
         config: NodeConfigDict,
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,
     ) -> None:
         self._graph_init_params = graph_init_params
         self._run_context = MappingProxyType(dict(graph_init_params.run_context))
-        self.id = id
+        self.id = node_id
         self.workflow_id = graph_init_params.workflow_id
         self.graph_config = graph_init_params.graph_config
         self.workflow_call_depth = graph_init_params.call_depth
         self.graph_runtime_state = graph_runtime_state
         self.state: NodeState = NodeState.UNKNOWN  # node execution state
 
-        node_id = config["id"]
+        config_node_id = config["id"]
+        if node_id != config_node_id:
+            msg = (
+                "node_id must match config['id'], "
+                f"got node_id={node_id!r}, config['id']={config_node_id!r}"
+            )
+            raise ValueError(msg)
 
-        self._node_id = node_id
+        self._node_id = config_node_id
         self._node_execution_id: str = ""
         self._start_at = datetime.now(UTC).replace(tzinfo=None)
 
         self._node_data = self.validate_node_data(config["data"])
 
         self.post_init()
-
-    @classmethod
-    def validate_node_data(
-        cls, node_data: BaseNodeData | Mapping[str, Any]
-    ) -> NodeDataT:
-        """Validate shared graph node payloads against the subclass-declared
-        NodeData model.
-
-        Re-validate from a dumped payload instead of `from_attributes=True` so
-        compatibility extras stored on `BaseNodeData` survive the handoff to the
-        concrete node data model. Human Input delivery methods are one such extra
-        field until graphon owns that schema.
-        """
-        if isinstance(node_data, BaseNodeData):
-            payload = node_data.model_dump(mode="python")
-        else:
-            payload = dict(node_data)
-        return cast("NodeDataT", cls._node_data_type.model_validate(payload))
-
-    def init_node_data(self, data: BaseNodeData | Mapping[str, Any]) -> None:
-        """Hydrate `_node_data` for legacy callers that bypass `__init__`."""
-        self._node_data = self.validate_node_data(data)
-
-    def post_init(self) -> None:
-        """Optional hook for subclasses requiring extra initialization."""
-        return
-
-    @property
-    def graph_init_params(self) -> GraphInitParams:
-        return self._graph_init_params
-
-    @property
-    def run_context(self) -> Mapping[str, Any]:
-        return self._run_context
-
-    def get_run_context_value(self, key: str, default: Any = None) -> Any:
-        return self._run_context.get(key, default)
-
-    def require_run_context_value(self, key: str) -> Any:
-        value = self.get_run_context_value(key, _MISSING_RUN_CONTEXT_VALUE)
-        if value is _MISSING_RUN_CONTEXT_VALUE:
-            raise ValueError(f"run_context missing required key: {key}")
-        return value
-
-    @property
-    def execution_id(self) -> str:
-        return self._node_execution_id
-
-    def ensure_execution_id(self) -> str:
-        if self._node_execution_id:
-            return self._node_execution_id
-
-        resumed_execution_id = self._restore_execution_id_from_runtime_state()
-        if resumed_execution_id:
-            self._node_execution_id = resumed_execution_id
-            return self._node_execution_id
-
-        self._node_execution_id = str(uuid4())
-        return self._node_execution_id
 
     def _restore_execution_id_from_runtime_state(self) -> str | None:
         graph_execution = self.graph_runtime_state.graph_execution
@@ -355,16 +552,8 @@ class Node[NodeDataT: BaseNodeData]:
 
     @abstractmethod
     def _run(self) -> NodeRunResult | Generator[NodeEventBase, None, None]:
-        """
-        Run node
-        :return:
-        """
+        """Run the node and return either a result object or an event stream."""
         raise NotImplementedError
-
-    def populate_start_event(self, event: NodeRunStartedEvent) -> None:
-        """Allow subclasses to enrich the started event without cross-node imports
-        in the base class."""
-        _ = event
 
     def run(self) -> Generator[GraphNodeEventBase, None, None]:
         execution_id = self.ensure_execution_id()
@@ -474,16 +663,18 @@ class Node[NodeDataT: BaseNodeData]:
 
         :param graph_config: graph config
         :param config: node config
-        :return:
+
+        Returns:
+            A mapping from node-local reference keys to concrete variable selectors.
+
         """
         node_id = config["id"]
         node_data = cls.validate_node_data(config["data"])
-        data = cls._extract_variable_selector_to_variable_mapping(
+        return cls._extract_variable_selector_to_variable_mapping(
             graph_config=graph_config,
             node_id=node_id,
             node_data=node_data,
         )
-        return data
 
     @classmethod
     def _extract_variable_selector_to_variable_mapping(
@@ -493,26 +684,9 @@ class Node[NodeDataT: BaseNodeData]:
         node_id: str,
         node_data: NodeDataT,
     ) -> Mapping[str, Sequence[str]]:
-        return {}
-
-    def blocks_variable_output(self, variable_selectors: set[tuple[str, ...]]) -> bool:
-        """
-        Check if this node blocks the output of specific variables.
-
-        This method is used to determine if a node must complete execution before
-        the specified variables can be used in streaming output.
-
-        :param variable_selectors: Set of variable selectors, each as a tuple
-        (e.g., ('conversation', 'str'))
-        :return: True if this node blocks output of any of the specified
-        variables, False otherwise
-        """
-        return False
-
-    @classmethod
-    def get_default_config(
-        cls, filters: Mapping[str, object] | None = None
-    ) -> Mapping[str, object]:
+        _ = graph_config
+        _ = node_id
+        _ = node_data
         return {}
 
     @classmethod
@@ -521,83 +695,12 @@ class Node[NodeDataT: BaseNodeData]:
         """`node_version` returns the version of current node type."""
         # NOTE(QuantumGhost): Node versions must remain unique per `NodeType` so
         # registry lookups can resolve numeric versions and `latest`.
-        raise NotImplementedError(
-            "subclasses of BaseNode must implement `version` method."
-        )
-
-    @classmethod
-    def get_node_type_classes_mapping(
-        cls,
-    ) -> Mapping[NodeType, Mapping[str, type[Node]]]:
-        """Return a read-only view of the currently registered node classes.
-
-        This accessor intentionally performs no imports. The embedding layer that
-        owns bootstrap (for example `core.workflow.node_factory`) must import any
-        extension node packages before calling it so their subclasses register via
-        `__init_subclass__`.
-        """
-        return {
-            node_type: MappingProxyType(version_map)
-            for node_type, version_map in cls._registry.items()
-        }
-
-    @property
-    def retry(self) -> bool:
-        return False
-
-    def _get_error_strategy(self) -> ErrorStrategy | None:
-        """Get the error strategy for this node."""
-        return self._node_data.error_strategy
-
-    def _get_retry_config(self) -> RetryConfig:
-        """Get the retry configuration for this node."""
-        return self._node_data.retry_config
-
-    def _get_title(self) -> str:
-        """Get the node title."""
-        return self._node_data.title
-
-    def _get_description(self) -> str | None:
-        """Get the node description."""
-        return self._node_data.desc
-
-    def _get_default_value_dict(self) -> dict[str, Any]:
-        """Get the default values dictionary for this node."""
-        return self._node_data.default_value_dict
-
-    # Public interface properties that delegate to abstract methods
-    @property
-    def error_strategy(self) -> ErrorStrategy | None:
-        """Get the error strategy for this node."""
-        return self._get_error_strategy()
-
-    @property
-    def retry_config(self) -> RetryConfig:
-        """Get the retry configuration for this node."""
-        return self._get_retry_config()
-
-    @property
-    def title(self) -> str:
-        """Get the node title."""
-        return self._get_title()
-
-    @property
-    def description(self) -> str | None:
-        """Get the node description."""
-        return self._get_description()
-
-    @property
-    def default_value_dict(self) -> dict[str, Any]:
-        """Get the default values dictionary for this node."""
-        return self._get_default_value_dict()
-
-    @property
-    def node_data(self) -> NodeDataT:
-        """Typed access to this node's configuration data."""
-        return self._node_data
+        msg = "subclasses of BaseNode must implement `version` method."
+        raise NotImplementedError(msg)
 
     def _convert_node_run_result_to_graph_node_event(
-        self, result: NodeRunResult
+        self,
+        result: NodeRunResult,
     ) -> GraphNodeEventBase:
         finished_at = datetime.now(UTC).replace(tzinfo=None)
         match result.status:
@@ -621,13 +724,13 @@ class Node[NodeDataT: BaseNodeData]:
                     node_run_result=result,
                 )
             case _:
-                raise Exception(f"result status {result.status} not supported")
+                msg = f"result status {result.status} not supported"
+                raise ValueError(msg)
 
     @singledispatchmethod
     def _dispatch(self, event: NodeEventBase) -> GraphNodeEventBase:
-        raise NotImplementedError(
-            f"Node {self._node_id} does not support event type {type(event)}"
-        )
+        msg = f"Node {self._node_id} does not support event type {type(event)}"
+        raise NotImplementedError(msg)
 
     @_dispatch.register
     def _(self, event: StreamChunkEvent) -> NodeRunStreamChunkEvent:
@@ -642,7 +745,8 @@ class Node[NodeDataT: BaseNodeData]:
 
     @_dispatch.register
     def _(
-        self, event: StreamCompletedEvent
+        self,
+        event: StreamCompletedEvent,
     ) -> NodeRunSucceededEvent | NodeRunFailedEvent:
         finished_at = datetime.now(UTC).replace(tzinfo=None)
         match event.node_run_result.status:
@@ -666,10 +770,11 @@ class Node[NodeDataT: BaseNodeData]:
                     error=event.node_run_result.error,
                 )
             case _:
-                raise NotImplementedError(
+                msg = (
                     f"Node {self._node_id} does not support status "
                     f"{event.node_run_result.status}"
                 )
+                raise NotImplementedError(msg)
 
     @_dispatch.register
     def _(self, event: VariableUpdatedEvent) -> NodeRunVariableUpdatedEvent:
@@ -707,7 +812,7 @@ class Node[NodeDataT: BaseNodeData]:
         )
 
     @_dispatch.register
-    def _(self, event: HumanInputFormFilledEvent):
+    def _(self, event: HumanInputFormFilledEvent) -> NodeRunHumanInputFormFilledEvent:
         return NodeRunHumanInputFormFilledEvent(
             id=self.execution_id,
             node_id=self._node_id,
@@ -719,7 +824,7 @@ class Node[NodeDataT: BaseNodeData]:
         )
 
     @_dispatch.register
-    def _(self, event: HumanInputFormTimeoutEvent):
+    def _(self, event: HumanInputFormTimeoutEvent) -> NodeRunHumanInputFormTimeoutEvent:
         return NodeRunHumanInputFormTimeoutEvent(
             id=self.execution_id,
             node_id=self._node_id,

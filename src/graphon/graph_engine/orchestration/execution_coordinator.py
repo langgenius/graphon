@@ -1,6 +1,4 @@
-"""
-Execution coordinator for managing overall workflow execution.
-"""
+"""Execution coordinator for managing overall workflow execution."""
 
 from typing import final
 
@@ -12,8 +10,7 @@ from ..worker_management import WorkerPool
 
 @final
 class ExecutionCoordinator:
-    """
-    Coordinates overall execution flow between subsystems.
+    """Coordinates overall execution flow between subsystems.
 
     This provides high-level coordination methods used by the
     dispatcher to manage execution state.
@@ -26,14 +23,14 @@ class ExecutionCoordinator:
         command_processor: CommandProcessor,
         worker_pool: WorkerPool,
     ) -> None:
-        """
-        Initialize the execution coordinator.
+        """Initialize the execution coordinator.
 
         Args:
             graph_execution: Graph execution aggregate
             state_manager: Unified state manager
             command_processor: Processor for commands
             worker_pool: Pool of workers
+
         """
         self._graph_execution = graph_execution
         self._state_manager = state_manager
@@ -69,17 +66,16 @@ class ExecutionCoordinator:
             self._graph_execution.complete()
 
     def mark_failed(self, error: Exception) -> None:
-        """
-        Mark execution as failed.
+        """Mark execution as failed.
 
         Args:
             error: The error that caused failure
+
         """
         self._graph_execution.fail(error)
 
     def handle_pause_if_needed(self) -> None:
         """If the execution has been paused, stop workers immediately."""
-
         if not self._graph_execution.is_paused:
             return
 
@@ -88,7 +84,6 @@ class ExecutionCoordinator:
 
     def handle_abort_if_needed(self) -> None:
         """If the execution has been aborted, stop workers immediately."""
-
         if not self._graph_execution.aborted:
             return
 
@@ -101,7 +96,6 @@ class ExecutionCoordinator:
         # Before pause, executing state can change concurrently, making the result
         # unreliable.
         if not self._graph_execution.is_paused:
-            raise AssertionError(
-                "has_executing_nodes should only be called after execution is paused"
-            )
+            msg = "has_executing_nodes should only be called after execution is paused"
+            raise AssertionError(msg)
         return self._state_manager.get_executing_count() > 0

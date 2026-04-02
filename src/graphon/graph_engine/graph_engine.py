@@ -1,5 +1,4 @@
-"""
-QueueBasedGraphEngine - Main orchestrator for queue-based workflow execution.
+"""QueueBasedGraphEngine - Main orchestrator for queue-based workflow execution.
 
 This engine uses a modular architecture with separated packages following
 Domain-Driven Design principles for improved maintainability and testability.
@@ -62,8 +61,7 @@ _DEFAULT_CONFIG = GraphEngineConfig()
 
 @final
 class GraphEngine:
-    """
-    Queue-based graph execution engine.
+    """Queue-based graph execution engine.
 
     Uses a modular architecture that delegates responsibilities to specialized
     subsystems, following Domain-Driven Design and SOLID principles.
@@ -79,7 +77,6 @@ class GraphEngine:
         child_engine_builder: ChildGraphEngineBuilderProtocol | None = None,
     ) -> None:
         """Initialize the graph engine with all subsystems and dependencies."""
-
         # Bind runtime state to current workflow context
         self._graph = graph
         self._graph_runtime_state = graph_runtime_state
@@ -148,10 +145,11 @@ class GraphEngine:
         self._command_processor.register_handler(PauseCommand, pause_handler)
 
         update_variables_handler = UpdateVariablesCommandHandler(
-            self._graph_runtime_state.variable_pool
+            self._graph_runtime_state.variable_pool,
         )
         self._command_processor.register_handler(
-            UpdateVariablesCommand, update_variables_handler
+            UpdateVariablesCommand,
+            update_variables_handler,
         )
 
         # === Worker Pool Setup ===
@@ -204,10 +202,11 @@ class GraphEngine:
         expected_state_id = id(self._graph_runtime_state)
         for node in self._graph.nodes.values():
             if id(node.graph_runtime_state) != expected_state_id:
-                raise ValueError(
+                msg = (
                     "GraphRuntimeState consistency violation: Node "
                     f"'{node.id}' has a different instance"
                 )
+                raise ValueError(msg)
 
     def _bind_layer_context(
         self,
@@ -227,7 +226,7 @@ class GraphEngine:
     def request_abort(self, reason: str | None = None) -> None:
         """Queue an abort command for this engine."""
         self._command_channel.send_command(
-            AbortCommand(reason=reason or "User requested abort")
+            AbortCommand(reason=reason or "User requested abort"),
         )
 
     def create_child_engine(
@@ -246,11 +245,11 @@ class GraphEngine:
         )
 
     def run(self) -> Generator[GraphEngineEvent, None, None]:
-        """
-        Execute the graph using the modular architecture.
+        """Execute the graph using the modular architecture.
 
-        Returns:
-            Generator yielding GraphEngineEvent instances
+        Yields:
+            `GraphEngineEvent` instances emitted during workflow execution.
+
         """
         try:
             # Initialize layers
@@ -278,51 +277,11 @@ class GraphEngine:
             yield from self._event_manager.emit_events()
 
             # Handle completion
-            if self._graph_execution.is_paused:
-                pause_reasons = self._graph_execution.pause_reasons
-                assert pause_reasons, (
-                    "pause_reasons should not be empty when execution is paused."
-                )
-                # Ensure we have a valid PauseReason for the event
-                paused_event = GraphRunPausedEvent(
-                    reasons=pause_reasons,
-                    outputs=self._graph_runtime_state.outputs,
-                )
-                self._event_manager.notify_layers(paused_event)
-                yield paused_event
-            elif self._graph_execution.aborted:
-                abort_reason = "Workflow execution aborted by user command"
-                if self._graph_execution.error:
-                    abort_reason = str(self._graph_execution.error)
-                aborted_event = GraphRunAbortedEvent(
-                    reason=abort_reason,
-                    outputs=self._graph_runtime_state.outputs,
-                )
-                self._event_manager.notify_layers(aborted_event)
-                yield aborted_event
-            elif self._graph_execution.has_error:
-                if self._graph_execution.error:
-                    raise self._graph_execution.error
-            else:
-                outputs = self._graph_runtime_state.outputs
-                exceptions_count = self._graph_execution.exceptions_count
-                if exceptions_count > 0:
-                    partial_event = GraphRunPartialSucceededEvent(
-                        exceptions_count=exceptions_count,
-                        outputs=outputs,
-                    )
-                    self._event_manager.notify_layers(partial_event)
-                    yield partial_event
-                else:
-                    succeeded_event = GraphRunSucceededEvent(
-                        outputs=outputs,
-                    )
-                    self._event_manager.notify_layers(succeeded_event)
-                    yield succeeded_event
+            yield from self._emit_terminal_events()
 
-        except Exception as e:
+        except Exception as error:
             failed_event = GraphRunFailedEvent(
-                error=str(e),
+                error=str(error),
                 exceptions_count=self._graph_execution.exceptions_count,
             )
             self._event_manager.notify_layers(failed_event)
@@ -332,6 +291,56 @@ class GraphEngine:
         finally:
             self._stop_execution()
 
+    def _emit_terminal_events(self) -> Generator[GraphEngineEvent, None, None]:
+        if self._graph_execution.is_paused:
+            pause_reasons = self._graph_execution.pause_reasons
+            assert pause_reasons, (
+                "pause_reasons should not be empty when execution is paused."
+            )
+            # Ensure we have a valid PauseReason for the event
+            paused_event = GraphRunPausedEvent(
+                reasons=pause_reasons,
+                outputs=self._graph_runtime_state.outputs,
+            )
+            self._event_manager.notify_layers(paused_event)
+            yield paused_event
+            return
+
+        if self._graph_execution.aborted:
+            abort_reason = "Workflow execution aborted by user command"
+            if self._graph_execution.error:
+                abort_reason = str(self._graph_execution.error)
+            aborted_event = GraphRunAbortedEvent(
+                reason=abort_reason,
+                outputs=self._graph_runtime_state.outputs,
+            )
+            self._event_manager.notify_layers(aborted_event)
+            yield aborted_event
+            return
+
+        if self._graph_execution.has_error:
+            error = self._graph_execution.error
+            if error is not None:
+                raise error
+            return
+
+        outputs = self._graph_runtime_state.outputs
+        exceptions_count = self._graph_execution.exceptions_count
+        if exceptions_count > 0:
+            partial_event = GraphRunPartialSucceededEvent(
+                exceptions_count=exceptions_count,
+                outputs=outputs,
+            )
+            self._event_manager.notify_layers(partial_event)
+            yield partial_event
+            return
+
+        succeeded_event = GraphRunSucceededEvent(
+            outputs=outputs,
+        )
+        self._event_manager.notify_layers(succeeded_event)
+        yield succeeded_event
+
     def _initialize_layers(self) -> None:
         """Initialize layers with context."""
         self._event_manager.set_layers(self._layers)
@@ -340,7 +349,8 @@ class GraphEngine:
                 layer.on_graph_start()
             except Exception:
                 logger.exception(
-                    "Layer %s failed on_graph_start", layer.__class__.__name__
+                    "Layer %s failed on_graph_start",
+                    layer.__class__.__name__,
                 )
 
     def _start_execution(self, *, resume: bool = False) -> None:
@@ -388,7 +398,8 @@ class GraphEngine:
                 layer.on_graph_end(self._graph_execution.error)
             except Exception:
                 logger.exception(
-                    "Layer %s failed on_graph_end", layer.__class__.__name__
+                    "Layer %s failed on_graph_end",
+                    layer.__class__.__name__,
                 )
 
     # Public property accessors for attributes that need external access

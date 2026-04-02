@@ -1,10 +1,10 @@
-"""
-Worker - Thread implementation for queue-based node execution
+"""Worker - Thread implementation for queue-based node execution
 
 Workers pull node IDs from the ready_queue, execute nodes, and push events
 to the event_queue for the dispatcher to process.
 """
 
+import logging
 import queue
 import threading
 import time
@@ -27,11 +27,12 @@ from graphon.nodes.base.node import Node
 
 from .ready_queue import ReadyQueue
 
+logger = logging.getLogger(__name__)
+
 
 @final
 class Worker(threading.Thread):
-    """
-    Worker thread that executes nodes from the ready queue.
+    """Worker thread that executes nodes from the ready queue.
 
     Workers continuously pull node IDs from the ready_queue, execute the
     corresponding nodes, and push the resulting events to the event_queue
@@ -47,8 +48,7 @@ class Worker(threading.Thread):
         worker_id: int = 0,
         execution_context: AbstractContextManager[object] | None = None,
     ) -> None:
-        """
-        Initialize worker thread.
+        """Initialize worker thread.
 
         Args:
             ready_queue: Ready queue containing node IDs ready for execution
@@ -57,6 +57,7 @@ class Worker(threading.Thread):
             layers: Graph engine layers for node execution hooks
             worker_id: Unique identifier for this worker
             execution_context: Optional execution context for context preservation
+
         """
         super().__init__(name=f"GraphWorker-{worker_id}", daemon=True)
         self._ready_queue = ready_queue
@@ -91,8 +92,7 @@ class Worker(threading.Thread):
 
     @override
     def run(self) -> None:
-        """
-        Main worker loop.
+        """Main worker loop.
 
         Continuously pulls node IDs from ready_queue, executes them,
         and pushes events to event_queue until stopped.
@@ -111,20 +111,26 @@ class Worker(threading.Thread):
                 self._execute_node(node)
                 self._ready_queue.task_done()
             except Exception as e:
+                logger.exception(
+                    "Worker failed while executing node %s",
+                    getattr(node, "id", node_id),
+                )
                 self._event_queue.put(
                     self._build_fallback_failure_event(
-                        node, e, started_at=self._current_node_started_at
-                    )
+                        node,
+                        e,
+                        started_at=self._current_node_started_at,
+                    ),
                 )
             finally:
                 self._current_node_started_at = None
 
     def _execute_node(self, node: Node) -> None:
-        """
-        Execute a single node and handle its events.
+        """Execute a single node and handle its events.
 
         Args:
             node: The node instance to execute
+
         """
         node.ensure_execution_id()
 
@@ -176,7 +182,11 @@ class Worker(threading.Thread):
             try:
                 layer.on_node_run_start(node)
             except Exception:
-                # Silently ignore layer errors to prevent disrupting node execution
+                logger.exception(
+                    "Layer %s failed in on_node_run_start for node %s",
+                    type(layer).__name__,
+                    node.id,
+                )
                 continue
 
     def _invoke_node_run_end_hooks(
@@ -190,14 +200,21 @@ class Worker(threading.Thread):
             try:
                 layer.on_node_run_end(node, error, result_event)
             except Exception:
-                # Silently ignore layer errors to prevent disrupting node execution
+                logger.exception(
+                    "Layer %s failed in on_node_run_end for node %s",
+                    type(layer).__name__,
+                    node.id,
+                )
                 continue
 
     def _build_fallback_failure_event(
-        self, node: Node, error: Exception, *, started_at: datetime | None = None
+        self,
+        node: Node,
+        error: Exception,
+        *,
+        started_at: datetime | None = None,
     ) -> NodeRunFailedEvent:
-        """Build a failed event when worker-level execution aborts
-        before a node emits its own result event."""
+        """Build a failure event when worker execution aborts before node output."""
         failure_time = datetime.now(UTC).replace(tzinfo=None)
         error_message = str(error)
         return NodeRunFailedEvent(

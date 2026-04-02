@@ -23,7 +23,7 @@ from graphon.model_runtime.slim import (
 
 
 @pytest.fixture(autouse=True)
-def clear_slim_binary_path_env(monkeypatch) -> None:
+def clear_slim_binary_path_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SLIM_BINARY_PATH", raising=False)
 
 
@@ -38,7 +38,7 @@ def _write_fake_plugin(plugin_root: Path) -> None:
             plugins:
               models:
                 - provider/provider.yaml
-            """
+            """,
         ).strip()
         + "\n",
         encoding="utf-8",
@@ -78,7 +78,7 @@ def _write_fake_plugin(plugin_root: Path) -> None:
               llm:
                 predefined:
                   - models/llm/*.yaml
-            """
+            """,
         ).strip()
         + "\n",
         encoding="utf-8",
@@ -97,7 +97,7 @@ def _write_fake_plugin(plugin_root: Path) -> None:
             parameter_rules:
               - name: temperature
                 use_template: temperature
-            """
+            """,
         ).strip()
         + "\n",
         encoding="utf-8",
@@ -120,7 +120,7 @@ def _write_multi_provider_plugin(plugin_root: Path) -> None:
               models:
                 - provider/first.yaml
                 - provider/second.yaml
-            """
+            """,
         ).strip()
         + "\n",
         encoding="utf-8",
@@ -181,7 +181,7 @@ def _write_multi_provider_plugin(plugin_root: Path) -> None:
                   llm:
                     predefined:
                       - {model_file}
-                """
+                """,
             ).strip()
             + "\n",
             encoding="utf-8",
@@ -200,7 +200,7 @@ def _write_multi_provider_plugin(plugin_root: Path) -> None:
                 parameter_rules:
                   - name: temperature
                     use_template: temperature
-                """
+                """,
             ).strip()
             + "\n",
             encoding="utf-8",
@@ -372,7 +372,7 @@ def _write_fake_slim(binary_path: Path) -> None:
             else:
                 emit("error", {"code": "UNKNOWN_ACTION", "message": action})
                 sys.exit(1)
-            """
+            """,
         ),
         encoding="utf-8",
     )
@@ -389,18 +389,17 @@ def _build_runtime(tmp_path: Path) -> SlimRuntime:
         "graphon.model_runtime.slim.runtime.shutil.which",
         return_value=str(binary_path),
     ):
-        runtime = SlimRuntime(
+        return SlimRuntime(
             SlimConfig(
                 bindings=[
                     SlimProviderBinding(
                         plugin_id="author/fake:0.0.1@test",
                         plugin_root=plugin_root,
-                    )
+                    ),
                 ],
                 local=SlimLocalSettings(folder=tmp_path / "plugins"),
-            )
+            ),
         )
-    return runtime
 
 
 def test_slim_runtime_loads_provider_schema_and_icon(tmp_path: Path) -> None:
@@ -411,7 +410,7 @@ def test_slim_runtime_loads_provider_schema_and_icon(tmp_path: Path) -> None:
     assert len(providers) == 1
     provider = providers[0]
     assert provider.provider == "fake-provider"
-    assert provider.label.en_US == "Fake Provider"
+    assert provider.label.en_us == "Fake Provider"
     assert provider.models[0].model == "fake-chat"
 
     icon_bytes, extension = runtime.get_provider_icon(
@@ -477,10 +476,10 @@ def test_slim_package_loader_selects_requested_provider(tmp_path: Path) -> None:
                         plugin_id="author/fake:0.0.1@test",
                         provider="other-provider",
                         plugin_root=plugin_root,
-                    )
+                    ),
                 ],
                 local=SlimLocalSettings(folder=tmp_path / "plugins"),
-            )
+            ),
         )
 
     providers = runtime.fetch_model_providers()
@@ -500,7 +499,7 @@ def test_slim_runtime_invokes_tts_without_tenant_context(tmp_path: Path) -> None
             credentials={"api_key": "secret"},
             content_text="Hello",
             voice="nova",
-        )
+        ),
     )
 
     assert result == b"hi"
@@ -520,7 +519,7 @@ def test_slim_runtime_merges_non_stream_tool_call_deltas(tmp_path: Path) -> None
                 name="extract",
                 description="Extract fields",
                 parameters={},
-            )
+            ),
         ],
         stop=None,
         stream=False,
@@ -554,7 +553,7 @@ def test_slim_runtime_keeps_blocking_structured_output(tmp_path: Path) -> None:
 
 
 def test_slim_config_auto_discovers_uv_and_python(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(
@@ -573,23 +572,28 @@ def test_slim_config_auto_discovers_uv_and_python(
 
 
 def test_slim_runtime_panics_when_binary_is_missing(
-    caplog,
+    caplog: pytest.LogCaptureFixture,
     tmp_path: Path,
 ) -> None:
-    with patch("graphon.model_runtime.slim.runtime.shutil.which", return_value=None):
-        with pytest.raises(
+    with (
+        patch(
+            "graphon.model_runtime.slim.runtime.shutil.which",
+            return_value=None,
+        ),
+        pytest.raises(
             RuntimeError,
             match=(
                 r"dify-plugin-daemon-slim is not available in PATH\. "
                 r"Set SLIM_BINARY_PATH to override it\."
             ),
-        ):
-            SlimRuntime(
-                SlimConfig(
-                    bindings=[SlimProviderBinding(plugin_id="author/fake:0.0.1@test")],
-                    local=SlimLocalSettings(folder=tmp_path / "plugins"),
-                )
-            )
+        ),
+    ):
+        SlimRuntime(
+            SlimConfig(
+                bindings=[SlimProviderBinding(plugin_id="author/fake:0.0.1@test")],
+                local=SlimLocalSettings(folder=tmp_path / "plugins"),
+            ),
+        )
 
     assert (
         "dify-plugin-daemon-slim is not available in PATH. "
@@ -598,7 +602,7 @@ def test_slim_runtime_panics_when_binary_is_missing(
 
 
 def test_slim_runtime_uses_slim_binary_path_env(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     custom_binary = tmp_path / "custom-slim"
@@ -612,14 +616,14 @@ def test_slim_runtime_uses_slim_binary_path_env(
             SlimConfig(
                 bindings=[SlimProviderBinding(plugin_id="author/fake:0.0.1@test")],
                 local=SlimLocalSettings(folder=tmp_path / "plugins"),
-            )
+            ),
         )
 
     assert runtime._binary_path == str(custom_binary)  # pyright: ignore[reportPrivateUsage]
 
 
 def test_slim_runtime_rejects_invalid_slim_binary_path_env(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     missing_binary = tmp_path / "missing-slim"
@@ -633,5 +637,5 @@ def test_slim_runtime_rejects_invalid_slim_binary_path_env(
             SlimConfig(
                 bindings=[SlimProviderBinding(plugin_id="author/fake:0.0.1@test")],
                 local=SlimLocalSettings(folder=tmp_path / "plugins"),
-            )
+            ),
         )

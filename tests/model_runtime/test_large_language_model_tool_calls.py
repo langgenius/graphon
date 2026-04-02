@@ -1,10 +1,11 @@
-from unittest.mock import MagicMock, patch
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
 from graphon.model_runtime.entities.message_entities import AssistantPromptMessage
-from graphon.model_runtime.model_providers.__base.large_language_model import (
-    _increase_tool_call,
+from graphon.model_runtime.model_providers.base.large_language_model import (
+    merge_tool_call_deltas,
 )
 
 ToolCall = AssistantPromptMessage.ToolCall
@@ -31,7 +32,8 @@ EXPECTED_CASE_1 = [
         id="1",
         type="function",
         function=ToolCall.ToolCallFunction(
-            name="func_foo", arguments='{"arg1": "value"}'
+            name="func_foo",
+            arguments='{"arg1": "value"}',
         ),
     ),
 ]
@@ -73,14 +75,16 @@ EXPECTED_CASE_2 = [
         id="1",
         type="function",
         function=ToolCall.ToolCallFunction(
-            name="func_foo", arguments='{"arg1": "value"}'
+            name="func_foo",
+            arguments='{"arg1": "value"}',
         ),
     ),
     ToolCall(
         id="2",
         type="function",
         function=ToolCall.ToolCallFunction(
-            name="func_bar", arguments='{"arg2": "value"}'
+            name="func_bar",
+            arguments='{"arg2": "value"}',
         ),
     ),
 ]
@@ -122,14 +126,16 @@ EXPECTED_CASE_3 = [
         id="1",
         type="function",
         function=ToolCall.ToolCallFunction(
-            name="func_foo", arguments='{"arg1": "value"}'
+            name="func_foo",
+            arguments='{"arg1": "value"}',
         ),
     ),
     ToolCall(
         id="2",
         type="function",
         function=ToolCall.ToolCallFunction(
-            name="func_bar", arguments='{"arg2": "value"}'
+            name="func_bar",
+            arguments='{"arg2": "value"}',
         ),
     ),
 ]
@@ -171,40 +177,45 @@ EXPECTED_CASE_4 = [
         id="RANDOM_ID_1",
         type="function",
         function=ToolCall.ToolCallFunction(
-            name="func_foo", arguments='{"arg1": "value"}'
+            name="func_foo",
+            arguments='{"arg1": "value"}',
         ),
     ),
     ToolCall(
         id="RANDOM_ID_2",
         type="function",
         function=ToolCall.ToolCallFunction(
-            name="func_bar", arguments='{"arg2": "value"}'
+            name="func_bar",
+            arguments='{"arg2": "value"}',
         ),
     ),
 ]
 
 
-def _run_case(inputs: list[ToolCall], expected: list[ToolCall]):
+def _run_case(
+    inputs: list[ToolCall],
+    expected: list[ToolCall],
+    *,
+    id_generator: Any = None,
+) -> None:
     actual = []
-    _increase_tool_call(inputs, actual)
+    merge_tool_call_deltas(inputs, actual, id_generator=id_generator)
     assert actual == expected
 
 
-def test__increase_tool_call():
+def test__merge_tool_call_deltas():
     _run_case(INPUTS_CASE_1, EXPECTED_CASE_1)
     _run_case(INPUTS_CASE_2, EXPECTED_CASE_2)
     _run_case(INPUTS_CASE_3, EXPECTED_CASE_3)
 
     mock_id_generator = MagicMock()
-    mock_id_generator.side_effect = [_exp_case.id for _exp_case in EXPECTED_CASE_4]
-    with patch(
-        "graphon.model_runtime.model_providers.__base.large_language_model._gen_tool_call_id",
-        mock_id_generator,
-    ):
-        _run_case(INPUTS_CASE_4, EXPECTED_CASE_4)
+    mock_id_generator.side_effect = [
+        expected_case.id for expected_case in EXPECTED_CASE_4
+    ]
+    _run_case(INPUTS_CASE_4, EXPECTED_CASE_4, id_generator=mock_id_generator)
 
 
-def test__increase_tool_call__no_id_no_name_first_delta_should_raise():
+def test__merge_tool_call_deltas__no_id_no_name_first_delta_should_raise():
     inputs = [
         ToolCall(
             id="",
@@ -218,9 +229,8 @@ def test__increase_tool_call__no_id_no_name_first_delta_should_raise():
         ),
     ]
     actual: list[ToolCall] = []
-    with patch(
-        "graphon.model_runtime.model_providers.__base.large_language_model._gen_tool_call_id",
-        MagicMock(),
+    with pytest.raises(
+        ValueError,
+        match=r"no existing tool call is available to apply the delta",
     ):
-        with pytest.raises(ValueError):
-            _increase_tool_call(inputs, actual)
+        merge_tool_call_deltas(inputs, actual, id_generator=MagicMock())

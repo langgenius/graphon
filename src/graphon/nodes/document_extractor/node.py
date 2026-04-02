@@ -46,9 +46,34 @@ if TYPE_CHECKING:
     from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
 
+def _partition_file_via_unstructured_api(
+    partition_via_api: Any,
+    file_content: bytes,
+    *,
+    suffix: str,
+    unstructured_api_config: UnstructuredApiConfig,
+) -> Sequence[Any]:
+    api_key = unstructured_api_config.api_key or ""
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp_file:
+        temp_file.write(file_content)
+        temp_file.flush()
+        temp_path = pathlib.Path(temp_file.name)
+
+    try:
+        with temp_path.open("rb") as file:
+            return partition_via_api(
+                file=file,
+                metadata_filename=temp_path.name,
+                api_url=unstructured_api_config.api_url,
+                api_key=api_key,
+            )
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
 class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
-    """
-    Extracts text content from various file types.
+    """Extracts text content from various file types.
     Supports plain text, PDF, and DOC/DOCX files.
     """
 
@@ -62,7 +87,7 @@ class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
     @override
     def __init__(
         self,
-        id: str,
+        node_id: str,
         config: NodeConfigDict,
         graph_init_params: "GraphInitParams",
         graph_runtime_state: "GraphRuntimeState",
@@ -71,7 +96,7 @@ class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
         http_client: HttpClientProtocol | None = None,
     ) -> None:
         super().__init__(
-            id=id,
+            node_id=node_id,
             config=config,
             graph_init_params=graph_init_params,
             graph_runtime_state=graph_runtime_state,
@@ -86,15 +111,19 @@ class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
         variable_selector = self.node_data.variable_selector
         variable = self.graph_runtime_state.variable_pool.get(variable_selector)
 
+        error_message = None
         if variable is None:
             error_message = f"File variable not found for selector: {variable_selector}"
-            return NodeRunResult(
-                status=WorkflowNodeExecutionStatus.FAILED, error=error_message
-            )
-        if variable.value and not isinstance(variable, ArrayFileSegment | FileSegment):
+        elif variable.value and not isinstance(
+            variable,
+            ArrayFileSegment | FileSegment,
+        ):
             error_message = f"Variable {variable_selector} is not an ArrayFileSegment"
+
+        if error_message is not None:
             return NodeRunResult(
-                status=WorkflowNodeExecutionStatus.FAILED, error=error_message
+                status=WorkflowNodeExecutionStatus.FAILED,
+                error=error_message,
             )
 
         value = variable.value
@@ -111,8 +140,8 @@ class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
                 outputs={"text": ArrayStringSegment(value=[])},
             )
 
-        try:
-            if isinstance(value, list):
+        if isinstance(value, list):
+            try:
                 extracted_text_list = [
                     _extract_text_from_file(
                         self._http_client,
@@ -121,33 +150,38 @@ class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
                     )
                     for file in value
                 ]
+            except DocumentExtractorError as e:
+                logger.warning(e, exc_info=True)
                 return NodeRunResult(
-                    status=WorkflowNodeExecutionStatus.SUCCEEDED,
+                    status=WorkflowNodeExecutionStatus.FAILED,
+                    error=str(e),
                     inputs=inputs,
                     process_data=process_data,
-                    outputs={"text": ArrayStringSegment(value=extracted_text_list)},
                 )
-            if isinstance(value, File):
+            outputs = {"text": ArrayStringSegment(value=extracted_text_list)}
+        else:
+            try:
                 extracted_text = _extract_text_from_file(
                     self._http_client,
                     value,
                     unstructured_api_config=self._unstructured_api_config,
                 )
+            except DocumentExtractorError as e:
+                logger.warning(e, exc_info=True)
                 return NodeRunResult(
-                    status=WorkflowNodeExecutionStatus.SUCCEEDED,
+                    status=WorkflowNodeExecutionStatus.FAILED,
+                    error=str(e),
                     inputs=inputs,
                     process_data=process_data,
-                    outputs={"text": extracted_text},
                 )
-            raise DocumentExtractorError(f"Unsupported variable type: {type(value)}")
-        except DocumentExtractorError as e:
-            logger.warning(e, exc_info=True)
-            return NodeRunResult(
-                status=WorkflowNodeExecutionStatus.FAILED,
-                error=str(e),
-                inputs=inputs,
-                process_data=process_data,
-            )
+            outputs = {"text": extracted_text}
+
+        return NodeRunResult(
+            status=WorkflowNodeExecutionStatus.SUCCEEDED,
+            inputs=inputs,
+            process_data=process_data,
+            outputs=outputs,
+        )
 
     @classmethod
     @override
@@ -171,50 +205,56 @@ def _extract_text_by_mime_type(
     """Extract text from a file based on its MIME type."""
     match mime_type:
         case "text/plain" | "text/html" | "text/htm" | "text/markdown" | "text/xml":
-            return _extract_text_from_plain_text(file_content)
+            extracted_text = _extract_text_from_plain_text(file_content)
         case "application/pdf":
-            return _extract_text_from_pdf(file_content)
+            extracted_text = _extract_text_from_pdf(file_content)
         case "application/msword":
-            return _extract_text_from_doc(
-                file_content, unstructured_api_config=unstructured_api_config
+            extracted_text = _extract_text_from_doc(
+                file_content,
+                unstructured_api_config=unstructured_api_config,
             )
         case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-            return _extract_text_from_docx(file_content)
+            extracted_text = _extract_text_from_docx(file_content)
         case "text/csv":
-            return _extract_text_from_csv(file_content)
+            extracted_text = _extract_text_from_csv(file_content)
         case (
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             | "application/vnd.ms-excel"
         ):
-            return _extract_text_from_excel(file_content)
+            extracted_text = _extract_text_from_excel(file_content)
         case "application/vnd.ms-powerpoint":
-            return _extract_text_from_ppt(
-                file_content, unstructured_api_config=unstructured_api_config
+            extracted_text = _extract_text_from_ppt(
+                file_content,
+                unstructured_api_config=unstructured_api_config,
             )
         case (
             "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         ):
-            return _extract_text_from_pptx(
-                file_content, unstructured_api_config=unstructured_api_config
+            extracted_text = _extract_text_from_pptx(
+                file_content,
+                unstructured_api_config=unstructured_api_config,
             )
         case "application/epub+zip":
-            return _extract_text_from_epub(
-                file_content, unstructured_api_config=unstructured_api_config
+            extracted_text = _extract_text_from_epub(
+                file_content,
+                unstructured_api_config=unstructured_api_config,
             )
         case "message/rfc822":
-            return _extract_text_from_eml(file_content)
+            extracted_text = _extract_text_from_eml(file_content)
         case "application/vnd.ms-outlook":
-            return _extract_text_from_msg(file_content)
+            extracted_text = _extract_text_from_msg(file_content)
         case "application/json":
-            return _extract_text_from_json(file_content)
+            extracted_text = _extract_text_from_json(file_content)
         case "application/x-yaml" | "text/yaml":
-            return _extract_text_from_yaml(file_content)
+            extracted_text = _extract_text_from_yaml(file_content)
         case "text/vtt":
-            return _extract_text_from_vtt(file_content)
+            extracted_text = _extract_text_from_vtt(file_content)
         case "text/properties":
-            return _extract_text_from_properties(file_content)
+            extracted_text = _extract_text_from_properties(file_content)
         case _:
-            raise UnsupportedFileTypeError(f"Unsupported MIME type: {mime_type}")
+            msg = f"Unsupported MIME type: {mime_type}"
+            raise UnsupportedFileTypeError(msg)
+    return extracted_text
 
 
 def _extract_text_by_file_extension(
@@ -277,52 +317,57 @@ def _extract_text_by_file_extension(
             | ".log"
             | ".vtt"
         ):
-            return _extract_text_from_plain_text(file_content)
+            extracted_text = _extract_text_from_plain_text(file_content)
         case ".json":
-            return _extract_text_from_json(file_content)
+            extracted_text = _extract_text_from_json(file_content)
         case ".yaml" | ".yml":
-            return _extract_text_from_yaml(file_content)
+            extracted_text = _extract_text_from_yaml(file_content)
         case ".pdf":
-            return _extract_text_from_pdf(file_content)
+            extracted_text = _extract_text_from_pdf(file_content)
         case ".doc":
-            return _extract_text_from_doc(
-                file_content, unstructured_api_config=unstructured_api_config
+            extracted_text = _extract_text_from_doc(
+                file_content,
+                unstructured_api_config=unstructured_api_config,
             )
         case ".docx":
-            return _extract_text_from_docx(file_content)
+            extracted_text = _extract_text_from_docx(file_content)
         case ".csv":
-            return _extract_text_from_csv(file_content)
+            extracted_text = _extract_text_from_csv(file_content)
         case ".xls" | ".xlsx":
-            return _extract_text_from_excel(file_content)
+            extracted_text = _extract_text_from_excel(file_content)
         case ".ppt":
-            return _extract_text_from_ppt(
-                file_content, unstructured_api_config=unstructured_api_config
+            extracted_text = _extract_text_from_ppt(
+                file_content,
+                unstructured_api_config=unstructured_api_config,
             )
         case ".pptx":
-            return _extract_text_from_pptx(
-                file_content, unstructured_api_config=unstructured_api_config
+            extracted_text = _extract_text_from_pptx(
+                file_content,
+                unstructured_api_config=unstructured_api_config,
             )
         case ".epub":
-            return _extract_text_from_epub(
-                file_content, unstructured_api_config=unstructured_api_config
+            extracted_text = _extract_text_from_epub(
+                file_content,
+                unstructured_api_config=unstructured_api_config,
             )
         case ".eml":
-            return _extract_text_from_eml(file_content)
+            extracted_text = _extract_text_from_eml(file_content)
         case ".msg":
-            return _extract_text_from_msg(file_content)
+            extracted_text = _extract_text_from_msg(file_content)
         case ".properties":
-            return _extract_text_from_properties(file_content)
+            extracted_text = _extract_text_from_properties(file_content)
         case _:
-            raise UnsupportedFileTypeError(
-                f"Unsupported Extension Type: {file_extension}"
-            )
+            msg = f"Unsupported Extension Type: {file_extension}"
+            raise UnsupportedFileTypeError(msg)
+    return extracted_text
 
 
 def _extract_text_from_plain_text(file_content: bytes) -> str:
     try:
         # Detect encoding using charset_normalizer
         result = charset_normalizer.from_bytes(
-            file_content, cp_isolation=["utf_8", "latin_1", "cp1252"]
+            file_content,
+            cp_isolation=["utf_8", "latin_1", "cp1252"],
         ).best()
         encoding = result.encoding if result else "utf-8"
 
@@ -336,7 +381,8 @@ def _extract_text_from_plain_text(file_content: bytes) -> str:
         try:
             return file_content.decode("utf-8", errors="ignore")
         except UnicodeDecodeError:
-            raise TextExtractionError(f"Failed to decode plain text file: {e}") from e
+            msg = f"Failed to decode plain text file: {e}"
+            raise TextExtractionError(msg) from e
 
 
 def _extract_text_from_json(file_content: bytes) -> str:
@@ -357,9 +403,8 @@ def _extract_text_from_json(file_content: bytes) -> str:
             json_data = json.loads(file_content.decode("utf-8", errors="ignore"))
             return json.dumps(json_data, indent=2, ensure_ascii=False)
         except (UnicodeDecodeError, json.JSONDecodeError):
-            raise TextExtractionError(
-                f"Failed to decode or parse JSON file: {e}"
-            ) from e
+            msg = f"Failed to decode or parse JSON file: {e}"
+            raise TextExtractionError(msg) from e
 
 
 def _extract_text_from_yaml(file_content: bytes) -> str:
@@ -379,13 +424,12 @@ def _extract_text_from_yaml(file_content: bytes) -> str:
         # If decoding fails, try with utf-8 as last resort
         try:
             yaml_data = yaml.safe_load_all(
-                file_content.decode("utf-8", errors="ignore")
+                file_content.decode("utf-8", errors="ignore"),
             )
             return yaml.dump_all(yaml_data, allow_unicode=True, sort_keys=False)
         except (UnicodeDecodeError, yaml.YAMLError):
-            raise TextExtractionError(
-                f"Failed to decode or parse YAML file: {e}"
-            ) from e
+            msg = f"Failed to decode or parse YAML file: {e}"
+            raise TextExtractionError(msg) from e
 
 
 def _extract_text_from_pdf(file_content: bytes) -> str:
@@ -398,52 +442,59 @@ def _extract_text_from_pdf(file_content: bytes) -> str:
             text += text_page.get_text_range()
             text_page.close()
             page.close()
-        return text
     except Exception as e:
-        raise TextExtractionError(f"Failed to extract text from PDF: {e!s}") from e
+        msg = f"Failed to extract text from PDF: {e!s}"
+        raise TextExtractionError(msg) from e
+    else:
+        return text
 
 
 def _extract_text_from_doc(
-    file_content: bytes, *, unstructured_api_config: UnstructuredApiConfig
+    file_content: bytes,
+    *,
+    unstructured_api_config: UnstructuredApiConfig,
 ) -> str:
-    """
-    Extract text from a DOC file.
-    """
-    from unstructured.partition.api import partition_via_api
+    """Extract text from a DOC file."""
+    from unstructured.partition.api import partition_via_api  # noqa: PLC0415
 
     if not unstructured_api_config.api_url:
-        raise TextExtractionError(
-            "Unstructured API URL is not configured for DOC file processing."
-        )
-    api_key = unstructured_api_config.api_key or ""
+        msg = "Unstructured API URL is not configured for DOC file processing."
+        raise TextExtractionError(msg)
 
     try:
-        with tempfile.NamedTemporaryFile(suffix=".doc", delete=False) as temp_file:
-            temp_file.write(file_content)
-            temp_file.flush()
-            with pathlib.Path(temp_file.name).open("rb") as file:
-                elements = partition_via_api(
-                    file=file,
-                    metadata_filename=temp_file.name,
-                    api_url=unstructured_api_config.api_url,
-                    api_key=api_key,
-                )
-            pathlib.Path(temp_file.name).unlink()
+        elements = _partition_file_via_unstructured_api(
+            partition_via_api,
+            file_content,
+            suffix=".doc",
+            unstructured_api_config=unstructured_api_config,
+        )
         return "\n".join([getattr(element, "text", "") for element in elements])
     except Exception as e:
-        raise TextExtractionError(f"Failed to extract text from DOC: {e!s}") from e
+        msg = f"Failed to extract text from DOC: {e!s}"
+        raise TextExtractionError(msg) from e
 
 
-def parser_docx_part(block, doc: Document, content_items, i):
-    if isinstance(block, CT_P):
-        content_items.append((i, "paragraph", Paragraph(block, doc)))
-    elif isinstance(block, CT_Tbl):
-        content_items.append((i, "table", Table(block, doc)))
+def parser_docx_part(
+    block: object,
+    doc: Document,
+    content_items: list[tuple[int, str, Table | Paragraph]],
+    i: int,
+) -> None:
+    content_item: tuple[int, str, Table | Paragraph] | None = None
+    match block:
+        case CT_P():
+            content_item = (i, "paragraph", Paragraph(block, doc))
+        case CT_Tbl():
+            content_item = (i, "table", Table(block, doc))
+        case _:
+            pass
+
+    if content_item is not None:
+        content_items.append(content_item)
 
 
 def _normalize_docx_zip(file_content: bytes) -> bytes:
-    """
-    Some DOCX files (e.g. exported by Evernote on Windows) are malformed:
+    r"""Some DOCX files (e.g. exported by Evernote on Windows) are malformed:
     ZIP entry names use backslash (\\) as path separator instead of the forward
     slash (/) required by both the ZIP spec and OOXML.  On Linux/Mac the entry
     "word\\document.xml" is never found when python-docx looks for
@@ -451,12 +502,18 @@ def _normalize_docx_zip(file_content: bytes) -> bytes:
 
     This function rewrites the ZIP in-memory, normalizing all entry names to
     use forward slashes without touching any actual document content.
+
+    Returns:
+        Normalized DOCX bytes, or the original bytes if the payload is not a ZIP.
+
     """
     try:
         with zipfile.ZipFile(io.BytesIO(file_content), "r") as zin:
             out_buf = io.BytesIO()
             with zipfile.ZipFile(
-                out_buf, "w", compression=zipfile.ZIP_DEFLATED
+                out_buf,
+                "w",
+                compression=zipfile.ZIP_DEFLATED,
             ) as zout:
                 for item in zin.infolist():
                     data = zin.read(item.filename)
@@ -470,94 +527,105 @@ def _normalize_docx_zip(file_content: bytes) -> bytes:
 
 
 def _extract_text_from_docx(file_content: bytes) -> str:
-    """
-    Extract text from a DOCX file.
+    """Extract text from a DOCX file.
     For now support only paragraph and table add more if needed
+
+    Returns:
+        Extracted plain text content from the DOCX file.
+
+    Raises:
+        TextExtractionError: If the DOCX cannot be parsed after normalization and retry.
+
     """
     try:
-        doc_file = io.BytesIO(file_content)
-        try:
-            doc = docx.Document(doc_file)
-        except Exception as e:
-            logger.warning(
-                "Failed to parse DOCX, attempting to normalize ZIP entry paths: %s", e
-            )
-            # Some DOCX files exported by tools like Evernote on Windows use
-            # backslash path separators in ZIP entries and/or single-quoted XML
-            # attributes, both of which break python-docx on Linux. Normalize and retry.
-            file_content = _normalize_docx_zip(file_content)
-            doc = docx.Document(io.BytesIO(file_content))
-        text = []
-
-        # Keep track of paragraph and table positions
-        content_items: list[tuple[int, str, Table | Paragraph]] = []
-
-        it = iter(doc.element.body)
-        part = next(it, None)
-        i = 0
-        while part is not None:
-            parser_docx_part(part, doc, content_items, i)
-            i = i + 1
-            part = next(it, None)
-
-        # Process sorted content
-        for _, item_type, item in content_items:
-            if item_type == "paragraph":
-                if isinstance(item, Table):
-                    continue
-                text.append(item.text)
-            elif item_type == "table":
-                # Process tables
-                if not isinstance(item, Table):
-                    continue
-                try:
-                    # Check if any cell in the table has text
-                    has_content = False
-                    for row in item.rows:
-                        if any(cell.text.strip() for cell in row.cells):
-                            has_content = True
-                            break
-
-                    if has_content:
-                        cell_texts = [
-                            cell.text.replace("\n", "<br>")
-                            for cell in item.rows[0].cells
-                        ]
-                        markdown_table = f"| {' | '.join(cell_texts)} |\n"
-                        markdown_table += (
-                            f"| {' | '.join(['---'] * len(item.rows[0].cells))} |\n"
-                        )
-
-                        for row in item.rows[1:]:
-                            # Replace newlines with <br> in each cell
-                            row_cells = [
-                                cell.text.replace("\n", "<br>") for cell in row.cells
-                            ]
-                            markdown_table += "| " + " | ".join(row_cells) + " |\n"
-
-                        text.append(markdown_table)
-                except Exception as e:
-                    logger.warning("Failed to extract table from DOC: %s", e)
-                    continue
-
+        doc = _load_docx_document(file_content)
+        text: list[str] = []
+        for item_type, item in _iter_docx_content_items(doc):
+            extracted_text = _extract_docx_item_text(item_type, item)
+            if extracted_text is not None:
+                text.append(extracted_text)
         return "\n".join(text)
 
     except Exception as e:
-        raise TextExtractionError(f"Failed to extract text from DOCX: {e!s}") from e
+        logger.exception("Failed to extract text from DOCX")
+        msg = f"Failed to extract text from DOCX: {e!s}"
+        raise TextExtractionError(msg) from e
+
+
+def _load_docx_document(file_content: bytes) -> Document:
+    try:
+        return docx.Document(io.BytesIO(file_content))
+    except Exception as e:
+        logger.warning(
+            "Failed to parse DOCX, attempting to normalize ZIP entry paths: %s",
+            e,
+            exc_info=e,
+        )
+        normalized_file_content = _normalize_docx_zip(file_content)
+        return docx.Document(io.BytesIO(normalized_file_content))
+
+
+def _iter_docx_content_items(doc: Document) -> list[tuple[str, Table | Paragraph]]:
+    content_items: list[tuple[int, str, Table | Paragraph]] = []
+    for index, part in enumerate(doc.element.body):
+        parser_docx_part(part, doc, content_items, index)
+    return [(item_type, item) for _, item_type, item in content_items]
+
+
+def _extract_docx_item_text(item_type: str, item: Table | Paragraph) -> str | None:
+    result: str | None
+    match item_type, item:
+        case "paragraph", Paragraph():
+            result = item.text
+        case "table", Table():
+            result = _extract_docx_table_text(item)
+        case _:
+            result = None
+    return result
+
+
+def _extract_docx_table_text(item: Table) -> str | None:
+    try:
+        if not _docx_table_has_content(item):
+            return None
+        return _build_docx_markdown_table(item)
+    except Exception as e:
+        logger.warning("Failed to extract table from DOC: %s", e, exc_info=e)
+        return None
+
+
+def _docx_table_has_content(item: Table) -> bool:
+    return any(any(cell.text.strip() for cell in row.cells) for row in item.rows)
+
+
+def _build_docx_markdown_table(item: Table) -> str:
+    cell_texts = [cell.text.replace("\n", "<br>") for cell in item.rows[0].cells]
+    markdown_table = f"| {' | '.join(cell_texts)} |\n"
+    markdown_table += f"| {' | '.join(['---'] * len(item.rows[0].cells))} |\n"
+    for row in item.rows[1:]:
+        row_cells = [cell.text.replace("\n", "<br>") for cell in row.cells]
+        markdown_table += "| " + " | ".join(row_cells) + " |\n"
+    return markdown_table
 
 
 def _download_file_content(http_client: HttpClientProtocol, file: File) -> bytes:
     """Download the content of a file based on its transfer method."""
+    if (
+        file.transfer_method == FileTransferMethod.REMOTE_URL
+        and file.remote_url is None
+    ):
+        msg = "Missing URL for remote file"
+        raise FileDownloadError(msg)
+
     try:
         if file.transfer_method == FileTransferMethod.REMOTE_URL:
-            if file.remote_url is None:
-                raise FileDownloadError("Missing URL for remote file")
             response = http_client.get(file.remote_url)
             response.raise_for_status()
             return response.content
         return file_manager.download(file)
     except Exception as e:
-        raise FileDownloadError(f"Error downloading file: {e!s}") from e
+        msg = f"Error downloading file: {e!s}"
+        raise FileDownloadError(msg) from e
 
 
 def _extract_text_from_file(
@@ -580,9 +648,8 @@ def _extract_text_from_file(
             unstructured_api_config=unstructured_api_config,
         )
     else:
-        raise UnsupportedFileTypeError(
-            "Unable to determine file type: MIME type or file extension is missing"
-        )
+        msg = "Unable to determine file type: MIME type or file extension is missing"
+        raise UnsupportedFileTypeError(msg)
     return extracted_text
 
 
@@ -622,9 +689,11 @@ def _extract_text_from_csv(file_content: bytes) -> str:
             processed_row = [cell.replace("\n", " ").replace("\r", "") for cell in row]
             markdown_table += "| " + " | ".join(processed_row) + " |\n"
 
-        return markdown_table
     except Exception as e:
-        raise TextExtractionError(f"Failed to extract text from CSV: {e!s}") from e
+        msg = f"Failed to extract text from CSV: {e!s}"
+        raise TextExtractionError(msg) from e
+    else:
+        return markdown_table
 
 
 def _extract_text_from_excel(file_content: bytes) -> str:
@@ -645,8 +714,7 @@ def _extract_text_from_excel(file_content: bytes) -> str:
             data_rows.append(data_row)
 
         # Combine all rows into a single string
-        markdown_table = "\n".join([header_row, separator_row] + data_rows)
-        return markdown_table
+        return "\n".join([header_row, separator_row, *data_rows])
 
     try:
         excel_file = pd.ExcelFile(io.BytesIO(file_content))
@@ -654,11 +722,13 @@ def _extract_text_from_excel(file_content: bytes) -> str:
         for sheet_name in excel_file.sheet_names:
             try:
                 df = excel_file.parse(sheet_name=sheet_name)
-                df.dropna(how="all", inplace=True)
+                df = df.dropna(how="all")
 
                 # Combine multi-line text in each cell into a single line
                 df = df.map(
-                    lambda x: " ".join(str(x).splitlines()) if isinstance(x, str) else x
+                    lambda x: (
+                        " ".join(str(x).splitlines()) if isinstance(x, str) else x
+                    ),
                 )
 
                 # Combine multi-line text in column names into a single line
@@ -668,124 +738,117 @@ def _extract_text_from_excel(file_content: bytes) -> str:
 
                 # Manually construct the Markdown table
                 markdown_table += _construct_markdown_table(df) + "\n\n"
-            except Exception:
+            except (TypeError, ValueError):
                 continue
-        return markdown_table
     except Exception as e:
-        raise TextExtractionError(
-            f"Failed to extract text from Excel file: {e!s}"
-        ) from e
+        msg = f"Failed to extract text from Excel file: {e!s}"
+        raise TextExtractionError(msg) from e
+    else:
+        return markdown_table
 
 
 def _extract_text_from_ppt(
-    file_content: bytes, *, unstructured_api_config: UnstructuredApiConfig
+    file_content: bytes,
+    *,
+    unstructured_api_config: UnstructuredApiConfig,
 ) -> str:
-    from unstructured.partition.api import partition_via_api
-    from unstructured.partition.ppt import partition_ppt
-
-    api_key = unstructured_api_config.api_key or ""
-
     try:
         if unstructured_api_config.api_url:
-            with tempfile.NamedTemporaryFile(suffix=".ppt", delete=False) as temp_file:
-                temp_file.write(file_content)
-                temp_file.flush()
-                with pathlib.Path(temp_file.name).open("rb") as file:
-                    elements = partition_via_api(
-                        file=file,
-                        metadata_filename=temp_file.name,
-                        api_url=unstructured_api_config.api_url,
-                        api_key=api_key,
-                    )
-                pathlib.Path(temp_file.name).unlink()
+            from unstructured.partition.api import partition_via_api  # noqa: PLC0415
+
+            elements = _partition_file_via_unstructured_api(
+                partition_via_api,
+                file_content,
+                suffix=".ppt",
+                unstructured_api_config=unstructured_api_config,
+            )
         else:
+            from unstructured.partition.ppt import partition_ppt  # noqa: PLC0415
+
             with io.BytesIO(file_content) as file:
                 elements = partition_ppt(file=file)
         return "\n".join([getattr(element, "text", "") for element in elements])
 
     except Exception as e:
-        raise TextExtractionError(f"Failed to extract text from PPTX: {e!s}") from e
+        msg = f"Failed to extract text from PPTX: {e!s}"
+        raise TextExtractionError(msg) from e
 
 
 def _extract_text_from_pptx(
-    file_content: bytes, *, unstructured_api_config: UnstructuredApiConfig
+    file_content: bytes,
+    *,
+    unstructured_api_config: UnstructuredApiConfig,
 ) -> str:
-    from unstructured.partition.api import partition_via_api
-    from unstructured.partition.pptx import partition_pptx
-
-    api_key = unstructured_api_config.api_key or ""
-
     try:
         if unstructured_api_config.api_url:
-            with tempfile.NamedTemporaryFile(suffix=".pptx", delete=False) as temp_file:
-                temp_file.write(file_content)
-                temp_file.flush()
-                with pathlib.Path(temp_file.name).open("rb") as file:
-                    elements = partition_via_api(
-                        file=file,
-                        metadata_filename=temp_file.name,
-                        api_url=unstructured_api_config.api_url,
-                        api_key=api_key,
-                    )
-                pathlib.Path(temp_file.name).unlink()
+            from unstructured.partition.api import partition_via_api  # noqa: PLC0415
+
+            elements = _partition_file_via_unstructured_api(
+                partition_via_api,
+                file_content,
+                suffix=".pptx",
+                unstructured_api_config=unstructured_api_config,
+            )
         else:
+            from unstructured.partition.pptx import partition_pptx  # noqa: PLC0415
+
             with io.BytesIO(file_content) as file:
                 elements = partition_pptx(file=file)
         return "\n".join([getattr(element, "text", "") for element in elements])
     except Exception as e:
-        raise TextExtractionError(f"Failed to extract text from PPTX: {e!s}") from e
+        msg = f"Failed to extract text from PPTX: {e!s}"
+        raise TextExtractionError(msg) from e
 
 
 def _extract_text_from_epub(
-    file_content: bytes, *, unstructured_api_config: UnstructuredApiConfig
+    file_content: bytes,
+    *,
+    unstructured_api_config: UnstructuredApiConfig,
 ) -> str:
-    from unstructured.partition.api import partition_via_api
-    from unstructured.partition.epub import partition_epub
-
-    api_key = unstructured_api_config.api_key or ""
-
     try:
         if unstructured_api_config.api_url:
-            with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as temp_file:
-                temp_file.write(file_content)
-                temp_file.flush()
-                with pathlib.Path(temp_file.name).open("rb") as file:
-                    elements = partition_via_api(
-                        file=file,
-                        metadata_filename=temp_file.name,
-                        api_url=unstructured_api_config.api_url,
-                        api_key=api_key,
-                    )
-                pathlib.Path(temp_file.name).unlink()
+            from unstructured.partition.api import partition_via_api  # noqa: PLC0415
+
+            elements = _partition_file_via_unstructured_api(
+                partition_via_api,
+                file_content,
+                suffix=".epub",
+                unstructured_api_config=unstructured_api_config,
+            )
         else:
             pypandoc.download_pandoc()
+            from unstructured.partition.epub import partition_epub  # noqa: PLC0415
+
             with io.BytesIO(file_content) as file:
                 elements = partition_epub(file=file)
         return "\n".join([str(element) for element in elements])
     except Exception as e:
-        raise TextExtractionError(f"Failed to extract text from EPUB: {e!s}") from e
+        msg = f"Failed to extract text from EPUB: {e!s}"
+        raise TextExtractionError(msg) from e
 
 
 def _extract_text_from_eml(file_content: bytes) -> str:
-    from unstructured.partition.email import partition_email
-
     try:
+        from unstructured.partition.email import partition_email  # noqa: PLC0415
+
         with io.BytesIO(file_content) as file:
             elements = partition_email(file=file)
         return "\n".join([str(element) for element in elements])
     except Exception as e:
-        raise TextExtractionError(f"Failed to extract text from EML: {e!s}") from e
+        msg = f"Failed to extract text from EML: {e!s}"
+        raise TextExtractionError(msg) from e
 
 
 def _extract_text_from_msg(file_content: bytes) -> str:
-    from unstructured.partition.msg import partition_msg
-
     try:
+        from unstructured.partition.msg import partition_msg  # noqa: PLC0415
+
         with io.BytesIO(file_content) as file:
             elements = partition_msg(file=file)
         return "\n".join([str(element) for element in elements])
     except Exception as e:
-        raise TextExtractionError(f"Failed to extract text from MSG: {e!s}") from e
+        msg = f"Failed to extract text from MSG: {e!s}"
+        raise TextExtractionError(msg) from e
 
 
 def _extract_text_from_vtt(vtt_bytes: bytes) -> str:
@@ -833,23 +896,22 @@ def _extract_text_from_properties(file_content: bytes) -> str:
         lines = text.splitlines()
         result = []
         for line in lines:
-            line = line.strip()
+            stripped_line = line.strip()
             # Preserve comments and empty lines
-            if not line or line.startswith("#") or line.startswith("!"):
-                result.append(line)
+            if not stripped_line or stripped_line.startswith(("#", "!")):
+                result.append(stripped_line)
                 continue
 
-            if "=" in line:
-                key, value = line.split("=", 1)
-            elif ":" in line:
-                key, value = line.split(":", 1)
+            if "=" in stripped_line:
+                key, value = stripped_line.split("=", 1)
+            elif ":" in stripped_line:
+                key, value = stripped_line.split(":", 1)
             else:
-                key, value = line, ""
+                key, value = stripped_line, ""
 
             result.append(f"{key.strip()}: {value.strip()}")
 
         return "\n".join(result)
     except Exception as e:
-        raise TextExtractionError(
-            f"Failed to extract text from properties file: {e!s}"
-        ) from e
+        msg = f"Failed to extract text from properties file: {e!s}"
+        raise TextExtractionError(msg) from e

@@ -21,13 +21,9 @@ from graphon.model_runtime.entities.model_entities import (
     ModelType,
     PriceType,
 )
-from graphon.model_runtime.model_providers.__base.ai_model import AIModel
+from graphon.model_runtime.model_providers.base.ai_model import AIModel
 
 logger = logging.getLogger(__name__)
-
-
-def _gen_tool_call_id() -> str:
-    return f"chatcmpl-tool-{uuid.uuid4().hex!s}"
 
 
 def _run_callbacks(
@@ -53,21 +49,32 @@ def _run_callbacks(
             )
 
 
+def generate_tool_call_id() -> str:
+    return f"chatcmpl-tool-{uuid.uuid4().hex!s}"
+
+
 def _get_or_create_tool_call(
     existing_tools_calls: list[AssistantPromptMessage.ToolCall],
     tool_call_id: str,
 ) -> AssistantPromptMessage.ToolCall:
-    """
-    Get or create a tool call by ID.
+    """Get or create a tool call by ID.
 
     If `tool_call_id` is empty, returns the most recently created tool call.
+
+    Returns:
+        The existing or newly created tool call that should receive the delta.
+
+    Raises:
+        ValueError: If `tool_call_id` is empty and there is no prior tool call to reuse.
+
     """
     if not tool_call_id:
         if not existing_tools_calls:
-            raise ValueError(
+            msg = (
                 "tool_call_id is empty but no existing tool call is "
                 "available to apply the delta"
             )
+            raise ValueError(msg)
         return existing_tools_calls[-1]
 
     tool_call = next(
@@ -83,7 +90,8 @@ def _get_or_create_tool_call(
             id=tool_call_id,
             type="function",
             function=AssistantPromptMessage.ToolCall.ToolCallFunction(
-                name="", arguments=""
+                name="",
+                arguments="",
             ),
         )
         existing_tools_calls.append(tool_call)
@@ -110,16 +118,14 @@ def _build_llm_result_from_chunks(
     prompt_messages: Sequence[PromptMessage],
     chunks: Iterator[LLMResultChunk],
 ) -> LLMResult:
-    """
-    Build a single `LLMResult` by accumulating all returned chunks.
+    """Build a single `LLMResult` by accumulating all returned chunks.
 
-    Some models only support streaming output (e.g. Qwen3 open-source edition)
-    and the plugin side may still implement the response via a chunked stream,
-    so all chunks must be consumed and concatenated into a single ``LLMResult``.
+    Some models only support streaming output and the runtime may still return
+    an iterator in non-stream mode, so all chunks must be consumed and merged.
 
-    The ``usage`` is taken from the last chunk that carries it, which is the
-    typical convention for streaming responses (the final chunk contains the
-    aggregated token counts).
+    Returns:
+        A normalized `LLMResult` assembled from the consumed chunks.
+
     """
     content = ""
     content_list: list[PromptMessageContentUnionTypes] = []
@@ -135,7 +141,7 @@ def _build_llm_result_from_chunks(
                 content_list.extend(chunk.delta.message.content)
 
             if chunk.delta.message.tool_calls:
-                _increase_tool_call(chunk.delta.message.tool_calls, tools_calls)
+                merge_tool_call_deltas(chunk.delta.message.tool_calls, tools_calls)
 
             if chunk.delta.usage:
                 usage = chunk.delta.usage
@@ -145,8 +151,6 @@ def _build_llm_result_from_chunks(
         logger.exception("Error while consuming non-stream plugin chunk iterator.")
         raise
     finally:
-        # Drain any remaining chunks to release underlying streaming
-        # resources (e.g. HTTP connections).
         close = getattr(chunks, "close", None)
         if callable(close):
             close()
@@ -161,6 +165,42 @@ def _build_llm_result_from_chunks(
         usage=usage,
         system_fingerprint=system_fingerprint,
     )
+
+
+def normalize_non_stream_runtime_result(
+    model: str,
+    prompt_messages: Sequence[PromptMessage],
+    result: LLMResult | Iterator[LLMResultChunk],
+) -> LLMResult:
+    if isinstance(result, LLMResult):
+        return result
+    return _build_llm_result_from_chunks(
+        model=model,
+        prompt_messages=prompt_messages,
+        chunks=result,
+    )
+
+
+def merge_tool_call_deltas(
+    new_tool_calls: list[AssistantPromptMessage.ToolCall],
+    existing_tools_calls: list[AssistantPromptMessage.ToolCall],
+    *,
+    id_generator: Callable[[], str] | None = None,
+) -> None:
+    """Merge incremental tool call deltas into existing tool calls.
+
+    :param new_tool_calls: List of new tool call deltas to be merged.
+    :param existing_tools_calls: List of existing tool calls modified in place.
+    :param id_generator: Optional callable for generating IDs in tests/callers.
+    """
+    generator = generate_tool_call_id if id_generator is None else id_generator
+
+    for new_tool_call in new_tool_calls:
+        if new_tool_call.function.name and not new_tool_call.id:
+            new_tool_call.id = generator()
+
+        tool_call = _get_or_create_tool_call(existing_tools_calls, new_tool_call.id)
+        _merge_tool_call_delta(tool_call, new_tool_call)
 
 
 def _invoke_llm_via_runtime(
@@ -187,42 +227,8 @@ def _invoke_llm_via_runtime(
     )
 
 
-def _normalize_non_stream_runtime_result(
-    model: str,
-    prompt_messages: Sequence[PromptMessage],
-    result: LLMResult | Iterator[LLMResultChunk],
-) -> LLMResult:
-    if isinstance(result, LLMResult):
-        return result
-    return _build_llm_result_from_chunks(
-        model=model, prompt_messages=prompt_messages, chunks=result
-    )
-
-
-def _increase_tool_call(
-    new_tool_calls: list[AssistantPromptMessage.ToolCall],
-    existing_tools_calls: list[AssistantPromptMessage.ToolCall],
-):
-    """
-    Merge incremental tool call updates into existing tool calls.
-
-    :param new_tool_calls: List of new tool call deltas to be merged.
-    :param existing_tools_calls: List of existing tool calls to be modified IN-PLACE.
-    """
-
-    for new_tool_call in new_tool_calls:
-        # generate ID for tool calls with function name but no ID to track them
-        if new_tool_call.function.name and not new_tool_call.id:
-            new_tool_call.id = _gen_tool_call_id()
-
-        tool_call = _get_or_create_tool_call(existing_tools_calls, new_tool_call.id)
-        _merge_tool_call_delta(tool_call, new_tool_call)
-
-
 class LargeLanguageModel(AIModel):
-    """
-    Model class for large language model.
-    """
+    """Model class for large language model."""
 
     model_type: ModelType = ModelType.LLM
 
@@ -237,19 +243,7 @@ class LargeLanguageModel(AIModel):
         stream: bool = True,
         callbacks: list[Callback] | None = None,
     ) -> LLMResult | Generator[LLMResultChunk, None, None]:
-        """
-        Invoke large language model
-
-        :param model: model name
-        :param credentials: model credentials
-        :param prompt_messages: prompt messages
-        :param model_parameters: model parameters
-        :param tools: tools for tool calling
-        :param stop: stop words
-        :param stream: is stream response
-        :param callbacks: callbacks
-        :return: full response or stream response chunk generator result
-        """
+        """Invoke the large language model and optionally stream result chunks."""
         # validate and filter model parameters
         if model_parameters is None:
             model_parameters = {}
@@ -289,8 +283,10 @@ class LargeLanguageModel(AIModel):
             )
 
             if not stream:
-                result = _normalize_non_stream_runtime_result(
-                    model=model, prompt_messages=prompt_messages, result=result
+                result = normalize_non_stream_runtime_result(
+                    model=model,
+                    prompt_messages=prompt_messages,
+                    result=result,
                 )
         except Exception as e:
             self._trigger_invoke_error_callbacks(
@@ -306,7 +302,7 @@ class LargeLanguageModel(AIModel):
             )
 
             # TODO
-            raise self._transform_invoke_error(e)
+            raise self._transform_invoke_error(e) from e
 
         if stream and not isinstance(result, LLMResult):
             return self._invoke_result_generator(
@@ -337,7 +333,8 @@ class LargeLanguageModel(AIModel):
             # To ensure compatibility, we add the prompt_messages back here.
             result.prompt_messages = prompt_messages
             return result
-        raise NotImplementedError("unsupported invoke result type", type(result))
+        msg = "unsupported invoke result type"
+        raise NotImplementedError(msg, type(result))
 
     def _invoke_result_generator(
         self,
@@ -352,12 +349,7 @@ class LargeLanguageModel(AIModel):
         invocation_context: Mapping[str, object] | None = None,
         callbacks: list[Callback] | None = None,
     ) -> Generator[LLMResultChunk, None, None]:
-        """
-        Invoke result generator
-
-        :param result: result generator
-        :return: result generator
-        """
+        """Stream runtime result chunks through callbacks and bookkeeping hooks."""
         callbacks = callbacks or []
         message_content: list[PromptMessageContentUnionTypes] = []
         usage = None
@@ -366,7 +358,7 @@ class LargeLanguageModel(AIModel):
 
         def _update_message_content(
             content: str | list[PromptMessageContentUnionTypes] | None,
-        ):
+        ) -> None:
             if not content:
                 return
             if isinstance(content, list):
@@ -407,7 +399,7 @@ class LargeLanguageModel(AIModel):
                 if chunk.system_fingerprint:
                     system_fingerprint = chunk.system_fingerprint
         except Exception as e:
-            raise self._transform_invoke_error(e)
+            raise self._transform_invoke_error(e) from e
 
         assistant_message = AssistantPromptMessage(content=message_content)
         self._trigger_after_invoke_callbacks(
@@ -436,15 +428,7 @@ class LargeLanguageModel(AIModel):
         prompt_messages: list[PromptMessage],
         tools: list[PromptMessageTool] | None = None,
     ) -> int:
-        """
-        Get number of tokens for given prompt messages
-
-        :param model: model name
-        :param credentials: model credentials
-        :param prompt_messages: prompt messages
-        :param tools: tools for tool calling
-        :return:
-        """
+        """Count prompt tokens for the given messages and optional tools."""
         return self.model_runtime.get_llm_num_tokens(
             provider=self.provider,
             model_type=self.model_type,
@@ -455,17 +439,13 @@ class LargeLanguageModel(AIModel):
         )
 
     def calc_response_usage(
-        self, model: str, credentials: dict, prompt_tokens: int, completion_tokens: int
+        self,
+        model: str,
+        credentials: dict,
+        prompt_tokens: int,
+        completion_tokens: int,
     ) -> LLMUsage:
-        """
-        Calculate response usage
-
-        :param model: model name
-        :param credentials: model credentials
-        :param prompt_tokens: prompt tokens
-        :param completion_tokens: completion tokens
-        :return: usage
-        """
+        """Calculate unified usage and pricing metadata for a response."""
         # get prompt price info
         prompt_price_info = self.get_price(
             model=model,
@@ -483,7 +463,7 @@ class LargeLanguageModel(AIModel):
         )
 
         # transform usage
-        usage = LLMUsage(
+        return LLMUsage(
             prompt_tokens=prompt_tokens,
             prompt_unit_price=prompt_price_info.unit_price,
             prompt_price_unit=prompt_price_info.unit,
@@ -499,8 +479,6 @@ class LargeLanguageModel(AIModel):
             latency=time.perf_counter() - self.started_at,
         )
 
-        return usage
-
     def _trigger_before_invoke_callbacks(
         self,
         model: str,
@@ -512,9 +490,8 @@ class LargeLanguageModel(AIModel):
         stream: bool = True,
         invocation_context: Mapping[str, object] | None = None,
         callbacks: list[Callback] | None = None,
-    ):
-        """
-        Trigger before invoke callbacks
+    ) -> None:
+        """Trigger before invoke callbacks
 
         :param model: model name
         :param credentials: model credentials
@@ -554,9 +531,8 @@ class LargeLanguageModel(AIModel):
         stream: bool = True,
         invocation_context: Mapping[str, object] | None = None,
         callbacks: list[Callback] | None = None,
-    ):
-        """
-        Trigger new chunk callbacks
+    ) -> None:
+        """Trigger new chunk callbacks
 
         :param chunk: chunk
         :param model: model name
@@ -597,9 +573,8 @@ class LargeLanguageModel(AIModel):
         stream: bool = True,
         invocation_context: Mapping[str, object] | None = None,
         callbacks: list[Callback] | None = None,
-    ):
-        """
-        Trigger after invoke callbacks
+    ) -> None:
+        """Trigger after invoke callbacks
 
         :param model: model name
         :param result: result
@@ -641,9 +616,8 @@ class LargeLanguageModel(AIModel):
         stream: bool = True,
         invocation_context: Mapping[str, object] | None = None,
         callbacks: list[Callback] | None = None,
-    ):
-        """
-        Trigger invoke error callbacks
+    ) -> None:
+        """Trigger invoke error callbacks
 
         :param model: model name
         :param ex: exception

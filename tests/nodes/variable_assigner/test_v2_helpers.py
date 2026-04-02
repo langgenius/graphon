@@ -10,7 +10,9 @@ def test_is_input_value_valid_overwrite_array_string():
         value=["hello", "world"],
     )
     assert is_input_value_valid(
-        variable_type=SegmentType.ARRAY_STRING, operation=Operation.OVER_WRITE, value=[]
+        variable_type=SegmentType.ARRAY_STRING,
+        operation=Operation.OVER_WRITE,
+        value=[],
     )
 
     assert not is_input_value_valid(
@@ -43,4 +45,12 @@ def test_is_input_value_valid_accepts_clear_without_input():
         variable_type=SegmentType.ARRAY_OBJECT,
         operation=Operation.CLEAR,
         value=None,
+    )
+
+
+def test_is_input_value_valid_accepts_array_any_append_string() -> None:
+    assert is_input_value_valid(
+        variable_type=SegmentType.ARRAY_ANY,
+        operation=Operation.APPEND,
+        value="hello",
     )

@@ -38,7 +38,7 @@ class VisionConfig(BaseModel):
 
     @field_validator("configs", mode="before")
     @classmethod
-    def convert_none_configs(cls, v: Any):
+    def convert_none_configs(cls, v: Any) -> Any:
         if v is None:
             return VisionConfigOptions()
         return v
@@ -49,7 +49,7 @@ class PromptConfig(BaseModel):
 
     @field_validator("jinja2_variables", mode="before")
     @classmethod
-    def convert_none_jinja2_variables(cls, v: Any):
+    def convert_none_jinja2_variables(cls, v: Any) -> Any:
         if v is None:
             return []
         return v
@@ -99,7 +99,7 @@ class LLMNodeData(BaseNodeData):
 
     @field_validator("prompt_config", mode="before")
     @classmethod
-    def convert_none_prompt_config(cls, v: Any):
+    def convert_none_prompt_config(cls, v: Any) -> Any:
         if v is None:
             return PromptConfig()
         return v

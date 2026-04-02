@@ -1,6 +1,4 @@
-"""
-Main error handler that coordinates error strategies.
-"""
+"""Main error handler that coordinates error strategies."""
 
 import logging
 import time
@@ -30,8 +28,7 @@ logger = logging.getLogger(__name__)
 
 @final
 class ErrorHandler:
-    """
-    Coordinates error handling strategies for node failures.
+    """Coordinates error handling strategies for node failures.
 
     This acts as a facade for the various error strategies,
     selecting and applying the appropriate strategy based on
@@ -39,21 +36,21 @@ class ErrorHandler:
     """
 
     def __init__(self, graph: Graph, graph_execution: "GraphExecution") -> None:
-        """
-        Initialize the error handler.
+        """Initialize the error handler.
 
         Args:
             graph: The workflow graph
             graph_execution: The graph execution state
+
         """
         self._graph = graph
         self._graph_execution = graph_execution
 
     def handle_node_failure(
-        self, event: NodeRunFailedEvent
+        self,
+        event: NodeRunFailedEvent,
     ) -> GraphNodeEventBase | None:
-        """
-        Handle a node failure event.
+        """Handle a node failure event.
 
         Selects and applies the appropriate error strategy based on
         the node's configuration.
@@ -63,11 +60,12 @@ class ErrorHandler:
 
         Returns:
             Optional new event to process, or None to abort
+
         """
         node = self._graph.nodes[event.node_id]
         # Get retry count from NodeExecution
         node_execution = self._graph_execution.get_or_create_node_execution(
-            event.node_id
+            event.node_id,
         )
         retry_count = node_execution.retry_count
 
@@ -89,9 +87,8 @@ class ErrorHandler:
             case ErrorStrategyEnum.DEFAULT_VALUE:
                 return self._handle_default_value(event)
 
-    def _handle_abort(self, event: NodeRunFailedEvent):
-        """
-        Handle error by aborting execution.
+    def _handle_abort(self, event: NodeRunFailedEvent) -> None:
+        """Handle error by aborting execution.
 
         This is the default strategy when no other strategy is specified.
         It stops the entire graph execution when a node fails.
@@ -99,17 +96,20 @@ class ErrorHandler:
         Args:
             event: The failure event
 
-        Returns:
-            None - signals abortion
         """
         logger.error(
-            "Node %s failed with ABORT strategy: %s", event.node_id, event.error
+            "Node %s failed with ABORT strategy: %s",
+            event.node_id,
+            event.error,
         )
         # Return None to signal that execution should stop
 
-    def _handle_retry(self, event: NodeRunFailedEvent, retry_count: int):
-        """
-        Handle error by retrying the node.
+    def _handle_retry(
+        self,
+        event: NodeRunFailedEvent,
+        retry_count: int,
+    ) -> NodeRunRetryEvent | None:
+        """Handle error by retrying the node.
 
         This strategy re-attempts node execution up to a configured
         maximum number of retries with configurable intervals.
@@ -120,6 +120,7 @@ class ErrorHandler:
 
         Returns:
             NodeRunRetryEvent if retry should occur, None otherwise
+
         """
         node = self._graph.nodes[event.node_id]
 
@@ -142,9 +143,8 @@ class ErrorHandler:
             retry_index=retry_count + 1,
         )
 
-    def _handle_fail_branch(self, event: NodeRunFailedEvent):
-        """
-        Handle error by taking the fail branch.
+    def _handle_fail_branch(self, event: NodeRunFailedEvent) -> NodeRunExceptionEvent:
+        """Handle error by taking the fail branch.
 
         This strategy converts failures to exceptions and routes execution
         through a designated fail-branch edge.
@@ -154,6 +154,7 @@ class ErrorHandler:
 
         Returns:
             NodeRunExceptionEvent to continue via fail branch
+
         """
         outputs = {
             "error_message": event.node_run_result.error,
@@ -181,9 +182,8 @@ class ErrorHandler:
             error=event.error,
         )
 
-    def _handle_default_value(self, event: NodeRunFailedEvent):
-        """
-        Handle error by using default values.
+    def _handle_default_value(self, event: NodeRunFailedEvent) -> NodeRunExceptionEvent:
+        """Handle error by using default values.
 
         This strategy allows nodes to fail gracefully by providing
         predefined default output values.
@@ -193,6 +193,7 @@ class ErrorHandler:
 
         Returns:
             NodeRunExceptionEvent with default values
+
         """
         node = self._graph.nodes[event.node_id]
 

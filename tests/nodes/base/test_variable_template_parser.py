@@ -17,7 +17,8 @@ def test_extract_selectors_from_template():
             value_selector=["node_id", "custom_query"],
         ),
         VariableSelector(
-            variable="#env.secret_key#", value_selector=["env", "secret_key"]
+            variable="#env.secret_key#",
+            value_selector=["env", "secret_key"],
         ),
     ]
 
@@ -37,7 +38,7 @@ def test_invalid_references():
     for idx, case in enumerate(cases, 1):
         fail_msg = f"Test case {case.name} failed, index={idx}"
         selectors = variable_template_parser.extract_selectors_from_template(
-            case.template
+            case.template,
         )
         assert selectors == [], fail_msg
         parser = variable_template_parser.VariableTemplateParser(case.template)

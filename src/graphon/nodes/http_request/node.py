@@ -23,6 +23,7 @@ from graphon.variables.segments import ArrayFileSegment
 from .config import build_http_request_config, resolve_http_request_config
 from .entities import (
     HTTP_REQUEST_CONFIG_FILTER_KEY,
+    BodyData,
     HttpRequestNodeConfig,
     HttpRequestNodeData,
     HttpRequestNodeTimeout,
@@ -43,7 +44,7 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
     @override
     def __init__(
         self,
-        id: str,
+        node_id: str,
         config: NodeConfigDict,
         graph_init_params: "GraphInitParams",
         graph_runtime_state: "GraphRuntimeState",
@@ -55,7 +56,7 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
         file_reference_factory: FileReferenceFactoryProtocol,
     ) -> None:
         super().__init__(
-            id=id,
+            node_id=node_id,
             config=config,
             graph_init_params=graph_init_params,
             graph_runtime_state=graph_runtime_state,
@@ -70,7 +71,8 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
     @classmethod
     @override
     def get_default_config(
-        cls, filters: Mapping[str, object] | None = None
+        cls,
+        filters: Mapping[str, object] | None = None,
     ) -> Mapping[str, object]:
         if not filters or HTTP_REQUEST_CONFIG_FILTER_KEY not in filters:
             http_request_config = build_http_request_config()
@@ -163,7 +165,8 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
             )
 
     def _get_request_timeout(
-        self, node_data: HttpRequestNodeData
+        self,
+        node_data: HttpRequestNodeData,
     ) -> HttpRequestNodeTimeout:
         default_timeout = self._http_request_config.default_timeout()
         timeout = node_data.timeout
@@ -185,92 +188,100 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
         node_id: str,
         node_data: HttpRequestNodeData,
     ) -> Mapping[str, Sequence[str]]:
+        _ = graph_config
+        selectors = cls._extract_template_selectors(
+            node_data.url,
+            node_data.headers,
+            node_data.params,
+        )
+        selectors.extend(cls._extract_body_selectors(node_data))
+        return {
+            node_id + "." + selector.variable: selector.value_selector
+            for selector in selectors
+        }
+
+    @staticmethod
+    def _extract_template_selectors(*templates: str) -> list[VariableSelector]:
         selectors: list[VariableSelector] = []
-        selectors += variable_template_parser.extract_selectors_from_template(
-            node_data.url
-        )
-        selectors += variable_template_parser.extract_selectors_from_template(
-            node_data.headers
-        )
-        selectors += variable_template_parser.extract_selectors_from_template(
-            node_data.params
-        )
-        if node_data.body:
-            body_type = node_data.body.type
-            data = node_data.body.data
-            match body_type:
-                case "none":
-                    pass
-                case "binary":
-                    if len(data) != 1:
-                        raise RequestBodyError(
-                            "invalid body data, should have only one item"
-                        )
-                    selector = data[0].file
-                    selectors.append(
-                        VariableSelector(
-                            variable="#" + ".".join(selector) + "#",
-                            value_selector=selector,
-                        )
-                    )
-                case "json" | "raw-text":
-                    if len(data) != 1:
-                        raise RequestBodyError(
-                            "invalid body data, should have only one item"
-                        )
-                    selectors += (
-                        variable_template_parser.extract_selectors_from_template(
-                            data[0].key
-                        )
-                    )
-                    selectors += (
-                        variable_template_parser.extract_selectors_from_template(
-                            data[0].value
-                        )
-                    )
-                case "x-www-form-urlencoded":
-                    for item in data:
-                        selectors += (
-                            variable_template_parser.extract_selectors_from_template(
-                                item.key
-                            )
-                        )
-                        selectors += (
-                            variable_template_parser.extract_selectors_from_template(
-                                item.value
-                            )
-                        )
-                case "form-data":
-                    for item in data:
-                        selectors += (
-                            variable_template_parser.extract_selectors_from_template(
-                                item.key
-                            )
-                        )
-                        if item.type == "text":
-                            selectors += variable_template_parser.extract_selectors_from_template(
-                                item.value
-                            )
-                        elif item.type == "file":
-                            selectors.append(
-                                VariableSelector(
-                                    variable="#" + ".".join(item.file) + "#",
-                                    value_selector=item.file,
-                                )
-                            )
-
-        mapping = {}
-        for selector_iter in selectors:
-            mapping[node_id + "." + selector_iter.variable] = (
-                selector_iter.value_selector
+        for template in templates:
+            selectors.extend(
+                variable_template_parser.extract_selectors_from_template(template),
             )
+        return selectors
 
-        return mapping
+    @classmethod
+    def _extract_body_selectors(
+        cls,
+        node_data: HttpRequestNodeData,
+    ) -> list[VariableSelector]:
+        if node_data.body is None or node_data.body.type == "none":
+            return []
+        match node_data.body.type:
+            case "binary":
+                selectors = cls._extract_binary_body_selectors(node_data.body.data)
+            case "json" | "raw-text":
+                selectors = cls._extract_template_body_selectors(node_data.body.data)
+            case "x-www-form-urlencoded":
+                selectors = cls._extract_key_value_body_selectors(node_data.body.data)
+            case "form-data":
+                selectors = cls._extract_form_data_body_selectors(node_data.body.data)
+            case _:
+                selectors = []
+        return selectors
+
+    @staticmethod
+    def _build_file_selector(selector: Sequence[str]) -> VariableSelector:
+        return VariableSelector(
+            variable="#" + ".".join(selector) + "#",
+            value_selector=selector,
+        )
+
+    @classmethod
+    def _extract_binary_body_selectors(
+        cls,
+        data: Sequence[BodyData],
+    ) -> list[VariableSelector]:
+        if len(data) != 1:
+            msg = "invalid body data, should have only one item"
+            raise RequestBodyError(msg)
+        return [cls._build_file_selector(data[0].file)]
+
+    @classmethod
+    def _extract_template_body_selectors(
+        cls,
+        data: Sequence[BodyData],
+    ) -> list[VariableSelector]:
+        if len(data) != 1:
+            msg = "invalid body data, should have only one item"
+            raise RequestBodyError(msg)
+        return cls._extract_template_selectors(data[0].key, data[0].value)
+
+    @classmethod
+    def _extract_key_value_body_selectors(
+        cls,
+        data: Sequence[BodyData],
+    ) -> list[VariableSelector]:
+        selectors: list[VariableSelector] = []
+        for item in data:
+            selectors.extend(cls._extract_template_selectors(item.key, item.value))
+        return selectors
+
+    @classmethod
+    def _extract_form_data_body_selectors(
+        cls,
+        data: Sequence[BodyData],
+    ) -> list[VariableSelector]:
+        selectors: list[VariableSelector] = []
+        for item in data:
+            selectors.extend(cls._extract_template_selectors(item.key))
+            if item.type == "text":
+                selectors.extend(cls._extract_template_selectors(item.value))
+                continue
+            selectors.append(cls._build_file_selector(item.file))
+        return selectors
 
     def extract_files(self, url: str, response: Response) -> ArrayFileSegment:
-        """
-        Extract files from response by checking both Content-Type header and URL
-        """
+        """Extract files from response by checking both Content-Type header and URL"""
         files: list[File] = []
         is_file = response.is_file
         content_type = response.content_type
@@ -287,7 +298,7 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
                 # If filename is available from content-disposition,
                 # use it to guess the content type
                 content_disposition_type = mimetypes.guess_type(
-                    content_disposition_filename
+                    content_disposition_filename,
                 )[0]
 
         # Guess file extension from URL or Content-Type header
@@ -309,7 +320,7 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
             mapping={
                 "tool_file_id": tool_file.id,
                 "transfer_method": FileTransferMethod.TOOL_FILE,
-            }
+            },
         )
         files.append(file)
 

@@ -1,5 +1,4 @@
-"""
-GraphEngine Manager for sending control commands via Redis channel.
+"""GraphEngine Manager for sending control commands via Redis channel.
 
 This module provides a simplified interface for controlling workflow executions
 using the new Redis command channel, without requiring user permission checks.
@@ -27,8 +26,7 @@ logger = logging.getLogger(__name__)
 
 @final
 class GraphEngineManager:
-    """
-    Manager for sending control commands to GraphEngine instances.
+    """Manager for sending control commands to GraphEngine instances.
 
     This class provides a simple interface for controlling workflow executions
     by sending commands through Redis channels, without user validation.
@@ -40,27 +38,27 @@ class GraphEngineManager:
         self._redis_client = redis_client
 
     def send_stop_command(self, task_id: str, reason: str | None = None) -> None:
-        """
-        Send a stop command to a running workflow.
+        """Send a stop command to a running workflow.
 
         Args:
             task_id: The task ID of the workflow to stop
             reason: Optional reason for stopping (defaults to "User requested stop")
+
         """
         abort_command = AbortCommand(reason=reason or "User requested stop")
         self._send_command(task_id, abort_command)
 
     def send_pause_command(self, task_id: str, reason: str | None = None) -> None:
         """Send a pause command to a running workflow."""
-
         pause_command = PauseCommand(reason=reason or "User requested pause")
         self._send_command(task_id, pause_command)
 
     def send_update_variables_command(
-        self, task_id: str, updates: Sequence[VariableUpdate]
+        self,
+        task_id: str,
+        updates: Sequence[VariableUpdate],
     ) -> None:
         """Send a command to update variables in a running workflow."""
-
         if not updates:
             return
 
@@ -69,7 +67,6 @@ class GraphEngineManager:
 
     def _send_command(self, task_id: str, command: GraphEngineCommand) -> None:
         """Send a command to the workflow-specific Redis channel."""
-
         if not task_id:
             return
 

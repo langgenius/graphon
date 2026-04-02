@@ -1,5 +1,4 @@
-"""
-Redis-based implementation of CommandChannel for distributed scenarios.
+"""Redis-based implementation of CommandChannel for distributed scenarios.
 
 This implementation uses Redis lists for command queuing, supporting
 multi-instance deployments and cross-server communication.
@@ -17,6 +16,12 @@ from ..entities.commands import (
     PauseCommand,
     UpdateVariablesCommand,
 )
+
+_COMMAND_MODEL_BY_TYPE: dict[CommandType, type[GraphEngineCommand]] = {
+    CommandType.ABORT: AbortCommand,
+    CommandType.PAUSE: PauseCommand,
+    CommandType.UPDATE_VARIABLES: UpdateVariablesCommand,
+}
 
 
 class RedisPipelineProtocol(Protocol):
@@ -39,8 +44,7 @@ class RedisClientProtocol(Protocol):
 
 @final
 class RedisChannel:
-    """
-    Redis-based command channel implementation for distributed systems.
+    """Redis-based command channel implementation for distributed systems.
 
     Each instance uses a unique Redis key for its command queue.
     Commands are JSON-serialized for transport.
@@ -52,13 +56,13 @@ class RedisChannel:
         channel_key: str,
         command_ttl: int = 3600,
     ) -> None:
-        """
-        Initialize the Redis channel.
+        """Initialize the Redis channel.
 
         Args:
             redis_client: Redis client instance
             channel_key: Unique key for this channel's command queue
             command_ttl: TTL for command keys in seconds (default: 3600)
+
         """
         self._redis = redis_client
         self._key = channel_key
@@ -66,11 +70,11 @@ class RedisChannel:
         self._pending_key = f"{channel_key}:pending"
 
     def fetch_commands(self) -> list[GraphEngineCommand]:
-        """
-        Fetch all pending commands from Redis.
+        """Fetch all pending commands from Redis.
 
         Returns:
             List of pending commands (drains the Redis list)
+
         """
         if not self._has_pending_commands():
             return []
@@ -99,11 +103,11 @@ class RedisChannel:
         return commands
 
     def send_command(self, command: GraphEngineCommand) -> None:
-        """
-        Send a command to Redis.
+        """Send a command to Redis.
 
         Args:
             command: The command to send
+
         """
         command_json = json.dumps(command.model_dump())
 
@@ -115,14 +119,14 @@ class RedisChannel:
             pipe.execute()
 
     def _deserialize_command(self, data: dict[str, Any]) -> GraphEngineCommand | None:
-        """
-        Deserialize a command from dictionary data.
+        """Deserialize a command from dictionary data.
 
         Args:
             data: Command data dictionary
 
         Returns:
             Deserialized command or None if invalid
+
         """
         command_type_value = data.get("command_type")
         if not isinstance(command_type_value, str):
@@ -130,26 +134,18 @@ class RedisChannel:
 
         try:
             command_type = CommandType(command_type_value)
-
-            if command_type == CommandType.ABORT:
-                return AbortCommand.model_validate(data)
-            if command_type == CommandType.PAUSE:
-                return PauseCommand.model_validate(data)
-            if command_type == CommandType.UPDATE_VARIABLES:
-                return UpdateVariablesCommand.model_validate(data)
-
-            # For other command types, use base class
-            return GraphEngineCommand.model_validate(data)
+            command_model = _COMMAND_MODEL_BY_TYPE.get(command_type, GraphEngineCommand)
+            return command_model.model_validate(data)
 
         except (ValueError, TypeError):
             return None
 
     def _has_pending_commands(self) -> bool:
-        """
-        Check and consume the pending marker to avoid unnecessary list reads.
+        """Check and consume the pending marker to avoid unnecessary list reads.
 
         Returns:
             True if commands should be fetched from Redis.
+
         """
         with self._redis.pipeline() as pipe:
             pipe.get(self._pending_key)

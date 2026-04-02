@@ -28,12 +28,10 @@ def resolve_http_request_config(
     filters: Mapping[str, object] | None,
 ) -> HttpRequestNodeConfig:
     if not filters:
-        raise ValueError(
-            "http_request_config is required to build HTTP request default config"
-        )
+        msg = "http_request_config is required to build HTTP request default config"
+        raise ValueError(msg)
     config = filters.get(HTTP_REQUEST_CONFIG_FILTER_KEY)
     if not isinstance(config, HttpRequestNodeConfig):
-        raise ValueError(
-            "http_request_config must be an HttpRequestNodeConfig instance"
-        )
+        msg = "http_request_config must be an HttpRequestNodeConfig instance"
+        raise TypeError(msg)
     return config

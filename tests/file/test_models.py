@@ -1,3 +1,5 @@
+from typing import Any
+
 from graphon.file import helpers
 from graphon.file.enums import (
     FileTransferMethod,
@@ -10,8 +12,8 @@ from ..helpers import build_file_reference
 
 def _build_local_file(*, reference: str, storage_key: str | None = None) -> File:
     return File(
-        id="file-id",
-        type=FileType.DOCUMENT,
+        file_id="file-id",
+        file_type=FileType.DOCUMENT,
         transfer_method=FileTransferMethod.LOCAL_FILE,
         reference=reference,
         filename="report.pdf",
@@ -24,7 +26,8 @@ def _build_local_file(*, reference: str, storage_key: str | None = None) -> File
 
 def test_file_exposes_legacy_aliases_from_opaque_reference() -> None:
     reference = build_file_reference(
-        record_id="upload-file-id", storage_key="files/report.pdf"
+        record_id="upload-file-id",
+        storage_key="files/report.pdf",
     )
 
     file = _build_local_file(reference=reference)
@@ -36,22 +39,31 @@ def test_file_exposes_legacy_aliases_from_opaque_reference() -> None:
 
 def test_file_falls_back_to_raw_reference_when_opaque_reference_is_invalid() -> None:
     file = _build_local_file(
-        reference="dify-file-ref:not-base64", storage_key="fallback-key"
+        reference="dify-file-ref:not-base64",
+        storage_key="fallback-key",
     )
 
     assert file.related_id == "dify-file-ref:not-base64"
     assert file.storage_key == "fallback-key"
 
 
-def test_file_to_dict_keeps_reference_and_legacy_related_id(monkeypatch) -> None:
+def test_file_to_dict_keeps_reference_and_legacy_related_id(
+    monkeypatch: Any,
+) -> None:
     reference = build_file_reference(
-        record_id="upload-file-id", storage_key="files/report.pdf"
+        record_id="upload-file-id",
+        storage_key="files/report.pdf",
     )
     file = _build_local_file(reference=reference)
+
+    def fake_resolve_file_url(_file: Any, *, for_external: bool = True) -> str:
+        _ = for_external
+        return "https://example.com/report.pdf"
+
     monkeypatch.setattr(
         helpers,
         "resolve_file_url",
-        lambda _file, for_external=True: "https://example.com/report.pdf",
+        fake_resolve_file_url,
     )
 
     serialized = file.to_dict()

@@ -29,7 +29,8 @@ class ReadyQueueProtocol(Protocol):
 
     def get(self, timeout: float | None = None) -> str:
         """Return the next node identifier,
-        blocking until available or timeout expires."""
+        blocking until available or timeout expires.
+        """
         ...
 
     def task_done(self) -> None:
@@ -130,7 +131,8 @@ class NodeProtocol(Protocol):
     node_type: ClassVar[NodeType]
 
     def blocks_variable_output(
-        self, variable_selectors: set[tuple[str, ...]]
+        self,
+        variable_selectors: set[tuple[str, ...]],
     ) -> bool: ...
 
 
@@ -144,7 +146,8 @@ class EdgeProtocol(Protocol):
 
 class GraphProtocol(Protocol):
     """Structural interface required from graph instances attached
-    to the runtime state."""
+    to the runtime state.
+    """
 
     nodes: Mapping[str, NodeProtocol]
     edges: Mapping[str, EdgeProtocol]
@@ -204,81 +207,14 @@ class _GraphRuntimeStateSnapshot:
     graph_edge_states: dict[str, NodeState]
 
 
-class GraphRuntimeState:
-    """Mutable runtime state shared across graph execution components.
+class _GraphRuntimeStateBindingMixin:
+    """Graph attachment and child-engine orchestration helpers."""
 
-    `GraphRuntimeState` encapsulates the runtime state of workflow execution,
-    including scheduling details, variable values, and timing information.
-
-    Values that are initialized prior to workflow execution and remain constant
-    throughout the execution should be part of `GraphInitParams` instead.
-    """
-
-    def __init__(
-        self,
-        *,
-        variable_pool: VariablePool,
-        start_at: float,
-        total_tokens: int = 0,
-        llm_usage: LLMUsage | None = None,
-        outputs: dict[str, object] | None = None,
-        node_run_steps: int = 0,
-        ready_queue: ReadyQueueProtocol | None = None,
-        graph_execution: GraphExecutionProtocol | None = None,
-        response_coordinator: ResponseStreamCoordinatorProtocol | None = None,
-        graph: GraphProtocol | None = None,
-        execution_context: AbstractContextManager[object] | None = None,
-    ) -> None:
-        self._variable_pool = variable_pool
-        self._start_at = start_at
-
-        if total_tokens < 0:
-            raise ValueError("total_tokens must be non-negative")
-        self._total_tokens = total_tokens
-
-        self._llm_usage = (llm_usage or LLMUsage.empty_usage()).model_copy()
-        self._outputs = deepcopy(outputs) if outputs is not None else {}
-
-        if node_run_steps < 0:
-            raise ValueError("node_run_steps must be non-negative")
-        self._node_run_steps = node_run_steps
-
-        self._graph: GraphProtocol | None = None
-
-        self._ready_queue = ready_queue
-        self._graph_execution = graph_execution
-        self._response_coordinator = response_coordinator
-        # Application code injects this when worker threads must restore request
-        # or framework-local state. It is intentionally excluded from snapshots.
-        self._execution_context = (
-            execution_context if execution_context is not None else nullcontext(None)
-        )
-        self._pending_response_coordinator_dump: str | None = None
-        self._pending_graph_execution_workflow_id: str | None = None
-        self._paused_nodes: set[str] = set()
-        self._deferred_nodes: set[str] = set()
-        self._child_engine_builder: ChildGraphEngineBuilderProtocol | None = None
-
-        # Node and edges states needed to be restored into
-        # graph object.
-        #
-        # These two fields are non-None only when resuming from a snapshot.
-        # Once the graph is attached, these two fields will be set to None.
-        self._pending_graph_node_states: dict[str, NodeState] | None = None
-        self._pending_graph_edge_states: dict[str, NodeState] | None = None
-
-        if graph is not None:
-            self.attach_graph(graph)
-
-    # ------------------------------------------------------------------
-    # Context binding helpers
-    # ------------------------------------------------------------------
     def attach_graph(self, graph: GraphProtocol) -> None:
         """Attach the materialized graph to the runtime state."""
         if self._graph is not None and self._graph is not graph:
-            raise ValueError(
-                "GraphRuntimeState already attached to a different graph instance"
-            )
+            msg = "GraphRuntimeState already attached to a different graph instance"
+            raise ValueError(msg)
 
         self._graph = graph
 
@@ -305,7 +241,8 @@ class GraphRuntimeState:
             _ = self.response_coordinator
 
     def bind_child_engine_builder(
-        self, builder: ChildGraphEngineBuilderProtocol
+        self,
+        builder: ChildGraphEngineBuilderProtocol,
     ) -> None:
         self._child_engine_builder = builder
 
@@ -317,12 +254,10 @@ class GraphRuntimeState:
         root_node_id: str,
         variable_pool: VariablePool | None = None,
     ) -> Any:
-        """Create a child graph engine that derives its runtime state
-        from the parent."""
+        """Create a child graph engine whose runtime state derives from this parent."""
         if self._child_engine_builder is None:
-            raise ChildEngineBuilderNotConfiguredError(
-                "Child engine builder is not configured."
-            )
+            msg = "Child engine builder is not configured."
+            raise ChildEngineBuilderNotConfiguredError(msg)
 
         return self._child_engine_builder.build_child_engine(
             workflow_id=workflow_id,
@@ -332,9 +267,10 @@ class GraphRuntimeState:
             variable_pool=variable_pool,
         )
 
-    # ------------------------------------------------------------------
-    # Primary collaborators
-    # ------------------------------------------------------------------
+
+class _GraphRuntimeStateAccessorsMixin:
+    """Public scalar state and collaborator accessors."""
+
     @property
     def variable_pool(self) -> VariablePool:
         return self._variable_pool
@@ -355,9 +291,8 @@ class GraphRuntimeState:
     def response_coordinator(self) -> ResponseStreamCoordinatorProtocol:
         if self._response_coordinator is None:
             if self._graph is None:
-                raise ValueError(
-                    "Graph must be attached before accessing response coordinator"
-                )
+                msg = "Graph must be attached before accessing response coordinator"
+                raise ValueError(msg)
             self._response_coordinator = self._build_response_coordinator(self._graph)
         return self._response_coordinator
 
@@ -369,9 +304,6 @@ class GraphRuntimeState:
     def execution_context(self, value: AbstractContextManager[object] | None) -> None:
         self._execution_context = value if value is not None else nullcontext(None)
 
-    # ------------------------------------------------------------------
-    # Scalar state
-    # ------------------------------------------------------------------
     @property
     def start_at(self) -> float:
         return self._start_at
@@ -387,7 +319,8 @@ class GraphRuntimeState:
     @total_tokens.setter
     def total_tokens(self, value: int) -> None:
         if value < 0:
-            raise ValueError("total_tokens must be non-negative")
+            msg = "total_tokens must be non-negative"
+            raise ValueError(msg)
         self._total_tokens = value
 
     @property
@@ -423,7 +356,8 @@ class GraphRuntimeState:
     @node_run_steps.setter
     def node_run_steps(self, value: int) -> None:
         if value < 0:
-            raise ValueError("node_run_steps must be non-negative")
+            msg = "node_run_steps must be non-negative"
+            raise ValueError(msg)
         self._node_run_steps = value
 
     def increment_node_run_steps(self) -> None:
@@ -431,15 +365,16 @@ class GraphRuntimeState:
 
     def add_tokens(self, tokens: int) -> None:
         if tokens < 0:
-            raise ValueError("tokens must be non-negative")
+            msg = "tokens must be non-negative"
+            raise ValueError(msg)
         self._total_tokens += tokens
 
-    # ------------------------------------------------------------------
-    # Serialization
-    # ------------------------------------------------------------------
+
+class _GraphRuntimeStateSnapshotMixin:
+    """Snapshot serialization and suspension queue management."""
+
     def dumps(self) -> str:
         """Serialize runtime state into a JSON string."""
-
         snapshot: dict[str, Any] = {
             "version": "1.0",
             "start_at": self._start_at,
@@ -466,7 +401,6 @@ class GraphRuntimeState:
     @classmethod
     def from_snapshot(cls, data: str | Mapping[str, Any]) -> GraphRuntimeState:
         """Restore runtime state from a serialized snapshot."""
-
         snapshot = cls._parse_snapshot_payload(data)
 
         state = cls(
@@ -482,43 +416,109 @@ class GraphRuntimeState:
 
     def loads(self, data: str | Mapping[str, Any]) -> None:
         """Restore runtime state from a serialized snapshot (legacy API)."""
-
         snapshot = self._parse_snapshot_payload(data)
         self._apply_snapshot(snapshot)
 
     def register_paused_node(self, node_id: str) -> None:
         """Record a node that should resume when execution is continued."""
-
         self._paused_nodes.add(node_id)
 
     def get_paused_nodes(self) -> list[str]:
         """Retrieve the list of paused nodes without mutating internal state."""
-
         return list(self._paused_nodes)
 
     def consume_paused_nodes(self) -> list[str]:
         """Retrieve and clear the list of paused nodes awaiting resume."""
-
         nodes = list(self._paused_nodes)
         self._paused_nodes.clear()
         return nodes
 
     def register_deferred_node(self, node_id: str) -> None:
         """Record a node that became ready during pause and should resume later."""
-
         self._deferred_nodes.add(node_id)
 
     def get_deferred_nodes(self) -> list[str]:
         """Retrieve deferred nodes without mutating internal state."""
-
         return list(self._deferred_nodes)
 
     def consume_deferred_nodes(self) -> list[str]:
         """Retrieve and clear deferred nodes awaiting resume."""
-
         nodes = list(self._deferred_nodes)
         self._deferred_nodes.clear()
         return nodes
+
+
+class GraphRuntimeState(
+    _GraphRuntimeStateBindingMixin,
+    _GraphRuntimeStateAccessorsMixin,
+    _GraphRuntimeStateSnapshotMixin,
+):
+    """Mutable runtime state shared across graph execution components.
+
+    `GraphRuntimeState` encapsulates the runtime state of workflow execution,
+    including scheduling details, variable values, and timing information.
+
+    Values that are initialized prior to workflow execution and remain constant
+    throughout the execution should be part of `GraphInitParams` instead.
+    """
+
+    def __init__(
+        self,
+        *,
+        variable_pool: VariablePool,
+        start_at: float,
+        total_tokens: int = 0,
+        llm_usage: LLMUsage | None = None,
+        outputs: dict[str, object] | None = None,
+        node_run_steps: int = 0,
+        ready_queue: ReadyQueueProtocol | None = None,
+        graph_execution: GraphExecutionProtocol | None = None,
+        response_coordinator: ResponseStreamCoordinatorProtocol | None = None,
+        graph: GraphProtocol | None = None,
+        execution_context: AbstractContextManager[object] | None = None,
+    ) -> None:
+        self._variable_pool = variable_pool
+        self._start_at = start_at
+
+        if total_tokens < 0:
+            msg = "total_tokens must be non-negative"
+            raise ValueError(msg)
+        self._total_tokens = total_tokens
+
+        self._llm_usage = (llm_usage or LLMUsage.empty_usage()).model_copy()
+        self._outputs = deepcopy(outputs) if outputs is not None else {}
+
+        if node_run_steps < 0:
+            msg = "node_run_steps must be non-negative"
+            raise ValueError(msg)
+        self._node_run_steps = node_run_steps
+
+        self._graph: GraphProtocol | None = None
+
+        self._ready_queue = ready_queue
+        self._graph_execution = graph_execution
+        self._response_coordinator = response_coordinator
+        # Application code injects this when worker threads must restore request
+        # or framework-local state. It is intentionally excluded from snapshots.
+        self._execution_context = (
+            execution_context if execution_context is not None else nullcontext(None)
+        )
+        self._pending_response_coordinator_dump: str | None = None
+        self._pending_graph_execution_workflow_id: str | None = None
+        self._paused_nodes: set[str] = set()
+        self._deferred_nodes: set[str] = set()
+        self._child_engine_builder: ChildGraphEngineBuilderProtocol | None = None
+
+        # Node and edges states needed to be restored into
+        # graph object.
+        #
+        # These two fields are non-None only when resuming from a snapshot.
+        # Once the graph is attached, these two fields will be set to None.
+        self._pending_graph_node_states: dict[str, NodeState] | None = None
+        self._pending_graph_edge_states: dict[str, NodeState] | None = None
+
+        if graph is not None:
+            self.attach_graph(graph)
 
     # ------------------------------------------------------------------
     # Builders
@@ -539,7 +539,8 @@ class GraphRuntimeState:
         return graph_execution_cls(workflow_id=workflow_id)  # type: ignore[invalid-return-type]
 
     def _build_response_coordinator(
-        self, graph: GraphProtocol
+        self,
+        graph: GraphProtocol,
     ) -> ResponseStreamCoordinatorProtocol:
         # Lazily import to keep the runtime domain decoupled from graph_engine modules.
         module = importlib.import_module("graphon.graph_engine.response_coordinator")
@@ -551,29 +552,30 @@ class GraphRuntimeState:
     # ------------------------------------------------------------------
     @classmethod
     def _parse_snapshot_payload(
-        cls, data: str | Mapping[str, Any]
+        cls,
+        data: str | Mapping[str, Any],
     ) -> _GraphRuntimeStateSnapshot:
         payload: dict[str, Any]
         payload = json.loads(data) if isinstance(data, str) else dict(data)
 
         version = payload.get("version")
         if version != "1.0":
-            raise ValueError(
-                f"Unsupported GraphRuntimeState snapshot version: {version}"
-            )
+            msg = f"Unsupported GraphRuntimeState snapshot version: {version}"
+            raise ValueError(msg)
 
         start_at = float(payload.get("start_at", 0.0))
 
         total_tokens = int(payload.get("total_tokens", 0))
         if total_tokens < 0:
-            raise ValueError("total_tokens must be non-negative")
+            msg = "total_tokens must be non-negative"
+            raise ValueError(msg)
 
         node_run_steps = int(payload.get("node_run_steps", 0))
         if node_run_steps < 0:
-            raise ValueError("node_run_steps must be non-negative")
+            msg = "node_run_steps must be non-negative"
+            raise ValueError(msg)
 
-        llm_usage_payload = payload.get("llm_usage", {})
-        llm_usage = LLMUsage.model_validate(llm_usage_payload)
+        llm_usage = LLMUsage.model_validate(payload.get("llm_usage", {}))
 
         outputs_payload = deepcopy(payload.get("outputs", {}))
 
@@ -585,11 +587,6 @@ class GraphRuntimeState:
             else VariablePool()
         )
 
-        ready_queue_payload = payload.get("ready_queue")
-        graph_execution_payload = payload.get("graph_execution")
-        response_payload = payload.get("response_coordinator")
-        paused_nodes_payload = payload.get("paused_nodes", [])
-        deferred_nodes_payload = payload.get("deferred_nodes", [])
         graph_state_payload = payload.get("graph_state", {}) or {}
         graph_node_states = _coerce_graph_state_map(graph_state_payload, "nodes")
         graph_edge_states = _coerce_graph_state_map(graph_state_payload, "edges")
@@ -602,11 +599,11 @@ class GraphRuntimeState:
             outputs=outputs_payload,
             variable_pool=variable_pool,
             has_variable_pool=has_variable_pool,
-            ready_queue_dump=ready_queue_payload,
-            graph_execution_dump=graph_execution_payload,
-            response_coordinator_dump=response_payload,
-            paused_nodes=tuple(map(str, paused_nodes_payload)),
-            deferred_nodes=tuple(map(str, deferred_nodes_payload)),
+            ready_queue_dump=payload.get("ready_queue"),
+            graph_execution_dump=payload.get("graph_execution"),
+            response_coordinator_dump=payload.get("response_coordinator"),
+            paused_nodes=tuple(map(str, payload.get("paused_nodes", []))),
+            deferred_nodes=tuple(map(str, payload.get("deferred_nodes", []))),
             graph_node_states=graph_node_states,
             graph_edge_states=graph_edge_states,
         )
@@ -646,7 +643,7 @@ class GraphRuntimeState:
         try:
             execution_payload = json.loads(payload)
             self._pending_graph_execution_workflow_id = execution_payload.get(
-                "workflow_id"
+                "workflow_id",
             )
         except (json.JSONDecodeError, TypeError, AttributeError):
             self._pending_graph_execution_workflow_id = None

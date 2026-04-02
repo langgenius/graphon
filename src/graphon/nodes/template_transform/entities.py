@@ -4,9 +4,7 @@ from graphon.nodes.base.entities import VariableSelector
 
 
 class TemplateTransformNodeData(BaseNodeData):
-    """
-    Template Transform Node Data.
-    """
+    """Template Transform Node Data."""
 
     type: NodeType = BuiltinNodeTypes.TEMPLATE_TRANSFORM
     variables: list[VariableSelector]

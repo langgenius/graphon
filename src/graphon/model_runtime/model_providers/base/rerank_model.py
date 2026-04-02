@@ -3,13 +3,11 @@ from graphon.model_runtime.entities.rerank_entities import (
     MultimodalRerankInput,
     RerankResult,
 )
-from graphon.model_runtime.model_providers.__base.ai_model import AIModel
+from graphon.model_runtime.model_providers.base.ai_model import AIModel
 
 
 class RerankModel(AIModel):
-    """
-    Base Model class for rerank model.
-    """
+    """Base Model class for rerank model."""
 
     model_type: ModelType = ModelType.RERANK
 
@@ -22,17 +20,7 @@ class RerankModel(AIModel):
         score_threshold: float | None = None,
         top_n: int | None = None,
     ) -> RerankResult:
-        """
-        Invoke rerank model
-
-        :param model: model name
-        :param credentials: model credentials
-        :param query: search query
-        :param docs: docs for reranking
-        :param score_threshold: score threshold
-        :param top_n: top n
-        :return: rerank result
-        """
+        """Invoke the rerank model for text inputs."""
         try:
             return self.model_runtime.invoke_rerank(
                 provider=self.provider,
@@ -44,7 +32,7 @@ class RerankModel(AIModel):
                 top_n=top_n,
             )
         except Exception as e:
-            raise self._transform_invoke_error(e)
+            raise self._transform_invoke_error(e) from e
 
     def invoke_multimodal_rerank(
         self,
@@ -55,16 +43,7 @@ class RerankModel(AIModel):
         score_threshold: float | None = None,
         top_n: int | None = None,
     ) -> RerankResult:
-        """
-        Invoke multimodal rerank model
-        :param model: model name
-        :param credentials: model credentials
-        :param query: search query
-        :param docs: docs for reranking
-        :param score_threshold: score threshold
-        :param top_n: top n
-        :return: rerank result
-        """
+        """Invoke the rerank model for multimodal inputs."""
         try:
             return self.model_runtime.invoke_multimodal_rerank(
                 provider=self.provider,
@@ -76,4 +55,4 @@ class RerankModel(AIModel):
                 top_n=top_n,
             )
         except Exception as e:
-            raise self._transform_invoke_error(e)
+            raise self._transform_invoke_error(e) from e

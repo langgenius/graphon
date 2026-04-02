@@ -8,20 +8,18 @@ from graphon.enums import BuiltinNodeTypes, NodeType
 
 
 class AnswerNodeData(BaseNodeData):
-    """
-    Answer Node Data.
-    """
+    """Answer Node Data."""
 
     type: NodeType = BuiltinNodeTypes.ANSWER
     answer: str = Field(..., description="answer template string")
 
 
 class GenerateRouteChunk(BaseModel):
-    """
-    Generate Route Chunk.
-    """
+    """Generate Route Chunk."""
 
     class ChunkType(StrEnum):
+        """Kinds of generate-route chunks."""
+
         VAR = auto()
         TEXT = auto()
 
@@ -29,9 +27,7 @@ class GenerateRouteChunk(BaseModel):
 
 
 class VarGenerateRouteChunk(GenerateRouteChunk):
-    """
-    Var Generate Route Chunk.
-    """
+    """Var Generate Route Chunk."""
 
     type: GenerateRouteChunk.ChunkType = GenerateRouteChunk.ChunkType.VAR
     """generate route chunk type"""
@@ -39,9 +35,7 @@ class VarGenerateRouteChunk(GenerateRouteChunk):
 
 
 class TextGenerateRouteChunk(GenerateRouteChunk):
-    """
-    Text Generate Route Chunk.
-    """
+    """Text Generate Route Chunk."""
 
     type: GenerateRouteChunk.ChunkType = GenerateRouteChunk.ChunkType.TEXT
     """generate route chunk type"""
@@ -55,9 +49,7 @@ class AnswerNodeDoubleLink(BaseModel):
 
 
 class AnswerStreamGenerateRoute(BaseModel):
-    """
-    AnswerStreamGenerateRoute entity
-    """
+    """AnswerStreamGenerateRoute entity"""
 
     answer_dependencies: dict[str, list[str]] = Field(
         ...,

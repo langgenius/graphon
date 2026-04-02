@@ -15,34 +15,36 @@ class WorkflowRuntimeTypeConverter:
     def to_json_encodable(self, value: None) -> None: ...
 
     def to_json_encodable(
-        self, value: Mapping[str, Any] | None
+        self,
+        value: Mapping[str, Any] | None,
     ) -> Mapping[str, Any] | None:
         """Convert runtime values to JSON-serializable structures."""
-
         result = self.value_to_json_encodable_recursive(value)
         if isinstance(result, Mapping) or result is None:
             return result
         return {}
 
     def value_to_json_encodable_recursive(self, value: Any):
-        if value is None:
-            return value
-        if isinstance(value, (bool, int, str, float)):
-            return value
-        if isinstance(value, Decimal):
-            # Convert Decimal to float for JSON serialization
-            return float(value)
-        if isinstance(value, Segment):
-            return self.value_to_json_encodable_recursive(value.value)
-        if isinstance(value, File):
-            return value.to_dict()
-        if isinstance(value, BaseModel):
-            return value.model_dump(mode="json")
-        if isinstance(value, dict):
-            res = {}
-            for k, v in value.items():
-                res[k] = self.value_to_json_encodable_recursive(v)
-            return res
-        if isinstance(value, list):
-            return [self.value_to_json_encodable_recursive(item) for item in value]
-        return value
+        result = value
+        match value:
+            case None | bool() | int() | str() | float():
+                result = value
+            case Decimal():
+                # Convert Decimal to float for JSON serialization
+                result = float(value)
+            case Segment():
+                result = self.value_to_json_encodable_recursive(value.value)
+            case File():
+                result = value.to_dict()
+            case BaseModel():
+                result = value.model_dump(mode="json")
+            case dict():
+                encoded_mapping = {}
+                for key, item in value.items():
+                    encoded_mapping[key] = self.value_to_json_encodable_recursive(item)
+                result = encoded_mapping
+            case list():
+                result = [
+                    self.value_to_json_encodable_recursive(item) for item in value
+                ]
+        return result

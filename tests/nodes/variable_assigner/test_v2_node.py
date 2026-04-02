@@ -1,4 +1,5 @@
 import time
+from typing import Any
 
 from graphon.enums import WorkflowNodeExecutionStatus
 from graphon.graph_events.node import (
@@ -17,15 +18,20 @@ from graphon.variables.variables import (
 from ...helpers import build_graph_init_params, build_variable_pool
 
 
-def _build_node(*, variable_pool, items):
+def _build_node(
+    *,
+    variable_pool: Any,
+    items: Any,
+) -> VariableAssignerNode:
     graph_config = {"nodes": [], "edges": []}
     init_params = build_graph_init_params(graph_config=graph_config)
     runtime_state = GraphRuntimeState(
-        variable_pool=variable_pool, start_at=time.perf_counter()
+        variable_pool=variable_pool,
+        start_at=time.perf_counter(),
     )
 
     return VariableAssignerNode(
-        id="assigner",
+        node_id="assigner",
         graph_init_params=init_params,
         graph_runtime_state=runtime_state,
         config={
@@ -55,7 +61,7 @@ def test_remove_first_from_array():
                 "input_type": InputType.VARIABLE,
                 "operation": Operation.REMOVE_FIRST,
                 "value": None,
-            }
+            },
         ],
     )
 
@@ -83,7 +89,7 @@ def test_remove_last_from_array():
                 "input_type": InputType.VARIABLE,
                 "operation": Operation.REMOVE_LAST,
                 "value": None,
-            }
+            },
         ],
     )
 
@@ -161,7 +167,7 @@ def test_invalid_constant_input_returns_failed_event():
                 "input_type": InputType.CONSTANT,
                 "operation": Operation.OVER_WRITE,
                 "value": 123,
-            }
+            },
         ],
     )
 

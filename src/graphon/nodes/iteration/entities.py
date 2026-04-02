@@ -18,9 +18,7 @@ class ErrorHandleMode(StrEnum):
 
 
 class IterationNodeData(BaseIterationNodeData):
-    """
-    Iteration Node Data.
-    """
+    """Iteration Node Data."""
 
     type: NodeType = BuiltinNodeTypes.ITERATION
     parent_loop_id: str | None = None  # redundant field, not used currently
@@ -37,38 +35,28 @@ class IterationNodeData(BaseIterationNodeData):
 
 
 class IterationStartNodeData(BaseNodeData):
-    """
-    Iteration Start Node Data.
-    """
+    """Iteration Start Node Data."""
 
     type: NodeType = BuiltinNodeTypes.ITERATION_START
 
 
 class IterationState(BaseIterationState):
-    """
-    Iteration State.
-    """
+    """Iteration State."""
 
     outputs: list[Any] = Field(default_factory=list)
     current_output: Any = None
 
     class MetaData(BaseIterationState.MetaData):
-        """
-        Data.
-        """
+        """Data."""
 
         iterator_length: int
 
     def get_last_output(self) -> Any:
-        """
-        Get last output.
-        """
+        """Get last output."""
         if self.outputs:
             return self.outputs[-1]
         return None
 
     def get_current_output(self) -> Any:
-        """
-        Get current output.
-        """
+        """Get current output."""
         return self.current_output

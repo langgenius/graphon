@@ -52,8 +52,8 @@ from graphon.model_runtime.errors.invoke import (
     InvokeConnectionError,
     InvokeServerUnavailableError,
 )
-from graphon.model_runtime.model_providers.__base.large_language_model import (
-    _increase_tool_call,
+from graphon.model_runtime.model_providers.base.large_language_model import (
+    merge_tool_call_deltas,
 )
 from graphon.model_runtime.runtime import ModelRuntime
 from graphon.model_runtime.utils.encoders import jsonable_encoder
@@ -78,6 +78,17 @@ _PROMPT_CONTENT_TYPE_TO_CLASS = {
     PromptMessageContentType.AUDIO.value: AudioPromptMessageContent,
     PromptMessageContentType.VIDEO.value: VideoPromptMessageContent,
     PromptMessageContentType.DOCUMENT.value: DocumentPromptMessageContent,
+}
+
+_I18N_OBJECT_ATTR_BY_LANG = {
+    "en": "en_us",
+    "en-us": "en_us",
+    "en_US": "en_us",
+    "en_us": "en_us",
+    "zh-hans": "zh_hans",
+    "zh_Hans": "zh_hans",
+    "zh_CN": "zh_hans",
+    "zh_cn": "zh_hans",
 }
 
 
@@ -148,27 +159,36 @@ class SlimRuntime(ModelRuntime):
         ]
 
     def get_provider_icon(
-        self, *, provider: str, icon_type: str, lang: str
+        self,
+        *,
+        provider: str,
+        icon_type: str,
+        lang: str,
     ) -> tuple[bytes, str]:
         loaded = self._get_loaded_provider(provider)
         icon_meta = getattr(loaded.provider_entity, icon_type, None)
         if icon_meta is None:
-            raise ValueError(f"Provider {provider} does not expose {icon_type}")
+            msg = f"Provider {provider} does not expose {icon_type}"
+            raise ValueError(msg)
 
-        candidate = getattr(icon_meta, lang, None) or icon_meta.en_US
+        lang_attr = _I18N_OBJECT_ATTR_BY_LANG.get(lang, lang)
+        candidate = getattr(icon_meta, lang_attr, None) or icon_meta.en_us
         if not candidate:
-            raise ValueError(f"Provider {provider} has no icon for language {lang}")
+            msg = f"Provider {provider} has no icon for language {lang}"
+            raise ValueError(msg)
 
         icon_path = loaded.asset_root / candidate
         if not icon_path.exists():
-            raise ValueError(
-                f"Provider icon {candidate} not found under {loaded.asset_root}"
-            )
+            msg = f"Provider icon {candidate} not found under {loaded.asset_root}"
+            raise ValueError(msg)
 
         return icon_path.read_bytes(), icon_path.suffix or ""
 
     def validate_provider_credentials(
-        self, *, provider: str, credentials: dict[str, Any]
+        self,
+        *,
+        provider: str,
+        credentials: dict[str, Any],
     ) -> None:
         loaded = self._get_loaded_provider(provider)
         result = self._invoke_unary_action(
@@ -180,9 +200,8 @@ class SlimRuntime(ModelRuntime):
             },
         )
         if not result.get("result", False):
-            raise InvokeAuthorizationError(
-                "Slim provider credential validation failed."
-            )
+            msg = "Slim provider credential validation failed."
+            raise InvokeAuthorizationError(msg)
 
     def validate_model_credentials(
         self,
@@ -204,7 +223,8 @@ class SlimRuntime(ModelRuntime):
             },
         )
         if not result.get("result", False):
-            raise InvokeAuthorizationError("Slim model credential validation failed.")
+            msg = "Slim model credential validation failed."
+            raise InvokeAuthorizationError(msg)
 
     def get_model_schema(
         self,
@@ -558,7 +578,8 @@ class SlimRuntime(ModelRuntime):
         try:
             return self._providers_by_name[provider]
         except KeyError as exc:
-            raise ValueError(f"Unknown Slim provider: {provider}") from exc
+            msg = f"Unknown Slim provider: {provider}"
+            raise ValueError(msg) from exc
 
     def _invoke_unary_action(
         self,
@@ -582,13 +603,14 @@ class SlimRuntime(ModelRuntime):
             return {}
         if len(chunks) > 1:
             logger.debug(
-                "slim[%s] returned %s chunks for unary action", action, len(chunks)
+                "slim[%s] returned %s chunks for unary action",
+                action,
+                len(chunks),
             )
         payload = chunks[-1]
         if not isinstance(payload, dict):
-            raise ValueError(
-                f"Expected dict payload for action {action}, got {type(payload)}"
-            )
+            msg = f"Expected dict payload for action {action}, got {type(payload)}"
+            raise TypeError(msg)
         return payload
 
     def _invoke_streaming_action(
@@ -664,12 +686,13 @@ class SlimRuntime(ModelRuntime):
                         yield _SlimErrorEvent(
                             code=str(error.get("code", "PLUGIN_EXEC_ERROR")),
                             message=str(
-                                error.get("message", "Slim returned an error event.")
+                                error.get("message", "Slim returned an error event."),
                             ),
                         )
                         break
                     else:
-                        raise ValueError(f"Unknown Slim event type: {event_type}")
+                        msg = f"Unknown Slim event type: {event_type}"
+                        raise ValueError(msg)
             finally:
                 return_code = process.wait()
                 stderr_file.seek(0)
@@ -679,23 +702,26 @@ class SlimRuntime(ModelRuntime):
                         try:
                             stderr_payload = json.loads(stderr_text.splitlines()[-1])
                         except json.JSONDecodeError:
-                            raise ValueError(
-                                f"Slim process exited with code {return_code}: {stderr_text}"
-                            ) from None
+                            msg = (
+                                f"Slim process exited with code {return_code}: "
+                                f"{stderr_text}"
+                            )
+                            raise ValueError(msg) from None
                         raise self._map_slim_error(
                             _SlimErrorEvent(
                                 code=str(
-                                    stderr_payload.get("code", "PLUGIN_EXEC_ERROR")
+                                    stderr_payload.get("code", "PLUGIN_EXEC_ERROR"),
                                 ),
                                 message=str(
                                     stderr_payload.get(
                                         "message",
                                         f"Slim process exited with code {return_code}",
-                                    )
+                                    ),
                                 ),
-                            )
+                            ),
                         )
-                    raise ValueError(f"Slim process exited with code {return_code}")
+                    msg = f"Slim process exited with code {return_code}"
+                    raise ValueError(msg)
 
     def _llm_chunk_generator(
         self,
@@ -709,7 +735,8 @@ class SlimRuntime(ModelRuntime):
                 break
             chunk = event.data
             if not isinstance(chunk, dict):
-                raise ValueError(f"Unexpected LLM chunk payload: {chunk!r}")
+                msg = f"Unexpected LLM chunk payload: {chunk!r}"
+                raise TypeError(msg)
             yield self._parse_llm_chunk(
                 model=model,
                 prompt_messages=prompt_messages,
@@ -739,7 +766,7 @@ class SlimRuntime(ModelRuntime):
                 content_parts.extend(delta_message.content)
 
             if delta_message.tool_calls:
-                _increase_tool_call(delta_message.tool_calls, tool_calls)
+                merge_tool_call_deltas(delta_message.tool_calls, tool_calls)
             if chunk.delta.usage is not None:
                 usage = chunk.delta.usage
             if chunk.delta.finish_reason is not None:

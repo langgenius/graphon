@@ -15,7 +15,10 @@ from graphon.enums import BuiltinNodeTypes
 from graphon.graph_events.node import NodeRunStreamChunkEvent
 
 
-def test_load_env_file_sets_missing_values(monkeypatch, tmp_path: Path) -> None:
+def test_load_env_file_sets_missing_values(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
         "OPENAI_API_KEY=secret\n"
@@ -34,13 +37,13 @@ def test_load_env_file_sets_missing_values(monkeypatch, tmp_path: Path) -> None:
         assert env_file.is_file()
         assert os.environ["OPENAI_API_KEY"] == "secret"
         assert os.environ["SLIM_BINARY_PATH"] == str(
-            (tmp_path / ".." / "bin" / "dify-plugin-daemon-slim").resolve()
+            (tmp_path / ".." / "bin" / "dify-plugin-daemon-slim").resolve(),
         )
         assert os.environ["SLIM_PROVIDER"] == "openai"
 
 
 def test_load_env_file_does_not_override_existing_values(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     env_file = tmp_path / ".env"
@@ -99,7 +102,7 @@ def test_env_example_leaves_slim_binary_path_empty() -> None:
         for key, value in [line.removeprefix("export ").split("=", 1)]
     }
 
-    assert values["SLIM_BINARY_PATH"] == ""
+    assert not values["SLIM_BINARY_PATH"]
 
 
 def test_write_stream_chunk_writes_llm_text_chunks() -> None:
@@ -129,4 +132,4 @@ def test_write_stream_chunk_ignores_non_llm_text_chunks() -> None:
     )
 
     assert write_stream_chunk(event, stream_output=output) is False
-    assert output.getvalue() == ""
+    assert not output.getvalue()

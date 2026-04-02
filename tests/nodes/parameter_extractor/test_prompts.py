@@ -23,11 +23,12 @@ from ...helpers import build_graph_init_params, build_variable_pool
 def _build_parameter_extractor_node() -> tuple[ParameterExtractorNode, object]:
     variable_pool = build_variable_pool(variables=[(("start", "rule"), "strictly")])
     runtime_state = GraphRuntimeState(
-        variable_pool=variable_pool, start_at=time.perf_counter()
+        variable_pool=variable_pool,
+        start_at=time.perf_counter(),
     )
     init_params = build_graph_init_params(graph_config={"nodes": [], "edges": []})
     node = ParameterExtractorNode(
-        id="extractor",
+        node_id="extractor",
         config={
             "id": "extractor",
             "data": {
@@ -45,7 +46,7 @@ def _build_parameter_extractor_node() -> tuple[ParameterExtractorNode, object]:
                         "type": "string",
                         "description": "The target location",
                         "required": True,
-                    }
+                    },
                 ],
                 "instruction": "Follow {{#start.rule#}} instructions.",
                 "reasoning_mode": "function_call",
@@ -66,7 +67,7 @@ def test_function_calling_system_prompt_formats_without_missing_placeholders():
     )
 
     assert FUNCTION_CALLING_EXTRACTOR_NAME in rendered
-    assert "{FUNCTION_CALLING_EXTRACTOR_NAME}" not in rendered
+    assert "{FUNCTION_CALLING_EXTRACTOR_NAME}" not in rendered  # noqa: RUF027
     assert "`extract_parameter`" not in rendered
     assert "previous messages" in rendered
     assert "Follow the schema." in rendered
@@ -80,14 +81,18 @@ def test_parameter_extractor_runtime_prompts_format_with_expected_arguments():
 
     rendered_prompts = [
         FUNCTION_CALLING_EXTRACTOR_USER_TEMPLATE.format(
-            content=input_text, structure=structure
+            content=input_text,
+            structure=structure,
         ),
         CHAT_GENERATE_JSON_USER_MESSAGE_TEMPLATE.format(
-            structure=structure, text=input_text
+            structure=structure,
+            text=input_text,
         ),
         CHAT_GENERATE_JSON_PROMPT.format(histories=histories, instruction=instruction),
         COMPLETION_GENERATE_JSON_PROMPT.format(
-            histories=histories, text=input_text, instruction=instruction
+            histories=histories,
+            text=input_text,
+            instruction=instruction,
         ),
     ]
 
@@ -116,7 +121,7 @@ def test_function_calling_prompt_template_renders_system_message():
     assert len(prompt_messages) == 2
     assert prompt_messages[0].role == PromptMessageRole.SYSTEM
     assert FUNCTION_CALLING_EXTRACTOR_NAME in prompt_messages[0].text
-    assert "{FUNCTION_CALLING_EXTRACTOR_NAME}" not in prompt_messages[0].text
+    assert "{FUNCTION_CALLING_EXTRACTOR_NAME}" not in prompt_messages[0].text  # noqa: RUF027
     assert "`extract_parameter`" not in prompt_messages[0].text
     assert "Follow strictly instructions." in prompt_messages[0].text
     assert prompt_messages[1].role == PromptMessageRole.USER

@@ -2,6 +2,7 @@ import json
 import logging
 import sys
 from collections.abc import Mapping, Sequence
+from typing import override
 
 from graphon.model_runtime.callbacks.base_callback import Callback
 from graphon.model_runtime.entities.llm_entities import LLMResult, LLMResultChunk
@@ -9,12 +10,13 @@ from graphon.model_runtime.entities.message_entities import (
     PromptMessage,
     PromptMessageTool,
 )
-from graphon.model_runtime.model_providers.__base.ai_model import AIModel
+from graphon.model_runtime.model_providers.base.ai_model import AIModel
 
 logger = logging.getLogger(__name__)
 
 
 class LoggingCallback(Callback):
+    @override
     def on_before_invoke(
         self,
         llm_instance: AIModel,
@@ -28,8 +30,7 @@ class LoggingCallback(Callback):
         user: str | None = None,
         invocation_context: Mapping[str, object] | None = None,
     ):
-        """
-        Before invoke callback
+        """Before invoke callback
 
         :param llm_instance: LLM instance
         :param model: model name
@@ -62,7 +63,8 @@ class LoggingCallback(Callback):
 
         if invocation_context:
             self.print_text(
-                f"Invocation context: {dict(invocation_context)}\n", color="blue"
+                f"Invocation context: {dict(invocation_context)}\n",
+                color="blue",
             )
 
         self.print_text("Prompt messages:\n", color="blue")
@@ -76,6 +78,7 @@ class LoggingCallback(Callback):
         if stream:
             self.print_text("\n[on_llm_new_chunk]")
 
+    @override
     def on_new_chunk(
         self,
         llm_instance: AIModel,
@@ -90,8 +93,7 @@ class LoggingCallback(Callback):
         user: str | None = None,
         invocation_context: Mapping[str, object] | None = None,
     ):
-        """
-        On new chunk callback
+        """On new chunk callback
 
         :param llm_instance: LLM instance
         :param chunk: chunk
@@ -109,6 +111,7 @@ class LoggingCallback(Callback):
             sys.stdout.write(chunk.delta.message.content)
             sys.stdout.flush()
 
+    @override
     def on_after_invoke(
         self,
         llm_instance: AIModel,
@@ -123,8 +126,7 @@ class LoggingCallback(Callback):
         user: str | None = None,
         invocation_context: Mapping[str, object] | None = None,
     ):
-        """
-        After invoke callback
+        """After invoke callback
 
         :param llm_instance: LLM instance
         :param result: result
@@ -147,15 +149,18 @@ class LoggingCallback(Callback):
                 self.print_text(f"\t{tool_call.id}\n", color="yellow")
                 self.print_text(f"\t{tool_call.function.name}\n", color="yellow")
                 self.print_text(
-                    f"\t{json.dumps(tool_call.function.arguments)}\n", color="yellow"
+                    f"\t{json.dumps(tool_call.function.arguments)}\n",
+                    color="yellow",
                 )
 
         self.print_text(f"Model: {result.model}\n", color="yellow")
         self.print_text(f"Usage: {result.usage}\n", color="yellow")
         self.print_text(
-            f"System Fingerprint: {result.system_fingerprint}\n", color="yellow"
+            f"System Fingerprint: {result.system_fingerprint}\n",
+            color="yellow",
         )
 
+    @override
     def on_invoke_error(
         self,
         llm_instance: AIModel,
@@ -170,8 +175,7 @@ class LoggingCallback(Callback):
         user: str | None = None,
         invocation_context: Mapping[str, object] | None = None,
     ):
-        """
-        Invoke error callback
+        """Invoke error callback
 
         :param llm_instance: LLM instance
         :param ex: exception
@@ -186,4 +190,4 @@ class LoggingCallback(Callback):
         """
         _ = user, invocation_context
         self.print_text("\n[on_llm_invoke_error]\n", color="red")
-        logger.exception(ex)
+        logger.error("LLM invoke failed: %s", ex, exc_info=ex)

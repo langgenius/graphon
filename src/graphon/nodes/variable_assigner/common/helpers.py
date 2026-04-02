@@ -3,6 +3,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from graphon.nodes.variable_assigner.common.exc import VariableOperatorNodeError
 from graphon.variables.consts import SELECTORS_LENGTH
 from graphon.variables.segments import Segment
 from graphon.variables.types import SegmentType
@@ -20,10 +21,12 @@ class UpdatedVariable(BaseModel):
 
 
 def variable_to_processed_data(
-    selector: Sequence[str], seg: Segment
+    selector: Sequence[str],
+    seg: Segment,
 ) -> UpdatedVariable:
     if len(selector) < SELECTORS_LENGTH:
-        raise Exception("selector too short")
+        msg = "selector too short"
+        raise VariableOperatorNodeError(msg)
     _, var_name = selector[:2]
     return UpdatedVariable(
         name=var_name,
@@ -34,7 +37,8 @@ def variable_to_processed_data(
 
 
 def set_updated_variables[T: MutableMapping[str, Any]](
-    m: T, updates: Sequence[UpdatedVariable]
+    m: T,
+    updates: Sequence[UpdatedVariable],
 ) -> T:
     m[_UPDATED_VARIABLES_KEY] = updates
     return m
@@ -45,12 +49,13 @@ def get_updated_variables(m: Mapping[str, Any]) -> Sequence[UpdatedVariable] | N
     if updated_values is None:
         return None
     result = []
-    for items in updated_values:
-        if isinstance(items, UpdatedVariable):
-            result.append(items)
-        elif isinstance(items, dict):
-            items = UpdatedVariable.model_validate(items)
-            result.append(items)
+    for item in updated_values:
+        if isinstance(item, UpdatedVariable):
+            result.append(item)
+        elif isinstance(item, dict):
+            validated_item = UpdatedVariable.model_validate(item)
+            result.append(validated_item)
         else:
-            raise TypeError(f"Invalid updated variable: {items}, type={type(items)}")
+            msg = f"Invalid updated variable: {item}, type={type(item)}"
+            raise TypeError(msg)
     return result

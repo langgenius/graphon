@@ -1,4 +1,5 @@
 import base64
+from collections.abc import Generator
 from unittest.mock import MagicMock
 
 import pytest
@@ -30,8 +31,8 @@ def _build_file(
     mime_type: str = "image/png",
 ) -> File:
     return File(
-        id="file-id",
-        type=file_type,
+        file_id="file-id",
+        file_type=file_type,
         transfer_method=transfer_method,
         reference=reference,
         remote_url=remote_url,
@@ -43,7 +44,7 @@ def _build_file(
 
 
 @pytest.fixture
-def workflow_file_runtime():
+def workflow_file_runtime() -> Generator[MagicMock, None, None]:
     previous_runtime = get_workflow_file_runtime()
     runtime = MagicMock()
     set_workflow_file_runtime(runtime)
@@ -62,13 +63,15 @@ def workflow_file_runtime():
     ],
 )
 def test_download_delegates_storage_backed_files_to_runtime_loader(
-    workflow_file_runtime, transfer_method
+    workflow_file_runtime: MagicMock,
+    transfer_method: FileTransferMethod,
 ) -> None:
     workflow_file_runtime.load_file_bytes.return_value = b"payload"
     file = _build_file(
         transfer_method=transfer_method,
         reference=build_file_reference(
-            record_id="file-id", storage_key="files/payload.bin"
+            record_id="file-id",
+            storage_key="files/payload.bin",
         ),
     )
 
@@ -76,7 +79,9 @@ def test_download_delegates_storage_backed_files_to_runtime_loader(
     workflow_file_runtime.load_file_bytes.assert_called_once_with(file=file)
 
 
-def test_download_remote_url_uses_runtime_http_get(workflow_file_runtime) -> None:
+def test_download_remote_url_uses_runtime_http_get(
+    workflow_file_runtime: MagicMock,
+) -> None:
     response = MagicMock()
     response.content = b"remote-payload"
     workflow_file_runtime.http_get.return_value = response
@@ -87,13 +92,14 @@ def test_download_remote_url_uses_runtime_http_get(workflow_file_runtime) -> Non
 
     assert download(file) == b"remote-payload"
     workflow_file_runtime.http_get.assert_called_once_with(
-        "https://example.com/image.png", follow_redirects=True
+        "https://example.com/image.png",
+        follow_redirects=True,
     )
     response.raise_for_status.assert_called_once_with()
 
 
 def test_to_prompt_message_content_uses_runtime_url_resolution_for_images(
-    workflow_file_runtime,
+    workflow_file_runtime: MagicMock,
 ) -> None:
     workflow_file_runtime.multimodal_send_format = "url"
     workflow_file_runtime.resolve_file_url.return_value = (
@@ -102,22 +108,24 @@ def test_to_prompt_message_content_uses_runtime_url_resolution_for_images(
     file = _build_file(
         transfer_method=FileTransferMethod.LOCAL_FILE,
         reference=build_file_reference(
-            record_id="upload-file-id", storage_key="files/image.png"
+            record_id="upload-file-id",
+            storage_key="files/image.png",
         ),
     )
 
     content = to_prompt_message_content(
-        file, image_detail_config=ImagePromptMessageContent.DETAIL.HIGH
+        file,
+        image_detail_config=ImagePromptMessageContent.DETAIL.HIGH,
     )
 
     assert isinstance(content, ImagePromptMessageContent)
     assert content.url == "https://cdn.example.com/image.png"
-    assert content.base64_data == ""
+    assert not content.base64_data
     assert content.detail == ImagePromptMessageContent.DETAIL.HIGH
 
 
 def test_to_prompt_message_content_uses_runtime_file_loader_for_base64_documents(
-    workflow_file_runtime,
+    workflow_file_runtime: MagicMock,
 ) -> None:
     workflow_file_runtime.multimodal_send_format = "base64"
     workflow_file_runtime.load_file_bytes.return_value = b"document-bytes"
@@ -125,7 +133,8 @@ def test_to_prompt_message_content_uses_runtime_file_loader_for_base64_documents
         transfer_method=FileTransferMethod.TOOL_FILE,
         file_type=FileType.DOCUMENT,
         reference=build_file_reference(
-            record_id="tool-file-id", storage_key="docs/report.pdf"
+            record_id="tool-file-id",
+            storage_key="docs/report.pdf",
         ),
         filename="report.pdf",
         extension=".pdf",
@@ -136,7 +145,7 @@ def test_to_prompt_message_content_uses_runtime_file_loader_for_base64_documents
 
     assert isinstance(content, DocumentPromptMessageContent)
     assert content.base64_data == base64.b64encode(b"document-bytes").decode("utf-8")
-    assert content.url == ""
+    assert not content.url
     workflow_file_runtime.load_file_bytes.assert_called_once_with(file=file)
 
 

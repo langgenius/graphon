@@ -6,8 +6,10 @@ from graphon.model_runtime.entities.provider_entities import (
 
 class CommonValidator:
     def _validate_and_filter_credential_form_schemas(
-        self, credential_form_schemas: list[CredentialFormSchema], credentials: dict
-    ):
+        self,
+        credential_form_schemas: list[CredentialFormSchema],
+        credentials: dict,
+    ) -> dict[str, str | bool]:
         need_validate_credential_form_schema_map = {}
         for credential_form_schema in credential_form_schemas:
             if not credential_form_schema.show_on:
@@ -38,7 +40,8 @@ class CommonValidator:
             # Add the value of the credential_form_schema corresponding to it to
             # validated_credentials
             result = self._validate_credential_form_schema(
-                credential_form_schema, credentials
+                credential_form_schema,
+                credentials,
             )
             if result:
                 validated_credentials[credential_form_schema.variable] = result
@@ -46,15 +49,11 @@ class CommonValidator:
         return validated_credentials
 
     def _validate_credential_form_schema(
-        self, credential_form_schema: CredentialFormSchema, credentials: dict
+        self,
+        credential_form_schema: CredentialFormSchema,
+        credentials: dict,
     ) -> str | bool | None:
-        """
-        Validate credential form schema
-
-        :param credential_form_schema: credential form schema
-        :param credentials: credentials
-        :return: validated credential form schema value
-        """
+        """Validate one credential schema entry and return its normalized value."""
         #  If the variable does not exist in credentials
         value: str | bool | None = None
         if (
@@ -63,9 +62,8 @@ class CommonValidator:
         ):
             # If required is True, an exception is thrown
             if credential_form_schema.required:
-                raise ValueError(
-                    f"Variable {credential_form_schema.variable} is required"
-                )
+                msg = f"Variable {credential_form_schema.variable} is required"
+                raise ValueError(msg)
             # Get the value of default
             if credential_form_schema.default:
                 # If it exists, add it to validated_credentials
@@ -77,37 +75,36 @@ class CommonValidator:
         value = credentials[credential_form_schema.variable]
 
         if not isinstance(value, str):
-            raise ValueError(
-                f"Variable {credential_form_schema.variable} should be string"
-            )
+            msg = f"Variable {credential_form_schema.variable} should be string"
+            raise TypeError(msg)
 
         # If max_length=0, no validation is performed
         if (
             credential_form_schema.max_length
             and len(value) > credential_form_schema.max_length
         ):
-            raise ValueError(
+            msg = (
                 f"Variable {credential_form_schema.variable} length should not be"
                 f" greater than {credential_form_schema.max_length}"
             )
+            raise ValueError(msg)
 
         if (
-            credential_form_schema.type in {FormType.SELECT, FormType.RADIO}
+            credential_form_schema.type in frozenset((FormType.SELECT, FormType.RADIO))
             and credential_form_schema.options
             and value not in [option.value for option in credential_form_schema.options]
         ):
-            raise ValueError(
-                f"Variable {credential_form_schema.variable} is not in options"
-            )
+            msg = f"Variable {credential_form_schema.variable} is not in options"
+            raise ValueError(msg)
 
         if credential_form_schema.type == FormType.SWITCH:
             # If the value is not in ['true', 'false'], an exception is thrown
-            if value.lower() not in {"true", "false"}:
-                raise ValueError(
+            if value.lower() not in frozenset(("true", "false")):
+                msg = (
                     f"Variable {credential_form_schema.variable} should be "
                     "true or false"
                 )
-
+                raise ValueError(msg)
             value = value.lower() == "true"
 
         return value

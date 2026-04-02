@@ -15,31 +15,35 @@ def _with_case_variants(extensions: Iterable[str]) -> frozenset[str]:
     return frozenset(normalized | {extension.upper() for extension in normalized})
 
 
-IMAGE_EXTENSIONS = _with_case_variants({"jpg", "jpeg", "png", "webp", "gif", "svg"})
-VIDEO_EXTENSIONS = _with_case_variants({"mp4", "mov", "mpeg", "webm"})
-AUDIO_EXTENSIONS = _with_case_variants({"mp3", "m4a", "wav", "amr", "mpga"})
-DOCUMENT_EXTENSIONS = _with_case_variants({
-    "txt",
-    "markdown",
-    "md",
-    "mdx",
-    "pdf",
-    "html",
-    "htm",
-    "xlsx",
-    "xls",
-    "vtt",
-    "properties",
-    "doc",
-    "docx",
-    "csv",
-    "eml",
-    "msg",
-    "ppt",
-    "pptx",
-    "xml",
-    "epub",
-})
+IMAGE_EXTENSIONS = _with_case_variants(
+    frozenset(("jpg", "jpeg", "png", "webp", "gif", "svg")),
+)
+VIDEO_EXTENSIONS = _with_case_variants(frozenset(("mp4", "mov", "mpeg", "webm")))
+AUDIO_EXTENSIONS = _with_case_variants(frozenset(("mp3", "m4a", "wav", "amr", "mpga")))
+DOCUMENT_EXTENSIONS = _with_case_variants(
+    frozenset((
+        "txt",
+        "markdown",
+        "md",
+        "mdx",
+        "pdf",
+        "html",
+        "htm",
+        "xlsx",
+        "xls",
+        "vtt",
+        "properties",
+        "doc",
+        "docx",
+        "csv",
+        "eml",
+        "msg",
+        "ppt",
+        "pptx",
+        "xml",
+        "epub",
+    )),
+)
 
 
 def maybe_file_object(o: Any) -> bool:

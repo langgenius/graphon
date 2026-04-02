@@ -101,9 +101,7 @@ class FailBranchSourceHandle(StrEnum):
 
 
 class WorkflowType(StrEnum):
-    """
-    Workflow Type Enum for domain layer
-    """
+    """Workflow Type Enum for domain layer"""
 
     WORKFLOW = "workflow"
     CHAT = "chat"
@@ -197,8 +195,7 @@ _END_STATE = frozenset([
 
 
 class WorkflowNodeExecutionMetadataKey(StrEnum):
-    """
-    Node Run Metadata Key.
+    """Node Run Metadata Key.
 
     Values in this enum are persisted as execution metadata and must stay in sync
     with every node that writes `NodeRunResult.metadata`.

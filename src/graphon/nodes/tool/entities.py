@@ -7,11 +7,18 @@ from pydantic_core.core_schema import ValidationInfo
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.enums import BuiltinNodeTypes, NodeType
 
+_SUPPORTED_TOOL_CONFIGURATION_VALUE_TYPES = (str, int, float, bool)
+_SUPPORTED_TOOL_INPUT_CONSTANT_VALUE_TYPES = (str, int, float, bool, dict, list)
+_SUPPORTED_TOOL_CONFIGURATION_VALUE_TYPE_NAMES = ", ".join(
+    value_type.__name__ for value_type in _SUPPORTED_TOOL_CONFIGURATION_VALUE_TYPES
+)
+_SUPPORTED_TOOL_INPUT_CONSTANT_VALUE_TYPE_NAMES = ", ".join(
+    value_type.__name__ for value_type in _SUPPORTED_TOOL_INPUT_CONSTANT_VALUE_TYPES
+)
+
 
 class ToolProviderType(StrEnum):
-    """
-    Graph-owned enum for persisted tool provider kinds.
-    """
+    """Graph-owned enum for persisted tool provider kinds."""
 
     PLUGIN = auto()
     BUILT_IN = "builtin"
@@ -34,50 +41,84 @@ class ToolEntity(BaseModel):
 
     @field_validator("tool_configurations", mode="before")
     @classmethod
-    def validate_tool_configurations(cls, value, values: ValidationInfo):
-        if not isinstance(value, dict):
-            raise ValueError("tool_configurations must be a dictionary")
+    def validate_tool_configurations(
+        cls,
+        value: Any,
+        values: ValidationInfo,
+    ) -> dict[str, Any]:
+        _ = values
+        match value:
+            case dict():
+                configurations = value
+            case _:
+                msg = "tool_configurations must be a dictionary"
+                raise ValueError(msg)
 
-        for key in values.data.get("tool_configurations", {}):
-            value = values.data.get("tool_configurations", {}).get(key)
-            if not isinstance(value, str | int | float | bool):
-                raise ValueError(f"{key} must be a string")
+        for key, config_value in configurations.items():
+            match config_value:
+                case str() | int() | float() | bool():
+                    pass
+                case _:
+                    msg = (
+                        f"{key} must be one of: "
+                        f"{_SUPPORTED_TOOL_CONFIGURATION_VALUE_TYPE_NAMES}"
+                    )
+                    raise ValueError(msg)
 
-        return value
+        return configurations
 
 
 class ToolNodeData(BaseNodeData, ToolEntity):
     type: NodeType = BuiltinNodeTypes.TOOL
 
     class ToolInput(BaseModel):
+        """Persisted tool input value and its binding mode."""
+
         # TODO: check this type
         value: Any | list[str]
         type: Literal["mixed", "variable", "constant"]
 
         @field_validator("type", mode="before")
         @classmethod
-        def check_type(cls, value, validation_info: ValidationInfo):
+        def check_type(
+            cls,
+            value: Any,
+            validation_info: ValidationInfo,
+        ) -> Literal["mixed", "variable", "constant"]:
             typ = value
             value = validation_info.data.get("value")
 
             if value is None:
                 return typ
 
-            if typ == "mixed" and not isinstance(value, str):
-                raise ValueError("value must be a string")
-            if typ == "variable":
-                if not isinstance(value, list):
-                    raise ValueError("value must be a list")
-                for val in value:
-                    if not isinstance(val, str):
-                        raise ValueError("value must be a list of strings")
-            elif typ == "constant" and not isinstance(
-                value, (allowed_types := (str, int, float, bool, dict, list))
-            ):
-                raise ValueError(
-                    f"value must be one of: "
-                    f"{', '.join(t.__name__ for t in allowed_types)}"
-                )
+            match typ:
+                case "mixed":
+                    match value:
+                        case str():
+                            pass
+                        case _:
+                            msg = "value must be a string"
+                            raise ValueError(msg)
+                case "variable":
+                    match value:
+                        case list() if all(isinstance(val, str) for val in value):
+                            pass
+                        case list():
+                            msg = "value must be a list of strings"
+                            raise ValueError(msg)
+                        case _:
+                            msg = "value must be a list"
+                            raise ValueError(msg)
+                case "constant":
+                    match value:
+                        case str() | int() | float() | bool() | dict() | list():
+                            pass
+                        case _:
+                            msg = (
+                                f"value must be one of: "
+                                f"{_SUPPORTED_TOOL_INPUT_CONSTANT_VALUE_TYPE_NAMES}"
+                            )
+                            raise ValueError(msg)
             return typ
 
     tool_parameters: dict[str, ToolInput]
@@ -88,7 +129,7 @@ class ToolNodeData(BaseNodeData, ToolEntity):
 
     @field_validator("tool_parameters", mode="before")
     @classmethod
-    def filter_none_tool_inputs(cls, value):
+    def filter_none_tool_inputs(cls, value: Any) -> Any:
         if not isinstance(value, dict):
             return value
 
@@ -99,8 +140,11 @@ class ToolNodeData(BaseNodeData, ToolEntity):
         }
 
     @staticmethod
-    def _has_valid_value(tool_input):
+    def _has_valid_value(tool_input: Any) -> bool:
         """Check if the value is valid"""
-        if isinstance(tool_input, dict):
-            return tool_input.get("value") is not None
-        return getattr(tool_input, "value", None) is not None
+        match tool_input:
+            case dict():
+                result = tool_input.get("value") is not None
+            case _:
+                result = getattr(tool_input, "value", None) is not None
+        return result

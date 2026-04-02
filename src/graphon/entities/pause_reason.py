@@ -46,5 +46,6 @@ class SchedulingPause(BaseModel):
 
 
 type PauseReason = Annotated[
-    HumanInputRequired | SchedulingPause, Field(discriminator="TYPE")
+    HumanInputRequired | SchedulingPause,
+    Field(discriminator="TYPE"),
 ]

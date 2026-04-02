@@ -1,5 +1,4 @@
-"""
-Worker management subsystem for graph engine.
+"""Worker management subsystem for graph engine.
 
 This package manages the worker pool, including creation,
 scaling, and activity tracking.

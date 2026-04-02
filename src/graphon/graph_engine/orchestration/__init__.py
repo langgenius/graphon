@@ -1,5 +1,4 @@
-"""
-Orchestration subsystem for graph engine.
+"""Orchestration subsystem for graph engine.
 
 This package coordinates the overall execution flow between
 different subsystems.

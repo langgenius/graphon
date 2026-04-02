@@ -4,7 +4,8 @@ from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
 class LLMUsageTrackingMixin:
     """Provides shared helpers for merging and recording
-    LLM usage within workflow nodes."""
+    LLM usage within workflow nodes.
+    """
 
     graph_runtime_state: GraphRuntimeState
 

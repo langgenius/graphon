@@ -19,7 +19,8 @@ class ToolFileManagerProtocol(Protocol):
     ) -> Any: ...
 
     def get_file_generator_by_tool_file_id(
-        self, tool_file_id: str
+        self,
+        tool_file_id: str,
     ) -> tuple[Generator | None, File | None]: ...
 
 

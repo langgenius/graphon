@@ -1,12 +1,13 @@
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
+from sys import stdout
 
 from graphon.model_runtime.entities.llm_entities import LLMResult, LLMResultChunk
 from graphon.model_runtime.entities.message_entities import (
     PromptMessage,
     PromptMessageTool,
 )
-from graphon.model_runtime.model_providers.__base.ai_model import AIModel
+from graphon.model_runtime.model_providers.base.ai_model import AIModel
 
 _TEXT_COLOR_MAPPING = {
     "blue": "36;1",
@@ -18,8 +19,7 @@ _TEXT_COLOR_MAPPING = {
 
 
 class Callback(ABC):
-    """
-    Base class for callbacks.
+    """Base class for callbacks.
     Only for LLM.
     """
 
@@ -39,8 +39,7 @@ class Callback(ABC):
         user: str | None = None,
         invocation_context: Mapping[str, object] | None = None,
     ):
-        """
-        Before invoke callback
+        """Before invoke callback
 
         :param llm_instance: LLM instance
         :param model: model name
@@ -70,8 +69,7 @@ class Callback(ABC):
         user: str | None = None,
         invocation_context: Mapping[str, object] | None = None,
     ):
-        """
-        On new chunk callback
+        """On new chunk callback
 
         :param llm_instance: LLM instance
         :param chunk: chunk
@@ -102,8 +100,7 @@ class Callback(ABC):
         user: str | None = None,
         invocation_context: Mapping[str, object] | None = None,
     ):
-        """
-        After invoke callback
+        """After invoke callback
 
         :param llm_instance: LLM instance
         :param result: result
@@ -134,8 +131,7 @@ class Callback(ABC):
         user: str | None = None,
         invocation_context: Mapping[str, object] | None = None,
     ):
-        """
-        Invoke error callback
+        """Invoke error callback
 
         :param llm_instance: LLM instance
         :param ex: exception
@@ -154,7 +150,7 @@ class Callback(ABC):
     def print_text(self, text: str, color: str | None = None, end: str = ""):
         """Print text with highlighting and no end characters."""
         text_to_print = self._get_colored_text(text, color) if color else text
-        print(text_to_print, end=end)
+        stdout.write(text_to_print + end)
 
     def _get_colored_text(self, text: str, color: str) -> str:
         """Get colored text."""

@@ -1,6 +1,4 @@
-"""
-Event handler implementations for different event types.
-"""
+"""Event handler implementations for different event types."""
 
 import logging
 from collections.abc import Mapping
@@ -51,8 +49,7 @@ logger = logging.getLogger(__name__)
 
 @final
 class EventHandler:
-    """
-    Registry of event handlers for different event types.
+    """Registry of event handlers for different event types.
 
     This centralizes the business logic for handling specific events,
     keeping it separate from the routing and collection infrastructure.
@@ -69,8 +66,7 @@ class EventHandler:
         state_manager: "GraphStateManager",
         error_handler: "ErrorHandler",
     ) -> None:
-        """
-        Initialize the event handler registry.
+        """Initialize the event handler registry.
 
         Args:
             graph: The workflow graph
@@ -81,6 +77,7 @@ class EventHandler:
             edge_processor: Edge processor for edge traversal
             state_manager: Unified state manager
             error_handler: Error handler
+
         """
         self._graph = graph
         self._graph_runtime_state = graph_runtime_state
@@ -92,11 +89,11 @@ class EventHandler:
         self._error_handler = error_handler
 
     def dispatch(self, event: GraphNodeEventBase) -> None:
-        """
-        Handle any node event by dispatching to the appropriate handler.
+        """Handle any node event by dispatching to the appropriate handler.
 
         Args:
             event: The event to handle
+
         """
         if isinstance(event, NodeRunVariableUpdatedEvent):
             self._dispatch(event)
@@ -128,15 +125,15 @@ class EventHandler:
 
     @_dispatch.register
     def _(self, event: NodeRunStartedEvent) -> None:
-        """
-        Handle node started event.
+        """Handle node started event.
 
         Args:
             event: The node started event
+
         """
         # Track execution in domain model
         node_execution = self._graph_execution.get_or_create_node_execution(
-            event.node_id
+            event.node_id,
         )
         is_initial_attempt = node_execution.retry_count == 0
         node_execution.mark_started(event.id)
@@ -151,11 +148,11 @@ class EventHandler:
 
     @_dispatch.register
     def _(self, event: NodeRunStreamChunkEvent) -> None:
-        """
-        Handle stream chunk event with full processing.
+        """Handle stream chunk event with full processing.
 
         Args:
             event: The stream chunk event
+
         """
         # Process with response coordinator
         streaming_events = list(self._response_coordinator.intercept_event(event))
@@ -166,31 +163,31 @@ class EventHandler:
 
     @_dispatch.register
     def _(self, event: NodeRunVariableUpdatedEvent) -> None:
-        """
-        Apply a node-requested variable mutation before downstream observers run.
+        """Apply a node-requested variable mutation before downstream observers run.
 
         The event is collected like other node events so parent/container engines can
         forward the updated payload to outer layers, including persistence listeners.
         """
         self._graph_runtime_state.variable_pool.add(
-            event.variable.selector, event.variable
+            event.variable.selector,
+            event.variable,
         )
         self._event_collector.collect(event)
 
     @_dispatch.register
     def _(self, event: NodeRunSucceededEvent) -> None:
-        """
-        Handle node success by coordinating subsystems.
+        """Handle node success by coordinating subsystems.
 
         This method coordinates between different subsystems to process
         node completion, handle edges, and trigger downstream execution.
 
         Args:
             event: The node succeeded event
+
         """
         # Update domain model
         node_execution = self._graph_execution.get_or_create_node_execution(
-            event.node_id
+            event.node_id,
         )
         node_execution.mark_taken()
 
@@ -209,7 +206,8 @@ class EventHandler:
         if node.execution_type == NodeExecutionType.BRANCH:
             ready_nodes, edge_streaming_events = (
                 self._edge_processor.handle_branch_completion(
-                    event.node_id, event.node_run_result.edge_source_handle
+                    event.node_id,
+                    event.node_run_result.edge_source_handle,
                 )
             )
         else:
@@ -243,7 +241,6 @@ class EventHandler:
     @_dispatch.register
     def _(self, event: NodeRunPauseRequestedEvent) -> None:
         """Handle pause requests emitted by nodes."""
-
         pause_reason = event.reason
         self._graph_execution.pause(pause_reason)
         self._state_manager.finish_execution(event.node_id)
@@ -254,15 +251,15 @@ class EventHandler:
 
     @_dispatch.register
     def _(self, event: NodeRunFailedEvent) -> None:
-        """
-        Handle node failure using error handler.
+        """Handle node failure using error handler.
 
         Args:
             event: The node failed event
+
         """
         # Update domain model
         node_execution = self._graph_execution.get_or_create_node_execution(
-            event.node_id
+            event.node_id,
         )
         node_execution.mark_failed(event.error)
         self._graph_execution.record_node_failure()
@@ -282,15 +279,15 @@ class EventHandler:
 
     @_dispatch.register
     def _(self, event: NodeRunExceptionEvent) -> None:
-        """
-        Handle node exception event (fail-branch strategy).
+        """Handle node exception event (fail-branch strategy).
 
         Args:
             event: The node exception event
+
         """
         # Node continues via fail-branch/default-value, treat as completion
         node_execution = self._graph_execution.get_or_create_node_execution(
-            event.node_id
+            event.node_id,
         )
         node_execution.mark_taken()
 
@@ -308,13 +305,13 @@ class EventHandler:
         elif node.error_strategy == ErrorStrategy.FAIL_BRANCH:
             ready_nodes, edge_streaming_events = (
                 self._edge_processor.handle_branch_completion(
-                    event.node_id, event.node_run_result.edge_source_handle
+                    event.node_id,
+                    event.node_run_result.edge_source_handle,
                 )
             )
         else:
-            raise NotImplementedError(
-                f"Unsupported error strategy: {node.error_strategy}"
-            )
+            msg = f"Unsupported error strategy: {node.error_strategy}"
+            raise NotImplementedError(msg)
 
         for edge_event in edge_streaming_events:
             self._event_collector.collect(edge_event)
@@ -334,14 +331,14 @@ class EventHandler:
 
     @_dispatch.register
     def _(self, event: NodeRunRetryEvent) -> None:
-        """
-        Handle node retry event.
+        """Handle node retry event.
 
         Args:
             event: The node retry event
+
         """
         node_execution = self._graph_execution.get_or_create_node_execution(
-            event.node_id
+            event.node_id,
         )
         node_execution.increment_retry()
 
@@ -369,15 +366,17 @@ class EventHandler:
             self._graph_runtime_state.llm_usage = current_usage.plus(usage)
 
     def _store_node_outputs(self, node_id: str, outputs: Mapping[str, object]) -> None:
-        """
-        Store node outputs in the variable pool.
+        """Store node outputs in the variable pool.
 
         Args:
-            event: The node succeeded event containing outputs
+            node_id: Identifier of the node whose outputs are being stored.
+            outputs: Mapping of output names to values produced by the node.
+
         """
         for variable_name, variable_value in outputs.items():
             self._graph_runtime_state.variable_pool.add(
-                (node_id, variable_name), variable_value
+                (node_id, variable_name),
+                variable_value,
             )
 
     def _update_response_outputs(self, outputs: Mapping[str, object]) -> None:

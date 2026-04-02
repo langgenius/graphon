@@ -29,25 +29,28 @@ _ALLOWED_OUTPUT_FROM_CODE = frozenset([
 
 def _validate_type(segment_type: SegmentType) -> SegmentType:
     if segment_type not in _ALLOWED_OUTPUT_FROM_CODE:
-        raise ValueError(
+        msg = (
             f"invalid type for code output, expected {_ALLOWED_OUTPUT_FROM_CODE}, "
             f"actual {segment_type}"
         )
+        raise ValueError(msg)
     return segment_type
 
 
 class CodeNodeData(BaseNodeData):
-    """
-    Code Node Data.
-    """
+    """Code Node Data."""
 
     type: NodeType = BuiltinNodeTypes.CODE
 
     class Output(BaseModel):
+        """Schema for a single code-node output."""
+
         type: Annotated[SegmentType, AfterValidator(_validate_type)]
         children: dict[str, "CodeNodeData.Output"] | None = None
 
     class Dependency(BaseModel):
+        """Dependency required by a code node."""
+
         name: str
         version: str
 

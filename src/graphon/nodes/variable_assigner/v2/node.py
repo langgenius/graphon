@@ -42,7 +42,7 @@ def _target_mapping_from_item(
     mapping: MutableMapping[str, Sequence[str]],
     node_id: str,
     item: VariableOperationItem,
-):
+) -> None:
     selector_str = ".".join(item.variable_selector)
     key = f"{node_id}.#{selector_str}#"
     mapping[key] = item.variable_selector
@@ -52,18 +52,26 @@ def _source_mapping_from_item(
     mapping: MutableMapping[str, Sequence[str]],
     node_id: str,
     item: VariableOperationItem,
-):
+) -> None:
     # Keep this in sync with the logic in _run methods...
     if item.input_type != InputType.VARIABLE:
         return
     selector = item.value
     if not isinstance(selector, list):
-        raise InvalidDataError(f"selector is not a list, {node_id=}, {item=}")
+        msg = f"selector is not a list, {node_id=}, {item=}"
+        raise InvalidDataError(msg)
     if len(selector) < SELECTORS_LENGTH:
-        raise InvalidDataError(f"selector too short, {node_id=}, {item=}")
+        msg = f"selector too short, {node_id=}, {item=}"
+        raise InvalidDataError(msg)
     selector_str = ".".join(selector)
     key = f"{node_id}.#{selector_str}#"
     mapping[key] = selector
+
+
+def _trim_array_edge(*, value: Sequence[Any], remove_first: bool) -> Sequence[Any]:
+    if not value:
+        return value
+    return value[1:] if remove_first else value[:-1]
 
 
 class VariableAssignerNode(Node[VariableAssignerNodeData]):
@@ -72,13 +80,13 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
     @override
     def __init__(
         self,
-        id: str,
+        node_id: str,
         config: NodeConfigDict,
         graph_init_params: "GraphInitParams",
         graph_runtime_state: "GraphRuntimeState",
-    ):
+    ) -> None:
         super().__init__(
-            id=id,
+            node_id=node_id,
             config=config,
             graph_init_params=graph_init_params,
             graph_runtime_state=graph_runtime_state,
@@ -86,10 +94,13 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
 
     @override
     def blocks_variable_output(self, variable_selectors: set[tuple[str, ...]]) -> bool:
-        """
-        Check if this Variable Assigner node blocks the output of specific variables.
+        """Check if this Variable Assigner node blocks the output of specific variables.
 
         Returns True if this node updates any of the requested conversation variables.
+
+        Returns:
+            `True` when any assigned selector is among the requested selectors.
+
         """
         # Check each item in this Variable Assigner node
         for item in self.node_data.items:
@@ -116,6 +127,7 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
         node_id: str,
         node_data: VariableAssignerNodeData,
     ) -> Mapping[str, Sequence[str]]:
+        _ = graph_config
         var_mapping: dict[str, Sequence[str]] = {}
         for item in node_data.items:
             _target_mapping_from_item(var_mapping, node_id, item)
@@ -131,7 +143,7 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
         # Preserve intra-node read-after-write behavior without mutating the shared pool
         # until the engine processes the emitted VariableUpdatedEvent instances.
         working_variable_pool = self.graph_runtime_state.variable_pool.model_copy(
-            deep=True
+            deep=True,
         )
 
         try:
@@ -143,37 +155,42 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
                 # Check if variable exists
                 if not isinstance(variable, VariableBase):
                     raise VariableNotFoundError(
-                        variable_selector=item.variable_selector
+                        variable_selector=item.variable_selector,
                     )
 
                 # Check if operation is supported
                 if not helpers.is_operation_supported(
-                    variable_type=variable.value_type, operation=item.operation
+                    variable_type=variable.value_type,
+                    operation=item.operation,
                 ):
                     raise OperationNotSupportedError(
-                        operation=item.operation, variable_type=variable.value_type
+                        operation=item.operation,
+                        variable_type=variable.value_type,
                     )
 
                 # Check if variable input is supported
                 if (
                     item.input_type == InputType.VARIABLE
                     and not helpers.is_variable_input_supported(
-                        operation=item.operation
+                        operation=item.operation,
                     )
                 ):
                     raise InputTypeNotSupportedError(
-                        input_type=InputType.VARIABLE, operation=item.operation
+                        input_type=InputType.VARIABLE,
+                        operation=item.operation,
                     )
 
                 # Check if constant input is supported
                 if (
                     item.input_type == InputType.CONSTANT
                     and not helpers.is_constant_input_supported(
-                        variable_type=variable.value_type, operation=item.operation
+                        variable_type=variable.value_type,
+                        operation=item.operation,
                     )
                 ):
                     raise InputTypeNotSupportedError(
-                        input_type=InputType.CONSTANT, operation=item.operation
+                        input_type=InputType.CONSTANT,
+                        operation=item.operation,
                     )
 
                 # Get value from variable pool
@@ -181,11 +198,11 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
                 if (
                     item.input_type == InputType.VARIABLE
                     and item.operation
-                    not in {
+                    not in frozenset((
                         Operation.CLEAR,
                         Operation.REMOVE_FIRST,
                         Operation.REMOVE_LAST,
-                    }
+                    ))
                     and item.value is not None
                 ):
                     value = working_variable_pool.get(item.value)
@@ -205,8 +222,8 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
                 ):
                     try:
                         input_value = json.loads(input_value)
-                    except json.JSONDecodeError:
-                        raise InvalidInputValueError(value=input_value)
+                    except json.JSONDecodeError as error:
+                        raise InvalidInputValueError(value=input_value) from error
 
                 # Check if input value is valid
                 if not helpers.is_input_value_valid(
@@ -233,7 +250,7 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
                     inputs=inputs,
                     process_data=process_data,
                     error=str(e),
-                )
+                ),
             )
             return
 
@@ -241,7 +258,7 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
         # is not hashable.
         # remove duplicated items while preserving the first update order.
         updated_variable_selectors = list(
-            dict.fromkeys(map(tuple, updated_variable_selectors))
+            dict.fromkeys(map(tuple, updated_variable_selectors)),
         )
 
         for selector in updated_variable_selectors:
@@ -257,7 +274,8 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
         ]
 
         process_data = common_helpers.set_updated_variables(
-            process_data, updated_variables
+            process_data,
+            updated_variables,
         )
         for selector in updated_variable_selectors:
             variable = working_variable_pool.get(selector)
@@ -271,7 +289,7 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
                 inputs=inputs,
                 process_data=process_data,
                 outputs={},
-            )
+            ),
         )
 
     def _handle_item(
@@ -280,33 +298,28 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
         variable: VariableBase,
         operation: Operation,
         value: Any,
-    ):
+    ) -> Any:
         match operation:
             case Operation.OVER_WRITE:
-                return value
+                result = value
             case Operation.CLEAR:
-                return SegmentType.get_zero_value(variable.value_type).to_object()
+                result = SegmentType.get_zero_value(variable.value_type).to_object()
             case Operation.APPEND:
-                return variable.value + [value]
+                result = [*variable.value, value]
             case Operation.EXTEND:
-                return variable.value + value
+                result = variable.value + value
             case Operation.SET:
-                return value
+                result = value
             case Operation.ADD:
-                return variable.value + value
+                result = variable.value + value
             case Operation.SUBTRACT:
-                return variable.value - value
+                result = variable.value - value
             case Operation.MULTIPLY:
-                return variable.value * value
+                result = variable.value * value
             case Operation.DIVIDE:
-                return variable.value / value
+                result = variable.value / value
             case Operation.REMOVE_FIRST:
-                # If array is empty, do nothing
-                if not variable.value:
-                    return variable.value
-                return variable.value[1:]
+                result = _trim_array_edge(value=variable.value, remove_first=True)
             case Operation.REMOVE_LAST:
-                # If array is empty, do nothing
-                if not variable.value:
-                    return variable.value
-                return variable.value[:-1]
+                result = _trim_array_edge(value=variable.value, remove_first=False)
+        return result

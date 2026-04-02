@@ -33,13 +33,13 @@ class VariableAssignerNode(Node[VariableAssignerData]):
     @override
     def __init__(
         self,
-        id: str,
+        node_id: str,
         config: NodeConfigDict,
         graph_init_params: "GraphInitParams",
         graph_runtime_state: "GraphRuntimeState",
-    ):
+    ) -> None:
         super().__init__(
-            id=id,
+            node_id=node_id,
             config=config,
             graph_init_params=graph_init_params,
             graph_runtime_state=graph_runtime_state,
@@ -47,10 +47,13 @@ class VariableAssignerNode(Node[VariableAssignerData]):
 
     @override
     def blocks_variable_output(self, variable_selectors: set[tuple[str, ...]]) -> bool:
-        """
-        Check if this Variable Assigner node blocks the output of specific variables.
+        """Check if this Variable Assigner node blocks the output of specific variables.
 
         Returns True if this node updates any of the requested conversation variables.
+
+        Returns:
+            `True` when the assigned selector is among the requested selectors.
+
         """
         assigned_selector = tuple(self.node_data.assigned_variable_selector)
         return assigned_selector in variable_selectors
@@ -69,6 +72,7 @@ class VariableAssignerNode(Node[VariableAssignerData]):
         node_id: str,
         node_data: VariableAssignerData,
     ) -> Mapping[str, Sequence[str]]:
+        _ = graph_config
         mapping = {}
         selector_key = ".".join(node_data.assigned_variable_selector)
         key = f"{node_id}.#{selector_key}#"
@@ -84,43 +88,47 @@ class VariableAssignerNode(Node[VariableAssignerData]):
         assigned_variable_selector = self.node_data.assigned_variable_selector
         # Should be String, Number, Object, ArrayString, ArrayNumber, ArrayObject
         original_variable = self.graph_runtime_state.variable_pool.get(
-            assigned_variable_selector
+            assigned_variable_selector,
         )
         if not isinstance(original_variable, VariableBase):
-            raise VariableOperatorNodeError("assigned variable not found")
+            msg = "assigned variable not found"
+            raise VariableOperatorNodeError(msg)
 
         match self.node_data.write_mode:
             case WriteMode.OVER_WRITE:
                 income_value = self.graph_runtime_state.variable_pool.get(
-                    self.node_data.input_variable_selector
+                    self.node_data.input_variable_selector,
                 )
                 if not income_value:
-                    raise VariableOperatorNodeError("input value not found")
+                    msg = "input value not found"
+                    raise VariableOperatorNodeError(msg)
                 updated_variable = original_variable.model_copy(
-                    update={"value": income_value.value}
+                    update={"value": income_value.value},
                 )
 
             case WriteMode.APPEND:
                 income_value = self.graph_runtime_state.variable_pool.get(
-                    self.node_data.input_variable_selector
+                    self.node_data.input_variable_selector,
                 )
                 if not income_value:
-                    raise VariableOperatorNodeError("input value not found")
-                updated_value = original_variable.value + [income_value.value]
+                    msg = "input value not found"
+                    raise VariableOperatorNodeError(msg)
+                updated_value = [*original_variable.value, income_value.value]
                 updated_variable = original_variable.model_copy(
-                    update={"value": updated_value}
+                    update={"value": updated_value},
                 )
 
             case WriteMode.CLEAR:
                 income_value = SegmentType.get_zero_value(original_variable.value_type)
                 updated_variable = original_variable.model_copy(
-                    update={"value": income_value.to_object()}
+                    update={"value": income_value.to_object()},
                 )
 
         updated_variables = [
             common_helpers.variable_to_processed_data(
-                assigned_variable_selector, updated_variable
-            )
+                assigned_variable_selector,
+                updated_variable,
+            ),
         ]
         yield VariableUpdatedEvent(variable=cast("Variable", updated_variable))
         yield StreamCompletedEvent(
@@ -134,8 +142,9 @@ class VariableAssignerNode(Node[VariableAssignerData]):
                 # list to keep the output schema compatible with
                 # `v2.VariableAssignerNode`.
                 process_data=common_helpers.set_updated_variables(
-                    {}, updated_variables
+                    {},
+                    updated_variables,
                 ),
                 outputs={},
-            )
+            ),
         )

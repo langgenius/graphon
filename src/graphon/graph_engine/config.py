@@ -1,6 +1,4 @@
-"""
-GraphEngine configuration models.
-"""
+"""GraphEngine configuration models."""
 
 from pydantic import BaseModel, ConfigDict
 

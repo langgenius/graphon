@@ -1,5 +1,4 @@
-"""
-Domain entities for workflow execution.
+"""Domain entities for workflow execution.
 
 Models describe graph runtime state and avoid infrastructure-specific details.
 """
@@ -16,9 +15,7 @@ from graphon.enums import WorkflowExecutionStatus, WorkflowType
 
 
 class WorkflowExecution(BaseModel):
-    """
-    Domain model for a workflow execution within the graph runtime.
-    """
+    """Domain model for a workflow execution within the graph runtime."""
 
     id_: str = Field(...)
     workflow_id: str = Field(...)
@@ -40,8 +37,7 @@ class WorkflowExecution(BaseModel):
 
     @property
     def elapsed_time(self) -> float:
-        """
-        Calculate elapsed time in seconds.
+        """Calculate elapsed time in seconds.
         If workflow is not finished, use current time.
         """
         end_time = self.finished_at or datetime.now(UTC).replace(tzinfo=None)

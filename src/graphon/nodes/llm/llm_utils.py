@@ -22,7 +22,6 @@ from graphon.model_runtime.entities.message_entities import (
 )
 from graphon.model_runtime.entities.model_entities import (
     AIModelEntity,
-    ModelFeature,
     ModelPropertyKey,
 )
 from graphon.model_runtime.memory.prompt_message_memory import PromptMessageMemory
@@ -60,10 +59,11 @@ MAX_RESOLVED_VALUE_LENGTH = 1024
 def fetch_model_schema(*, model_instance: PreparedLLMProtocol) -> AIModelEntity:
     model_schema = model_instance.get_model_schema()
     if not model_schema:
-        raise ValueError(
+        msg = (
             "Model schema not found for "
             f"{getattr(model_instance, 'model_name', 'unknown model')}"
         )
+        raise ValueError(msg)
     return model_schema
 
 
@@ -77,7 +77,8 @@ def fetch_files(variable_pool: VariablePool, selector: Sequence[str]) -> Sequenc
         return variable.value
     if isinstance(variable, NoneSegment | ArrayAnySegment):
         return []
-    raise InvalidVariableTypeError(f"Invalid variable type: {type(variable)}")
+    msg = f"Invalid variable type: {type(variable)}"
+    raise InvalidVariableTypeError(msg)
 
 
 def convert_history_messages_to_text(
@@ -130,6 +131,83 @@ def fetch_memory_text(
     )
 
 
+def _update_completion_prompt_content(
+    *,
+    prompt_messages: list[PromptMessage],
+    memory_text: str,
+    sys_query: str | None,
+) -> None:
+    prompt_content = prompt_messages[0].content
+    if isinstance(prompt_content, str):
+        prompt_content = str(prompt_content)
+        if "#histories#" in prompt_content:
+            prompt_content = prompt_content.replace("#histories#", memory_text)
+        else:
+            prompt_content = memory_text + "\n" + prompt_content
+        prompt_messages[0].content = prompt_content
+        if sys_query:
+            prompt_messages[0].content = str(prompt_messages[0].content).replace(
+                "#sys.query#",
+                sys_query,
+            )
+        return
+
+    if isinstance(prompt_content, list):
+        for content_item in prompt_content:
+            if isinstance(content_item, TextPromptMessageContent):
+                if "#histories#" in content_item.data:
+                    content_item.data = content_item.data.replace(
+                        "#histories#",
+                        memory_text,
+                    )
+                else:
+                    content_item.data = memory_text + "\n" + content_item.data
+        if sys_query:
+            for content_item in prompt_content:
+                if isinstance(content_item, TextPromptMessageContent):
+                    content_item.data = sys_query + "\n" + content_item.data
+        return
+
+    msg = "Invalid prompt content type"
+    raise ValueError(msg)
+
+
+def _filter_prompt_messages(
+    *,
+    prompt_messages: list[PromptMessage],
+    model_schema: AIModelEntity,
+) -> list[PromptMessage]:
+    filtered_prompt_messages: list[PromptMessage] = []
+    for prompt_message in prompt_messages:
+        if isinstance(prompt_message.content, list):
+            prompt_message_content: list[PromptMessageContentUnionTypes] = []
+            for content_item in prompt_message.content:
+                if not model_schema.supports_prompt_content_type(content_item.type):
+                    continue
+                prompt_message_content.append(content_item)
+            if not prompt_message_content:
+                continue
+            if (
+                len(prompt_message_content) == 1
+                and prompt_message_content[0].type == PromptMessageContentType.TEXT
+            ):
+                prompt_message.content = prompt_message_content[0].data
+            else:
+                prompt_message.content = prompt_message_content
+            filtered_prompt_messages.append(prompt_message)
+        elif not prompt_message.is_empty():
+            filtered_prompt_messages.append(prompt_message)
+
+    if len(filtered_prompt_messages) == 0:
+        msg = (
+            "No prompt found in the LLM configuration. "
+            "Please ensure a prompt is properly configured before proceeding."
+        )
+        raise NoPromptFoundError(msg)
+
+    return filtered_prompt_messages
+
+
 def fetch_prompt_messages(
     *,
     sys_query: str | None = None,
@@ -151,92 +229,66 @@ def fetch_prompt_messages(
     prompt_messages: list[PromptMessage] = []
     model_schema = fetch_model_schema(model_instance=model_instance)
 
-    if isinstance(prompt_template, list):
-        prompt_messages.extend(
-            handle_list_messages(
-                messages=prompt_template,
-                context=context,
-                jinja2_variables=jinja2_variables,
-                variable_pool=variable_pool,
-                vision_detail_config=vision_detail,
-                template_renderer=template_renderer,
+    match prompt_template:
+        case list():
+            prompt_messages.extend(
+                handle_list_messages(
+                    messages=prompt_template,
+                    context=context,
+                    jinja2_variables=jinja2_variables,
+                    variable_pool=variable_pool,
+                    vision_detail_config=vision_detail,
+                    template_renderer=template_renderer,
+                ),
             )
-        )
+            prompt_messages.extend(
+                handle_memory_chat_mode(
+                    memory=memory,
+                    memory_config=memory_config,
+                    model_instance=model_instance,
+                ),
+            )
 
-        prompt_messages.extend(
-            handle_memory_chat_mode(
+            if sys_query:
+                prompt_messages.extend(
+                    handle_list_messages(
+                        messages=[
+                            LLMNodeChatModelMessage(
+                                text=sys_query,
+                                role=PromptMessageRole.USER,
+                                edition_type="basic",
+                            ),
+                        ],
+                        context="",
+                        jinja2_variables=[],
+                        variable_pool=variable_pool,
+                        vision_detail_config=vision_detail,
+                        template_renderer=template_renderer,
+                    ),
+                )
+        case LLMNodeCompletionModelPromptTemplate():
+            prompt_messages.extend(
+                handle_completion_template(
+                    template=prompt_template,
+                    context=context,
+                    jinja2_variables=jinja2_variables,
+                    variable_pool=variable_pool,
+                    template_renderer=template_renderer,
+                ),
+            )
+
+            memory_text = handle_memory_completion_mode(
                 memory=memory,
                 memory_config=memory_config,
                 model_instance=model_instance,
             )
-        )
-
-        if sys_query:
-            prompt_messages.extend(
-                handle_list_messages(
-                    messages=[
-                        LLMNodeChatModelMessage(
-                            text=sys_query,
-                            role=PromptMessageRole.USER,
-                            edition_type="basic",
-                        )
-                    ],
-                    context="",
-                    jinja2_variables=[],
-                    variable_pool=variable_pool,
-                    vision_detail_config=vision_detail,
-                    template_renderer=template_renderer,
-                )
+            _update_completion_prompt_content(
+                prompt_messages=prompt_messages,
+                memory_text=memory_text,
+                sys_query=sys_query,
             )
-    elif isinstance(prompt_template, LLMNodeCompletionModelPromptTemplate):
-        prompt_messages.extend(
-            handle_completion_template(
-                template=prompt_template,
-                context=context,
-                jinja2_variables=jinja2_variables,
-                variable_pool=variable_pool,
-                template_renderer=template_renderer,
-            )
-        )
-
-        memory_text = handle_memory_completion_mode(
-            memory=memory,
-            memory_config=memory_config,
-            model_instance=model_instance,
-        )
-        prompt_content = prompt_messages[0].content
-        if isinstance(prompt_content, str):
-            prompt_content = str(prompt_content)
-            if "#histories#" in prompt_content:
-                prompt_content = prompt_content.replace("#histories#", memory_text)
-            else:
-                prompt_content = memory_text + "\n" + prompt_content
-            prompt_messages[0].content = prompt_content
-        elif isinstance(prompt_content, list):
-            for content_item in prompt_content:
-                if isinstance(content_item, TextPromptMessageContent):
-                    if "#histories#" in content_item.data:
-                        content_item.data = content_item.data.replace(
-                            "#histories#", memory_text
-                        )
-                    else:
-                        content_item.data = memory_text + "\n" + content_item.data
-        else:
-            raise ValueError("Invalid prompt content type")
-
-        if sys_query:
-            if isinstance(prompt_content, str):
-                prompt_messages[0].content = str(prompt_messages[0].content).replace(
-                    "#sys.query#", sys_query
-                )
-            elif isinstance(prompt_content, list):
-                for content_item in prompt_content:
-                    if isinstance(content_item, TextPromptMessageContent):
-                        content_item.data = sys_query + "\n" + content_item.data
-            else:
-                raise ValueError("Invalid prompt content type")
-    else:
-        raise TemplateTypeNotSupportError(type_name=str(type(prompt_template)))
+        case _:
+            raise TemplateTypeNotSupportError(type_name=str(type(prompt_template)))
 
     _append_file_prompts(
         prompt_messages=prompt_messages,
@@ -250,57 +302,13 @@ def fetch_prompt_messages(
         vision_enabled=vision_enabled,
         vision_detail=vision_detail,
     )
-
-    filtered_prompt_messages: list[PromptMessage] = []
-    for prompt_message in prompt_messages:
-        if isinstance(prompt_message.content, list):
-            prompt_message_content: list[PromptMessageContentUnionTypes] = []
-            for content_item in prompt_message.content:
-                if not model_schema.features:
-                    if content_item.type == PromptMessageContentType.TEXT:
-                        prompt_message_content.append(content_item)
-                    continue
-
-                if (
-                    (
-                        content_item.type == PromptMessageContentType.IMAGE
-                        and ModelFeature.VISION not in model_schema.features
-                    )
-                    or (
-                        content_item.type == PromptMessageContentType.DOCUMENT
-                        and ModelFeature.DOCUMENT not in model_schema.features
-                    )
-                    or (
-                        content_item.type == PromptMessageContentType.VIDEO
-                        and ModelFeature.VIDEO not in model_schema.features
-                    )
-                    or (
-                        content_item.type == PromptMessageContentType.AUDIO
-                        and ModelFeature.AUDIO not in model_schema.features
-                    )
-                ):
-                    continue
-                prompt_message_content.append(content_item)
-            if not prompt_message_content:
-                continue
-            if (
-                len(prompt_message_content) == 1
-                and prompt_message_content[0].type == PromptMessageContentType.TEXT
-            ):
-                prompt_message.content = prompt_message_content[0].data
-            else:
-                prompt_message.content = prompt_message_content
-            filtered_prompt_messages.append(prompt_message)
-        elif not prompt_message.is_empty():
-            filtered_prompt_messages.append(prompt_message)
-
-    if len(filtered_prompt_messages) == 0:
-        raise NoPromptFoundError(
-            "No prompt found in the LLM configuration. "
-            "Please ensure a prompt is properly configured before proceeding."
-        )
-
-    return filtered_prompt_messages, stop
+    return (
+        _filter_prompt_messages(
+            prompt_messages=prompt_messages,
+            model_schema=model_schema,
+        ),
+        stop,
+    )
 
 
 def handle_list_messages(
@@ -325,7 +333,7 @@ def handle_list_messages(
                 combine_message_content_with_role(
                     contents=[TextPromptMessageContent(data=result_text)],
                     role=message.role,
-                )
+                ),
             )
             continue
 
@@ -336,29 +344,31 @@ def handle_list_messages(
             if isinstance(segment, ArrayFileSegment):
                 file_contents.extend(
                     file_manager.to_prompt_message_content(
-                        file, image_detail_config=vision_detail_config
+                        file,
+                        image_detail_config=vision_detail_config,
                     )
                     for file in segment.value
                     if file.type
-                    in {
+                    in frozenset((
                         FileType.IMAGE,
                         FileType.VIDEO,
                         FileType.AUDIO,
                         FileType.DOCUMENT,
-                    }
+                    ))
                 )
             elif isinstance(segment, FileSegment):
                 file = segment.value
-                if file.type in {
+                if file.type in frozenset((
                     FileType.IMAGE,
                     FileType.VIDEO,
                     FileType.AUDIO,
                     FileType.DOCUMENT,
-                }:
+                )):
                     file_contents.append(
                         file_manager.to_prompt_message_content(
-                            file, image_detail_config=vision_detail_config
-                        )
+                            file,
+                            image_detail_config=vision_detail_config,
+                        ),
                     )
 
         if segment_group.text:
@@ -366,13 +376,14 @@ def handle_list_messages(
                 combine_message_content_with_role(
                     contents=[TextPromptMessageContent(data=segment_group.text)],
                     role=message.role,
-                )
+                ),
             )
         if file_contents:
             prompt_messages.append(
                 combine_message_content_with_role(
-                    contents=file_contents, role=message.role
-                )
+                    contents=file_contents,
+                    role=message.role,
+                ),
             )
 
     return prompt_messages
@@ -388,7 +399,8 @@ def render_jinja2_message(
     if not template:
         return ""
     if template_renderer is None:
-        raise ValueError("template_renderer is required for jinja2 prompt rendering")
+        msg = "template_renderer is required for jinja2 prompt rendering"
+        raise ValueError(msg)
 
     jinja2_inputs: dict[str, Any] = {}
     for jinja2_variable in jinja2_variables:
@@ -421,7 +433,7 @@ def handle_completion_template(
         combine_message_content_with_role(
             contents=[TextPromptMessageContent(data=result_text)],
             role=PromptMessageRole.USER,
-        )
+        ),
     ]
 
 
@@ -438,7 +450,8 @@ def combine_message_content_with_role(
         case PromptMessageRole.SYSTEM:
             return SystemPromptMessage(content=contents)
         case _:
-            raise NotImplementedError(f"Role {role} is not supported")
+            msg = f"Role {role} is not supported"
+            raise NotImplementedError(msg)
 
 
 def calculate_rest_token(
@@ -451,7 +464,7 @@ def calculate_rest_token(
     runtime_model_parameters = model_instance.parameters
 
     model_context_tokens = runtime_model_schema.model_properties.get(
-        ModelPropertyKey.CONTEXT_SIZE
+        ModelPropertyKey.CONTEXT_SIZE,
     )
     if model_context_tokens:
         curr_message_tokens = model_instance.get_llm_num_tokens(prompt_messages)
@@ -483,7 +496,8 @@ def handle_memory_chat_mode(
     if not memory or not memory_config:
         return []
     rest_tokens = calculate_rest_token(
-        prompt_messages=[], model_instance=model_instance
+        prompt_messages=[],
+        model_instance=model_instance,
     )
     return memory.get_history_prompt_messages(
         max_token_limit=rest_tokens,
@@ -503,12 +517,12 @@ def handle_memory_completion_mode(
         return ""
 
     rest_tokens = calculate_rest_token(
-        prompt_messages=[], model_instance=model_instance
+        prompt_messages=[],
+        model_instance=model_instance,
     )
     if not memory_config.role_prefix:
-        raise MemoryRolePrefixRequiredError(
-            "Memory role prefix is required for completion model."
-        )
+        msg = "Memory role prefix is required for completion model."
+        raise MemoryRolePrefixRequiredError(msg)
 
     return fetch_memory_text(
         memory=memory,
@@ -543,7 +557,7 @@ def _append_file_prompts(
         existing_contents = prompt_messages[-1].content
         assert isinstance(existing_contents, list)
         prompt_messages[-1] = UserPromptMessage(
-            content=file_prompts + existing_contents
+            content=file_prompts + existing_contents,
         )
     else:
         prompt_messages.append(UserPromptMessage(content=file_prompts))
@@ -557,6 +571,10 @@ def _coerce_resolved_value(raw: str) -> int | float | bool | str:
     the ``temperature`` parameter).  This helper attempts a JSON parse so that
     ``"0.7"`` → ``0.7``, ``"true"`` → ``True``, etc.  Plain strings that are not
     valid JSON literals are returned as-is.
+
+    Returns:
+        The parsed numeric or boolean literal, or the original string.
+
     """
     stripped = raw.strip()
     if not stripped:
@@ -588,6 +606,10 @@ def resolve_completion_params_variables(
       are never concatenated into raw HTTP headers or SQL queries.
     - Numeric/boolean coercion is applied so that variables holding ``"0.7"`` are
       restored to their native type rather than sent as a bare string.
+
+    Returns:
+        Completion params with referenced variables resolved and coerced when possible.
+
     """
     resolved: dict[str, Any] = {}
     for key, value in completion_params.items():

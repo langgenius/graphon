@@ -9,7 +9,7 @@ def test_node_run_result_accepts_trigger_info_metadata() -> None:
             WorkflowNodeExecutionMetadataKey.TRIGGER_INFO: {
                 "provider_id": "provider-id",
                 "event_name": "event-name",
-            }
+            },
         },
     )
 

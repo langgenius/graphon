@@ -34,13 +34,13 @@ class _TestNode(Node[_TestNodeData]):
     def __init__(
         self,
         *,
-        id: str,
+        node_id: str,
         config: Mapping[str, object],
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,
     ) -> None:
         super().__init__(
-            id=id,
+            node_id=node_id,
             config=config,
             graph_init_params=graph_init_params,
             graph_runtime_state=graph_runtime_state,
@@ -50,7 +50,7 @@ class _TestNode(Node[_TestNodeData]):
         if isinstance(node_type_value, str):
             self.node_type = node_type_value
 
-    def _run(self):
+    def _run(self) -> None:
         raise NotImplementedError
 
     def post_init(self) -> None:
@@ -76,7 +76,7 @@ class _SimpleNodeFactory:
     def create_node(self, node_config: Mapping[str, object]) -> _TestNode:
         node_id = str(node_config["id"])
         return _TestNode(
-            id=node_id,
+            node_id=node_id,
             config=node_config,
             graph_init_params=self.graph_init_params,
             graph_runtime_state=self.graph_runtime_state,
@@ -91,10 +91,12 @@ def graph_init_dependencies() -> tuple[_SimpleNodeFactory, dict[str, object]]:
         graph_config=graph_config,
     )
     runtime_state = GraphRuntimeState(
-        variable_pool=VariablePool(), start_at=time.perf_counter()
+        variable_pool=VariablePool(),
+        start_at=time.perf_counter(),
     )
     factory = _SimpleNodeFactory(
-        graph_init_params=init_params, graph_runtime_state=runtime_state
+        graph_init_params=init_params,
+        graph_runtime_state=runtime_state,
     )
     return factory, graph_config
 
@@ -119,7 +121,9 @@ def test_graph_initialization_runs_default_validators(
     ]
 
     graph = Graph.init(
-        graph_config=graph_config, node_factory=node_factory, root_node_id="start"
+        graph_config=graph_config,
+        node_factory=node_factory,
+        root_node_id="start",
     )
 
     assert graph.root_node.id == "start"
@@ -146,7 +150,9 @@ def test_graph_validation_fails_for_unknown_edge_targets(
 
     with pytest.raises(GraphValidationError) as exc:
         Graph.init(
-            graph_config=graph_config, node_factory=node_factory, root_node_id="start"
+            graph_config=graph_config,
+            node_factory=node_factory,
+            root_node_id="start",
         )
 
     assert any(issue.code == "MISSING_NODE" for issue in exc.value.issues)
@@ -179,7 +185,9 @@ def test_graph_promotes_fail_branch_nodes_to_branch_execution_type(
     ]
 
     graph = Graph.init(
-        graph_config=graph_config, node_factory=node_factory, root_node_id="start"
+        graph_config=graph_config,
+        node_factory=node_factory,
+        root_node_id="start",
     )
 
     assert graph.nodes["branch"].execution_type == NodeExecutionType.BRANCH
@@ -216,7 +224,9 @@ def test_graph_init_ignores_custom_note_nodes_before_node_data_validation(
     ]
 
     graph = Graph.init(
-        graph_config=graph_config, node_factory=node_factory, root_node_id="start"
+        graph_config=graph_config,
+        node_factory=node_factory,
+        root_node_id="start",
     )
 
     assert graph.root_node.id == "start"
@@ -242,5 +252,7 @@ def test_graph_init_fails_for_unknown_root_node_id(
 
     with pytest.raises(ValueError, match="Root node id missing not found in the graph"):
         Graph.init(
-            graph_config=graph_config, node_factory=node_factory, root_node_id="missing"
+            graph_config=graph_config,
+            node_factory=node_factory,
+            root_node_id="missing",
         )

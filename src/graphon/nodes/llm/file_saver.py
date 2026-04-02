@@ -78,7 +78,7 @@ class FileSaverImpl(LLMFileSaver):
         tool_file_manager: ToolFileManagerProtocol,
         file_reference_factory: FileReferenceFactoryProtocol,
         http_client: HttpClientProtocol | None = None,
-    ):
+    ) -> None:
         self._tool_file_manager = tool_file_manager
         self._file_reference_factory = file_reference_factory
         self._http_client = http_client or get_http_client()
@@ -89,10 +89,14 @@ class FileSaverImpl(LLMFileSaver):
         data = http_response.content
         mime_type_from_header = http_response.headers.get("Content-Type")
         mime_type, extension = _extract_content_type_and_extension(
-            url, mime_type_from_header
+            url,
+            mime_type_from_header,
         )
         return self.save_binary_string(
-            data, mime_type, file_type, extension_override=extension
+            data,
+            mime_type,
+            file_type,
+            extension_override=extension,
         )
 
     def save_binary_string(
@@ -119,7 +123,7 @@ class FileSaverImpl(LLMFileSaver):
                 "tool_file_id": str(tool_file.id),
                 "related_id": str(tool_file.id),
                 "storage_key": tool_file.file_key,
-            }
+            },
         )
 
 
@@ -128,6 +132,10 @@ def _get_extension(mime_type: str, extension_override: str | None = None) -> str
 
     If the `extension_override` parameter is set, this function should honor it and
     return its value.
+
+    Returns:
+        The chosen filename extension, including a leading dot when applicable.
+
     """
     if extension_override is not None:
         return extension_override
@@ -135,10 +143,15 @@ def _get_extension(mime_type: str, extension_override: str | None = None) -> str
 
 
 def _extract_content_type_and_extension(
-    url: str, content_type_header: str | None
+    url: str,
+    content_type_header: str | None,
 ) -> tuple[str, str]:
     """_extract_content_type_and_extension tries to
     guess content type of file from url and `Content-Type` header in response.
+
+    Returns:
+        A tuple of resolved MIME type and file extension.
+
     """
     if content_type_header:
         extension = mimetypes.guess_extension(content_type_header) or DEFAULT_EXTENSION
@@ -152,11 +165,12 @@ def _validate_extension_override(extension_override: str | None) -> str | None:
     # `extension_override` is allow to be `None or `""`.
     if extension_override is None:
         return None
-    if extension_override == "":
-        return ""
+    if not extension_override:
+        return extension_override
     if not extension_override.startswith("."):
+        msg = "extension_override should start with '.' if not None or empty."
         raise ValueError(
-            "extension_override should start with '.' if not None or empty.",
+            msg,
             extension_override,
         )
     return extension_override

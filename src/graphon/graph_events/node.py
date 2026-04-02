@@ -31,13 +31,15 @@ class NodeRunStreamChunkEvent(GraphNodeEventBase):
     )
     chunk: str = Field(..., description="the actual chunk content")
     is_final: bool = Field(
-        default=False, description="indicates if this is the last chunk"
+        default=False,
+        description="indicates if this is the last chunk",
     )
 
 
 class NodeRunRetrieverResourceEvent(GraphNodeEventBase):
     retriever_resources: Sequence[Mapping[str, Any]] = Field(
-        ..., description="retriever resources"
+        ...,
+        description="retriever resources",
     )
     context: str = Field(..., description="context")
 
@@ -49,7 +51,8 @@ class NodeRunSucceededEvent(GraphNodeEventBase):
 
 class NodeRunVariableUpdatedEvent(GraphNodeEventBase):
     """Request that the engine apply a variable update before downstream
-    observers continue."""
+    observers continue.
+    """
 
     variable: Variable = Field(..., description="Updated variable payload to apply.")
 
@@ -69,7 +72,8 @@ class NodeRunExceptionEvent(GraphNodeEventBase):
 class NodeRunRetryEvent(NodeRunStartedEvent):
     error: str = Field(..., description="error")
     retry_index: int = Field(
-        ..., description="which retry attempt is about to be performed"
+        ...,
+        description="which retry attempt is about to be performed",
     )
 
 
@@ -78,13 +82,16 @@ class NodeRunHumanInputFormFilledEvent(GraphNodeEventBase):
 
     node_title: str = Field(..., description="HumanInput node title")
     rendered_content: str = Field(
-        ..., description="Markdown content rendered with user inputs."
+        ...,
+        description="Markdown content rendered with user inputs.",
     )
     action_id: str = Field(
-        ..., description="User action identifier chosen in the form."
+        ...,
+        description="User action identifier chosen in the form.",
     )
     action_text: str = Field(
-        ..., description="Display text of the chosen action button."
+        ...,
+        description="Display text of the chosen action button.",
     )
 
 
@@ -100,8 +107,7 @@ class NodeRunPauseRequestedEvent(GraphNodeEventBase):
 
 
 def is_node_result_event(event: GraphNodeEventBase) -> bool:
-    """
-    Check if an event is a final result event from node execution.
+    """Check if an event is a final result event from node execution.
 
     A result event indicates the completion of a node execution and contains
     runtime information such as inputs, outputs, or error details.
@@ -112,6 +118,7 @@ def is_node_result_event(event: GraphNodeEventBase) -> bool:
     Returns:
         True if the event is a node result event
         (succeeded/failed/paused), False otherwise
+
     """
     return isinstance(
         event,

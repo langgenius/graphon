@@ -39,9 +39,15 @@ class HttpClientProtocol(Protocol):
     def put(self, url: str, max_retries: int = ..., **kwargs: Any) -> HttpResponse: ...
 
     def delete(
-        self, url: str, max_retries: int = ..., **kwargs: Any
+        self,
+        url: str,
+        max_retries: int = ...,
+        **kwargs: Any,
     ) -> HttpResponse: ...
 
     def patch(
-        self, url: str, max_retries: int = ..., **kwargs: Any
+        self,
+        url: str,
+        max_retries: int = ...,
+        **kwargs: Any,
     ) -> HttpResponse: ...

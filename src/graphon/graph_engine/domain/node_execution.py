@@ -1,6 +1,4 @@
-"""
-NodeExecution entity representing a node's execution state.
-"""
+"""NodeExecution entity representing a node's execution state."""
 
 from dataclasses import dataclass
 
@@ -9,8 +7,7 @@ from graphon.enums import NodeState
 
 @dataclass
 class NodeExecution:
-    """
-    Entity representing the execution state of a single node.
+    """Entity representing the execution state of a single node.
 
     This is a mutable entity that tracks the runtime state of a node
     during graph execution.

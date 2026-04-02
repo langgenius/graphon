@@ -7,9 +7,7 @@ from graphon.nodes.loop.entities import LoopEndNodeData
 
 
 class LoopEndNode(Node[LoopEndNodeData]):
-    """
-    Loop End Node.
-    """
+    """Loop End Node."""
 
     node_type = BuiltinNodeTypes.LOOP_END
 
@@ -20,7 +18,5 @@ class LoopEndNode(Node[LoopEndNodeData]):
 
     @override
     def _run(self) -> NodeRunResult:
-        """
-        Run the node.
-        """
+        """Run the node."""
         return NodeRunResult(status=WorkflowNodeExecutionStatus.SUCCEEDED)

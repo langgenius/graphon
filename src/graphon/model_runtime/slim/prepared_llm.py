@@ -73,9 +73,8 @@ class SlimPreparedLLM(PreparedLLMProtocol):
             credentials=self._credentials,
         )
         if schema is None:
-            raise ValueError(
-                f"Model schema not found for {self._provider}/{self._model_name}"
-            )
+            msg = f"Model schema not found for {self._provider}/{self._model_name}"
+            raise ValueError(msg)
         return schema
 
     @override

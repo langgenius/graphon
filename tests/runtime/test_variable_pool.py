@@ -3,8 +3,10 @@ from graphon.variables.segments import (
     BooleanSegment,
     IntegerSegment,
     NoneSegment,
+    ObjectSegment,
     StringSegment,
 )
+from graphon.variables.variables import StringVariable
 
 
 class TestVariablePoolGetAndNestedAttribute:
@@ -40,7 +42,7 @@ class TestVariablePoolGetAndNestedAttribute:
         segment = pool._get_nested_attribute(obj, "a")
         assert segment is not None
         assert isinstance(segment, StringSegment)
-        assert segment.value == ""
+        assert not segment.value
 
     def test_get_simple_variable(self):
         pool = VariablePool.empty()
@@ -93,7 +95,7 @@ class TestVariablePoolGetAndNestedAttribute:
         segment_empty = pool.get(("node1", "obj", "inner_empty"))
         assert segment_empty is not None
         assert isinstance(segment_empty, StringSegment)
-        assert segment_empty.value == ""
+        assert not segment_empty.value
 
         segment_zero = pool.get(("node1", "obj", "inner_zero"))
         assert segment_zero is not None
@@ -104,6 +106,17 @@ class TestVariablePoolGetAndNestedAttribute:
         assert segment_false is not None
         assert isinstance(segment_false, BooleanSegment)
         assert segment_false.value is False
+
+    def test_add_keeps_variable_instances_and_supports_segments(self):
+        pool = VariablePool.empty()
+        variable = StringVariable(name="name", selector=["node1", "name"], value="Joe")
+        pool.add(("node1", "name"), variable)
+        pool.add(("node1", "profile"), ObjectSegment(value={"city": "Paris"}))
+
+        assert pool.variable_dictionary["node1"]["name"] is variable
+        segment = pool.get(("node1", "profile", "city"))
+        assert segment is not None
+        assert segment.value == "Paris"
 
 
 class TestVariablePoolGetNotModifyVariableDictionary:

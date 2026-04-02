@@ -46,8 +46,9 @@ class DefaultValue(BaseModel):
         """Unified JSON parsing handler"""
         try:
             return json.loads(value)
-        except json.JSONDecodeError:
-            raise DefaultValueTypeError(f"Invalid JSON format for value: {value}")
+        except json.JSONDecodeError as error:
+            msg = f"Invalid JSON format for value: {value}"
+            raise DefaultValueTypeError(msg) from error
 
     @staticmethod
     def _validate_array(value: Any, element_type: type_ | tuple[type_, ...]) -> bool:
@@ -61,8 +62,9 @@ class DefaultValue(BaseModel):
         """Unified number conversion handler"""
         try:
             return float(value)
-        except ValueError:
-            raise DefaultValueTypeError(f"Cannot convert to number: {value}")
+        except ValueError as error:
+            msg = f"Cannot convert to number: {value}"
+            raise DefaultValueTypeError(msg) from error
 
     @model_validator(mode="after")
     def validate_value_type(self) -> DefaultValue:
@@ -102,7 +104,8 @@ class DefaultValue(BaseModel):
             if self.type == DefaultValueType.ARRAY_FILES:
                 # Handle files type
                 return self
-            raise DefaultValueTypeError(f"Unsupported type: {self.type}")
+            msg = f"Unsupported type: {self.type}"
+            raise DefaultValueTypeError(msg)
 
         # Handle string input cases
         if isinstance(self.value, str) and self.type != DefaultValueType.STRING:
@@ -110,18 +113,19 @@ class DefaultValue(BaseModel):
 
         # Validate base type
         if not isinstance(self.value, validator["type"]):
-            raise DefaultValueTypeError(
-                f"Value must be {validator['type'].__name__} type for {self.value}"
-            )
+            msg = f"Value must be {validator['type'].__name__} type for {self.value}"
+            raise DefaultValueTypeError(msg)
 
         # Validate array element types
-        if validator["type"] == list and not self._validate_array(
-            self.value, validator["element_type"]
+        if validator["type"] is list and not self._validate_array(
+            self.value,
+            validator["element_type"],
         ):
-            raise DefaultValueTypeError(
+            msg = (
                 f"All elements must be {validator['element_type'].__name__} "
                 f"for {self.value}"
             )
+            raise DefaultValueTypeError(msg)
 
         return self
 
@@ -153,9 +157,15 @@ class BaseNodeData(ABC, BaseModel):
         return {}
 
     def __getitem__(self, key: str) -> Any:
-        """
-        Dict-style access without calling model_dump() on every lookup.
+        """Dict-style access without calling model_dump() on every lookup.
         Prefer using model fields and Pydantic's extra storage.
+
+        Returns:
+            The declared field value or compatibility extra stored under `key`.
+
+        Raises:
+            KeyError: If `key` is neither a declared field nor a stored extra.
+
         """
         # First, check declared model fields
         if key in self.__class__.model_fields:
@@ -171,9 +181,7 @@ class BaseNodeData(ABC, BaseModel):
         raise KeyError(key)
 
     def get(self, key: str, default: Any = None) -> Any:
-        """
-        Dict-style .get() without calling model_dump() on every lookup.
-        """
+        """Dict-style .get() without calling model_dump() on every lookup."""
         if key in self.__class__.model_fields:
             return getattr(self, key)
 

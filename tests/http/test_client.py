@@ -5,6 +5,7 @@ from typing import Any
 
 import httpx
 import pytest
+from pytest_mock import MockerFixture
 
 from graphon.http import (
     HttpClientMaxRetriesExceededError,
@@ -56,7 +57,9 @@ def _build_runtime_state() -> GraphRuntimeState:
     )
 
 
-def test_httpx_http_client_normalizes_request_kwargs(mocker):
+def test_httpx_http_client_normalizes_request_kwargs(
+    mocker: MockerFixture,
+) -> None:
     request = httpx.Request("POST", "https://example.com")
     response = httpx.Response(200, request=request)
     request_mock = mocker.patch(
@@ -84,7 +87,7 @@ def test_httpx_http_client_normalizes_request_kwargs(mocker):
     assert kwargs["timeout"].write == 3
 
 
-def test_httpx_http_client_retries_until_success(mocker):
+def test_httpx_http_client_retries_until_success(mocker: MockerFixture) -> None:
     request = httpx.Request("GET", "https://example.com")
     request_mock = mocker.patch(
         "graphon.http.client.httpx.request",
@@ -108,7 +111,9 @@ def test_http_response_raise_for_status_uses_library_error():
         response.raise_for_status()
 
 
-def test_httpx_http_client_raises_max_retries_exceeded_after_last_retry(mocker):
+def test_httpx_http_client_raises_max_retries_exceeded_after_last_retry(
+    mocker: MockerFixture,
+) -> None:
     request = httpx.Request("GET", "https://example.com")
     request_mock = mocker.patch(
         "graphon.http.client.httpx.request",
@@ -124,7 +129,9 @@ def test_httpx_http_client_raises_max_retries_exceeded_after_last_retry(mocker):
     assert request_mock.call_count == 2
 
 
-def test_httpx_http_client_raises_request_error_without_retry_wrapping(mocker):
+def test_httpx_http_client_raises_request_error_without_retry_wrapping(
+    mocker: MockerFixture,
+) -> None:
     request = httpx.Request("GET", "https://example.com")
     mocker.patch(
         "graphon.http.client.httpx.request",
@@ -137,7 +144,7 @@ def test_httpx_http_client_raises_request_error_without_retry_wrapping(mocker):
 
 def test_http_request_node_uses_default_http_client_when_not_injected():
     node = HttpRequestNode(
-        id="http",
+        node_id="http",
         config={
             "id": "http",
             "data": {
@@ -152,7 +159,7 @@ def test_http_request_node_uses_default_http_client_when_not_injected():
             },
         },
         graph_init_params=build_graph_init_params(
-            graph_config={"nodes": [], "edges": []}
+            graph_config={"nodes": [], "edges": []},
         ),
         graph_runtime_state=_build_runtime_state(),
         http_request_config=build_http_request_config(),
@@ -166,7 +173,7 @@ def test_http_request_node_uses_default_http_client_when_not_injected():
 
 def test_document_extractor_node_uses_default_http_client_when_not_injected():
     node = DocumentExtractorNode(
-        id="extractor",
+        node_id="extractor",
         config={
             "id": "extractor",
             "data": {
@@ -176,7 +183,7 @@ def test_document_extractor_node_uses_default_http_client_when_not_injected():
             },
         },
         graph_init_params=build_graph_init_params(
-            graph_config={"nodes": [], "edges": []}
+            graph_config={"nodes": [], "edges": []},
         ),
         graph_runtime_state=_build_runtime_state(),
     )
@@ -203,7 +210,10 @@ def test_file_saver_impl_uses_default_http_client_when_not_injected():
         (QuestionClassifierNode.__init__, "http_client"),
     ],
 )
-def test_http_client_injection_is_optional(callable_obj, parameter_name):
+def test_http_client_injection_is_optional(
+    callable_obj: Any,
+    parameter_name: str,
+) -> None:
     parameter = inspect.signature(callable_obj).parameters[parameter_name]
 
     assert parameter.default is None

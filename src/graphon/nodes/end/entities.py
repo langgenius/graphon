@@ -6,21 +6,18 @@ from graphon.nodes.base.entities import OutputVariableEntity
 
 
 class EndNodeData(BaseNodeData):
-    """
-    END Node Data.
-    """
+    """END Node Data."""
 
     type: NodeType = BuiltinNodeTypes.END
     outputs: list[OutputVariableEntity]
 
 
 class EndStreamParam(BaseModel):
-    """
-    EndStreamParam entity
-    """
+    """EndStreamParam entity"""
 
     end_dependencies: dict[str, list[str]] = Field(
-        ..., description="end dependencies (end node id -> dependent node ids)"
+        ...,
+        description="end dependencies (end node id -> dependent node ids)",
     )
     end_stream_variable_selector_mapping: dict[str, list[list[str]]] = Field(
         ...,

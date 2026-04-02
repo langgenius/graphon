@@ -31,9 +31,7 @@ def _is_valid_var_type(seg_type: SegmentType) -> SegmentType:
 
 
 class LoopVariableData(BaseModel):
-    """
-    Loop Variable Data.
-    """
+    """Loop Variable Data."""
 
     label: str
     var_type: Annotated[SegmentType, AfterValidator(_is_valid_var_type)]
@@ -47,61 +45,49 @@ class LoopNodeData(BaseLoopNodeData):
     break_conditions: list[Condition]  # Conditions to break the loop
     logical_operator: Literal["and", "or"]
     loop_variables: list[LoopVariableData] | None = Field(
-        default_factory=list[LoopVariableData]
+        default_factory=list[LoopVariableData],
     )
     outputs: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("outputs", mode="before")
     @classmethod
-    def validate_outputs(cls, v):
+    def validate_outputs(cls, v: Any) -> dict[str, Any]:
         if v is None:
             return {}
         return v
 
 
 class LoopStartNodeData(BaseNodeData):
-    """
-    Loop Start Node Data.
-    """
+    """Loop Start Node Data."""
 
     type: NodeType = BuiltinNodeTypes.LOOP_START
 
 
 class LoopEndNodeData(BaseNodeData):
-    """
-    Loop End Node Data.
-    """
+    """Loop End Node Data."""
 
     type: NodeType = BuiltinNodeTypes.LOOP_END
 
 
 class LoopState(BaseLoopState):
-    """
-    Loop State.
-    """
+    """Loop State."""
 
     outputs: list[Any] = Field(default_factory=list)
     current_output: Any = None
 
     class MetaData(BaseLoopState.MetaData):
-        """
-        Data.
-        """
+        """Data."""
 
         loop_length: int
 
     def get_last_output(self) -> Any:
-        """
-        Get last output.
-        """
+        """Get last output."""
         if self.outputs:
             return self.outputs[-1]
         return None
 
     def get_current_output(self) -> Any:
-        """
-        Get current output.
-        """
+        """Get current output."""
         return self.current_output
 
 

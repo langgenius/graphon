@@ -41,7 +41,10 @@ class TestMarkInactiveRootBranches:
 
         edges = {
             "edge1": Edge(
-                id="edge1", tail="root1", head="child1", source_handle="source"
+                id="edge1",
+                tail="root1",
+                head="child1",
+                source_handle="source",
             ),
         }
 
@@ -64,10 +67,16 @@ class TestMarkInactiveRootBranches:
 
         edges = {
             "edge1": Edge(
-                id="edge1", tail="root1", head="child1", source_handle="source"
+                id="edge1",
+                tail="root1",
+                head="child1",
+                source_handle="source",
             ),
             "edge2": Edge(
-                id="edge2", tail="root2", head="child2", source_handle="source"
+                id="edge2",
+                tail="root2",
+                head="child2",
+                source_handle="source",
             ),
         }
 
@@ -94,16 +103,28 @@ class TestMarkInactiveRootBranches:
 
         edges = {
             "edge1": Edge(
-                id="edge1", tail="root1", head="child1", source_handle="source"
+                id="edge1",
+                tail="root1",
+                head="child1",
+                source_handle="source",
             ),
             "edge2": Edge(
-                id="edge2", tail="root2", head="child2", source_handle="source"
+                id="edge2",
+                tail="root2",
+                head="child2",
+                source_handle="source",
             ),
             "edge3": Edge(
-                id="edge3", tail="child1", head="shared", source_handle="source"
+                id="edge3",
+                tail="child1",
+                head="shared",
+                source_handle="source",
             ),
             "edge4": Edge(
-                id="edge4", tail="child2", head="shared", source_handle="source"
+                id="edge4",
+                tail="child2",
+                head="shared",
+                source_handle="source",
             ),
         }
 
@@ -144,19 +165,34 @@ class TestMarkInactiveRootBranches:
 
         edges = {
             "edge1": Edge(
-                id="edge1", tail="root1", head="level1_a", source_handle="source"
+                id="edge1",
+                tail="root1",
+                head="level1_a",
+                source_handle="source",
             ),
             "edge2": Edge(
-                id="edge2", tail="root2", head="level1_b", source_handle="source"
+                id="edge2",
+                tail="root2",
+                head="level1_b",
+                source_handle="source",
             ),
             "edge3": Edge(
-                id="edge3", tail="level1_a", head="level2_a", source_handle="source"
+                id="edge3",
+                tail="level1_a",
+                head="level2_a",
+                source_handle="source",
             ),
             "edge4": Edge(
-                id="edge4", tail="level1_b", head="level2_b", source_handle="source"
+                id="edge4",
+                tail="level1_b",
+                head="level2_b",
+                source_handle="source",
             ),
             "edge5": Edge(
-                id="edge5", tail="level2_b", head="level3", source_handle="source"
+                id="edge5",
+                tail="level2_b",
+                head="level3",
+                source_handle="source",
             ),
         }
 
@@ -200,10 +236,16 @@ class TestMarkInactiveRootBranches:
 
         edges = {
             "edge1": Edge(
-                id="edge1", tail="root1", head="child1", source_handle="source"
+                id="edge1",
+                tail="root1",
+                head="child1",
+                source_handle="source",
             ),
             "edge2": Edge(
-                id="edge2", tail="non_root", head="child2", source_handle="source"
+                id="edge2",
+                tail="non_root",
+                head="child2",
+                source_handle="source",
             ),
         }
 
@@ -234,13 +276,22 @@ class TestMarkInactiveRootBranches:
 
         edges = {
             "edge1": Edge(
-                id="edge1", tail="root1", head="child1", source_handle="source"
+                id="edge1",
+                tail="root1",
+                head="child1",
+                source_handle="source",
             ),
             "edge2": Edge(
-                id="edge2", tail="root2", head="child2", source_handle="source"
+                id="edge2",
+                tail="root2",
+                head="child2",
+                source_handle="source",
             ),
             "edge3": Edge(
-                id="edge3", tail="root3", head="child3", source_handle="source"
+                id="edge3",
+                tail="root3",
+                head="child3",
+                source_handle="source",
             ),
         }
 
@@ -279,19 +330,34 @@ class TestMarkInactiveRootBranches:
 
         edges = {
             "edge1": Edge(
-                id="edge1", tail="root1", head="mid1", source_handle="source"
+                id="edge1",
+                tail="root1",
+                head="mid1",
+                source_handle="source",
             ),
             "edge2": Edge(
-                id="edge2", tail="root2", head="mid2", source_handle="source"
+                id="edge2",
+                tail="root2",
+                head="mid2",
+                source_handle="source",
             ),
             "edge3": Edge(
-                id="edge3", tail="root3", head="convergent", source_handle="source"
+                id="edge3",
+                tail="root3",
+                head="convergent",
+                source_handle="source",
             ),
             "edge4": Edge(
-                id="edge4", tail="mid1", head="convergent", source_handle="source"
+                id="edge4",
+                tail="mid1",
+                head="convergent",
+                source_handle="source",
             ),
             "edge5": Edge(
-                id="edge5", tail="mid2", head="convergent", source_handle="source"
+                id="edge5",
+                tail="mid2",
+                head="convergent",
+                source_handle="source",
             ),
         }
 

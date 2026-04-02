@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, NewType, override
 from typing_extensions import TypeIs
 
 from graphon.entities.graph_config import NodeConfigDictAdapter
+from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import (
     BuiltinNodeTypes,
     NodeExecutionType,
@@ -37,6 +38,7 @@ from graphon.node_events.node import StreamCompletedEvent
 from graphon.nodes.base.node import Node
 from graphon.nodes.base.usage_tracking_mixin import LLMUsageTrackingMixin
 from graphon.nodes.iteration.entities import ErrorHandleMode, IterationNodeData
+from graphon.runtime.graph_runtime_state import ChildGraphNotFoundError
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import ArrayAnySegment, ArraySegment, NoneSegment
 from graphon.variables.variables import IntegerVariable
@@ -61,9 +63,7 @@ EmptyArraySegment = NewType("EmptyArraySegment", ArraySegment)
 
 
 class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
-    """
-    Iteration Node.
-    """
+    """Iteration Node."""
 
     node_type = BuiltinNodeTypes.ITERATION
     execution_type = NodeExecutionType.CONTAINER
@@ -71,8 +71,10 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
     @classmethod
     @override
     def get_default_config(
-        cls, filters: Mapping[str, object] | None = None
+        cls,
+        filters: Mapping[str, object] | None = None,
     ) -> Mapping[str, object]:
+        _ = filters
         return {
             "type": "iteration",
             "config": {
@@ -143,30 +145,31 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
 
     def _get_iterator_variable(self) -> ArraySegment | NoneSegment:
         variable = self.graph_runtime_state.variable_pool.get(
-            self.node_data.iterator_selector
+            self.node_data.iterator_selector,
         )
 
         if not variable:
-            raise IteratorVariableNotFoundError(
-                f"iterator variable {self.node_data.iterator_selector} not found"
-            )
+            msg = f"iterator variable {self.node_data.iterator_selector} not found"
+            raise IteratorVariableNotFoundError(msg)
 
         if not isinstance(variable, ArraySegment) and not isinstance(
-            variable, NoneSegment
+            variable,
+            NoneSegment,
         ):
-            raise InvalidIteratorValueError(
-                f"invalid iterator value: {variable}, please provide a list."
-            )
+            msg = f"invalid iterator value: {variable}, please provide a list."
+            raise InvalidIteratorValueError(msg)
 
         return variable
 
     def _is_empty_iteration(
-        self, variable: ArraySegment | NoneSegment
+        self,
+        variable: ArraySegment | NoneSegment,
     ) -> TypeIs[NoneSegment | EmptyArraySegment]:
         return isinstance(variable, NoneSegment) or len(variable.value) == 0
 
     def _handle_empty_iteration(
-        self, variable: ArraySegment | NoneSegment
+        self,
+        variable: ArraySegment | NoneSegment,
     ) -> Generator[NodeEventBase, None, None]:
         # Try our best to preserve the type information.
         if isinstance(variable, ArraySegment):
@@ -180,26 +183,27 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
                 # TODO(QuantumGhost): is it possible to compute the type of `output`
                 # from graph definition?
                 outputs={"output": output},
-            )
+            ),
         )
 
     def _validate_and_get_iterator_list(
-        self, variable: ArraySegment
+        self,
+        variable: ArraySegment,
     ) -> Sequence[object]:
         iterator_list_value = variable.to_object()
 
         if not isinstance(iterator_list_value, list):
-            raise InvalidIteratorValueError(
+            msg = (
                 f"Invalid iterator value: {iterator_list_value}, please provide a list."
             )
+            raise InvalidIteratorValueError(msg)
 
         return iterator_list_value
 
     def _validate_start_node(self) -> None:
         if not self.node_data.start_node_id:
-            raise StartNodeIdNotFoundError(
-                f"field start_node_id in iteration {self._node_id} not found"
-            )
+            msg = f"field start_node_id in iteration {self._node_id} not found"
+            raise StartNodeIdNotFoundError(msg)
 
     def _execute_iterations(
         self,
@@ -233,7 +237,8 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
                     )
                 finally:
                     self._merge_graph_engine_usage(
-                        usage_accumulator=usage_accumulator, graph_engine=graph_engine
+                        usage_accumulator=usage_accumulator,
+                        graph_engine=graph_engine,
                     )
                 iter_run_map[str(index)] = (
                     datetime.now(UTC).replace(tzinfo=None) - iter_start_at
@@ -303,7 +308,8 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
                     iter_run_map[str(index)] = iteration_duration
 
                     usage_accumulator[0] = self._merge_usage(
-                        usage_accumulator[0], iteration_usage
+                        usage_accumulator[0],
+                        iteration_usage,
                     )
                     merged_usage_indexes.add(index)
 
@@ -328,7 +334,7 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
                             usage_accumulator=usage_accumulator,
                             merged_usage_indexes=merged_usage_indexes,
                         )
-                        raise e
+                        raise
 
                     # Handle errors based on error_handle_mode
                     match self.node_data.error_handle_mode:
@@ -337,7 +343,7 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
                             for f in future_to_index:
                                 if f != future:
                                     f.cancel()
-                            raise IterationNodeError(str(e))
+                            raise IterationNodeError(str(e)) from e
                         case ErrorHandleMode.CONTINUE_ON_ERROR:
                             outputs[index] = None
                         case ErrorHandleMode.REMOVE_ABNORMAL_OUTPUT:
@@ -356,14 +362,16 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
         if graph_engine is None:
             return
         usage_accumulator[0] = IterationNode._merge_usage(
-            usage_accumulator[0], graph_engine.graph_runtime_state.llm_usage
+            usage_accumulator[0],
+            graph_engine.graph_runtime_state.llm_usage,
         )
 
     def _abort_parallel_siblings(
         self,
         *,
         future_to_index: Mapping[
-            Future[tuple[float, list[GraphNodeEventBase], object | None, LLMUsage]], int
+            Future[tuple[float, list[GraphNodeEventBase], object | None, LLMUsage]],
+            int,
         ],
         current_future: Future[
             tuple[float, list[GraphNodeEventBase], object | None, LLMUsage]
@@ -385,7 +393,8 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
         self,
         *,
         future_to_index: Mapping[
-            Future[tuple[float, list[GraphNodeEventBase], object | None, LLMUsage]], int
+            Future[tuple[float, list[GraphNodeEventBase], object | None, LLMUsage]],
+            int,
         ],
         current_future: Future[
             tuple[float, list[GraphNodeEventBase], object | None, LLMUsage]
@@ -425,7 +434,6 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
             started_child_engines[index] = graph_engine
 
         return self._execute_parallel_iteration_with_graph_engine(
-            index=index,
             graph_engine=graph_engine,
         )
 
@@ -437,27 +445,26 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
         """Execute a single iteration in parallel mode and return results."""
         graph_engine = self._create_graph_engine(index, item)
         return self._execute_parallel_iteration_with_graph_engine(
-            index=index, graph_engine=graph_engine
+            graph_engine=graph_engine,
         )
 
     def _execute_parallel_iteration_with_graph_engine(
         self,
         *,
-        index: int,
         graph_engine: "GraphEngine",
     ) -> tuple[float, list[GraphNodeEventBase], object | None, LLMUsage]:
         """Execute a prepared child engine in parallel mode and return results."""
         iter_start_at = datetime.now(UTC).replace(tzinfo=None)
-        events: list[GraphNodeEventBase] = []
         outputs_temp: list[object] = []
 
         # Collect events instead of yielding them directly
-        for event in self._run_single_iter(
-            variable_pool=graph_engine.graph_runtime_state.variable_pool,
-            outputs=outputs_temp,
-            graph_engine=graph_engine,
-        ):
-            events.append(event)
+        events = list(
+            self._run_single_iter(
+                variable_pool=graph_engine.graph_runtime_state.variable_pool,
+                outputs=outputs_temp,
+                graph_engine=graph_engine,
+            ),
+        )
 
         # Get the output value from the temporary outputs list
         output_value = outputs_temp[0] if outputs_temp else None
@@ -509,17 +516,20 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
                     WorkflowNodeExecutionMetadataKey.CURRENCY: usage.currency,
                 },
                 llm_usage=usage,
-            )
+            ),
         )
 
     def _flatten_outputs_if_needed(self, outputs: list[object]) -> list[object]:
-        """
-        Flatten the outputs list if all elements are lists.
+        """Flatten the outputs list if all elements are lists.
         This maintains backward compatibility with version 1.8.1 behavior.
 
         If flatten_output is False, returns outputs as-is (nested structure).
         If flatten_output is True (default), flattens the list if all
         elements are lists.
+
+        Returns:
+            Either the original outputs or a flattened list, depending on settings.
+
         """
         # If flatten_output is disabled, return outputs as-is
         if not self.node_data.flatten_output:
@@ -585,7 +595,7 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
                     WorkflowNodeExecutionMetadataKey.CURRENCY: usage.currency,
                 },
                 llm_usage=usage,
-            )
+            ),
         )
 
     @classmethod
@@ -622,7 +632,7 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
             # variable selector to variable mapping
             try:
                 typed_sub_node_config = NodeConfigDictAdapter.validate_python(
-                    sub_node_config
+                    sub_node_config,
                 )
                 node_type = typed_sub_node_config["data"].type
                 node_mapping = Node.get_node_type_classes_mapping()
@@ -633,7 +643,8 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
 
                 sub_node_variable_mapping = (
                     node_cls.extract_variable_selector_to_variable_mapping(
-                        graph_config=graph_config, config=typed_sub_node_config
+                        graph_config=graph_config,
+                        config=typed_sub_node_config,
                     )
                 )
             except NotImplementedError:
@@ -649,19 +660,17 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
             variable_mapping.update(sub_node_variable_mapping)
 
         # remove variable out from iteration
-        variable_mapping = {
+        return {
             key: value
             for key, value in variable_mapping.items()
             if value[0] not in iteration_node_ids
         }
 
-        return variable_mapping
-
     def _append_iteration_info_to_event(
         self,
         event: GraphNodeEventBase,
         iter_run_index: int,
-    ):
+    ) -> None:
         event.in_iteration_id = self._node_id
         iter_metadata = {
             WorkflowNodeExecutionMetadataKey.ITERATION_ID: self._node_id,
@@ -683,49 +692,42 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
         # get current iteration index
         index_variable = variable_pool.get([self._node_id, "index"])
         if not isinstance(index_variable, IntegerVariable):
-            raise IterationIndexNotFoundError(
-                f"iteration {self._node_id} current index not found"
-            )
+            msg = f"iteration {self._node_id} current index not found"
+            raise IterationIndexNotFoundError(msg)
         current_index = index_variable.value
+        stop_iteration = False
         for event in rst:
-            if (
-                isinstance(event, GraphNodeEventBase)
-                and event.node_type == BuiltinNodeTypes.ITERATION_START
-            ):
-                continue
+            match event:
+                case GraphNodeEventBase(node_type=BuiltinNodeTypes.ITERATION_START):
+                    continue
+                case GraphNodeEventBase():
+                    self._append_iteration_info_to_event(
+                        event=event,
+                        iter_run_index=current_index,
+                    )
+                    yield event
+                case GraphRunSucceededEvent() | GraphRunPartialSucceededEvent():
+                    result = variable_pool.get(self.node_data.output_selector)
+                    outputs.append(None if result is None else result.to_object())
+                    stop_iteration = True
+                case GraphRunAbortedEvent(reason=reason):
+                    raise ChildGraphAbortedError(reason or _DEFAULT_CHILD_ABORT_REASON)
+                case GraphRunFailedEvent(error=error):
+                    match self.node_data.error_handle_mode:
+                        case ErrorHandleMode.TERMINATED:
+                            raise IterationNodeError(error)
+                        case ErrorHandleMode.CONTINUE_ON_ERROR:
+                            outputs.append(None)
+                            stop_iteration = True
+                        case ErrorHandleMode.REMOVE_ABNORMAL_OUTPUT:
+                            stop_iteration = True
 
-            if isinstance(event, GraphNodeEventBase):
-                self._append_iteration_info_to_event(
-                    event=event, iter_run_index=current_index
-                )
-                yield event
-            elif isinstance(
-                event, (GraphRunSucceededEvent, GraphRunPartialSucceededEvent)
-            ):
-                result = variable_pool.get(self.node_data.output_selector)
-                if result is None:
-                    outputs.append(None)
-                else:
-                    outputs.append(result.to_object())
-                return
-            elif isinstance(event, GraphRunAbortedEvent):
-                raise ChildGraphAbortedError(
-                    event.reason or _DEFAULT_CHILD_ABORT_REASON
-                )
-            elif isinstance(event, GraphRunFailedEvent):
-                match self.node_data.error_handle_mode:
-                    case ErrorHandleMode.TERMINATED:
-                        raise IterationNodeError(event.error)
-                    case ErrorHandleMode.CONTINUE_ON_ERROR:
-                        outputs.append(None)
-                        return
-                    case ErrorHandleMode.REMOVE_ABNORMAL_OUTPUT:
-                        return
+            if stop_iteration:
+                break
 
-    def _create_graph_engine(self, index: int, item: object):
-        from graphon.entities.graph_init_params import GraphInitParams
-        from graphon.runtime.graph_runtime_state import ChildGraphNotFoundError
+        return
 
+    def _create_graph_engine(self, index: int, item: object) -> Any:
         # Create GraphInitParams for child graph execution.
         graph_init_params = GraphInitParams(
             workflow_id=self.workflow_id,
@@ -735,7 +737,7 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
         )
         # Create a deep copy of the variable pool for each iteration
         variable_pool_copy = self.graph_runtime_state.variable_pool.model_copy(
-            deep=True
+            deep=True,
         )
 
         # append iteration variable (item, index) to variable pool
@@ -743,9 +745,8 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
         variable_pool_copy.add([self._node_id, "item"], item)
         root_node_id = self.node_data.start_node_id
         if root_node_id is None:
-            raise StartNodeIdNotFoundError(
-                f"field start_node_id in iteration {self._node_id} not found"
-            )
+            msg = f"field start_node_id in iteration {self._node_id} not found"
+            raise StartNodeIdNotFoundError(msg)
 
         try:
             return self.graph_runtime_state.create_child_engine(
@@ -755,4 +756,5 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
                 variable_pool=variable_pool_copy,
             )
         except ChildGraphNotFoundError as exc:
-            raise IterationGraphNotFoundError("iteration graph not found") from exc
+            msg = "iteration graph not found"
+            raise IterationGraphNotFoundError(msg) from exc

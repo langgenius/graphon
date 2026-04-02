@@ -1,4 +1,5 @@
 import decimal
+from typing import Any
 
 from graphon.model_runtime.entities.common_entities import I18nObject
 from graphon.model_runtime.entities.defaults import PARAMETER_RULE_TEMPLATE
@@ -23,8 +24,7 @@ from graphon.model_runtime.runtime import ModelRuntime
 
 
 class AIModel:
-    """
-    Runtime-facing base class for all model providers.
+    """Runtime-facing base class for all model providers.
 
     This stays a regular Python class because instances hold live collaborators
     such as the provider schema and runtime adapter rather than user input that
@@ -45,9 +45,8 @@ class AIModel:
         started_at: float = 0,
     ) -> None:
         if getattr(type(self), "model_type", None) is None:
-            raise TypeError(
-                "AIModel subclasses must define model_type as a class attribute"
-            )
+            msg = "AIModel subclasses must define model_type as a class attribute"
+            raise TypeError(msg)
 
         self.model_type = type(self).model_type
         self.provider_schema = provider_schema
@@ -60,12 +59,11 @@ class AIModel:
 
     @property
     def provider_display_name(self) -> str:
-        return self.provider_schema.label.en_US
+        return self.provider_schema.label.en_us
 
     @property
     def _invoke_error_mapping(self) -> dict[type[Exception], list[type[Exception]]]:
-        """
-        Map model invoke error to unified error.
+        """Map model invoke error to unified error.
 
         The key is the error type thrown to the caller, and the value contains
         runtime-facing exception types that should be normalized to it.
@@ -80,12 +78,7 @@ class AIModel:
         }
 
     def _transform_invoke_error(self, error: Exception) -> Exception:
-        """
-        Transform invoke error to unified error
-
-        :param error: model invoke error
-        :return: unified error
-        """
+        """Normalize provider/runtime exceptions into graphon-facing invoke errors."""
         for invoke_error, model_errors in self._invoke_error_mapping.items():
             if isinstance(error, tuple(model_errors)):
                 if invoke_error == InvokeAuthorizationError:
@@ -93,7 +86,7 @@ class AIModel:
                         description=(
                             f"[{self.provider_display_name}] Incorrect model "
                             "credentials provided, please check and try again."
-                        )
+                        ),
                     )
                 if isinstance(invoke_error, InvokeError):
                     return InvokeError(
@@ -101,26 +94,22 @@ class AIModel:
                             f"[{self.provider_display_name}] "
                             f"{invoke_error.description}, "
                             f"{error!s}"
-                        )
+                        ),
                     )
                 return error
 
         return InvokeError(
-            description=f"[{self.provider_display_name}] Error: {error!s}"
+            description=f"[{self.provider_display_name}] Error: {error!s}",
         )
 
     def get_price(
-        self, model: str, credentials: dict, price_type: PriceType, tokens: int
+        self,
+        model: str,
+        credentials: dict,
+        price_type: PriceType,
+        tokens: int,
     ) -> PriceInfo:
-        """
-        Get price for given model and tokens
-
-        :param model: model name
-        :param credentials: model credentials
-        :param price_type: price type
-        :param tokens: number of tokens
-        :return: price info
-        """
+        """Calculate pricing metadata for a token count on a given model."""
         # get model schema
         model_schema = self.get_model_schema(model, credentials)
 
@@ -147,10 +136,12 @@ class AIModel:
 
         # calculate total amount
         if not price_config:
-            raise ValueError(f"Price config not found for model {model}")
+            msg = f"Price config not found for model {model}"
+            raise ValueError(msg)
         total_amount = tokens * unit_price * price_config.unit
         total_amount = total_amount.quantize(
-            decimal.Decimal("0.0000001"), rounding=decimal.ROUND_HALF_UP
+            decimal.Decimal("0.0000001"),
+            rounding=decimal.ROUND_HALF_UP,
         )
 
         return PriceInfo(
@@ -161,15 +152,11 @@ class AIModel:
         )
 
     def get_model_schema(
-        self, model: str, credentials: dict | None = None
+        self,
+        model: str,
+        credentials: dict | None = None,
     ) -> AIModelEntity | None:
-        """
-        Get model schema by model name and credentials
-
-        :param model: model name
-        :param credentials: model credentials
-        :return: model schema
-        """
+        """Fetch the resolved model schema for a model and credential set."""
         return self.model_runtime.get_model_schema(
             provider=self.provider,
             model_type=self.model_type,
@@ -178,16 +165,11 @@ class AIModel:
         )
 
     def get_customizable_model_schema_from_credentials(
-        self, model: str, credentials: dict
+        self,
+        model: str,
+        credentials: dict,
     ) -> AIModelEntity | None:
-        """
-        Get customizable model schema from credentials
-
-        :param model: model name
-        :param credentials: model credentials
-        :return: model schema
-        """
-
+        """Resolve and hydrate a customizable model schema from credentials."""
         # get customizable model schema
         schema = self.get_customizable_model_schema(model, credentials)
         if not schema:
@@ -199,11 +181,11 @@ class AIModel:
             if parameter_rule.use_template:
                 try:
                     default_parameter_name = DefaultParameterName.value_of(
-                        parameter_rule.use_template
+                        parameter_rule.use_template,
                     )
                     default_parameter_rule = (
                         self._get_default_parameter_rule_variable_map(
-                            default_parameter_name
+                            default_parameter_name,
                         )
                     )
                     if not parameter_rule.max and "max" in default_parameter_rule:
@@ -227,28 +209,28 @@ class AIModel:
                         parameter_rule.required = default_parameter_rule["required"]
                     if not parameter_rule.help and "help" in default_parameter_rule:
                         parameter_rule.help = I18nObject(
-                            en_US=default_parameter_rule["help"]["en_US"],
+                            en_us=default_parameter_rule["help"]["en_US"],
                         )
                     if (
                         parameter_rule.help
-                        and not parameter_rule.help.en_US
+                        and not parameter_rule.help.en_us
                         and (
                             "help" in default_parameter_rule
                             and "en_US" in default_parameter_rule["help"]
                         )
                     ):
-                        parameter_rule.help.en_US = default_parameter_rule["help"][
+                        parameter_rule.help.en_us = default_parameter_rule["help"][
                             "en_US"
                         ]
                     if (
                         parameter_rule.help
-                        and not parameter_rule.help.zh_Hans
+                        and not parameter_rule.help.zh_hans
                         and (
                             "help" in default_parameter_rule
                             and "zh_Hans" in default_parameter_rule["help"]
                         )
                     ):
-                        parameter_rule.help.zh_Hans = default_parameter_rule[
+                        parameter_rule.help.zh_hans = default_parameter_rule[
                             "help"
                         ].get("zh_Hans", default_parameter_rule["help"]["en_US"])
                 except ValueError:
@@ -261,27 +243,24 @@ class AIModel:
         return schema
 
     def get_customizable_model_schema(
-        self, model: str, credentials: dict
+        self,
+        model: str,
+        credentials: dict,
     ) -> AIModelEntity | None:
-        """
-        Get customizable model schema
-
-        :param model: model name
-        :param credentials: model credentials
-        :return: model schema
-        """
+        """Return the provider-specific customizable model schema, if supported."""
+        _ = model
+        _ = credentials
         return None
 
-    def _get_default_parameter_rule_variable_map(self, name: DefaultParameterName):
-        """
-        Get default parameter rule for given name
-
-        :param name: parameter name
-        :return: parameter rule
-        """
+    def _get_default_parameter_rule_variable_map(
+        self,
+        name: DefaultParameterName,
+    ) -> dict[str, Any]:
+        """Look up the default parameter rule template for a named parameter."""
         default_parameter_rule = PARAMETER_RULE_TEMPLATE.get(name)
 
         if not default_parameter_rule:
-            raise Exception(f"Invalid model parameter rule name {name}")
+            msg = f"Invalid model parameter rule name {name}"
+            raise ValueError(msg)
 
         return default_parameter_rule

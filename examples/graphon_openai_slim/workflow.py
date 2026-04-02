@@ -4,8 +4,8 @@ Run from this directory:
 
     python3 workflow.py "Explain Graphon in one short sentence."
 
-The script automatically loads `examples/graphon_openai_slim/.env`. Existing environment variables
-take precedence over `.env` values.
+The script automatically loads `examples/graphon_openai_slim/.env`.
+Existing environment variables take precedence over `.env` values.
 
 Required environment variables:
 - `OPENAI_API_KEY`
@@ -20,7 +20,6 @@ Optional environment variables:
 
 from __future__ import annotations
 
-# ruff: noqa: E402
 import argparse
 import importlib.util
 import os
@@ -61,6 +60,7 @@ bootstrap_local_python()
 if importlib.util.find_spec("graphon") is None and str(LOCAL_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(LOCAL_SRC_DIR))
 
+# ruff: noqa: E402
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.file.enums import FileType
 from graphon.file.models import File
@@ -119,7 +119,8 @@ def load_default_env_file() -> None:
 def load_env_file(path: Path) -> None:
     env_dir = path.resolve().parent
     for line_number, raw_line in enumerate(
-        path.read_text(encoding="utf-8").splitlines(), start=1
+        path.read_text(encoding="utf-8").splitlines(),
+        start=1,
     ):
         line = raw_line.strip()
         if not line or line.startswith("#"):
@@ -127,16 +128,17 @@ def load_env_file(path: Path) -> None:
         if line.startswith("export "):
             line = line.removeprefix("export ").strip()
         if "=" not in line:
-            raise ValueError(f"Invalid .env line {line_number} in {path}: {raw_line}")
+            msg = f"Invalid .env line {line_number} in {path}: {raw_line}"
+            raise ValueError(msg)
 
         key, value = line.split("=", 1)
         key = key.strip()
         if not key:
-            raise ValueError(f"Invalid .env key on line {line_number} in {path}")
+            msg = f"Invalid .env key on line {line_number} in {path}"
+            raise ValueError(msg)
         if key not in ALLOWED_ENV_VARS:
-            raise ValueError(
-                f"Unsupported .env key {key!r} on line {line_number} in {path}"
-            )
+            msg = f"Unsupported .env key {key!r} on line {line_number} in {path}"
+            raise ValueError(msg)
 
         os.environ.setdefault(
             key,
@@ -186,18 +188,21 @@ class TextOnlyFileSaver:
         extension_override: str | None = None,
     ) -> File:
         _ = data, mime_type, file_type, extension_override
-        raise RuntimeError("This example only supports text responses.")
+        msg = "This example only supports text responses."
+        raise RuntimeError(msg)
 
     def save_remote_url(self, url: str, file_type: FileType) -> File:
         _ = url, file_type
-        raise RuntimeError("This example only supports text responses.")
+        msg = "This example only supports text responses."
+        raise RuntimeError(msg)
 
 
 def require_env(name: str) -> str:
     value = env_value(name)
     if value:
         return value
-    raise ValueError(f"{name} is required.")
+    msg = f"{name} is required."
+    raise ValueError(msg)
 
 
 def env_value(name: str) -> str:
@@ -205,7 +210,9 @@ def env_value(name: str) -> str:
     if raw_value is not None:
         return raw_value.strip()
     return normalize_env_value(
-        name, ALLOWED_ENV_VARS[name], base_dir=EXAMPLE_DIR
+        name,
+        ALLOWED_ENV_VARS[name],
+        base_dir=EXAMPLE_DIR,
     ).strip()
 
 
@@ -226,10 +233,10 @@ def build_runtime() -> tuple[SlimRuntime, str]:
                     plugin_id=require_env("SLIM_PLUGIN_ID"),
                     provider=provider,
                     plugin_root=plugin_root,
-                )
+                ),
             ],
             local=SlimLocalSettings(folder=plugin_folder),
-        )
+        ),
     )
     return runtime, provider
 
@@ -242,7 +249,7 @@ def build_graph(
     graph_runtime_state: GraphRuntimeState,
 ) -> Graph:
     start_node = StartNode(
-        id="start",
+        node_id="start",
         config={
             "id": "start",
             "data": StartNodeData(
@@ -253,7 +260,7 @@ def build_graph(
                         label="Query",
                         type=VariableEntityType.PARAGRAPH,
                         required=True,
-                    )
+                    ),
                 ],
             ),
         },
@@ -262,7 +269,7 @@ def build_graph(
     )
 
     llm_node = LLMNode(
-        id="llm",
+        node_id="llm",
         config={
             "id": "llm",
             "data": LLMNodeData(
@@ -293,7 +300,7 @@ def build_graph(
     )
 
     output_node = AnswerNode(
-        id="output",
+        node_id="output",
         config={
             "id": "output",
             "data": AnswerNodeData(
@@ -327,7 +334,9 @@ def write_stream_chunk(event: object, *, stream_output: IO[str]) -> bool:
 
 
 def _execute_workflow(
-    query: str, *, stream_output: IO[str] | None = None
+    query: str,
+    *,
+    stream_output: IO[str] | None = None,
 ) -> tuple[str, bool]:
     load_default_env_file()
     runtime, provider = build_runtime()
@@ -367,13 +376,15 @@ def _execute_workflow(
     streamed = False
     for event in engine.run():
         if stream_output is not None and write_stream_chunk(
-            event, stream_output=stream_output
+            event,
+            stream_output=stream_output,
         ):
             streamed = True
 
     answer = graph_runtime_state.get_output("answer")
     if not isinstance(answer, str):
-        raise RuntimeError("Workflow did not produce a text answer.")
+        msg = "Workflow did not produce a text answer."
+        raise TypeError(msg)
     if stream_output is not None and streamed and not answer.endswith("\n"):
         stream_output.write("\n")
         stream_output.flush()
@@ -402,7 +413,8 @@ def main() -> int:
     args = parse_args()
     answer, streamed = _execute_workflow(args.query, stream_output=sys.stdout)
     if not streamed:
-        print(answer)
+        sys.stdout.write(f"{answer}\n")
+        sys.stdout.flush()
     return 0
 
 

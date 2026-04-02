@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 from pydantic import BaseModel, ValidationError
 
@@ -39,14 +41,14 @@ class TestPauseReasonDiscriminator:
                     "reason": {
                         "TYPE": "scheduled_pause",
                         "message": "Hold on",
-                    }
+                    },
                 },
                 SchedulingPause(message="Hold on"),
                 id="SchedulingPause",
             ),
         ],
     )
-    def test_model_validate(self, dict_value, expected):
+    def test_model_validate(self, dict_value: dict[str, Any], expected: PauseReason):
         holder = _Holder.model_validate(dict_value)
 
         assert type(holder.reason) is type(expected)
@@ -65,7 +67,7 @@ class TestPauseReasonDiscriminator:
         ],
         ids=lambda x: type(x).__name__,
     )
-    def test_model_construct(self, reason):
+    def test_model_construct(self, reason: PauseReason):
         holder = _Holder(reason=reason)
         assert holder.reason == reason
 

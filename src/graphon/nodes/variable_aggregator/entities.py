@@ -6,16 +6,12 @@ from graphon.variables.types import SegmentType
 
 
 class AdvancedSettings(BaseModel):
-    """
-    Advanced setting.
-    """
+    """Advanced setting."""
 
     group_enabled: bool
 
     class Group(BaseModel):
-        """
-        Group.
-        """
+        """Group."""
 
         output_type: SegmentType
         variables: list[list[str]]
@@ -25,9 +21,7 @@ class AdvancedSettings(BaseModel):
 
 
 class VariableAggregatorNodeData(BaseNodeData):
-    """
-    Variable Aggregator Node Data.
-    """
+    """Variable Aggregator Node Data."""
 
     type: NodeType = BuiltinNodeTypes.VARIABLE_AGGREGATOR
     output_type: str

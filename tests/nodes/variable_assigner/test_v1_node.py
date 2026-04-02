@@ -1,4 +1,5 @@
 import time
+from typing import Any
 
 from graphon.graph_events.node import NodeRunSucceededEvent, NodeRunVariableUpdatedEvent
 from graphon.nodes.variable_assigner.common import helpers as common_helpers
@@ -13,15 +14,22 @@ from graphon.variables.variables import (
 from ...helpers import build_graph_init_params, build_variable_pool
 
 
-def _build_node(*, variable_pool, assigned_selector, write_mode, input_selector):
+def _build_node(
+    *,
+    variable_pool: Any,
+    assigned_selector: Any,
+    write_mode: WriteMode,
+    input_selector: Any,
+) -> VariableAssignerNode:
     graph_config = {"nodes": [], "edges": []}
     init_params = build_graph_init_params(graph_config=graph_config)
     runtime_state = GraphRuntimeState(
-        variable_pool=variable_pool, start_at=time.perf_counter()
+        variable_pool=variable_pool,
+        start_at=time.perf_counter(),
     )
 
     return VariableAssignerNode(
-        id="assigner",
+        node_id="assigner",
         graph_init_params=init_params,
         graph_runtime_state=runtime_state,
         config={
@@ -38,10 +46,12 @@ def _build_node(*, variable_pool, assigned_selector, write_mode, input_selector)
 
 def test_overwrite_string_variable():
     conversation_variable = StringVariable(
-        name="test_conversation_variable", value="the first value"
+        name="test_conversation_variable",
+        value="the first value",
     )
     input_variable = StringVariable(
-        name="test_string_variable", value="the second value"
+        name="test_string_variable",
+        value="the second value",
     )
 
     variable_pool = build_variable_pool(
@@ -63,7 +73,7 @@ def test_overwrite_string_variable():
         event for event in events if isinstance(event, NodeRunSucceededEvent)
     )
     updated_variables = common_helpers.get_updated_variables(
-        succeeded_event.node_run_result.process_data
+        succeeded_event.node_run_result.process_data,
     )
 
     assert updated_variables is not None
@@ -79,10 +89,12 @@ def test_overwrite_string_variable():
 
 def test_append_variable_to_array():
     conversation_variable = ArrayStringVariable(
-        name="test_conversation_variable", value=["the first value"]
+        name="test_conversation_variable",
+        value=["the first value"],
     )
     input_variable = StringVariable(
-        name="test_string_variable", value="the second value"
+        name="test_string_variable",
+        value="the second value",
     )
 
     variable_pool = build_variable_pool(
@@ -104,7 +116,7 @@ def test_append_variable_to_array():
         event for event in events if isinstance(event, NodeRunSucceededEvent)
     )
     updated_variables = common_helpers.get_updated_variables(
-        succeeded_event.node_run_result.process_data
+        succeeded_event.node_run_result.process_data,
     )
 
     assert updated_variables is not None
@@ -115,7 +127,8 @@ def test_append_variable_to_array():
 
 def test_clear_array():
     conversation_variable = ArrayStringVariable(
-        name="test_conversation_variable", value=["the first value"]
+        name="test_conversation_variable",
+        value=["the first value"],
     )
 
     variable_pool = build_variable_pool(conversation_variables=[conversation_variable])
@@ -134,7 +147,7 @@ def test_clear_array():
         event for event in events if isinstance(event, NodeRunSucceededEvent)
     )
     updated_variables = common_helpers.get_updated_variables(
-        succeeded_event.node_run_result.process_data
+        succeeded_event.node_run_result.process_data,
     )
 
     assert updated_variables is not None

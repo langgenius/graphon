@@ -1,5 +1,4 @@
-"""
-Internal response session management for response coordinator.
+"""Internal response session management for response coordinator.
 
 This module contains the private ResponseSession class used internally
 by ResponseStreamCoordinator to manage streaming sessions.
@@ -15,8 +14,7 @@ from graphon.runtime.graph_runtime_state import NodeProtocol
 
 @dataclass
 class ResponseSession:
-    """
-    Represents an active response streaming session.
+    """Represents an active response streaming session.
 
     Note: This is an internal class not exposed in the public API.
     """
@@ -27,8 +25,7 @@ class ResponseSession:
 
     @classmethod
     def from_node(cls, node: NodeProtocol) -> ResponseSession:
-        """
-        Create a ResponseSession from a response-capable node.
+        """Create a ResponseSession from a response-capable node.
 
         The parameter is typed as `NodeProtocol` because the graph is exposed
         behind a protocol at the runtime layer. At runtime this must be a node
@@ -45,13 +42,15 @@ class ResponseSession:
         Raises:
             TypeError: If node does not implement the response-session
             streaming contract.
+
         """
         get_streaming_template = getattr(node, "get_streaming_template", None)
         if not callable(get_streaming_template):
-            raise TypeError(
+            msg = (
                 "ResponseSession.from_node requires "
                 "get_streaming_template() on response nodes"
             )
+            raise TypeError(msg)
         template = get_streaming_template()
 
         return cls(

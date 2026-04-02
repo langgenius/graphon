@@ -15,7 +15,8 @@ from .base import NodeEventBase
 
 class RunRetrieverResourceEvent(NodeEventBase):
     retriever_resources: Sequence[Mapping[str, Any]] = Field(
-        ..., description="retriever resources"
+        ...,
+        description="retriever resources",
     )
     context: str = Field(..., description="context")
     context_files: list[File] | None = Field(default=None, description="context files")
@@ -45,7 +46,8 @@ class StreamChunkEvent(NodeEventBase):
     )
     chunk: str = Field(..., description="the actual chunk content")
     is_final: bool = Field(
-        default=False, description="indicates if this is the last chunk"
+        default=False,
+        description="indicates if this is the last chunk",
     )
 
 

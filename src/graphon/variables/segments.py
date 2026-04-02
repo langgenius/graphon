@@ -23,14 +23,21 @@ class Segment(BaseModel):
 
     @field_validator("value_type")
     @classmethod
-    def validate_value_type(cls, value):
-        """
-        This validator checks if the provided value is equal to the default value
+    def validate_value_type(cls, value: SegmentType) -> SegmentType:
+        """Validate that the provided value is equal to the default value
         of the `'value_type'` field. If the value is different, a ValueError is
         raised.
+
+        Returns:
+            The validated `value_type` when it matches the segment class default.
+
+        Raises:
+            ValueError: If `value` differs from the segment class default `value_type`.
+
         """
         if value != cls.model_fields["value_type"].default:
-            raise ValueError("Cannot modify 'value_type'")
+            msg = "Cannot modify 'value_type'"
+            raise ValueError(msg)
         return value
 
     @property
@@ -47,9 +54,7 @@ class Segment(BaseModel):
 
     @property
     def size(self) -> int:
-        """
-        Return the size of the value in bytes.
-        """
+        """Return the size of the value in bytes."""
         return sys.getsizeof(self.value)
 
     def to_object(self):

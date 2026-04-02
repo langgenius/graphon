@@ -27,7 +27,7 @@ class TemplateTransformNode(Node[TemplateTransformNodeData]):
     @override
     def __init__(
         self,
-        id: str,
+        node_id: str,
         config: NodeConfigDict,
         graph_init_params: "GraphInitParams",
         graph_runtime_state: "GraphRuntimeState",
@@ -36,7 +36,7 @@ class TemplateTransformNode(Node[TemplateTransformNodeData]):
         max_output_length: int | None = None,
     ) -> None:
         super().__init__(
-            id=id,
+            node_id=node_id,
             config=config,
             graph_init_params=graph_init_params,
             graph_runtime_state=graph_runtime_state,
@@ -44,7 +44,8 @@ class TemplateTransformNode(Node[TemplateTransformNodeData]):
         self._jinja2_template_renderer = jinja2_template_renderer
 
         if max_output_length is not None and max_output_length <= 0:
-            raise ValueError("max_output_length must be a positive integer")
+            msg = "max_output_length must be a positive integer"
+            raise ValueError(msg)
         self._max_output_length = (
             max_output_length or DEFAULT_TEMPLATE_TRANSFORM_MAX_OUTPUT_LENGTH
         )
@@ -52,13 +53,11 @@ class TemplateTransformNode(Node[TemplateTransformNodeData]):
     @classmethod
     @override
     def get_default_config(
-        cls, filters: Mapping[str, object] | None = None
+        cls,
+        filters: Mapping[str, object] | None = None,
     ) -> Mapping[str, object]:
-        """
-        Get default config of node.
-        :param filters: filter by node config parameters.
-        :return:
-        """
+        """Build the default template-transform node config."""
+        _ = filters
         return {
             "type": "template-transform",
             "config": {
@@ -79,13 +78,14 @@ class TemplateTransformNode(Node[TemplateTransformNodeData]):
         for variable_selector in self.node_data.variables:
             variable_name = variable_selector.variable
             value = self.graph_runtime_state.variable_pool.get(
-                variable_selector.value_selector
+                variable_selector.value_selector,
             )
             variables[variable_name] = value.to_object() if value else None
         # Run code
         try:
             rendered = self._jinja2_template_renderer.render_template(
-                self.node_data.template, variables
+                self.node_data.template,
+                variables,
             )
         except TemplateRenderError as e:
             return NodeRunResult(

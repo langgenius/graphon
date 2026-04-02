@@ -8,9 +8,7 @@ from graphon.variables.input_entities import VariableEntity
 
 
 class StartNodeData(BaseNodeData):
-    """
-    Start Node Data
-    """
+    """Start Node Data"""
 
     type: NodeType = BuiltinNodeTypes.START
     variables: Sequence[VariableEntity] = Field(default_factory=list)

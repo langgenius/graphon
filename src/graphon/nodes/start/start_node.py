@@ -25,11 +25,11 @@ class StartNode(Node[StartNodeData]):
     @override
     def _run(self) -> NodeRunResult:
         node_inputs = dict(
-            self.graph_runtime_state.variable_pool.get_by_prefix(self.id)
+            self.graph_runtime_state.variable_pool.get_by_prefix(self.id),
         )
         self._validate_and_normalize_json_object_inputs(node_inputs)
         outputs = dict(
-            self.graph_runtime_state.variable_pool.flatten(unprefixed_node_id=self.id)
+            self.graph_runtime_state.variable_pool.flatten(unprefixed_node_id=self.id),
         )
         outputs.update(node_inputs)
 
@@ -40,7 +40,8 @@ class StartNode(Node[StartNodeData]):
         )
 
     def _validate_and_normalize_json_object_inputs(
-        self, node_inputs: dict[str, Any]
+        self,
+        node_inputs: dict[str, Any],
     ) -> None:
         for variable in self.node_data.variables:
             if variable.type != VariableEntityType.JSON_OBJECT:
@@ -50,14 +51,16 @@ class StartNode(Node[StartNodeData]):
             value = node_inputs.get(key)
 
             if value is None and variable.required:
-                raise ValueError(f"{key} is required in input form")
+                msg = f"{key} is required in input form"
+                raise ValueError(msg)
 
             # If no value provided, skip further processing for this key
             if not value:
                 continue
 
             if not isinstance(value, dict):
-                raise ValueError(f"JSON object for '{key}' must be an object")
+                msg = f"JSON object for '{key}' must be an object"
+                raise TypeError(msg)
 
             # Overwrite with normalized dict to ensure downstream consistency
             node_inputs[key] = value
@@ -70,6 +73,5 @@ class StartNode(Node[StartNodeData]):
             try:
                 Draft7Validator(schema).validate(value)
             except ValidationError as e:
-                raise ValueError(
-                    f"JSON object for '{key}' does not match schema: {e.message}"
-                )
+                msg = f"JSON object for '{key}' does not match schema: {e.message}"
+                raise ValueError(msg) from e

@@ -36,7 +36,8 @@ class SlimConfig:
 
     def __post_init__(self) -> None:
         if not self.bindings:
-            raise ValueError("SlimConfig.bindings must not be empty.")
+            msg = "SlimConfig.bindings must not be empty."
+            raise ValueError(msg)
 
         python_path = self.local.python_path
         if python_path == "python3":

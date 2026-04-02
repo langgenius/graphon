@@ -51,7 +51,8 @@ class GraphRunPausedEvent(BaseGraphEvent):
     """Event emitted when a graph run is paused by user command."""
 
     reasons: list[PauseReason] = Field(
-        description="reason for pause", default_factory=list
+        description="reason for pause",
+        default_factory=list,
     )
     outputs: dict[str, object] = Field(
         default_factory=dict,
