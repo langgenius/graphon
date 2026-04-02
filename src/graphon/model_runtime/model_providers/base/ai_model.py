@@ -209,7 +209,7 @@ class AIModel:
                         parameter_rule.required = default_parameter_rule["required"]
                     if not parameter_rule.help and "help" in default_parameter_rule:
                         parameter_rule.help = I18nObject(
-                            en_us=default_parameter_rule["help"]["en_US"],
+                            en_US=default_parameter_rule["help"]["en_US"],
                         )
                     if (
                         parameter_rule.help

@@ -1,7 +1,8 @@
 import time
 from typing import Any
 
-from graphon.enums import WorkflowNodeExecutionStatus
+from graphon.entities.graph_config import NodeConfigDictAdapter
+from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.graph_events.node import (
     NodeRunFailedEvent,
     NodeRunSucceededEvent,
@@ -34,14 +35,15 @@ def _build_node(
         node_id="assigner",
         graph_init_params=init_params,
         graph_runtime_state=runtime_state,
-        config={
+        config=NodeConfigDictAdapter.validate_python({
             "id": "assigner",
             "data": {
+                "type": BuiltinNodeTypes.VARIABLE_ASSIGNER,
                 "title": "Variable Assigner",
                 "version": "2",
                 "items": items,
             },
-        },
+        }),
     )
 
 

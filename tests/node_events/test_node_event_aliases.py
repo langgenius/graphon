@@ -1,3 +1,5 @@
+from graphon.entities.pause_reason import SchedulingPause
+from graphon.enums import WorkflowNodeExecutionStatus
 from graphon.graph_events.node import (
     NodeRunPauseRequestedEvent,
     NodeRunVariableUpdatedEvent,
@@ -22,7 +24,9 @@ def test_variable_alias_still_validates_in_event_models() -> None:
         "id": "evt-1",
         "node_id": "start",
         "node_type": "start",
-        "node_run_result": NodeRunResult(status="succeeded").model_dump(mode="python"),
+        "node_run_result": NodeRunResult(
+            status=WorkflowNodeExecutionStatus.SUCCEEDED,
+        ).model_dump(mode="python"),
     })
 
     assert node_event.variable.value == "hello"
@@ -38,8 +42,12 @@ def test_pause_reason_alias_still_validates_in_event_models() -> None:
         "id": "evt-2",
         "node_id": "start",
         "node_type": "start",
-        "node_run_result": NodeRunResult(status="succeeded").model_dump(mode="python"),
+        "node_run_result": NodeRunResult(
+            status=WorkflowNodeExecutionStatus.SUCCEEDED,
+        ).model_dump(mode="python"),
     })
 
+    assert isinstance(node_event.reason, SchedulingPause)
+    assert isinstance(graph_event.reason, SchedulingPause)
     assert node_event.reason.message == "Hold on"
     assert graph_event.reason.message == "Hold on"

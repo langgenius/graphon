@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from decimal import Decimal
 from enum import Enum
 from ipaddress import (
@@ -85,7 +85,7 @@ class TestEncoders:
         assert decimal_encoder(Decimal(-1)) == -1
 
     def test_generate_encoders_by_class_tuples(self):
-        type_map = {int: str, float: str, str: int}
+        type_map: dict[Any, Callable[[Any], Any]] = {int: str, float: str, str: int}
         result = generate_encoders_by_class_tuples(type_map)
         assert result[str] == (int, float)
         assert result[int] == (str,)
@@ -148,7 +148,7 @@ class TestEncoders:
         assert jsonable_encoder(gen()) == [1, 2]
 
     def test_jsonable_encoder_custom_encoder(self):
-        custom = {int: lambda x: str(x + 1)}
+        custom: dict[Any, Callable[[Any], Any]] = {int: lambda x: str(x + 1)}
         assert jsonable_encoder(1, custom_encoder=custom) == "2"
 
         class SubInt(int):

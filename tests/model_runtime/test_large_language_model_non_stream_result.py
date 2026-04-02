@@ -8,6 +8,7 @@ from graphon.model_runtime.entities.llm_entities import (
 )
 from graphon.model_runtime.entities.message_entities import (
     AssistantPromptMessage,
+    PromptMessageContentUnionTypes,
     TextPromptMessageContent,
     UserPromptMessage,
 )
@@ -19,7 +20,7 @@ from graphon.model_runtime.model_providers.base.large_language_model import (
 def _make_chunk(
     *,
     model: str = "test-model",
-    content: str | list[TextPromptMessageContent] | None,
+    content: str | list[PromptMessageContentUnionTypes] | None,
     tool_calls: list[AssistantPromptMessage.ToolCall] | None = None,
     usage: LLMUsage | None = None,
     system_fingerprint: str | None = None,
@@ -99,7 +100,7 @@ def test_non_stream_result_merges_first_chunk_content_and_tool_calls():
 def test__normalize_non_stream_runtime_result__from_first_chunk_list_content():
     prompt_messages = [UserPromptMessage(content="hi")]
 
-    content_list = [
+    content_list: list[PromptMessageContentUnionTypes] = [
         TextPromptMessageContent(data="a"),
         TextPromptMessageContent(data="b"),
     ]

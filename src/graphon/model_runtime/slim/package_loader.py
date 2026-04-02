@@ -315,7 +315,10 @@ class SlimPackageLoader:
         if not en_us:
             msg = f"Missing en_US translation in {value}"
             raise ValueError(msg)
-        return I18nObject(en_us=str(en_us), zh_hans=str(zh_hans or en_us))
+        return I18nObject.model_validate({
+            "en_US": str(en_us),
+            "zh_Hans": str(zh_hans or en_us),
+        })
 
     def _convert_optional_i18n(self, value: dict[str, Any] | None) -> I18nObject | None:
         if value is None:

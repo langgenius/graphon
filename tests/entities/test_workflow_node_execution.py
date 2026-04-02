@@ -127,62 +127,63 @@ class ProcessDataScenario:
     expected_response_data: dict[str, Any] | None
 
 
-class TestWorkflowNodeExecutionProcessDataScenarios:
-    def get_process_data_scenarios(self) -> list[ProcessDataScenario]:
-        return [
-            ProcessDataScenario(
-                name="no_process_data",
-                original_data=None,
-                truncated_data=None,
-                expected_truncated_flag=False,
-                expected_response_data=None,
-            ),
-            ProcessDataScenario(
-                name="process_data_without_truncation",
-                original_data={"small": "data"},
-                truncated_data=None,
-                expected_truncated_flag=False,
-                expected_response_data={"small": "data"},
-            ),
-            ProcessDataScenario(
-                name="process_data_with_truncation",
-                original_data={"large": "x" * 10000, "metadata": "info"},
-                truncated_data={"large": "[TRUNCATED]", "metadata": "info"},
-                expected_truncated_flag=True,
-                expected_response_data={"large": "[TRUNCATED]", "metadata": "info"},
-            ),
-            ProcessDataScenario(
-                name="empty_process_data",
-                original_data={},
-                truncated_data=None,
-                expected_truncated_flag=False,
-                expected_response_data={},
-            ),
-            ProcessDataScenario(
-                name="complex_nested_data_with_truncation",
-                original_data={
-                    "config": {"setting": "value"},
-                    "logs": ["log1", "log2"] * 1000,
-                    "status": "running",
-                },
-                truncated_data={
-                    "config": {"setting": "value"},
-                    "logs": "[TRUNCATED: 2000 items]",
-                    "status": "running",
-                },
-                expected_truncated_flag=True,
-                expected_response_data={
-                    "config": {"setting": "value"},
-                    "logs": "[TRUNCATED: 2000 items]",
-                    "status": "running",
-                },
-            ),
-        ]
+def _get_process_data_scenarios() -> list[ProcessDataScenario]:
+    return [
+        ProcessDataScenario(
+            name="no_process_data",
+            original_data=None,
+            truncated_data=None,
+            expected_truncated_flag=False,
+            expected_response_data=None,
+        ),
+        ProcessDataScenario(
+            name="process_data_without_truncation",
+            original_data={"small": "data"},
+            truncated_data=None,
+            expected_truncated_flag=False,
+            expected_response_data={"small": "data"},
+        ),
+        ProcessDataScenario(
+            name="process_data_with_truncation",
+            original_data={"large": "x" * 10000, "metadata": "info"},
+            truncated_data={"large": "[TRUNCATED]", "metadata": "info"},
+            expected_truncated_flag=True,
+            expected_response_data={"large": "[TRUNCATED]", "metadata": "info"},
+        ),
+        ProcessDataScenario(
+            name="empty_process_data",
+            original_data={},
+            truncated_data=None,
+            expected_truncated_flag=False,
+            expected_response_data={},
+        ),
+        ProcessDataScenario(
+            name="complex_nested_data_with_truncation",
+            original_data={
+                "config": {"setting": "value"},
+                "logs": ["log1", "log2"] * 1000,
+                "status": "running",
+            },
+            truncated_data={
+                "config": {"setting": "value"},
+                "logs": "[TRUNCATED: 2000 items]",
+                "status": "running",
+            },
+            expected_truncated_flag=True,
+            expected_response_data={
+                "config": {"setting": "value"},
+                "logs": "[TRUNCATED: 2000 items]",
+                "status": "running",
+            },
+        ),
+    ]
 
+
+class TestWorkflowNodeExecutionProcessDataScenarios:
     @pytest.mark.parametrize(
         "scenario",
-        get_process_data_scenarios(None),
-        ids=[scenario.name for scenario in get_process_data_scenarios(None)],
+        _get_process_data_scenarios(),
+        ids=[scenario.name for scenario in _get_process_data_scenarios()],
     )
     def test_process_data_scenarios(self, scenario: ProcessDataScenario):
         execution = WorkflowNodeExecution(

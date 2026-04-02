@@ -32,7 +32,7 @@ homepage = 'https://github.com/langgenius/graphon'
 issues = 'https://github.com/langgenius/graphon/issues'
 
 [dependency-groups]
-dev = ['pytest', 'pytest-cov', 'pytest-mock', 'pytest-xdist', 'ruff', 'prek']
+dev = ['pytest', 'pytest-cov', 'pytest-mock', 'pytest-xdist', 'ruff', 'prek', 'ty']
 
 [build-system]
 requires = ['uv_build>=0.11.1,<0.12.0']
@@ -87,6 +87,9 @@ ignore-one-line-docstrings = true
 'tests/**/*.py' = [
     'S101', # Pytest convention relies on plain assert statements.
 ]
+
+[tool.ty.environment]
+python-platform = "linux"
 
 [tool.pytest]
 minversion = '9.0'

@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import (
     BooleanSegment,
@@ -26,7 +28,7 @@ class TestVariablePoolGetAndNestedAttribute:
     def test__get_nested_attribute_non_dict(self):
         pool = VariablePool.empty()
         obj = ["not", "a", "dict"]
-        segment = pool._get_nested_attribute(obj, "a")
+        segment = pool._get_nested_attribute(cast(Any, obj), "a")
         assert segment is None
 
     def test__get_nested_attribute_with_none_value(self):

@@ -41,7 +41,7 @@ class StreamChunkEvent(NodeEventBase):
     selector: Sequence[str] = Field(
         ...,
         description=(
-            "selector identifying the output location (e.g., ['nodeA', 'text'])",
+            "selector identifying the output location (e.g., ['nodeA', 'text'])"
         ),
     )
     chunk: str = Field(..., description="the actual chunk content")

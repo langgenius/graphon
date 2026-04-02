@@ -10,7 +10,7 @@ def test_i18n_object_accepts_alias_keys_and_fills_missing_zh_hans():
 
 
 def test_i18n_object_serializes_with_locale_aliases():
-    i18n = I18nObject(en_us="Temperature", zh_hans="温度")
+    i18n = I18nObject.model_validate({"en_US": "Temperature", "zh_Hans": "温度"})
 
     assert i18n.model_dump() == {"zh_Hans": "温度", "en_US": "Temperature"}
     assert jsonable_encoder(i18n) == {"zh_Hans": "温度", "en_US": "Temperature"}

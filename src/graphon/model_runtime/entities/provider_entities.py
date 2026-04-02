@@ -42,7 +42,7 @@ class FormOption(BaseModel):
     @model_validator(mode="after")
     def _(self) -> Self:
         if not self.label:
-            self.label = I18nObject(en_us=self.value)
+            self.label = I18nObject(en_US=self.value)
         return self
 
 

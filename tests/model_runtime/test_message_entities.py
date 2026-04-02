@@ -22,9 +22,9 @@ def test_user_prompt_message_get_text_content_keeps_only_text_items() -> None:
 
 
 def test_prompt_message_normalizes_dict_content_items_for_serialization() -> None:
-    message = UserPromptMessage(
-        content=[{"type": "text", "data": "hello"}],
-    )
+    message = UserPromptMessage.model_validate({
+        "content": [{"type": "text", "data": "hello"}],
+    })
 
     assert isinstance(message.content, list)
     assert isinstance(message.content[0], TextPromptMessageContent)

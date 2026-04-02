@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
 from dataclasses import dataclass
 
 import pytest
 
 from graphon.entities.base_node_data import BaseNodeData
+from graphon.entities.graph_config import NodeConfigDict, NodeConfigDictAdapter
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import BuiltinNodeTypes, ErrorStrategy, NodeExecutionType, NodeType
 from graphon.graph.graph import Graph
 from graphon.graph.validation import GraphValidationError
+from graphon.node_events.base import NodeEventBase, NodeRunResult
 from graphon.nodes.base.node import Node
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.runtime.variable_pool import VariablePool
@@ -35,7 +37,7 @@ class _TestNode(Node[_TestNodeData]):
         self,
         *,
         node_id: str,
-        config: Mapping[str, object],
+        config: NodeConfigDict,
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,
     ) -> None:
@@ -50,7 +52,7 @@ class _TestNode(Node[_TestNodeData]):
         if isinstance(node_type_value, str):
             self.node_type = node_type_value
 
-    def _run(self) -> None:
+    def _run(self) -> NodeRunResult | Generator[NodeEventBase, None, None]:
         raise NotImplementedError
 
     def post_init(self) -> None:
@@ -77,7 +79,7 @@ class _SimpleNodeFactory:
         node_id = str(node_config["id"])
         return _TestNode(
             node_id=node_id,
-            config=node_config,
+            config=NodeConfigDictAdapter.validate_python(node_config),
             graph_init_params=self.graph_init_params,
             graph_runtime_state=self.graph_runtime_state,
         )

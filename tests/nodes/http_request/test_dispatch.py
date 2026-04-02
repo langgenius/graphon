@@ -23,13 +23,13 @@ def _build_http_request_config() -> HttpRequestNodeConfig:
 
 
 def test_http_request_node_extracts_variable_selectors_from_form_data() -> None:
-    node_data = HttpRequestNodeData(
-        method="post",
-        url="https://example.com/{{#start.id#}}",
-        authorization={"type": "no-auth"},
-        headers="X-Trace: {{#sys.trace#}}",
-        params="q: {{#input.query#}}",
-        body={
+    node_data = HttpRequestNodeData.model_validate({
+        "method": "post",
+        "url": "https://example.com/{{#start.id#}}",
+        "authorization": {"type": "no-auth"},
+        "headers": "X-Trace: {{#sys.trace#}}",
+        "params": "q: {{#input.query#}}",
+        "body": {
             "type": "form-data",
             "data": [
                 {
@@ -44,7 +44,7 @@ def test_http_request_node_extracts_variable_selectors_from_form_data() -> None:
                 },
             ],
         },
-    )
+    })
 
     mapping = HttpRequestNode._extract_variable_selector_to_variable_mapping(
         graph_config={},
@@ -63,13 +63,13 @@ def test_http_request_node_extracts_variable_selectors_from_form_data() -> None:
 
 def test_executor_initializes_json_body_with_body_handler_map() -> None:
     executor = Executor(
-        node_data=HttpRequestNodeData(
-            method="post",
-            url="https://example.com",
-            authorization={"type": "no-auth"},
-            headers="",
-            params="",
-            body={
+        node_data=HttpRequestNodeData.model_validate({
+            "method": "post",
+            "url": "https://example.com",
+            "authorization": {"type": "no-auth"},
+            "headers": "",
+            "params": "",
+            "body": {
                 "type": "json",
                 "data": [
                     {
@@ -78,7 +78,7 @@ def test_executor_initializes_json_body_with_body_handler_map() -> None:
                     },
                 ],
             },
-        ),
+        }),
         timeout=HttpRequestNodeTimeout(connect=1, read=1, write=1),
         variable_pool=build_variable_pool(),
         http_request_config=_build_http_request_config(),
@@ -92,13 +92,13 @@ def test_executor_initializes_json_body_with_body_handler_map() -> None:
 def test_executor_initializes_form_data_placeholder_when_no_files_resolve() -> None:
     file_manager = MagicMock()
     executor = Executor(
-        node_data=HttpRequestNodeData(
-            method="post",
-            url="https://example.com",
-            authorization={"type": "no-auth"},
-            headers="",
-            params="",
-            body={
+        node_data=HttpRequestNodeData.model_validate({
+            "method": "post",
+            "url": "https://example.com",
+            "authorization": {"type": "no-auth"},
+            "headers": "",
+            "params": "",
+            "body": {
                 "type": "form-data",
                 "data": [
                     {"key": "note", "type": "text", "value": "hello"},
@@ -109,7 +109,7 @@ def test_executor_initializes_form_data_placeholder_when_no_files_resolve() -> N
                     },
                 ],
             },
-        ),
+        }),
         timeout=HttpRequestNodeTimeout(connect=1, read=1, write=1),
         variable_pool=build_variable_pool(),
         http_request_config=_build_http_request_config(),
@@ -126,23 +126,23 @@ def test_executor_initializes_form_data_placeholder_when_no_files_resolve() -> N
 
 def test_executor_assembling_headers_applies_bearer_auth_and_content_type() -> None:
     executor = Executor(
-        node_data=HttpRequestNodeData(
-            method="post",
-            url="https://example.com",
-            authorization={
+        node_data=HttpRequestNodeData.model_validate({
+            "method": "post",
+            "url": "https://example.com",
+            "authorization": {
                 "type": "api-key",
                 "config": {
                     "type": "bearer",
                     "api_key": "secret-token",
                 },
             },
-            headers="X-Test: 1",
-            params="",
-            body={
+            "headers": "X-Test: 1",
+            "params": "",
+            "body": {
                 "type": "raw-text",
                 "data": [{"type": "text", "value": "payload"}],
             },
-        ),
+        }),
         timeout=HttpRequestNodeTimeout(connect=1, read=1, write=1),
         variable_pool=build_variable_pool(),
         http_request_config=_build_http_request_config(),
@@ -159,23 +159,23 @@ def test_executor_assembling_headers_applies_bearer_auth_and_content_type() -> N
 
 def test_executor_to_log_masks_authorization_and_logs_raw_text_body() -> None:
     executor = Executor(
-        node_data=HttpRequestNodeData(
-            method="post",
-            url="https://example.com/api?debug=1",
-            authorization={
+        node_data=HttpRequestNodeData.model_validate({
+            "method": "post",
+            "url": "https://example.com/api?debug=1",
+            "authorization": {
                 "type": "api-key",
                 "config": {
                     "type": "bearer",
                     "api_key": "secret-token",
                 },
             },
-            headers="X-Test: 1",
-            params="",
-            body={
+            "headers": "X-Test: 1",
+            "params": "",
+            "body": {
                 "type": "raw-text",
                 "data": [{"type": "text", "value": "payload"}],
             },
-        ),
+        }),
         timeout=HttpRequestNodeTimeout(connect=1, read=1, write=1),
         variable_pool=build_variable_pool(),
         http_request_config=_build_http_request_config(),
@@ -193,17 +193,17 @@ def test_executor_to_log_masks_authorization_and_logs_raw_text_body() -> None:
 
 def test_executor_to_log_renders_file_entries_for_multipart_body() -> None:
     executor = Executor(
-        node_data=HttpRequestNodeData(
-            method="post",
-            url="https://example.com/upload",
-            authorization={"type": "no-auth"},
-            headers="",
-            params="",
-            body={
+        node_data=HttpRequestNodeData.model_validate({
+            "method": "post",
+            "url": "https://example.com/upload",
+            "authorization": {"type": "no-auth"},
+            "headers": "",
+            "params": "",
+            "body": {
                 "type": "form-data",
                 "data": [{"key": "note", "type": "text", "value": "hello"}],
             },
-        ),
+        }),
         timeout=HttpRequestNodeTimeout(connect=1, read=1, write=1),
         variable_pool=build_variable_pool(),
         http_request_config=_build_http_request_config(),

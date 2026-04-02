@@ -7,6 +7,7 @@ import httpx
 import pytest
 from pytest_mock import MockerFixture
 
+from graphon.entities.graph_config import NodeConfigDictAdapter
 from graphon.http import (
     HttpClientMaxRetriesExceededError,
     HttpResponse,
@@ -145,7 +146,7 @@ def test_httpx_http_client_raises_request_error_without_retry_wrapping(
 def test_http_request_node_uses_default_http_client_when_not_injected():
     node = HttpRequestNode(
         node_id="http",
-        config={
+        config=NodeConfigDictAdapter.validate_python({
             "id": "http",
             "data": {
                 "type": "http-request",
@@ -157,7 +158,7 @@ def test_http_request_node_uses_default_http_client_when_not_injected():
                 "params": "",
                 "body": {"type": "none", "data": []},
             },
-        },
+        }),
         graph_init_params=build_graph_init_params(
             graph_config={"nodes": [], "edges": []},
         ),
@@ -174,14 +175,14 @@ def test_http_request_node_uses_default_http_client_when_not_injected():
 def test_document_extractor_node_uses_default_http_client_when_not_injected():
     node = DocumentExtractorNode(
         node_id="extractor",
-        config={
+        config=NodeConfigDictAdapter.validate_python({
             "id": "extractor",
             "data": {
                 "type": "document-extractor",
                 "title": "Document Extractor",
                 "variable_selector": ["inputs", "file"],
             },
-        },
+        }),
         graph_init_params=build_graph_init_params(
             graph_config={"nodes": [], "edges": []},
         ),

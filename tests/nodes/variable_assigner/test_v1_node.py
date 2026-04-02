@@ -1,6 +1,8 @@
 import time
 from typing import Any
 
+from graphon.entities.graph_config import NodeConfigDictAdapter
+from graphon.enums import BuiltinNodeTypes
 from graphon.graph_events.node import NodeRunSucceededEvent, NodeRunVariableUpdatedEvent
 from graphon.nodes.variable_assigner.common import helpers as common_helpers
 from graphon.nodes.variable_assigner.v1.node import VariableAssignerNode
@@ -32,15 +34,16 @@ def _build_node(
         node_id="assigner",
         graph_init_params=init_params,
         graph_runtime_state=runtime_state,
-        config={
+        config=NodeConfigDictAdapter.validate_python({
             "id": "assigner",
             "data": {
+                "type": BuiltinNodeTypes.VARIABLE_ASSIGNER,
                 "title": "Variable Assigner",
                 "assigned_variable_selector": assigned_selector,
                 "write_mode": write_mode,
                 "input_variable_selector": input_selector,
             },
-        },
+        }),
     )
 
 

@@ -1,6 +1,7 @@
 import time
 from unittest.mock import Mock
 
+from graphon.entities.graph_config import NodeConfigDictAdapter
 from graphon.enums import BuiltinNodeTypes
 from graphon.model_runtime.entities.llm_entities import LLMMode
 from graphon.model_runtime.entities.message_entities import PromptMessageRole
@@ -16,11 +17,12 @@ from graphon.nodes.parameter_extractor.prompts import (
     FUNCTION_CALLING_EXTRACTOR_USER_TEMPLATE,
 )
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.variable_pool import VariablePool
 
 from ...helpers import build_graph_init_params, build_variable_pool
 
 
-def _build_parameter_extractor_node() -> tuple[ParameterExtractorNode, object]:
+def _build_parameter_extractor_node() -> tuple[ParameterExtractorNode, VariablePool]:
     variable_pool = build_variable_pool(variables=[(("start", "rule"), "strictly")])
     runtime_state = GraphRuntimeState(
         variable_pool=variable_pool,
@@ -29,7 +31,7 @@ def _build_parameter_extractor_node() -> tuple[ParameterExtractorNode, object]:
     init_params = build_graph_init_params(graph_config={"nodes": [], "edges": []})
     node = ParameterExtractorNode(
         node_id="extractor",
-        config={
+        config=NodeConfigDictAdapter.validate_python({
             "id": "extractor",
             "data": {
                 "type": BuiltinNodeTypes.PARAMETER_EXTRACTOR,
@@ -51,7 +53,7 @@ def _build_parameter_extractor_node() -> tuple[ParameterExtractorNode, object]:
                 "instruction": "Follow {{#start.rule#}} instructions.",
                 "reasoning_mode": "function_call",
             },
-        },
+        }),
         graph_init_params=init_params,
         graph_runtime_state=runtime_state,
         model_instance=Mock(),

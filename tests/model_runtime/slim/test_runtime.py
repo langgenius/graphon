@@ -3,11 +3,15 @@ from __future__ import annotations
 import sys
 import textwrap
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 import pytest
 
-from graphon.model_runtime.entities.llm_entities import LLMResultWithStructuredOutput
+from graphon.model_runtime.entities.llm_entities import (
+    LLMResult,
+    LLMResultWithStructuredOutput,
+)
 from graphon.model_runtime.entities.message_entities import (
     PromptMessageTool,
     UserPromptMessage,
@@ -525,6 +529,7 @@ def test_slim_runtime_merges_non_stream_tool_call_deltas(tmp_path: Path) -> None
         stream=False,
     )
 
+    result = cast(LLMResult, result)
     assert len(result.message.tool_calls) == 1
     assert result.message.tool_calls[0].function.name == "extract"
     assert result.message.tool_calls[0].function.arguments == '{"query": "Hello"}'

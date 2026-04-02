@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pydantic import BaseModel, ValidationError
@@ -73,7 +73,7 @@ class TestPauseReasonDiscriminator:
 
     def test_model_construct_with_invalid_type(self):
         with pytest.raises(ValidationError):
-            _Holder(reason=object())  # type: ignore[arg-type]
+            _Holder(reason=cast(Any, object()))
 
     def test_unknown_type_fails_validation(self):
         with pytest.raises(ValidationError):

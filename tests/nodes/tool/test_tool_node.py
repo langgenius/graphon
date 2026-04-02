@@ -1,3 +1,5 @@
+from collections.abc import Generator
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -11,24 +13,32 @@ from graphon.nodes.tool.tool_node import ToolNode
 from graphon.nodes.tool_runtime_entities import ToolRuntimeHandle, ToolRuntimeMessage
 
 
-def _build_tool_node() -> ToolNode:
+def _message_stream(
+    *messages: ToolRuntimeMessage,
+) -> Generator[ToolRuntimeMessage, None, None]:
+    yield from messages
+
+
+def _build_tool_node() -> tuple[ToolNode, MagicMock, MagicMock]:
     node = ToolNode.__new__(ToolNode)
     node._node_id = "node-1"
-    node._runtime = MagicMock()
-    node._runtime.get_usage.return_value = LLMUsage.empty_usage()
-    node._tool_file_manager_factory = MagicMock()
-    return node
+    runtime = MagicMock()
+    runtime.get_usage.return_value = LLMUsage.empty_usage()
+    tool_file_manager_factory = MagicMock()
+    node._runtime = cast(Any, runtime)
+    node._tool_file_manager_factory = cast(Any, tool_file_manager_factory)
+    return node, runtime, tool_file_manager_factory
 
 
 def test_transform_message_dispatches_text_variable_and_file_messages() -> None:
-    node = _build_tool_node()
+    node, _runtime, _tool_file_manager_factory = _build_tool_node()
     file_obj = File(
         file_type=FileType.DOCUMENT,
         transfer_method=FileTransferMethod.LOCAL_FILE,
         reference="file-ref",
         filename="doc.txt",
     )
-    messages = iter([
+    messages = _message_stream(
         ToolRuntimeMessage(
             type=ToolRuntimeMessage.MessageType.TEXT,
             message=ToolRuntimeMessage.TextMessage(text="hello"),
@@ -46,7 +56,7 @@ def test_transform_message_dispatches_text_variable_and_file_messages() -> None:
             message=ToolRuntimeMessage.FileMessage(),
             meta={"file": file_obj},
         ),
-    ])
+    )
 
     events = list(
         node._transform_message(
@@ -80,7 +90,7 @@ def test_transform_message_dispatches_text_variable_and_file_messages() -> None:
 
 
 def test_transform_message_dispatches_image_link_with_handler_map() -> None:
-    node = _build_tool_node()
+    node, runtime, tool_file_manager_factory = _build_tool_node()
     tool_file = File(
         file_type=FileType.IMAGE,
         transfer_method=FileTransferMethod.TOOL_FILE,
@@ -92,15 +102,15 @@ def test_transform_message_dispatches_image_link_with_handler_map() -> None:
         transfer_method=FileTransferMethod.TOOL_FILE,
         reference="tool-file-1",
     )
-    node._tool_file_manager_factory.get_file_generator_by_tool_file_id.return_value = (
+    tool_file_manager_factory.get_file_generator_by_tool_file_id.return_value = (
         None,
         tool_file,
     )
-    node._runtime.build_file_reference.return_value = built_file
+    runtime.build_file_reference.return_value = built_file
 
     events = list(
         node._transform_message(
-            messages=iter([
+            messages=_message_stream(
                 ToolRuntimeMessage(
                     type=ToolRuntimeMessage.MessageType.IMAGE_LINK,
                     message=ToolRuntimeMessage.TextMessage(
@@ -108,7 +118,7 @@ def test_transform_message_dispatches_image_link_with_handler_map() -> None:
                     ),
                     meta={"tool_file_id": "tool-file-1"},
                 ),
-            ]),
+            ),
             tool_info={},
             parameters_for_log={},
             node_id="node-1",
@@ -119,7 +129,7 @@ def test_transform_message_dispatches_image_link_with_handler_map() -> None:
     completed_event = events[-1]
     assert isinstance(completed_event, StreamCompletedEvent)
     assert completed_event.node_run_result.outputs["files"].value == [built_file]
-    node._runtime.build_file_reference.assert_called_once_with(
+    runtime.build_file_reference.assert_called_once_with(
         mapping={
             "tool_file_id": "tool-file-1",
             "type": FileType.IMAGE,
@@ -130,18 +140,18 @@ def test_transform_message_dispatches_image_link_with_handler_map() -> None:
 
 
 def test_transform_message_rejects_non_file_payload_in_file_message() -> None:
-    node = _build_tool_node()
+    node, _runtime, _tool_file_manager_factory = _build_tool_node()
 
     with pytest.raises(ToolNodeError, match="Expected File object"):
         list(
             node._transform_message(
-                messages=iter([
+                messages=_message_stream(
                     ToolRuntimeMessage(
                         type=ToolRuntimeMessage.MessageType.FILE,
                         message=ToolRuntimeMessage.FileMessage(),
                         meta={"file": "not-a-file"},
                     ),
-                ]),
+                ),
                 tool_info={},
                 parameters_for_log={},
                 node_id="node-1",

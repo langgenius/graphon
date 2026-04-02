@@ -20,29 +20,29 @@ def test_tool_entity_rejects_non_scalar_configuration_value() -> None:
         ValueError,
         match="timeout must be one of: str, int, float, bool",
     ):
-        ToolEntity(
-            provider_id="provider-1",
-            provider_type="builtin",
-            provider_name="Built-in",
-            tool_name="tool",
-            tool_label="Tool",
-            tool_configurations={"timeout": ["10"]},
-        )
+        ToolEntity.model_validate({
+            "provider_id": "provider-1",
+            "provider_type": "builtin",
+            "provider_name": "Built-in",
+            "tool_name": "tool",
+            "tool_label": "Tool",
+            "tool_configurations": {"timeout": ["10"]},
+        })
 
 
 def test_tool_node_filters_none_and_empty_tool_inputs() -> None:
-    node_data = ToolNodeData(
-        provider_id="provider-1",
-        provider_type="builtin",
-        provider_name="Built-in",
-        tool_name="tool",
-        tool_label="Tool",
-        tool_configurations={"timeout": 10},
-        tool_parameters={
+    node_data = ToolNodeData.model_validate({
+        "provider_id": "provider-1",
+        "provider_type": "builtin",
+        "provider_name": "Built-in",
+        "tool_name": "tool",
+        "tool_label": "Tool",
+        "tool_configurations": {"timeout": 10},
+        "tool_parameters": {
             "answer": {"type": "mixed", "value": "ok"},
             "ignored_none": None,
             "ignored_empty": {"type": "mixed", "value": None},
         },
-    )
+    })
 
     assert set(node_data.tool_parameters) == {"answer"}

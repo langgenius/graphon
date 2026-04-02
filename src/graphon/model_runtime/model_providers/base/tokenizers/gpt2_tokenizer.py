@@ -27,7 +27,7 @@ class GPT2Tokenizer:
     def _get_num_tokens_by_gpt2(text: str) -> int:
         """Use gpt2 tokenizer to get num tokens"""
         tokenizer = GPT2Tokenizer.get_encoder()
-        tokens = tokenizer.encode(text)  # type: ignore
+        tokens = tokenizer.encode(text)
         return len(tokens)
 
     @staticmethod

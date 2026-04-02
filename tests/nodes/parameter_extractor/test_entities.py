@@ -11,30 +11,30 @@ from graphon.variables.types import SegmentType
 
 def test_parameter_config_maps_legacy_types() -> None:
     assert (
-        ParameterConfig(
-            name="flag",
-            type="bool",
-            description="legacy bool",
-            required=True,
-        ).type
+        ParameterConfig.model_validate({
+            "name": "flag",
+            "type": "bool",
+            "description": "legacy bool",
+            "required": True,
+        }).type
         == SegmentType.BOOLEAN
     )
     assert (
-        ParameterConfig(
-            name="choice",
-            type="select",
-            description="legacy select",
-            required=False,
-        ).type
+        ParameterConfig.model_validate({
+            "name": "choice",
+            "type": "select",
+            "description": "legacy select",
+            "required": False,
+        }).type
         == SegmentType.STRING
     )
 
 
 def test_parameter_extractor_node_data_builds_parameter_json_schema() -> None:
-    node_data = ParameterExtractorNodeData(
-        model={"provider": "test", "name": "model", "mode": LLMMode.CHAT},
-        query=["start", "query"],
-        parameters=[
+    node_data = ParameterExtractorNodeData.model_validate({
+        "model": {"provider": "test", "name": "model", "mode": LLMMode.CHAT},
+        "query": ["start", "query"],
+        "parameters": [
             {
                 "name": "location",
                 "type": "string",
@@ -49,8 +49,8 @@ def test_parameter_extractor_node_data_builds_parameter_json_schema() -> None:
                 "options": ["a", "b"],
             },
         ],
-        reasoning_mode="function_call",
-    )
+        "reasoning_mode": "function_call",
+    })
 
     assert node_data.get_parameter_json_schema() == {
         "type": "object",
@@ -72,10 +72,10 @@ def test_parameter_extractor_node_data_builds_parameter_json_schema() -> None:
 
 def test_parameter_extractor_transform_result_uses_type_dispatch() -> None:
     node = ParameterExtractorNode.__new__(ParameterExtractorNode)
-    node_data = ParameterExtractorNodeData(
-        model={"provider": "test", "name": "model", "mode": LLMMode.CHAT},
-        query=["start", "query"],
-        parameters=[
+    node_data = ParameterExtractorNodeData.model_validate({
+        "model": {"provider": "test", "name": "model", "mode": LLMMode.CHAT},
+        "query": ["start", "query"],
+        "parameters": [
             {
                 "name": "age",
                 "type": "number",
@@ -125,8 +125,8 @@ def test_parameter_extractor_transform_result_uses_type_dispatch() -> None:
                 "required": False,
             },
         ],
-        reasoning_mode="function_call",
-    )
+        "reasoning_mode": "function_call",
+    })
 
     transformed = node._transform_result(
         node_data,

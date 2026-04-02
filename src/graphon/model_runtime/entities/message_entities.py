@@ -64,7 +64,7 @@ class PromptMessageContent(ABC, BaseModel):
 class TextPromptMessageContent(PromptMessageContent):
     """Model class for text prompt message content."""
 
-    type: Literal[PromptMessageContentType.TEXT] = PromptMessageContentType.TEXT  # type: ignore
+    type: Literal[PromptMessageContentType.TEXT] = PromptMessageContentType.TEXT
     data: str
 
 
@@ -86,11 +86,11 @@ class MultiModalPromptMessageContent(PromptMessageContent):
 
 
 class VideoPromptMessageContent(MultiModalPromptMessageContent):
-    type: Literal[PromptMessageContentType.VIDEO] = PromptMessageContentType.VIDEO  # type: ignore
+    type: Literal[PromptMessageContentType.VIDEO] = PromptMessageContentType.VIDEO
 
 
 class AudioPromptMessageContent(MultiModalPromptMessageContent):
-    type: Literal[PromptMessageContentType.AUDIO] = PromptMessageContentType.AUDIO  # type: ignore
+    type: Literal[PromptMessageContentType.AUDIO] = PromptMessageContentType.AUDIO
 
 
 class ImagePromptMessageContent(MultiModalPromptMessageContent):
@@ -102,12 +102,12 @@ class ImagePromptMessageContent(MultiModalPromptMessageContent):
         LOW = auto()
         HIGH = auto()
 
-    type: Literal[PromptMessageContentType.IMAGE] = PromptMessageContentType.IMAGE  # type: ignore
+    type: Literal[PromptMessageContentType.IMAGE] = PromptMessageContentType.IMAGE
     detail: DETAIL = DETAIL.LOW
 
 
 class DocumentPromptMessageContent(MultiModalPromptMessageContent):
-    type: Literal[PromptMessageContentType.DOCUMENT] = PromptMessageContentType.DOCUMENT  # type: ignore
+    type: Literal[PromptMessageContentType.DOCUMENT] = PromptMessageContentType.DOCUMENT
 
 
 type PromptMessageContentUnionTypes = Annotated[

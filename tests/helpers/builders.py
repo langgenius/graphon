@@ -7,7 +7,7 @@ from typing import Any
 
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.runtime.variable_pool import VariablePool
-from graphon.variables.variables import VariableBase
+from graphon.variables.variables import Variable
 
 _FILE_REFERENCE_PREFIX = "dify-file-ref:"
 
@@ -40,8 +40,8 @@ def build_graph_init_params(
 
 def build_variable_pool(
     *,
-    system_variables: Sequence[VariableBase] = (),
-    conversation_variables: Sequence[VariableBase] = (),
+    system_variables: Sequence[Variable] = (),
+    conversation_variables: Sequence[Variable] = (),
     variables: Sequence[tuple[Sequence[str], Any]] = (),
 ) -> VariablePool:
     variable_pool = VariablePool(

@@ -79,7 +79,7 @@ def test_model_provider_factory_uses_model_class_map(
 ) -> None:
     provider = ProviderEntity(
         provider="test-provider",
-        label=I18nObject(en_us="Test Provider"),
+        label=I18nObject(en_US="Test Provider"),
         supported_model_types=[model_type],
         configurate_methods=[],
     )
