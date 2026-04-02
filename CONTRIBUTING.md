@@ -1,118 +1,89 @@
 # Contributing to Graphon
 
-This document covers the recommended workflow for contributing to Graphon.
+This guide reflects the repository's current local tooling and GitHub Actions
+checks.
 
-## Overview
+By default, use `make` for routine development. Direct
+[`uv`](https://docs.astral.sh/uv/), `ruff`, `pytest`, and
+[`prek`](https://prek.j178.dev/) usage is still fine when you need a targeted
+command.
 
-By default, use `make` for routine development commands in this repository.
+## Prerequisites
 
-That is the recommended path because:
-
-- it reflects the repository's intended workflow
-- it keeps formatting, linting, and testing commands consistent
-- it reduces command drift across contributors and CI
-
-If you know exactly what you are doing, using `ruff`, `pytest`, or `prek`
-directly is still your choice. Those tools remain fully available, but they
-should be treated as the lower-level interface rather than the default one.
-
-## Getting Started
-
-### Prerequisites
-
-- `uv`
+- Python 3.12 or newer
+- [`uv`](https://docs.astral.sh/uv/)
 - `make`
 - `git`
 
-### Initial Setup
-
-This project uses `uv` for dependency and virtual environment management.
+## Initial Setup
 
 ```bash
 make dev
+# optional for interactive work
 source .venv/bin/activate
 ```
 
 `make dev` will:
 
 - run `uv sync`
-- ensure `prek` hooks are installed
+- install [`prek`](https://prek.j178.dev/) Git hooks
 
-After that, the repository will have a local `.venv`, the project will be
-installed in editable mode, and Git hooks will be ready.
+The repository uses [`uv`](https://docs.astral.sh/uv/) for dependency and
+virtual environment management. The default development environment includes
+`ruff`, `pytest`, `pytest-xdist`, `pytest-cov`, `pytest-mock`, and
+[`prek`](https://prek.j178.dev/).
 
-## Development Workflow
+## Daily Workflow
 
-For normal development, the expected flow is:
+Use these commands for normal development:
 
-```bash
-make dev
-make pre
-```
-
-For day-to-day iteration, the usual commands are:
-
-```bash
-make format
-make lint
-make test
-```
-
-Before opening a pull request, run:
-
-```bash
-make pre
-```
-
-## Submitting Changes
-
-When you open a pull request:
-
-- keep the change focused and reviewable
-- run `make pre` before you push
-- if CLA Assistant asks you to sign the repository CLA, read [CLA.md](CLA.md)
-  and add the requested signature comment in the pull request
-- use Conventional Commits for the branch's commit history and the pull request
-  title
-- call out breaking changes clearly and mark them with `!`
-- make sure the pull request title matches the final change being merged
-
-## Contributor License Agreement
-
-This repository uses CLA Assistant to record contributor signatures in pull
-requests.
-
-If the action asks you to sign, read [CLA.md](CLA.md) and post the exact
-comment shown by the bot in the pull request conversation.
-
-Repository maintainers store CLA signatures on the dedicated `cla-signatures`
-branch so the protected default branch does not need to accept workflow writes.
-That branch must be created in the repository before the first CLA workflow run
-and left writable to GitHub Actions.
-
-Bot pull requests that are explicitly allowlisted in the workflow are exempt.
-
-## Common Commands
-
-Use these commands by default:
-
-- `make dev`: run `uv sync` and ensure `prek` is installed
-- `make format`: run `ruff format`
-- `make lint`: run `ruff check --fix`
-- `make check`: run `ruff format --check && ruff check`
+- `make format`: run `uv run ruff format`
+- `make lint`: run `uv run ruff check --fix`
+- `make check`: run `uv run ruff format --check && uv run ruff check`
 - `make test`: run `uv run --frozen pytest`
+- `make pre`: run `format`, `lint`, and `test`
 - `make build`: build the package distributions
-- `make pre`: run `format`, `lint`, and `test` in sequence
-- `make clean`: remove build artifacts, caches, and `__pycache__`
+- `make clean`: remove build artifacts and caches
+
+Notes:
+
+- `make lint` is mutating. It may rewrite files.
+- `make check` is the non-mutating style and lint check used in CI.
+- `pytest` is configured with `-n auto` and `testpaths = ['tests']`, so the
+  test suite runs in parallel by default.
+- `make test` uses `--frozen`. If you change dependencies, refresh and commit
+  `uv.lock` before opening a pull request.
+
+For most changes, a good local sequence is:
+
+```bash
+make pre
+make check
+```
+
+`make pre` applies local fixes and runs the test suite. `make check` then
+confirms the non-mutating CI check job will pass.
+
+## What CI Checks
+
+Pull requests targeting `main` currently run four kinds of checks:
+
+1. PR title validation with `amannn/action-semantic-pull-request`
+2. Commit history validation with `cocogitto check`
+3. `make check`
+4. `make test` on Python 3.12, 3.13, and 3.14
+
+Keep local workflow aligned with those checks. A green local `make pre` is
+useful, but it is not a complete substitute for the exact CI flow because CI
+also validates commit messages, PR titles, and a Python version matrix.
 
 ## Commit and Pull Request Conventions
 
-All commit messages must follow the
-[Conventional Commits](https://www.conventionalcommits.org/) specification.
+This repository enforces
+[Conventional Commits](https://www.conventionalcommits.org/) for both commit
+messages and pull request titles.
 
-This is a repository requirement, not a suggestion.
-
-The required commit types are:
+The PR title validator currently accepts these types:
 
 - `feat`
 - `fix`
@@ -126,122 +97,38 @@ The required commit types are:
 - `chore`
 - `revert`
 
-Use the Conventional Commits structure consistently, for example:
+Rules:
 
-```text
-feat: add graph snapshot export
-fix(runtime): avoid duplicate node completion events
-docs(readme): document development workflow
-refactor(variable-pool): simplify selector lookup
-test(encoders): cover nested dataclass encoding
-feat!: drop legacy workflow payload format
-refactor(api)!: remove deprecated runtime entrypoint
-```
-
-Pull request titles must follow the exact same convention.
-
-If a change is breaking, the commit message and the pull request title must
-include `!`.
+- use an optional scope when it improves clarity
+- mark breaking changes with `!`
+- keep the pull request title aligned with the final change being merged
+- keep the entire commit history reviewable, because CI validates all commits in
+  the pull request
 
 Examples:
 
 ```text
-feat!: remove deprecated graph initialization path
-fix(parser)!: change selector parsing semantics
+feat: add graph snapshot export
+fix(runtime): avoid duplicate node completion events
+docs(contributing): clarify CI workflow
+refactor(api)!: remove deprecated runtime entrypoint
 ```
 
-In other words:
+## Git Hooks
 
-- every commit message should use Conventional Commits
-- every pull request title should also use Conventional Commits
-- every breaking change must be marked with `!`
-- the pull request title must stay aligned with the final change being merged
+`make dev` installs [`prek`](https://prek.j178.dev/) hooks from
+[`prek.toml`](prek.toml).
 
-Do not use free-form pull request titles that diverge from the commit message
-standard.
+The current hook set includes:
 
-## Tooling Details
+- trailing whitespace and end-of-file cleanup
+- BOM cleanup and line ending normalization
+- TOML and YAML validation
+- shebang executable checks
+- local `make format`
+- local `make lint`
 
-### `uv`
-
-`uv` is responsible for environment and dependency management.
-
-Common commands:
-
-```bash
-uv sync
-uv run pytest
-uv run ruff check
-uv run prek run -a
-```
-
-Use `uv` when you need to:
-
-- create or refresh the local virtual environment
-- install project and development dependencies
-- run low-level commands without activating `.venv`
-
-### `make`
-
-`make` is the default command surface for this repository.
-
-If you are unsure which command to use, start with `make`.
-
-This is especially true for:
-
-- initial setup
-- formatting
-- linting
-- running the test suite
-- running the standard pre-check flow
-
-### `ruff`
-
-`ruff` handles both formatting and linting.
-
-Direct usage is supported, but it is secondary to `make`.
-
-Common direct commands:
-
-```bash
-ruff format
-ruff check --fix
-ruff format --check
-ruff check
-```
-
-Prefer direct `ruff` usage when:
-
-- you want to target a specific file or rule
-- you are debugging a particular lint issue
-- you intentionally want something more precise than the `Makefile` wrapper
-
-### `pytest`
-
-`pytest` runs the test suite.
-
-Common direct commands:
-
-```bash
-uv run pytest
-uv run pytest tests
-uv run pytest tests/utils/test_condition_processor.py
-uv run pytest -k condition
-```
-
-Notes:
-
-- the current default configuration includes `-n auto`
-- `testpaths` is set to `tests`
-- `make test` is the default wrapper and should be preferred unless you need a
-  more specific invocation
-
-### `prek`
-
-`prek` manages Git hooks for this repository. Its configuration is stored in
-`prek.toml`.
-
-Common direct commands:
+Useful direct commands:
 
 ```bash
 uv run prek install
@@ -250,20 +137,39 @@ uv run prek list
 uv run prek validate-config
 ```
 
-Notes:
+## CLA
 
-- `uv run prek install`: install Git hooks into `.git/hooks/`
-- `uv run prek run -a`: run hooks against all files in the repository
-- the current configuration mainly includes built-in cleanup and validation
-  hooks
-- the current configuration also includes local `make format` / `make lint`
-  hooks
+If CLA Assistant asks you to sign the repository CLA, read [CLA.md](CLA.md) and
+post this exact comment once in the pull request conversation:
+
+```text
+I have read the CLA Document and I hereby sign the CLA
+```
+
+The CLA workflow is separate from the normal PR checks.
+
+## Maintainer Notes
+
+Version bumps and changelog updates are managed with
+[`uv`](https://docs.astral.sh/uv/) `version` and `cog`:
+
+```bash
+make bump SEM=patch
+make bump SEM=minor
+make bump SEM=major
+```
+
+Release tags use the `v` prefix and are intended to be created from `main`.
+
+CLA signatures are stored on the dedicated `cla-signatures` branch. Maintainers
+must keep that branch available and writable to GitHub Actions.
 
 ## Direct Tool Usage
 
-If you know what you are doing, direct tool usage is completely acceptable.
+Use `make` by default. For targeted work, direct tool usage is still fine:
 
-The important distinction is:
-
-- default recommendation: use `make`
-- advanced or targeted usage: use `ruff`, `pytest`, or `prek` directly
+```bash
+uv run ruff check src/graphon/path.py
+uv run pytest tests/path/test_file.py -k keyword
+uv run prek run -a
+```
