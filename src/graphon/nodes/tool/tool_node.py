@@ -478,21 +478,9 @@ class ToolNode(Node[ToolNodeData]):
         self,
         *,
         message: ToolRuntimeMessage,
-        tool_info: Mapping[str, Any],
         **_: Any,
     ) -> Generator[NodeEventBase, None, None]:
         assert isinstance(message.message, ToolRuntimeMessage.LogMessage)
-        if message.message.metadata:
-            icon = tool_info.get("icon", "")
-            dict_metadata = dict(message.message.metadata)
-            if dict_metadata.get("provider"):
-                icon, icon_dark = self._runtime.resolve_provider_icons(
-                    provider_name=dict_metadata["provider"],
-                    default_icon=icon,
-                )
-                dict_metadata["icon"] = icon
-                dict_metadata["icon_dark"] = icon_dark
-                message.message.metadata = dict_metadata
         yield from ()
 
     def _emit_final_stream_events(

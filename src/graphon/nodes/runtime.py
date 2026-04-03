@@ -56,13 +56,6 @@ class ToolNodeRuntimeProtocol(Protocol):
 
     def build_file_reference(self, *, mapping: Mapping[str, Any]) -> Any: ...
 
-    def resolve_provider_icons(
-        self,
-        *,
-        provider_name: str,
-        default_icon: str | None = None,
-    ) -> tuple[str | Mapping[str, str] | None, str | Mapping[str, str] | None]: ...
-
 
 @runtime_checkable
 class HumanInputNodeRuntimeProtocol(Protocol):
