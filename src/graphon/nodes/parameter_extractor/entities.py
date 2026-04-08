@@ -90,17 +90,17 @@ class ParameterConfig(BaseModel):
         Returns:
             The element `SegmentType` for the array parameter.
 
-        Raises a ValueError if the parameter's type is not an array type.
-
+        Raises:
+            ValueError: If the parameter type does not expose an array element type.
         """
         element_type = self.type.element_type()
         # At this point, self.type is guaranteed to be one of `ARRAY_STRING`,
         # `ARRAY_NUMBER`, `ARRAY_OBJECT`, or `ARRAY_BOOLEAN`.
         #
         # See: _VALID_PARAMETER_TYPES for reference.
-        assert element_type is not None, (
-            f"the element type should not be None, {self.type=}"
-        )
+        if element_type is None:
+            msg = f"the element type should not be None, {self.type=}"
+            raise ValueError(msg)
         return element_type
 
 

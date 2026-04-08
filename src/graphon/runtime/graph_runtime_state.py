@@ -252,7 +252,7 @@ class _GraphRuntimeStateSnapshot:
     total_tokens: int
     node_run_steps: int
     llm_usage: LLMUsage
-    outputs: dict[str, Any]
+    outputs: dict[str, object]
     variable_pool: VariablePool
     has_variable_pool: bool
     ready_queue_dump: str | None
@@ -707,6 +707,17 @@ class GraphRuntimeState:  # noqa: PLR0904
 
     def update_outputs(self, updates: dict[str, object]) -> None:
         self._execution_data.update_outputs(updates)
+
+    def merge_response_outputs(self, outputs: Mapping[str, object]) -> None:
+        for key, value in outputs.items():
+            if key == "answer":
+                existing = self._execution_data.get_output("answer", "")
+                if existing:
+                    self._execution_data.set_output("answer", f"{existing}{value}")
+                else:
+                    self._execution_data.set_output("answer", value)
+                continue
+            self._execution_data.set_output(key, value)
 
     @property
     def node_run_steps(self) -> int:

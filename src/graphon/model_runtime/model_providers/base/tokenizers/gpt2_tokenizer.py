@@ -1,15 +1,21 @@
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Protocol
 
 logger = logging.getLogger(__name__)
 
-_tokenizer: Any | None = None
+
+class _TokenizerProtocol(Protocol):
+    def encode(self, text: str) -> Sequence[int]: ...
+
+
+_tokenizer: _TokenizerProtocol | None = None
 _lock = Lock()
 
 
-def _try_load_tiktoken_encoder() -> Any | None:
+def _try_load_tiktoken_encoder() -> _TokenizerProtocol | None:
     try:
         import tiktoken  # noqa: PLC0415
 
@@ -41,8 +47,8 @@ class GPT2Tokenizer:
         return GPT2Tokenizer._get_num_tokens_by_gpt2(text)
 
     @staticmethod
-    def get_encoder():
-        global _tokenizer
+    def get_encoder() -> _TokenizerProtocol:
+        global _tokenizer  # noqa: PLW0603
         if _tokenizer is not None:
             return _tokenizer
         with _lock:

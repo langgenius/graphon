@@ -23,3 +23,15 @@ class IfElseNodeData(BaseNodeData):
     conditions: list[Condition] | None = Field(default=None, deprecated=True)
 
     cases: list[Case] | None = None
+
+    def iter_cases(self) -> list[Case]:
+        if self.cases:
+            return list(self.cases)
+        legacy_conditions = self.__dict__.get("conditions") or []
+        return [
+            self.Case(
+                case_id="true",
+                logical_operator=self.logical_operator or "and",
+                conditions=list(legacy_conditions),
+            ),
+        ]

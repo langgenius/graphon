@@ -29,7 +29,7 @@ class LoggingCallback(Callback):
         stream: bool = True,
         user: str | None = None,
         invocation_context: Mapping[str, object] | None = None,
-    ):
+    ) -> None:
         """Before invoke callback
 
         :param llm_instance: LLM instance
@@ -92,7 +92,7 @@ class LoggingCallback(Callback):
         stream: bool = True,
         user: str | None = None,
         invocation_context: Mapping[str, object] | None = None,
-    ):
+    ) -> None:
         """On new chunk callback
 
         :param llm_instance: LLM instance
@@ -125,7 +125,7 @@ class LoggingCallback(Callback):
         stream: bool = True,
         user: str | None = None,
         invocation_context: Mapping[str, object] | None = None,
-    ):
+    ) -> None:
         """After invoke callback
 
         :param llm_instance: LLM instance
@@ -174,7 +174,7 @@ class LoggingCallback(Callback):
         stream: bool = True,
         user: str | None = None,
         invocation_context: Mapping[str, object] | None = None,
-    ):
+    ) -> None:
         """Invoke error callback
 
         :param llm_instance: LLM instance

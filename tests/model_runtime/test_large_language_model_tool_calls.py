@@ -1,4 +1,4 @@
-from typing import Any
+from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import pytest
@@ -196,14 +196,14 @@ def _run_case(
     inputs: list[ToolCall],
     expected: list[ToolCall],
     *,
-    id_generator: Any = None,
+    id_generator: Callable[[], str] | None = None,
 ) -> None:
     actual = []
     merge_tool_call_deltas(inputs, actual, id_generator=id_generator)
     assert actual == expected
 
 
-def test__merge_tool_call_deltas():
+def test__merge_tool_call_deltas() -> None:
     _run_case(INPUTS_CASE_1, EXPECTED_CASE_1)
     _run_case(INPUTS_CASE_2, EXPECTED_CASE_2)
     _run_case(INPUTS_CASE_3, EXPECTED_CASE_3)
@@ -215,7 +215,7 @@ def test__merge_tool_call_deltas():
     _run_case(INPUTS_CASE_4, EXPECTED_CASE_4, id_generator=mock_id_generator)
 
 
-def test__merge_tool_call_deltas__no_id_no_name_first_delta_should_raise():
+def test__merge_tool_call_deltas__no_id_no_name_first_delta_should_raise() -> None:
     inputs = [
         ToolCall(
             id="",

@@ -4,7 +4,7 @@ from graphon.nodes.base import variable_template_parser
 from graphon.nodes.base.entities import VariableSelector
 
 
-def test_extract_selectors_from_template():
+def test_extract_selectors_from_template() -> None:
     template = (
         "Hello, {{#sys.user_id#}}! Your query is {{#node_id.custom_query#}}. "
         "And your key is {{#env.secret_key#}}."
@@ -23,7 +23,7 @@ def test_extract_selectors_from_template():
     ]
 
 
-def test_invalid_references():
+def test_invalid_references() -> None:
     @dataclasses.dataclass
     class TestCase:
         name: str

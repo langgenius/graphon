@@ -7,7 +7,6 @@ from graphon.runtime.variable_pool import VariablePool
 
 from ..entities.commands import (
     AbortCommand,
-    GraphEngineCommand,
     PauseCommand,
     UpdateVariablesCommand,
 )
@@ -17,27 +16,25 @@ logger = logging.getLogger(__name__)
 
 
 @final
-class AbortCommandHandler(CommandHandler):
+class AbortCommandHandler(CommandHandler[AbortCommand]):
     @override
     def handle(
         self,
-        command: GraphEngineCommand,
+        command: AbortCommand,
         execution: GraphExecutionProtocol,
     ) -> None:
-        assert isinstance(command, AbortCommand)
         logger.debug("Aborting workflow %s: %s", execution.workflow_id, command.reason)
         execution.abort(command.reason or "User requested abort")
 
 
 @final
-class PauseCommandHandler(CommandHandler):
+class PauseCommandHandler(CommandHandler[PauseCommand]):
     @override
     def handle(
         self,
-        command: GraphEngineCommand,
+        command: PauseCommand,
         execution: GraphExecutionProtocol,
     ) -> None:
-        assert isinstance(command, PauseCommand)
         logger.debug("Pausing workflow %s: %s", execution.workflow_id, command.reason)
         # Convert string reason to PauseReason if needed
         reason = command.reason
@@ -46,17 +43,16 @@ class PauseCommandHandler(CommandHandler):
 
 
 @final
-class UpdateVariablesCommandHandler(CommandHandler):
+class UpdateVariablesCommandHandler(CommandHandler[UpdateVariablesCommand]):
     def __init__(self, variable_pool: VariablePool) -> None:
         self._variable_pool = variable_pool
 
     @override
     def handle(
         self,
-        command: GraphEngineCommand,
+        command: UpdateVariablesCommand,
         execution: GraphExecutionProtocol,
     ) -> None:
-        assert isinstance(command, UpdateVariablesCommand)
         for update in command.updates:
             try:
                 variable = update.value

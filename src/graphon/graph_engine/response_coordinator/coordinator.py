@@ -164,77 +164,79 @@ class ResponseStreamCoordinator:
             List of Path objects, where each path contains branch edge IDs
 
         """
-        # Get root node ID
         root_node_id = self._graph.root_node.id
-
-        # If root is the response node, return empty path
         if root_node_id == response_node_id:
             return [Path()]
 
-        # Extract variable selectors from the response node's template
+        variable_selectors = self._get_response_variable_selectors(response_node_id)
+        all_complete_paths = self._find_all_paths(root_node_id, response_node_id)
+        return [
+            Path(edges=self._get_blocking_edges(path, variable_selectors))
+            for path in all_complete_paths
+        ]
+
+    def _get_response_variable_selectors(
+        self,
+        response_node_id: NodeID,
+    ) -> set[tuple[str, ...]]:
         response_node = self._graph.nodes[response_node_id]
         response_session = ResponseSession.from_node(response_node)
-        template = response_session.template
+        return {
+            tuple(segment.selector[:2])
+            for segment in response_session.template.segments
+            if isinstance(segment, VariableSegment)
+        }
 
-        # Collect all variable selectors from the template
-        variable_selectors: set[tuple[str, ...]] = set()
-        for segment in template.segments:
-            if isinstance(segment, VariableSegment):
-                variable_selectors.add(tuple(segment.selector[:2]))
+    def _find_all_paths(
+        self,
+        current_node_id: NodeID,
+        target_node_id: NodeID,
+        current_path: list[EdgeID] | None = None,
+        visited: set[NodeID] | None = None,
+    ) -> list[list[EdgeID]]:
+        current_path = current_path or []
+        visited = visited or set()
+        if current_node_id == target_node_id:
+            return [current_path.copy()]
 
-        # Step 1: Find all complete paths from root to response node
-        all_complete_paths: list[list[EdgeID]] = []
+        next_visited = {current_node_id, *visited}
+        paths: list[list[EdgeID]] = []
+        for edge in self._graph.get_outgoing_edges(current_node_id):
+            if edge.head in next_visited:
+                continue
+            paths.extend(
+                self._find_all_paths(
+                    edge.head,
+                    target_node_id,
+                    [*current_path, edge.id],
+                    next_visited,
+                ),
+            )
+        return paths
 
-        def find_paths(
-            current_node_id: NodeID,
-            target_node_id: NodeID,
-            current_path: list[EdgeID],
-            visited: set[NodeID],
-        ) -> None:
-            """Recursively find all paths from current node to target node."""
-            if current_node_id == target_node_id:
-                # Found a complete path, store it
-                all_complete_paths.append(current_path.copy())
-                return
+    def _get_blocking_edges(
+        self,
+        path: list[EdgeID],
+        variable_selectors: set[tuple[str, ...]],
+    ) -> list[EdgeID]:
+        return [
+            edge_id
+            for edge_id in path
+            if self._is_blocking_edge(edge_id, variable_selectors)
+        ]
 
-            # Mark as visited to avoid cycles
-            visited.add(current_node_id)
-
-            # Explore outgoing edges
-            outgoing_edges = self._graph.get_outgoing_edges(current_node_id)
-            for edge in outgoing_edges:
-                edge_id = edge.id
-                next_node_id = edge.head
-
-                # Skip if already visited in this path
-                if next_node_id not in visited:
-                    # Add edge to path and recurse
-                    new_path = [*current_path, edge_id]
-                    find_paths(next_node_id, target_node_id, new_path, visited.copy())
-
-        # Start searching from root node
-        find_paths(root_node_id, response_node_id, [], set())
-
-        # Step 2: For each complete path, filter edges based on node blocking behavior
-        filtered_paths: list[Path] = []
-        for path in all_complete_paths:
-            blocking_edges: list[str] = []
-            for edge_id in path:
-                edge = self._graph.edges[edge_id]
-                source_node = self._graph.nodes[edge.tail]
-
-                # Check if node is a branch, container, or response node
-                if source_node.execution_type in frozenset((
-                    NodeExecutionType.BRANCH,
-                    NodeExecutionType.CONTAINER,
-                    NodeExecutionType.RESPONSE,
-                )) or source_node.blocks_variable_output(variable_selectors):
-                    blocking_edges.append(edge_id)
-
-            # Keep the path even if it's empty
-            filtered_paths.append(Path(edges=blocking_edges))
-
-        return filtered_paths
+    def _is_blocking_edge(
+        self,
+        edge_id: EdgeID,
+        variable_selectors: set[tuple[str, ...]],
+    ) -> bool:
+        edge = self._graph.edges[edge_id]
+        source_node = self._graph.nodes[edge.tail]
+        return source_node.execution_type in frozenset((
+            NodeExecutionType.BRANCH,
+            NodeExecutionType.CONTAINER,
+            NodeExecutionType.RESPONSE,
+        )) or source_node.blocks_variable_output(variable_selectors)
 
     def on_edge_taken(self, edge_id: str) -> Sequence[NodeRunStreamChunkEvent]:
         """Handle when an edge is taken (selected by a branch node).
@@ -457,24 +459,37 @@ class ResponseStreamCoordinator:
         segment: TextSegment,
     ) -> Sequence[NodeRunStreamChunkEvent]:
         """Process a text segment. Returns (events, is_complete)."""
-        assert self._active_session is not None
-        current_response_node = self._graph.nodes[self._active_session.node_id]
+        active_session = self._active_session
+        if active_session is None:
+            msg = "Cannot process a text segment without an active response session."
+            raise RuntimeError(msg)
+        current_response_node = self._graph.nodes[active_session.node_id]
 
         # Use get_or_create_execution_id to ensure we have a consistent ID
         execution_id = self._get_or_create_execution_id(current_response_node.id)
 
         is_last_segment = (
-            self._active_session.index
-            == len(self._active_session.template.segments) - 1
+            active_session.index == len(active_session.template.segments) - 1
         )
         event = self._create_stream_chunk_event(
             node_id=current_response_node.id,
             execution_id=execution_id,
-            selector=[current_response_node.id, "answer"],  # FIXME(-LAN-)
+            selector=self._get_text_segment_selector(current_response_node.id),
             chunk=segment.text,
             is_final=is_last_segment,
         )
         return [event]
+
+    def _get_text_segment_selector(self, response_node_id: str) -> Sequence[str]:
+        response_node = self._graph.nodes[response_node_id]
+        get_streaming_text_selector = getattr(
+            response_node,
+            "get_streaming_text_selector",
+            None,
+        )
+        if callable(get_streaming_text_selector):
+            return get_streaming_text_selector()
+        return [response_node.id, "answer"]
 
     def try_flush(self) -> list[NodeRunStreamChunkEvent]:
         with self._lock:

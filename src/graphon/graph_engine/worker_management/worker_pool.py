@@ -19,6 +19,8 @@ from ..ready_queue import ReadyQueue
 from ..worker import Worker
 
 logger = logging.getLogger(__name__)
+SMALL_GRAPH_NODE_THRESHOLD = 10
+MEDIUM_GRAPH_NODE_THRESHOLD = 50
 
 
 @final
@@ -80,9 +82,9 @@ class WorkerPool:
             # Calculate initial worker count
             if initial_count is None:
                 node_count = len(self._graph.nodes)
-                if node_count < 10:
+                if node_count < SMALL_GRAPH_NODE_THRESHOLD:
                     initial_count = self._config.min_workers
-                elif node_count < 50:
+                elif node_count < MEDIUM_GRAPH_NODE_THRESHOLD:
                     initial_count = min(
                         self._config.min_workers + 1,
                         self._config.max_workers,

@@ -4,13 +4,13 @@ import json
 import logging
 import os
 import shutil
-import subprocess
+import subprocess  # noqa: S404
 import tempfile
 from collections.abc import Generator, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
-from typing import IO, Any, cast
+from typing import IO, Any, NoReturn, cast
 
 from graphon.model_runtime.entities.llm_entities import (
     LLMResult,
@@ -591,14 +591,15 @@ class SlimRuntime(ModelRuntime):
     ) -> dict[str, Any]:
         chunks: list[Any] = []
         for event in self._run_slim(loaded=loaded, action=action, data=data):
-            if isinstance(event, _SlimProgressMessage):
-                logger.debug("slim[%s] %s: %s", action, event.stage, event.message)
-            elif isinstance(event, _SlimChunkEvent):
-                chunks.append(event.data)
-            elif isinstance(event, _SlimDoneEvent):
-                break
-            elif isinstance(event, _SlimErrorEvent):
-                raise self._map_slim_error(event)
+            match event:
+                case _SlimProgressMessage():
+                    logger.debug("slim[%s] %s: %s", action, event.stage, event.message)
+                case _SlimChunkEvent():
+                    chunks.append(event.data)
+                case _SlimDoneEvent():
+                    break
+                case _SlimErrorEvent():
+                    raise self._map_slim_error(event)
 
         if not chunks:
             return {}
@@ -622,13 +623,13 @@ class SlimRuntime(ModelRuntime):
         data: Mapping[str, Any],
     ) -> Generator[_SlimChunkEvent | _SlimDoneEvent, None, None]:
         for event in self._run_slim(loaded=loaded, action=action, data=data):
-            if isinstance(event, _SlimProgressMessage):
-                logger.debug("slim[%s] %s: %s", action, event.stage, event.message)
-                continue
-            if isinstance(event, _SlimErrorEvent):
-                raise self._map_slim_error(event)
-            if isinstance(event, (_SlimChunkEvent, _SlimDoneEvent)):
-                yield event
+            match event:
+                case _SlimProgressMessage():
+                    logger.debug("slim[%s] %s: %s", action, event.stage, event.message)
+                case _SlimErrorEvent():
+                    raise self._map_slim_error(event)
+                case _SlimChunkEvent() | _SlimDoneEvent():
+                    yield event
 
     def _run_slim(
         self,
@@ -642,7 +643,7 @@ class SlimRuntime(ModelRuntime):
         None,
     ]:
         with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stderr_file:
-            process = subprocess.Popen(
+            process = subprocess.Popen(  # noqa: S603
                 [
                     self._binary_path,
                     "-id",
@@ -660,69 +661,108 @@ class SlimRuntime(ModelRuntime):
 
             request_payload = {"data": jsonable_encoder(dict(data))}
 
-            assert process.stdin is not None
+            if process.stdin is None:
+                msg = "Slim subprocess did not expose stdin."
+                raise RuntimeError(msg)
             process.stdin.write(json.dumps(request_payload))
             process.stdin.close()
 
             try:
-                assert process.stdout is not None
-                for line in process.stdout:
-                    if not line.strip():
-                        continue
-                    payload = json.loads(line)
-                    event_type = payload.get("event")
-                    if event_type == "message":
-                        message = payload.get("data") or {}
-                        yield _SlimProgressMessage(
-                            stage=str(message.get("stage", "")),
-                            message=str(message.get("message", "")),
-                        )
-                    elif event_type == "chunk":
-                        yield _SlimChunkEvent(data=payload.get("data"))
-                    elif event_type == "done":
-                        yield _SlimDoneEvent()
-                        break
-                    elif event_type == "error":
-                        error = payload.get("data") or {}
-                        yield _SlimErrorEvent(
-                            code=str(error.get("code", "PLUGIN_EXEC_ERROR")),
-                            message=str(
-                                error.get("message", "Slim returned an error event."),
-                            ),
-                        )
-                        break
-                    else:
-                        msg = f"Unknown Slim event type: {event_type}"
-                        raise ValueError(msg)
+                if process.stdout is None:
+                    msg = "Slim subprocess did not expose stdout."
+                    raise RuntimeError(msg)
+                yield from self._iter_slim_stdout_events(process.stdout)
             finally:
-                return_code = process.wait()
-                stderr_file.seek(0)
-                stderr_text = stderr_file.read().strip()
-                if return_code != 0:
-                    if stderr_text:
-                        try:
-                            stderr_payload = json.loads(stderr_text.splitlines()[-1])
-                        except json.JSONDecodeError:
-                            msg = (
-                                f"Slim process exited with code {return_code}: "
-                                f"{stderr_text}"
-                            )
-                            raise ValueError(msg) from None
-                        raise self._map_slim_error(
-                            _SlimErrorEvent(
-                                code=str(
-                                    stderr_payload.get("code", "PLUGIN_EXEC_ERROR"),
-                                ),
-                                message=str(
-                                    stderr_payload.get(
-                                        "message",
-                                        f"Slim process exited with code {return_code}",
-                                    ),
-                                ),
-                            ),
-                        )
-                    msg = f"Slim process exited with code {return_code}"
-                    raise ValueError(msg)
+                self._check_slim_process_exit(process=process, stderr_file=stderr_file)
+
+    def _iter_slim_stdout_events(
+        self,
+        stdout: IO[str],
+    ) -> Generator[
+        _SlimProgressMessage | _SlimChunkEvent | _SlimDoneEvent | _SlimErrorEvent,
+        None,
+        None,
+    ]:
+        for line in stdout:
+            if not line.strip():
+                continue
+            event = self._parse_slim_event(json.loads(line))
+            yield event
+            if isinstance(event, (_SlimDoneEvent, _SlimErrorEvent)):
+                break
+
+    @staticmethod
+    def _parse_slim_event(
+        payload: Mapping[str, Any],
+    ) -> _SlimProgressMessage | _SlimChunkEvent | _SlimDoneEvent | _SlimErrorEvent:
+        event_type = payload.get("event")
+        match event_type:
+            case "message":
+                message = payload.get("data") or {}
+                return _SlimProgressMessage(
+                    stage=str(message.get("stage", "")),
+                    message=str(message.get("message", "")),
+                )
+            case "chunk":
+                return _SlimChunkEvent(data=payload.get("data"))
+            case "done":
+                return _SlimDoneEvent()
+            case "error":
+                error = payload.get("data") or {}
+                return _SlimErrorEvent(
+                    code=str(error.get("code", "PLUGIN_EXEC_ERROR")),
+                    message=str(
+                        error.get(
+                            "message",
+                            "Slim returned an error event.",
+                        ),
+                    ),
+                )
+            case _:
+                msg = f"Unknown Slim event type: {event_type}"
+                raise ValueError(msg)
+
+    def _check_slim_process_exit(
+        self,
+        *,
+        process: subprocess.Popen[str],
+        stderr_file: IO[str],
+    ) -> None:
+        return_code = process.wait()
+        stderr_file.seek(0)
+        stderr_text = stderr_file.read().strip()
+        if return_code == 0:
+            return
+        self._raise_slim_process_error(
+            return_code=return_code,
+            stderr_text=stderr_text,
+        )
+
+    def _raise_slim_process_error(
+        self,
+        *,
+        return_code: int,
+        stderr_text: str,
+    ) -> NoReturn:
+        if not stderr_text:
+            msg = f"Slim process exited with code {return_code}"
+            raise ValueError(msg)
+        try:
+            stderr_payload = json.loads(stderr_text.splitlines()[-1])
+        except json.JSONDecodeError:
+            msg = f"Slim process exited with code {return_code}: {stderr_text}"
+            raise ValueError(msg) from None
+        raise self._map_slim_error(
+            _SlimErrorEvent(
+                code=str(stderr_payload.get("code", "PLUGIN_EXEC_ERROR")),
+                message=str(
+                    stderr_payload.get(
+                        "message",
+                        f"Slim process exited with code {return_code}",
+                    ),
+                ),
+            ),
+        )
 
     def _llm_chunk_generator(
         self,

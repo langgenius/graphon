@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
-from typing import Any
 
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.variables.segments import Segment
@@ -61,7 +60,7 @@ class ReadOnlyGraphRuntimeStateWrapper:
         return self._state.llm_usage.model_copy()
 
     @property
-    def outputs(self) -> dict[str, Any]:
+    def outputs(self) -> dict[str, object]:
         return deepcopy(self._state.outputs)
 
     @property
@@ -76,7 +75,7 @@ class ReadOnlyGraphRuntimeStateWrapper:
     def exceptions_count(self) -> int:
         return self._state.graph_execution.exceptions_count
 
-    def get_output(self, key: str, default: Any = None) -> Any:
+    def get_output(self, key: str, default: object = None) -> object:
         return self._state.get_output(key, default)
 
     def dumps(self) -> str:

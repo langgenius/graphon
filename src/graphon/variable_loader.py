@@ -14,9 +14,8 @@ class VariableLoader(Protocol):
     required during the execution of a single node, which are not provided as
     user inputs.
 
-    TODO(QuantumGhost): this is a temporally workaround. If we can move the
-    creation of node instance into `WorkflowService.single_step_run`, we may get
-    rid of this interface.
+    This protocol keeps node construction decoupled from draft-variable loading
+    until node creation moves deeper into the runtime orchestration layer.
     """
 
     @abc.abstractmethod
@@ -54,7 +53,7 @@ def load_into_variable_pool(
     variable_pool: VariablePool,
     variable_mapping: Mapping[str, Sequence[str]],
     user_inputs: Mapping[str, Any],
-):
+) -> None:
     # Loading missing variable from draft var here, and set it into
     # variable_pool.
     variables_to_load: list[list[str]] = []
@@ -62,7 +61,7 @@ def load_into_variable_pool(
         # NOTE(QuantumGhost): this logic needs to be in sync with
         # `WorkflowEntry.mapping_user_inputs_to_variable_pool`.
         node_variable_list = key.split(".")
-        if len(node_variable_list) < 2:
+        if len(node_variable_list) < SELECTORS_LENGTH:
             msg = f"Invalid variable key: {key}. It should have at least two elements."
             raise ValueError(msg)
         if key in user_inputs:
@@ -74,7 +73,9 @@ def load_into_variable_pool(
             variables_to_load.append(list(selector))
     loaded = variable_loader.load_variables(variables_to_load)
     for var in loaded:
-        assert len(var.selector) >= SELECTORS_LENGTH, f"Invalid variable {var}"
+        if len(var.selector) < SELECTORS_LENGTH:
+            msg = f"Invalid variable {var}"
+            raise ValueError(msg)
         # Add variable directly to the pool
         # The variable pool expects 2-element selectors [node_id, variable_name]
         variable_pool.add([var.selector[0], var.selector[1]], var)

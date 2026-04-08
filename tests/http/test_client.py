@@ -1,13 +1,14 @@
 import inspect
 import time
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Callable, Generator, Mapping
+from http import HTTPStatus
 
 import httpx
 import pytest
 from pytest_mock import MockerFixture
 
 from graphon.entities.graph_config import NodeConfigDictAdapter
+from graphon.file.models import File
 from graphon.http import (
     HttpClientMaxRetriesExceededError,
     HttpResponse,
@@ -34,20 +35,27 @@ class _ToolFileManager:
         file_binary: bytes,
         mimetype: str,
         filename: str | None = None,
-    ) -> Any:
+    ) -> object:
         raise NotImplementedError
 
-    def get_file_generator_by_tool_file_id(self, tool_file_id: str) -> tuple[Any, Any]:
+    def get_file_generator_by_tool_file_id(
+        self,
+        tool_file_id: str,
+    ) -> tuple[Generator[bytes, None, None] | None, File | None]:
         raise NotImplementedError
 
 
 class _FileManager:
-    def download(self, f: Any, /) -> bytes:
+    def download(self, f: File, /) -> bytes:
         raise NotImplementedError
 
 
 class _FileReferenceFactory:
-    def build_from_mapping(self, *, mapping: Mapping[str, Any]) -> Any:
+    def build_from_mapping(
+        self,
+        *,
+        mapping: Mapping[str, object],
+    ) -> Mapping[str, object]:
         return mapping
 
 
@@ -62,7 +70,7 @@ def test_httpx_http_client_normalizes_request_kwargs(
     mocker: MockerFixture,
 ) -> None:
     request = httpx.Request("POST", "https://example.com")
-    response = httpx.Response(200, request=request)
+    response = httpx.Response(HTTPStatus.OK, request=request)
     request_mock = mocker.patch(
         "graphon.http.client.httpx.request",
         return_value=response,
@@ -77,7 +85,7 @@ def test_httpx_http_client_normalizes_request_kwargs(
     )
 
     assert isinstance(returned_response, HttpResponse)
-    assert returned_response.status_code == 200
+    assert returned_response.status_code == HTTPStatus.OK
     assert returned_response.content == response.content
     request_mock.assert_called_once()
     _, _, kwargs = request_mock.mock_calls[0]
@@ -90,22 +98,23 @@ def test_httpx_http_client_normalizes_request_kwargs(
 
 def test_httpx_http_client_retries_until_success(mocker: MockerFixture) -> None:
     request = httpx.Request("GET", "https://example.com")
+    responses = [
+        httpx.ConnectError("boom-1", request=request),
+        httpx.ConnectError("boom-2", request=request),
+        httpx.Response(HTTPStatus.OK, request=request),
+    ]
     request_mock = mocker.patch(
         "graphon.http.client.httpx.request",
-        side_effect=[
-            httpx.ConnectError("boom-1", request=request),
-            httpx.ConnectError("boom-2", request=request),
-            httpx.Response(200, request=request),
-        ],
+        side_effect=responses,
     )
 
     response = HttpxHttpClient().get("https://example.com", max_retries=2)
 
-    assert response.status_code == 200
-    assert request_mock.call_count == 3
+    assert response.status_code == HTTPStatus.OK
+    assert request_mock.call_count == len(responses)
 
 
-def test_http_response_raise_for_status_uses_library_error():
+def test_http_response_raise_for_status_uses_library_error() -> None:
     response = HttpResponse(status_code=404, url="https://example.com/missing")
 
     with pytest.raises(HttpStatusError):
@@ -116,18 +125,19 @@ def test_httpx_http_client_raises_max_retries_exceeded_after_last_retry(
     mocker: MockerFixture,
 ) -> None:
     request = httpx.Request("GET", "https://example.com")
+    failures = [
+        httpx.ConnectError("boom-1", request=request),
+        httpx.ConnectError("boom-2", request=request),
+    ]
     request_mock = mocker.patch(
         "graphon.http.client.httpx.request",
-        side_effect=[
-            httpx.ConnectError("boom-1", request=request),
-            httpx.ConnectError("boom-2", request=request),
-        ],
+        side_effect=failures,
     )
 
     with pytest.raises(HttpClientMaxRetriesExceededError):
         HttpxHttpClient().get("https://example.com", max_retries=1)
 
-    assert request_mock.call_count == 2
+    assert request_mock.call_count == len(failures)
 
 
 def test_httpx_http_client_raises_request_error_without_retry_wrapping(
@@ -143,7 +153,7 @@ def test_httpx_http_client_raises_request_error_without_retry_wrapping(
         HttpxHttpClient().get("https://example.com")
 
 
-def test_http_request_node_uses_default_http_client_when_not_injected():
+def test_http_request_node_uses_default_http_client_when_not_injected() -> None:
     node = HttpRequestNode(
         node_id="http",
         config=NodeConfigDictAdapter.validate_python({
@@ -172,7 +182,7 @@ def test_http_request_node_uses_default_http_client_when_not_injected():
     assert node._http_client is get_http_client()
 
 
-def test_document_extractor_node_uses_default_http_client_when_not_injected():
+def test_document_extractor_node_uses_default_http_client_when_not_injected() -> None:
     node = DocumentExtractorNode(
         node_id="extractor",
         config=NodeConfigDictAdapter.validate_python({
@@ -192,7 +202,7 @@ def test_document_extractor_node_uses_default_http_client_when_not_injected():
     assert node._http_client is get_http_client()
 
 
-def test_file_saver_impl_uses_default_http_client_when_not_injected():
+def test_file_saver_impl_uses_default_http_client_when_not_injected() -> None:
     file_saver = FileSaverImpl(
         tool_file_manager=_ToolFileManager(),
         file_reference_factory=_FileReferenceFactory(),
@@ -212,7 +222,7 @@ def test_file_saver_impl_uses_default_http_client_when_not_injected():
     ],
 )
 def test_http_client_injection_is_optional(
-    callable_obj: Any,
+    callable_obj: Callable[..., object],
     parameter_name: str,
 ) -> None:
     parameter = inspect.signature(callable_obj).parameters[parameter_name]

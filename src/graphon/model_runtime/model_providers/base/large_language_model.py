@@ -301,7 +301,6 @@ class LargeLanguageModel(AIModel):
                 callbacks=callbacks,
             )
 
-            # TODO
             raise self._transform_invoke_error(e) from e
 
         if stream and not isinstance(result, LLMResult):

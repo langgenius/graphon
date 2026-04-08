@@ -105,7 +105,7 @@ def graph_init_dependencies() -> tuple[_SimpleNodeFactory, dict[str, object]]:
 
 def test_graph_initialization_runs_default_validators(
     graph_init_dependencies: tuple[_SimpleNodeFactory, dict[str, object]],
-):
+) -> None:
     node_factory, graph_config = graph_init_dependencies
     graph_config["nodes"] = [
         {

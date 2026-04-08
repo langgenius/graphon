@@ -12,33 +12,33 @@ from graphon.variables.variables import StringVariable
 
 
 class TestVariablePoolGetAndNestedAttribute:
-    def test__get_nested_attribute_existing_key(self):
+    def test__get_nested_attribute_existing_key(self) -> None:
         pool = VariablePool.empty()
         obj = {"a": 123}
         segment = pool._get_nested_attribute(obj, "a")
         assert segment is not None
         assert segment.value == 123
 
-    def test__get_nested_attribute_missing_key(self):
+    def test__get_nested_attribute_missing_key(self) -> None:
         pool = VariablePool.empty()
         obj = {"a": 123}
         segment = pool._get_nested_attribute(obj, "b")
         assert segment is None
 
-    def test__get_nested_attribute_non_dict(self):
+    def test__get_nested_attribute_non_dict(self) -> None:
         pool = VariablePool.empty()
         obj = ["not", "a", "dict"]
         segment = pool._get_nested_attribute(cast(Any, obj), "a")
         assert segment is None
 
-    def test__get_nested_attribute_with_none_value(self):
+    def test__get_nested_attribute_with_none_value(self) -> None:
         pool = VariablePool.empty()
         obj = {"a": None}
         segment = pool._get_nested_attribute(obj, "a")
         assert segment is not None
         assert isinstance(segment, NoneSegment)
 
-    def test__get_nested_attribute_with_empty_string(self):
+    def test__get_nested_attribute_with_empty_string(self) -> None:
         pool = VariablePool.empty()
         obj = {"a": ""}
         segment = pool._get_nested_attribute(obj, "a")
@@ -46,24 +46,24 @@ class TestVariablePoolGetAndNestedAttribute:
         assert isinstance(segment, StringSegment)
         assert not segment.value
 
-    def test_get_simple_variable(self):
+    def test_get_simple_variable(self) -> None:
         pool = VariablePool.empty()
         pool.add(("node1", "var1"), "value1")
         segment = pool.get(("node1", "var1"))
         assert segment is not None
         assert segment.value == "value1"
 
-    def test_get_missing_variable(self):
+    def test_get_missing_variable(self) -> None:
         pool = VariablePool.empty()
         result = pool.get(("node1", "unknown"))
         assert result is None
 
-    def test_get_with_too_short_selector(self):
+    def test_get_with_too_short_selector(self) -> None:
         pool = VariablePool.empty()
         result = pool.get(("only_node",))
         assert result is None
 
-    def test_get_nested_object_attribute(self):
+    def test_get_nested_object_attribute(self) -> None:
         pool = VariablePool.empty()
         pool.add(("node1", "obj"), {"inner": "hello"})
 
@@ -71,14 +71,14 @@ class TestVariablePoolGetAndNestedAttribute:
         assert segment is not None
         assert segment.value == "hello"
 
-    def test_get_nested_object_missing_attribute(self):
+    def test_get_nested_object_missing_attribute(self) -> None:
         pool = VariablePool.empty()
         pool.add(("node1", "obj"), {"inner": "hello"})
 
         result = pool.get(("node1", "obj", "not_exist"))
         assert result is None
 
-    def test_get_nested_object_attribute_with_falsy_values(self):
+    def test_get_nested_object_attribute_with_falsy_values(self) -> None:
         pool = VariablePool.empty()
         pool.add(
             ("node1", "obj"),
@@ -109,7 +109,7 @@ class TestVariablePoolGetAndNestedAttribute:
         assert isinstance(segment_false, BooleanSegment)
         assert segment_false.value is False
 
-    def test_add_keeps_variable_instances_and_supports_segments(self):
+    def test_add_keeps_variable_instances_and_supports_segments(self) -> None:
         pool = VariablePool.empty()
         variable = StringVariable(name="name", selector=["node1", "name"], value="Joe")
         pool.add(("node1", "name"), variable)
@@ -125,13 +125,13 @@ class TestVariablePoolGetNotModifyVariableDictionary:
     _NODE_ID = "start"
     _VAR_NAME = "name"
 
-    def test_convert_to_template_should_not_introduce_extra_keys(self):
+    def test_convert_to_template_should_not_introduce_extra_keys(self) -> None:
         pool = VariablePool.empty()
         pool.add([self._NODE_ID, self._VAR_NAME], 0)
         pool.convert_template("The start.name is {{#start.name#}}")
         assert "The start" not in pool.variable_dictionary
 
-    def test_get_should_not_modify_variable_dictionary(self):
+    def test_get_should_not_modify_variable_dictionary(self) -> None:
         pool = VariablePool.empty()
         pool.get([self._NODE_ID, self._VAR_NAME])
         assert len(pool.variable_dictionary) == 0

@@ -2,6 +2,8 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from graphon.variables.consts import SELECTORS_LENGTH
+
 from .entities import VariableSelector
 
 REGEX = re.compile(
@@ -64,7 +66,7 @@ class VariableTemplateParser:
         self.template = template
         self.variable_keys = self.extract()
 
-    def extract(self):
+    def extract(self) -> list[str]:
         """Extracts all the template variable keys from the template string.
 
         Returns:
@@ -89,7 +91,7 @@ class VariableTemplateParser:
         for variable_key in self.variable_keys:
             remove_hash = variable_key.replace("#", "")
             split_result = remove_hash.split(".")
-            if len(split_result) < 2:
+            if len(split_result) < SELECTORS_LENGTH:
                 continue
 
             variable_selectors.append(

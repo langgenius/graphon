@@ -1,6 +1,6 @@
 import json
-from collections.abc import Mapping, Sequence
-from typing import Literal, NamedTuple, cast
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any, Literal, NamedTuple, cast
 
 from graphon.file import file_manager
 from graphon.file.enums import FileAttribute
@@ -15,9 +15,40 @@ from .entities import Condition, SubCondition, SupportedComparisonOperator
 
 _FILE_SUB_CONDITION_OPERATORS = frozenset(("contains", "not contains", "all of"))
 _EXISTENCE_OPERATORS = frozenset(("exists", "not exists"))
+_CONDITION_EVALUATOR_NAMES: dict[SupportedComparisonOperator, str] = {
+    "contains": "_assert_contains",
+    "not contains": "_assert_not_contains",
+    "start with": "_assert_start_with",
+    "end with": "_assert_end_with",
+    "is": "_assert_is",
+    "is not": "_assert_is_not",
+    "empty": "_assert_empty",
+    "not empty": "_assert_not_empty",
+    "=": "_assert_equal",
+    "≠": "_assert_not_equal",
+    ">": "_assert_greater_than",
+    "<": "_assert_less_than",
+    "≥": "_assert_greater_than_or_equal",
+    "≤": "_assert_less_than_or_equal",
+    "null": "_assert_null",
+    "not null": "_assert_not_null",
+    "in": "_assert_in",
+    "not in": "_assert_not_in",
+    "all of": "_evaluate_all_of_condition",
+    "exists": "_assert_exists",
+    "not exists": "_assert_not_exists",
+}
+_UNARY_CONDITION_OPERATORS = frozenset((
+    "empty",
+    "not empty",
+    "null",
+    "not null",
+    "exists",
+    "not exists",
+))
 
 
-def _convert_to_bool(value: object) -> bool:
+def _convert_to_bool(value: Any) -> bool:
     match value:
         case int():
             result = bool(value)
@@ -36,7 +67,7 @@ def _convert_to_bool(value: object) -> bool:
 
 
 class ConditionCheckResult(NamedTuple):
-    inputs: Sequence[Mapping[str, object]]
+    inputs: Sequence[Mapping[str, Any]]
     group_results: Sequence[bool]
     final_result: bool
 
@@ -49,7 +80,7 @@ class ConditionProcessor:
         conditions: Sequence[Condition],
         operator: Literal["and", "or"],
     ) -> ConditionCheckResult:
-        input_conditions: list[Mapping[str, object]] = []
+        input_conditions: list[Mapping[str, Any]] = []
         group_results: list[bool] = []
 
         for condition in conditions:
@@ -111,61 +142,22 @@ class ConditionProcessor:
 def _evaluate_condition(
     *,
     operator: SupportedComparisonOperator,
-    value: object,
+    value: Any,
     expected: str | Sequence[str] | bool | Sequence[bool] | None,
 ) -> bool:
-    match operator:
-        case "contains":
-            result = _assert_contains(value=value, expected=expected)
-        case "not contains":
-            result = _assert_not_contains(value=value, expected=expected)
-        case "start with":
-            result = _assert_start_with(value=value, expected=expected)
-        case "end with":
-            result = _assert_end_with(value=value, expected=expected)
-        case "is":
-            result = _assert_is(value=value, expected=expected)
-        case "is not":
-            result = _assert_is_not(value=value, expected=expected)
-        case "empty":
-            result = _assert_empty(value=value)
-        case "not empty":
-            result = _assert_not_empty(value=value)
-        case "=":
-            result = _assert_equal(value=value, expected=expected)
-        case "≠":
-            result = _assert_not_equal(value=value, expected=expected)
-        case ">":
-            result = _assert_greater_than(value=value, expected=expected)
-        case "<":
-            result = _assert_less_than(value=value, expected=expected)
-        case "≥":
-            result = _assert_greater_than_or_equal(value=value, expected=expected)
-        case "≤":
-            result = _assert_less_than_or_equal(value=value, expected=expected)
-        case "null":
-            result = _assert_null(value=value)
-        case "not null":
-            result = _assert_not_null(value=value)
-        case "in":
-            result = _assert_in(value=value, expected=expected)
-        case "not in":
-            result = _assert_not_in(value=value, expected=expected)
-        case "all of":
-            result = _evaluate_all_of_condition(value=value, expected=expected)
-        case "exists":
-            result = _assert_exists(value=value)
-        case "not exists":
-            result = _assert_not_exists(value=value)
-        case _:
-            msg = f"Unsupported operator: {operator}"
-            raise ValueError(msg)
-    return result
+    evaluator_name = _CONDITION_EVALUATOR_NAMES.get(operator)
+    if evaluator_name is None:
+        msg = f"Unsupported operator: {operator}"
+        raise ValueError(msg)
+    evaluator: Callable[..., bool] = globals()[evaluator_name]
+    if operator in _UNARY_CONDITION_OPERATORS:
+        return evaluator(value=value)
+    return evaluator(value=value, expected=expected)
 
 
 def _should_process_file_sub_conditions(
     *,
-    variable: object,
+    variable: Any,
     comparison_operator: SupportedComparisonOperator,
 ) -> bool:
     match variable:
@@ -178,7 +170,7 @@ def _should_process_file_sub_conditions(
 
 def _prepare_expected_value(
     *,
-    variable: object,
+    variable: Any,
     variable_pool: VariablePool,
     expected_value: str | Sequence[str] | bool | Sequence[bool] | None,
 ) -> str | Sequence[str] | bool | list[bool] | None:
@@ -204,7 +196,7 @@ def _prepare_expected_value(
     )
 
 
-def _evaluate_all_of_condition(*, value: object, expected: object) -> bool:
+def _evaluate_all_of_condition(*, value: Any, expected: Any) -> bool:
     match expected:
         case list() if all(isinstance(item, str) for item in expected):
             str_list: list[str] = [item for item in expected if isinstance(item, str)]
@@ -220,7 +212,7 @@ def _evaluate_all_of_condition(*, value: object, expected: object) -> bool:
     return result
 
 
-def _assert_contains(*, value: object, expected: object) -> bool:
+def _assert_contains(*, value: Any, expected: Any) -> bool:
     if not value:
         return False
 
@@ -240,7 +232,7 @@ def _assert_contains(*, value: object, expected: object) -> bool:
     return result
 
 
-def _assert_not_contains(*, value: object, expected: object) -> bool:
+def _assert_not_contains(*, value: Any, expected: Any) -> bool:
     if not value:
         return True
 
@@ -260,33 +252,33 @@ def _assert_not_contains(*, value: object, expected: object) -> bool:
     return result
 
 
-def _assert_start_with(*, value: object, expected: object) -> bool:
+def _assert_start_with(*, value: Any, expected: Any) -> bool:
     if not value:
         return False
 
     if not isinstance(value, str):
         msg = "Invalid actual value type: string"
-        raise ValueError(msg)
+        raise TypeError(msg)
     if not isinstance(expected, str):
         msg = "Expected value must be a string for startswith"
-        raise ValueError(msg)
+        raise TypeError(msg)
     return value.startswith(expected)
 
 
-def _assert_end_with(*, value: object, expected: object) -> bool:
+def _assert_end_with(*, value: Any, expected: Any) -> bool:
     if not value:
         return False
 
     if not isinstance(value, str):
         msg = "Invalid actual value type: string"
-        raise ValueError(msg)
+        raise TypeError(msg)
     if not isinstance(expected, str):
         msg = "Expected value must be a string for endswith"
-        raise ValueError(msg)
+        raise TypeError(msg)
     return value.endswith(expected)
 
 
-def _assert_is(*, value: object, expected: object) -> bool:
+def _assert_is(*, value: Any, expected: Any) -> bool:
     if value is None:
         return False
 
@@ -299,7 +291,7 @@ def _assert_is(*, value: object, expected: object) -> bool:
     return result
 
 
-def _assert_is_not(*, value: object, expected: object) -> bool:
+def _assert_is_not(*, value: Any, expected: Any) -> bool:
     if value is None:
         return False
 
@@ -312,17 +304,17 @@ def _assert_is_not(*, value: object, expected: object) -> bool:
     return result
 
 
-def _assert_empty(*, value: object) -> bool:
+def _assert_empty(*, value: Any) -> bool:
     return not value
 
 
-def _assert_not_empty(*, value: object) -> bool:
+def _assert_not_empty(*, value: Any) -> bool:
     return bool(value)
 
 
 def _normalize_numeric_values(
     value: float,
-    expected: object,
+    expected: Any,
 ) -> tuple[int | float, int | float]:
     """Normalize value and expected to compatible numeric types for comparison.
 
@@ -366,7 +358,7 @@ def _normalize_numeric_values(
     return normalized_values
 
 
-def _normalize_numeric_equality_expected(*, value: object, expected: object) -> object:
+def _normalize_numeric_equality_expected(*, value: Any, expected: Any) -> Any:
     match value:
         case bool():
             match expected:
@@ -395,7 +387,7 @@ def _normalize_numeric_equality_expected(*, value: object, expected: object) -> 
     return normalized_expected
 
 
-def _assert_equal(*, value: object, expected: object) -> bool:
+def _assert_equal(*, value: Any, expected: Any) -> bool:
     if value is None:
         return False
 
@@ -406,7 +398,7 @@ def _assert_equal(*, value: object, expected: object) -> bool:
     return value == normalized_expected
 
 
-def _assert_not_equal(*, value: object, expected: object) -> bool:
+def _assert_not_equal(*, value: Any, expected: Any) -> bool:
     if value is None:
         return False
 
@@ -417,7 +409,7 @@ def _assert_not_equal(*, value: object, expected: object) -> bool:
     return value != normalized_expected
 
 
-def _assert_greater_than(*, value: object, expected: object) -> bool:
+def _assert_greater_than(*, value: Any, expected: Any) -> bool:
     if value is None:
         return False
 
@@ -434,7 +426,7 @@ def _assert_greater_than(*, value: object, expected: object) -> bool:
     return result
 
 
-def _assert_less_than(*, value: object, expected: object) -> bool:
+def _assert_less_than(*, value: Any, expected: Any) -> bool:
     if value is None:
         return False
 
@@ -451,7 +443,7 @@ def _assert_less_than(*, value: object, expected: object) -> bool:
     return result
 
 
-def _assert_greater_than_or_equal(*, value: object, expected: object) -> bool:
+def _assert_greater_than_or_equal(*, value: Any, expected: Any) -> bool:
     if value is None:
         return False
 
@@ -468,7 +460,7 @@ def _assert_greater_than_or_equal(*, value: object, expected: object) -> bool:
     return result
 
 
-def _assert_less_than_or_equal(*, value: object, expected: object) -> bool:
+def _assert_less_than_or_equal(*, value: Any, expected: Any) -> bool:
     if value is None:
         return False
 
@@ -485,15 +477,15 @@ def _assert_less_than_or_equal(*, value: object, expected: object) -> bool:
     return result
 
 
-def _assert_null(*, value: object) -> bool:
+def _assert_null(*, value: Any) -> bool:
     return value is None
 
 
-def _assert_not_null(*, value: object) -> bool:
+def _assert_not_null(*, value: Any) -> bool:
     return value is not None
 
 
-def _assert_in(*, value: object, expected: object) -> bool:
+def _assert_in(*, value: Any, expected: Any) -> bool:
     if not value:
         return False
 
@@ -506,7 +498,7 @@ def _assert_in(*, value: object, expected: object) -> bool:
     return result
 
 
-def _assert_not_in(*, value: object, expected: object) -> bool:
+def _assert_not_in(*, value: Any, expected: Any) -> bool:
     if not value:
         return True
 
@@ -519,7 +511,7 @@ def _assert_not_in(*, value: object, expected: object) -> bool:
     return result
 
 
-def _assert_all_of(*, value: object, expected: Sequence[str]) -> bool:
+def _assert_all_of(*, value: Any, expected: Sequence[str]) -> bool:
     if not value:
         return False
 
@@ -531,7 +523,7 @@ def _assert_all_of(*, value: object, expected: Sequence[str]) -> bool:
     return result
 
 
-def _assert_all_of_bool(*, value: object, expected: Sequence[bool]) -> bool:
+def _assert_all_of_bool(*, value: Any, expected: Sequence[bool]) -> bool:
     if not value:
         return False
 
@@ -543,11 +535,11 @@ def _assert_all_of_bool(*, value: object, expected: Sequence[bool]) -> bool:
     return result
 
 
-def _assert_exists(*, value: object) -> bool:
+def _assert_exists(*, value: Any) -> bool:
     return value is not None
 
 
-def _assert_not_exists(*, value: object) -> bool:
+def _assert_not_exists(*, value: Any) -> bool:
     return value is None
 
 
@@ -572,7 +564,7 @@ def _process_sub_conditions(
             if expected_value and not expected_value.startswith("."):
                 expected_value = "." + expected_value
 
-            normalized_values: list[object] = []
+            normalized_values: list[Any] = []
             for value in values:
                 if value and isinstance(value, str) and not value.startswith("."):
                     normalized_value = "." + value

@@ -38,7 +38,7 @@ class Callback(ABC):
         stream: bool = True,
         user: str | None = None,
         invocation_context: Mapping[str, object] | None = None,
-    ):
+    ) -> None:
         """Before invoke callback
 
         :param llm_instance: LLM instance
@@ -68,7 +68,7 @@ class Callback(ABC):
         stream: bool = True,
         user: str | None = None,
         invocation_context: Mapping[str, object] | None = None,
-    ):
+    ) -> None:
         """On new chunk callback
 
         :param llm_instance: LLM instance
@@ -99,7 +99,7 @@ class Callback(ABC):
         stream: bool = True,
         user: str | None = None,
         invocation_context: Mapping[str, object] | None = None,
-    ):
+    ) -> None:
         """After invoke callback
 
         :param llm_instance: LLM instance
@@ -130,7 +130,7 @@ class Callback(ABC):
         stream: bool = True,
         user: str | None = None,
         invocation_context: Mapping[str, object] | None = None,
-    ):
+    ) -> None:
         """Invoke error callback
 
         :param llm_instance: LLM instance
@@ -147,7 +147,12 @@ class Callback(ABC):
         """
         raise NotImplementedError
 
-    def print_text(self, text: str, color: str | None = None, end: str = ""):
+    def print_text(
+        self,
+        text: str,
+        color: str | None = None,
+        end: str = "",
+    ) -> None:
         """Print text with highlighting and no end characters."""
         text_to_print = self._get_colored_text(text, color) if color else text
         stdout.write(text_to_print + end)

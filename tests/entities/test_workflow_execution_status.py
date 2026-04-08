@@ -2,7 +2,7 @@ from graphon.enums import WorkflowExecutionStatus
 
 
 class TestWorkflowExecutionStatus:
-    def test_is_ended_method(self):
+    def test_is_ended_method(self) -> None:
         ended_statuses = [
             WorkflowExecutionStatus.SUCCEEDED,
             WorkflowExecutionStatus.FAILED,
@@ -22,7 +22,7 @@ class TestWorkflowExecutionStatus:
         for status in non_ended_statuses:
             assert not status.is_ended(), f"{status} should not be considered ended"
 
-    def test_ended_values(self):
+    def test_ended_values(self) -> None:
         assert set(WorkflowExecutionStatus.ended_values()) == frozenset((
             WorkflowExecutionStatus.SUCCEEDED.value,
             WorkflowExecutionStatus.FAILED.value,

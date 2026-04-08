@@ -1,5 +1,5 @@
 import time
-from typing import Any
+from collections.abc import Sequence
 
 from graphon.entities.graph_config import NodeConfigDictAdapter
 from graphon.enums import BuiltinNodeTypes
@@ -8,6 +8,7 @@ from graphon.nodes.variable_assigner.common import helpers as common_helpers
 from graphon.nodes.variable_assigner.v1.node import VariableAssignerNode
 from graphon.nodes.variable_assigner.v1.node_data import WriteMode
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.variables import (
     ArrayStringVariable,
     StringVariable,
@@ -18,10 +19,10 @@ from ...helpers import build_graph_init_params, build_variable_pool
 
 def _build_node(
     *,
-    variable_pool: Any,
-    assigned_selector: Any,
+    variable_pool: VariablePool,
+    assigned_selector: Sequence[str],
     write_mode: WriteMode,
-    input_selector: Any,
+    input_selector: Sequence[str],
 ) -> VariableAssignerNode:
     graph_config = {"nodes": [], "edges": []}
     init_params = build_graph_init_params(graph_config=graph_config)
@@ -47,7 +48,7 @@ def _build_node(
     )
 
 
-def test_overwrite_string_variable():
+def test_overwrite_string_variable() -> None:
     conversation_variable = StringVariable(
         name="test_conversation_variable",
         value="the first value",
@@ -90,7 +91,7 @@ def test_overwrite_string_variable():
     assert succeeded_event.node_run_result.inputs == {"value": "the second value"}
 
 
-def test_append_variable_to_array():
+def test_append_variable_to_array() -> None:
     conversation_variable = ArrayStringVariable(
         name="test_conversation_variable",
         value=["the first value"],
@@ -128,7 +129,7 @@ def test_append_variable_to_array():
     assert updated_event.variable.value == ["the first value", "the second value"]
 
 
-def test_clear_array():
+def test_clear_array() -> None:
     conversation_variable = ArrayStringVariable(
         name="test_conversation_variable",
         value=["the first value"],

@@ -61,7 +61,7 @@ _PROMPT_CONTENT_CLASS_BY_FILE_TYPE: Mapping[
 }
 
 
-def get_attr(*, file: File, attr: FileAttribute):
+def get_attr(*, file: File, attr: FileAttribute) -> str | int | None:
     return _FILE_ATTRIBUTE_GETTERS[attr](file)
 
 

@@ -74,8 +74,7 @@ class ToolNodeData(BaseNodeData, ToolEntity):
     class ToolInput(BaseModel):
         """Persisted tool input value and its binding mode."""
 
-        # TODO: check this type
-        value: Any | list[str]
+        value: list[str] | str | int | float | bool | dict[str, Any] | list[Any] | None
         type: Literal["mixed", "variable", "constant"]
 
         @field_validator("type", mode="before")

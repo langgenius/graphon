@@ -6,7 +6,7 @@ class ProviderCredentialSchemaValidator(CommonValidator):
     def __init__(self, provider_credential_schema: ProviderCredentialSchema) -> None:
         self.provider_credential_schema = provider_credential_schema
 
-    def validate_and_filter(self, credentials: dict):
+    def validate_and_filter(self, credentials: dict) -> dict[str, str | bool]:
         """Validate provider credentials and return the filtered credential map."""
         # get the credential_form_schemas in provider_credential_schema
         credential_form_schemas = (

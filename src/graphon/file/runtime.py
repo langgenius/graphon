@@ -102,7 +102,7 @@ _runtime: WorkflowFileRuntimeProtocol = _UnconfiguredWorkflowFileRuntime()
 
 
 def set_workflow_file_runtime(runtime: WorkflowFileRuntimeProtocol) -> None:
-    global _runtime
+    global _runtime  # noqa: PLW0603
     _runtime = runtime
 
 

@@ -44,20 +44,6 @@ if TYPE_CHECKING:
     from graphon.runtime.variable_pool import VariablePool
 
 
-_MESSAGE_HANDLER_NAMES: dict[ToolRuntimeMessage.MessageType, str] = {
-    ToolRuntimeMessage.MessageType.IMAGE_LINK: "_handle_linked_file_message",
-    ToolRuntimeMessage.MessageType.BINARY_LINK: "_handle_linked_file_message",
-    ToolRuntimeMessage.MessageType.IMAGE: "_handle_linked_file_message",
-    ToolRuntimeMessage.MessageType.BLOB: "_handle_blob_message",
-    ToolRuntimeMessage.MessageType.TEXT: "_handle_text_message",
-    ToolRuntimeMessage.MessageType.JSON: "_handle_json_message",
-    ToolRuntimeMessage.MessageType.LINK: "_handle_link_message",
-    ToolRuntimeMessage.MessageType.VARIABLE: "_handle_variable_message",
-    ToolRuntimeMessage.MessageType.FILE: "_handle_file_message",
-    ToolRuntimeMessage.MessageType.LOG: "_handle_log_message",
-}
-
-
 @dataclass(slots=True)
 class _ToolMessageState:
     text: str = ""
@@ -265,14 +251,10 @@ class ToolNode(Node[ToolNodeData]):
         state = _ToolMessageState()
 
         for message in messages:
-            handler_name = _MESSAGE_HANDLER_NAMES.get(message.type)
-            if handler_name is None:
-                continue
-            yield from getattr(self, handler_name)(
+            yield from self._dispatch_message(
                 message=message,
                 state=state,
                 node_id=node_id,
-                tool_info=tool_info,
             )
 
         yield from self._emit_final_stream_events(state)
@@ -295,6 +277,123 @@ class ToolNode(Node[ToolNodeData]):
             ),
         )
 
+    def _dispatch_message(
+        self,
+        *,
+        message: ToolRuntimeMessage,
+        state: _ToolMessageState,
+        node_id: str,
+    ) -> Generator[NodeEventBase, None, None]:
+        match message.type:
+            case (
+                ToolRuntimeMessage.MessageType.IMAGE_LINK
+                | ToolRuntimeMessage.MessageType.BINARY_LINK
+                | ToolRuntimeMessage.MessageType.IMAGE
+            ):
+                payload = self._expect_message_payload(
+                    message=message,
+                    payload_type=ToolRuntimeMessage.TextMessage,
+                )
+                yield from self._handle_linked_file_message(
+                    payload=payload,
+                    meta=message.meta,
+                    state=state,
+                )
+            case ToolRuntimeMessage.MessageType.BLOB:
+                payload = self._expect_message_payload(
+                    message=message,
+                    payload_type=ToolRuntimeMessage.TextMessage,
+                )
+                yield from self._handle_blob_message(
+                    payload=payload,
+                    meta=message.meta,
+                    state=state,
+                )
+            case ToolRuntimeMessage.MessageType.TEXT:
+                payload = self._expect_message_payload(
+                    message=message,
+                    payload_type=ToolRuntimeMessage.TextMessage,
+                )
+                yield from self._handle_text_message(
+                    payload=payload,
+                    state=state,
+                    node_id=node_id,
+                )
+            case ToolRuntimeMessage.MessageType.JSON:
+                payload = self._expect_message_payload(
+                    message=message,
+                    payload_type=ToolRuntimeMessage.JsonMessage,
+                )
+                yield from self._handle_json_message(
+                    payload=payload,
+                    state=state,
+                )
+            case ToolRuntimeMessage.MessageType.LINK:
+                payload = self._expect_message_payload(
+                    message=message,
+                    payload_type=ToolRuntimeMessage.TextMessage,
+                )
+                yield from self._handle_link_message(
+                    payload=payload,
+                    meta=message.meta,
+                    state=state,
+                    node_id=node_id,
+                )
+            case ToolRuntimeMessage.MessageType.VARIABLE:
+                payload = self._expect_message_payload(
+                    message=message,
+                    payload_type=ToolRuntimeMessage.VariableMessage,
+                )
+                yield from self._handle_variable_message(
+                    payload=payload,
+                    state=state,
+                    node_id=node_id,
+                )
+            case ToolRuntimeMessage.MessageType.FILE:
+                payload = self._expect_message_payload(
+                    message=message,
+                    payload_type=ToolRuntimeMessage.FileMessage,
+                )
+                meta = self._require_message_meta(message=message)
+                yield from self._handle_file_message(
+                    payload=payload,
+                    meta=meta,
+                    state=state,
+                )
+            case ToolRuntimeMessage.MessageType.LOG:
+                payload = self._expect_message_payload(
+                    message=message,
+                    payload_type=ToolRuntimeMessage.LogMessage,
+                )
+                yield from self._handle_log_message(payload=payload)
+            case _:
+                yield from ()
+
+    def _require_message_meta(
+        self,
+        *,
+        message: ToolRuntimeMessage,
+    ) -> dict[str, Any]:
+        if message.meta is None:
+            msg = f"Tool message {message.type} is missing metadata."
+            raise ToolNodeError(msg)
+        return message.meta
+
+    def _expect_message_payload[PayloadT](
+        self,
+        *,
+        message: ToolRuntimeMessage,
+        payload_type: type[PayloadT],
+    ) -> PayloadT:
+        payload = message.message
+        if not isinstance(payload, payload_type):
+            msg = (
+                f"Expected {payload_type.__name__} payload for tool message "
+                f"{message.type}, got {type(payload).__name__}."
+            )
+            raise ToolNodeError(msg)
+        return payload
+
     def _resolve_tool_file(self, tool_file_id: str, *, missing_message: str) -> File:
         _stream, tool_file = (
             self._tool_file_manager_factory.get_file_generator_by_tool_file_id(
@@ -308,21 +407,20 @@ class ToolNode(Node[ToolNodeData]):
     def _handle_linked_file_message(
         self,
         *,
-        message: ToolRuntimeMessage,
+        payload: ToolRuntimeMessage.TextMessage,
+        meta: Mapping[str, Any] | None,
         state: _ToolMessageState,
         **_: Any,
     ) -> Generator[NodeEventBase, None, None]:
-        assert isinstance(message.message, ToolRuntimeMessage.TextMessage)
-
-        url = message.message.text
+        url = payload.text
         transfer_method = FileTransferMethod.TOOL_FILE
         tool_file_id: str | None = None
-        if message.meta:
-            transfer_method = message.meta.get(
+        if meta:
+            transfer_method = meta.get(
                 "transfer_method",
                 FileTransferMethod.TOOL_FILE,
             )
-            tool_file_id = message.meta.get("tool_file_id")
+            tool_file_id = meta.get("tool_file_id")
         if not isinstance(tool_file_id, str) or not tool_file_id:
             msg = "tool message is missing tool_file_id metadata"
             raise ToolFileError(msg)
@@ -347,14 +445,14 @@ class ToolNode(Node[ToolNodeData]):
     def _handle_blob_message(
         self,
         *,
-        message: ToolRuntimeMessage,
+        payload: ToolRuntimeMessage.TextMessage,
+        meta: Mapping[str, Any] | None,
         state: _ToolMessageState,
         **_: Any,
     ) -> Generator[NodeEventBase, None, None]:
-        assert isinstance(message.message, ToolRuntimeMessage.TextMessage)
-        assert message.meta
+        _ = payload
 
-        tool_file_id = message.meta.get("tool_file_id")
+        tool_file_id = (meta or {}).get("tool_file_id")
         if not isinstance(tool_file_id, str) or not tool_file_id:
             msg = "tool blob message is missing tool_file_id metadata"
             raise ToolFileError(msg)
@@ -375,47 +473,44 @@ class ToolNode(Node[ToolNodeData]):
     def _handle_text_message(
         self,
         *,
-        message: ToolRuntimeMessage,
+        payload: ToolRuntimeMessage.TextMessage,
         state: _ToolMessageState,
         node_id: str,
         **_: Any,
     ) -> Generator[NodeEventBase, None, None]:
-        assert isinstance(message.message, ToolRuntimeMessage.TextMessage)
-        state.text += message.message.text
+        state.text += payload.text
         yield StreamChunkEvent(
             selector=[node_id, "text"],
-            chunk=message.message.text,
+            chunk=payload.text,
             is_final=False,
         )
 
     def _handle_json_message(
         self,
         *,
-        message: ToolRuntimeMessage,
+        payload: ToolRuntimeMessage.JsonMessage,
         state: _ToolMessageState,
         **_: Any,
     ) -> Generator[NodeEventBase, None, None]:
-        assert isinstance(message.message, ToolRuntimeMessage.JsonMessage)
-        if message.message.json_object:
-            state.json_values.append(message.message.json_object)
+        if payload.json_object:
+            state.json_values.append(payload.json_object)
         yield from ()
 
     def _handle_link_message(
         self,
         *,
-        message: ToolRuntimeMessage,
+        payload: ToolRuntimeMessage.TextMessage,
+        meta: Mapping[str, Any] | None,
         state: _ToolMessageState,
         node_id: str,
         **_: Any,
     ) -> Generator[NodeEventBase, None, None]:
-        assert isinstance(message.message, ToolRuntimeMessage.TextMessage)
-
-        file_obj = (message.meta or {}).get("file")
+        file_obj = (meta or {}).get("file")
         if isinstance(file_obj, File):
             state.files.append(file_obj)
-            stream_text = f"File: {message.message.text}\n"
+            stream_text = f"File: {payload.text}\n"
         else:
-            stream_text = f"Link: {message.message.text}\n"
+            stream_text = f"Link: {payload.text}\n"
 
         state.text += stream_text
         yield StreamChunkEvent(
@@ -427,16 +522,15 @@ class ToolNode(Node[ToolNodeData]):
     def _handle_variable_message(
         self,
         *,
-        message: ToolRuntimeMessage,
+        payload: ToolRuntimeMessage.VariableMessage,
         state: _ToolMessageState,
         node_id: str,
         **_: Any,
     ) -> Generator[NodeEventBase, None, None]:
-        assert isinstance(message.message, ToolRuntimeMessage.VariableMessage)
-        variable_name = message.message.variable_name
-        variable_value = message.message.variable_value
+        variable_name = payload.variable_name
+        variable_value = payload.variable_value
 
-        if not message.message.stream:
+        if not payload.stream:
             state.variables[variable_name] = variable_value
             yield from ()
             return
@@ -456,17 +550,17 @@ class ToolNode(Node[ToolNodeData]):
     def _handle_file_message(
         self,
         *,
-        message: ToolRuntimeMessage,
+        payload: ToolRuntimeMessage.FileMessage,
+        meta: Mapping[str, Any],
         state: _ToolMessageState,
         **_: Any,
     ) -> Generator[NodeEventBase, None, None]:
-        assert message.meta is not None
-        assert isinstance(message.meta, dict)
-        if "file" not in message.meta:
+        _ = payload
+        if "file" not in meta:
             msg = "File message is missing 'file' key in meta"
             raise ToolNodeError(msg)
 
-        file_obj = message.meta["file"]
+        file_obj = meta["file"]
         if not isinstance(file_obj, File):
             msg = f"Expected File object but got {type(file_obj).__name__}"
             raise ToolNodeError(msg)
@@ -477,10 +571,10 @@ class ToolNode(Node[ToolNodeData]):
     def _handle_log_message(
         self,
         *,
-        message: ToolRuntimeMessage,
+        payload: ToolRuntimeMessage.LogMessage,
         **_: Any,
     ) -> Generator[NodeEventBase, None, None]:
-        assert isinstance(message.message, ToolRuntimeMessage.LogMessage)
+        _ = payload
         yield from ()
 
     def _emit_final_stream_events(
@@ -539,7 +633,9 @@ class ToolNode(Node[ToolNodeData]):
             tool_input = typed_node_data.tool_parameters[parameter_name]
             match tool_input.type:
                 case "mixed":
-                    assert isinstance(tool_input.value, str)
+                    if not isinstance(tool_input.value, str):
+                        msg = "Mixed tool input value must be a string."
+                        raise TypeError(msg)
                     selectors = VariableTemplateParser(
                         tool_input.value,
                     ).extract_variable_selectors()

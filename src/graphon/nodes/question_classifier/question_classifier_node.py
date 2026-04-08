@@ -1,6 +1,7 @@
 import json
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, override
 
 from graphon.entities.graph_config import NodeConfigDict
@@ -62,6 +63,15 @@ class _PassthroughPromptMessageSerializer:
         return list(prompt_messages)
 
 
+@dataclass(frozen=True)
+class _QuestionClassifierRunContext:
+    inputs: dict[str, Any]
+    model_instance: PreparedLLMProtocol
+    prompt_messages: list[Any]
+    stop: Sequence[str] | None
+    rendered_classes: list[Any]
+
+
 class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
     node_type = BuiltinNodeTypes.QUESTION_CLASSIFIER
     execution_type = NodeExecutionType.BRANCH
@@ -116,161 +126,28 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
 
     @override
     def _run(self) -> NodeRunResult:
-        node_data = self.node_data
-        variable_pool = self.graph_runtime_state.variable_pool
-
-        # extract variables
-        variable = (
-            variable_pool.get(node_data.query_variable_selector)
-            if node_data.query_variable_selector
-            else None
-        )
-        query = variable.value if variable else None
-        variables = {"query": query}
-        # fetch model instance
-        model_instance = self._model_instance
-        # Resolve variable references in string-typed completion params
-        model_instance.parameters = llm_utils.resolve_completion_params_variables(
-            model_instance.parameters,
-            variable_pool,
-        )
-        memory = self._memory
-        # fetch instruction
-        node_data.instruction = node_data.instruction or ""
-        node_data.instruction = variable_pool.convert_template(
-            node_data.instruction,
-        ).text
-
-        files = (
-            llm_utils.fetch_files(
-                variable_pool=variable_pool,
-                selector=node_data.vision.configs.variable_selector,
-            )
-            if node_data.vision.enabled
-            else []
-        )
-
-        # fetch prompt messages
-        rest_token = self._calculate_rest_token(
-            node_data=node_data,
-            query=query or "",
-            model_instance=model_instance,
-            context="",
-        )
-        prompt_template = self._get_prompt_template(
-            node_data=node_data,
-            query=query or "",
-            memory=memory,
-            max_token_limit=rest_token,
-        )
-        # Some models (e.g. Gemma, Mistral) force role alternation
-        # (user/assistant/user/assistant...), which can cause problems.
-        # If both self._get_prompt_template and self._fetch_prompt_messages
-        # append a user prompt, two consecutive user prompts will be generated,
-        # causing model error.
-        # To avoid this, set sys_query to an empty string so that only one
-        # user prompt is appended at the end.
-        prompt_messages, stop = llm_utils.fetch_prompt_messages(
-            prompt_template=prompt_template,
-            sys_query="",
-            memory=memory,
-            model_instance=model_instance,
-            stop=model_instance.stop,
-            sys_files=files,
-            vision_enabled=node_data.vision.enabled,
-            vision_detail=node_data.vision.configs.detail,
-            variable_pool=variable_pool,
-            jinja2_variables=[],
-            template_renderer=self._template_renderer,
-        )
-
-        result_text = ""
+        run_context = self._prepare_run_context()
         usage = LLMUsage.empty_usage()
-        finish_reason = None
 
         try:
-            # handle invoke result
-            generator = LLMNode.invoke_llm(
-                model_instance=model_instance,
-                prompt_messages=prompt_messages,
-                stop=stop,
-                structured_output_enabled=False,
-                structured_output=None,
-                file_saver=self._llm_file_saver,
-                file_outputs=self._file_outputs,
-                node_id=self._node_id,
+            result_text, usage, finish_reason = self._invoke_classifier(
+                run_context=run_context,
             )
-
-            for event in generator:
-                if isinstance(event, ModelInvokeCompletedEvent):
-                    result_text = event.text
-                    usage = event.usage
-                    finish_reason = event.finish_reason
-                    break
-
-            rendered_classes = [
-                c.model_copy(
-                    update={"name": variable_pool.convert_template(c.name).text},
-                )
-                for c in node_data.classes
-            ]
-
-            category_name = rendered_classes[0].name
-            category_id = rendered_classes[0].id
-            if "<think>" in result_text:
-                result_text = re.sub(
-                    r"<think[^>]*>[\s\S]*?</think>",
-                    "",
-                    result_text,
-                    flags=re.IGNORECASE,
-                )
-            result_text_json = parse_and_check_json_markdown(result_text, [])
-            # result_text_json = json.loads(result_text.strip('```JSON\n'))
-            if (
-                "category_name" in result_text_json
-                and "category_id" in result_text_json
-            ):
-                category_id_result = result_text_json["category_id"]
-                classes = rendered_classes
-                classes_map = {class_.id: class_.name for class_ in classes}
-                category_ids = [class_.id for class_ in classes]
-                if category_id_result in category_ids:
-                    category_name = classes_map[category_id_result]
-                    category_id = category_id_result
-            process_data = {
-                "model_mode": node_data.model.mode,
-                "prompts": self._prompt_message_serializer.serialize(
-                    model_mode=node_data.model.mode,
-                    prompt_messages=prompt_messages,
-                ),
-                "usage": jsonable_encoder(usage),
-                "finish_reason": finish_reason,
-                "model_provider": model_instance.provider,
-                "model_name": model_instance.model_name,
-            }
-            outputs = {
-                "class_name": category_name,
-                "class_id": category_id,
-                "usage": jsonable_encoder(usage),
-            }
-
-            return NodeRunResult(
-                status=WorkflowNodeExecutionStatus.SUCCEEDED,
-                inputs=variables,
-                process_data=process_data,
-                outputs=outputs,
-                edge_source_handle=category_id,
-                metadata={
-                    WorkflowNodeExecutionMetadataKey.TOTAL_TOKENS: usage.total_tokens,
-                    WorkflowNodeExecutionMetadataKey.TOTAL_PRICE: usage.total_price,
-                    WorkflowNodeExecutionMetadataKey.CURRENCY: usage.currency,
-                },
-                llm_usage=usage,
+            category_name, category_id = self._resolve_category(
+                rendered_classes=run_context.rendered_classes,
+                result_text=result_text,
+            )
+            return self._build_success_result(
+                run_context=run_context,
+                usage=usage,
+                finish_reason=finish_reason,
+                category_name=category_name,
+                category_id=category_id,
             )
         except ValueError as e:
             return NodeRunResult(
                 status=WorkflowNodeExecutionStatus.FAILED,
-                inputs=variables,
+                inputs=run_context.inputs,
                 error=str(e),
                 error_type=type(e).__name__,
                 metadata={
@@ -280,6 +157,185 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
                 },
                 llm_usage=usage,
             )
+
+    def _prepare_run_context(self) -> _QuestionClassifierRunContext:
+        node_data = self.node_data
+        variable_pool = self.graph_runtime_state.variable_pool
+        variable = (
+            variable_pool.get(node_data.query_variable_selector)
+            if node_data.query_variable_selector
+            else None
+        )
+        query = variable.value if variable else None
+        node_data.instruction = variable_pool.convert_template(
+            node_data.instruction or "",
+        ).text
+        model_instance = self._prepare_model_instance(variable_pool=variable_pool)
+        files = (
+            llm_utils.fetch_files(
+                variable_pool=variable_pool,
+                selector=node_data.vision.configs.variable_selector,
+            )
+            if node_data.vision.enabled
+            else []
+        )
+        prompt_messages, stop = self._build_prompt_messages(
+            query=query or "",
+            model_instance=model_instance,
+            files=files,
+        )
+        rendered_classes = [
+            class_.model_copy(
+                update={"name": variable_pool.convert_template(class_.name).text},
+            )
+            for class_ in node_data.classes
+        ]
+        return _QuestionClassifierRunContext(
+            inputs={"query": query},
+            model_instance=model_instance,
+            prompt_messages=prompt_messages,
+            stop=stop,
+            rendered_classes=rendered_classes,
+        )
+
+    def _prepare_model_instance(self, *, variable_pool: Any) -> PreparedLLMProtocol:
+        model_instance = self._model_instance
+        model_instance.parameters = llm_utils.resolve_completion_params_variables(
+            model_instance.parameters,
+            variable_pool,
+        )
+        return model_instance
+
+    def _build_prompt_messages(
+        self,
+        *,
+        query: str,
+        model_instance: PreparedLLMProtocol,
+        files: Sequence[Any],
+    ) -> tuple[list[Any], Sequence[str] | None]:
+        rest_token = self._calculate_rest_token(
+            node_data=self.node_data,
+            query=query,
+            model_instance=model_instance,
+            context="",
+        )
+        prompt_template = self._get_prompt_template(
+            node_data=self.node_data,
+            query=query,
+            memory=self._memory,
+            max_token_limit=rest_token,
+        )
+        return llm_utils.fetch_prompt_messages(
+            prompt_template=prompt_template,
+            sys_query="",
+            memory=self._memory,
+            model_instance=model_instance,
+            stop=model_instance.stop,
+            sys_files=files,
+            vision_enabled=self.node_data.vision.enabled,
+            vision_detail=self.node_data.vision.configs.detail,
+            variable_pool=self.graph_runtime_state.variable_pool,
+            jinja2_variables=[],
+            template_renderer=self._template_renderer,
+        )
+
+    def _invoke_classifier(
+        self,
+        *,
+        run_context: _QuestionClassifierRunContext,
+    ) -> tuple[str, LLMUsage, str | None]:
+        result_text = ""
+        usage = LLMUsage.empty_usage()
+        finish_reason = None
+        generator = LLMNode.invoke_llm(
+            model_instance=run_context.model_instance,
+            prompt_messages=run_context.prompt_messages,
+            stop=run_context.stop,
+            structured_output_enabled=False,
+            structured_output=None,
+            file_saver=self._llm_file_saver,
+            file_outputs=self._file_outputs,
+            node_id=self._node_id,
+        )
+        for event in generator:
+            if isinstance(event, ModelInvokeCompletedEvent):
+                result_text = event.text
+                usage = event.usage
+                finish_reason = event.finish_reason
+                break
+        return result_text, usage, finish_reason
+
+    @staticmethod
+    def _resolve_category(
+        *,
+        rendered_classes: Sequence[Any],
+        result_text: str,
+    ) -> tuple[str, str]:
+        category_name = rendered_classes[0].name
+        category_id = rendered_classes[0].id
+        cleaned_result_text = QuestionClassifierNode._strip_think_tags(result_text)
+        result_text_json = parse_and_check_json_markdown(cleaned_result_text, [])
+        if (
+            "category_name" not in result_text_json
+            or "category_id" not in result_text_json
+        ):
+            return category_name, category_id
+
+        category_id_result = result_text_json["category_id"]
+        classes_map = {class_.id: class_.name for class_ in rendered_classes}
+        if category_id_result in classes_map:
+            return classes_map[category_id_result], category_id_result
+        return category_name, category_id
+
+    @staticmethod
+    def _strip_think_tags(result_text: str) -> str:
+        if "<think>" not in result_text:
+            return result_text
+        return re.sub(
+            r"<think[^>]*>[\s\S]*?</think>",
+            "",
+            result_text,
+            flags=re.IGNORECASE,
+        )
+
+    def _build_success_result(
+        self,
+        *,
+        run_context: _QuestionClassifierRunContext,
+        usage: LLMUsage,
+        finish_reason: str | None,
+        category_name: str,
+        category_id: str,
+    ) -> NodeRunResult:
+        process_data = {
+            "model_mode": self.node_data.model.mode,
+            "prompts": self._prompt_message_serializer.serialize(
+                model_mode=self.node_data.model.mode,
+                prompt_messages=run_context.prompt_messages,
+            ),
+            "usage": jsonable_encoder(usage),
+            "finish_reason": finish_reason,
+            "model_provider": run_context.model_instance.provider,
+            "model_name": run_context.model_instance.model_name,
+        }
+        outputs = {
+            "class_name": category_name,
+            "class_id": category_id,
+            "usage": jsonable_encoder(usage),
+        }
+        return NodeRunResult(
+            status=WorkflowNodeExecutionStatus.SUCCEEDED,
+            inputs=run_context.inputs,
+            process_data=process_data,
+            outputs=outputs,
+            edge_source_handle=category_id,
+            metadata={
+                WorkflowNodeExecutionMetadataKey.TOTAL_TOKENS: usage.total_tokens,
+                WorkflowNodeExecutionMetadataKey.TOTAL_PRICE: usage.total_price,
+                WorkflowNodeExecutionMetadataKey.CURRENCY: usage.currency,
+            },
+            llm_usage=usage,
+        )
 
     @property
     def model_instance(self) -> PreparedLLMProtocol:

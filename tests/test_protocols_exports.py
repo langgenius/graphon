@@ -69,7 +69,7 @@ from graphon.runtime.graph_runtime_state_protocol import (
 from graphon.variable_loader import VariableLoader
 
 
-def test_public_protocol_exports_match_canonical_definitions():
+def test_public_protocol_exports_match_canonical_definitions() -> None:
     assert PublicHttpClientProtocol is HttpClientProtocol
     assert PublicHttpResponseProtocol is HttpResponseProtocol
     assert PublicWorkflowFileRuntimeProtocol is WorkflowFileRuntimeProtocol
@@ -94,7 +94,7 @@ def test_public_protocol_exports_match_canonical_definitions():
     assert PublicVariableLoader is VariableLoader
 
 
-def test_public_protocol_package_exports_are_stable():
+def test_public_protocol_package_exports_are_stable() -> None:
     assert protocols.__all__ == [
         "CredentialsProvider",
         "FileManagerProtocol",

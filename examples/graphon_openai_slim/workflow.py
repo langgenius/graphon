@@ -36,6 +36,7 @@ LOCAL_VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
 DEFAULT_ENV_FILE = EXAMPLE_DIR / ".env"
 BOOTSTRAP_ENV_VAR = "GRAPHON_EXAMPLE_BOOTSTRAPPED"
 RUNTIME_MODULES = ("pydantic", "httpx", "yaml")
+MIN_QUOTED_VALUE_LENGTH = 2
 
 
 def bootstrap_local_python() -> None:
@@ -48,7 +49,7 @@ def bootstrap_local_python() -> None:
 
     env = dict(os.environ)
     env[BOOTSTRAP_ENV_VAR] = "1"
-    os.execve(
+    os.execve(  # noqa: S606
         str(LOCAL_VENV_PYTHON),
         [str(LOCAL_VENV_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]],
         env,
@@ -151,7 +152,11 @@ def load_env_file(path: Path) -> None:
 
 
 def strip_optional_quotes(value: str) -> str:
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+    if (
+        len(value) >= MIN_QUOTED_VALUE_LENGTH
+        and value[0] == value[-1]
+        and value[0] in {'"', "'"}
+    ):
         return value[1:-1]
     return value
 

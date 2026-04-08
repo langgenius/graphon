@@ -28,6 +28,7 @@ from graphon.nodes.base.node import Node
 from .ready_queue import ReadyQueue
 
 logger = logging.getLogger(__name__)
+WORKER_IDLE_THRESHOLD_SECONDS = 0.2
 
 
 @final
@@ -77,8 +78,8 @@ class Worker(threading.Thread):
     @property
     def is_idle(self) -> bool:
         """Check if the worker is currently idle."""
-        # Worker is idle if it hasn't processed a task recently (within 0.2 seconds)
-        return (time.time() - self._last_task_time) > 0.2
+        # Worker is idle if it hasn't processed a task recently.
+        return (time.time() - self._last_task_time) > WORKER_IDLE_THRESHOLD_SECONDS
 
     @property
     def idle_duration(self) -> float:

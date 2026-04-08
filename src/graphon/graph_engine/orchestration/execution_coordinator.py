@@ -47,11 +47,11 @@ class ExecutionCoordinator:
         self._worker_pool.check_and_scale()
 
     @property
-    def execution_complete(self):
+    def execution_complete(self) -> bool:
         return self._state_manager.is_execution_complete()
 
     @property
-    def aborted(self):
+    def aborted(self) -> bool:
         return self._graph_execution.aborted or self._graph_execution.has_error
 
     @property

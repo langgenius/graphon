@@ -87,16 +87,22 @@ class WorkflowNodeExecution(BaseModel):
     def get_truncated_process_data(self) -> Mapping[str, Any] | None:
         return self._truncated_process_data
 
-    def set_truncated_inputs(self, truncated_inputs: Mapping[str, Any] | None):
+    def set_truncated_inputs(
+        self,
+        truncated_inputs: Mapping[str, Any] | None,
+    ) -> None:
         self._truncated_inputs = truncated_inputs
 
-    def set_truncated_outputs(self, truncated_outputs: Mapping[str, Any] | None):
+    def set_truncated_outputs(
+        self,
+        truncated_outputs: Mapping[str, Any] | None,
+    ) -> None:
         self._truncated_outputs = truncated_outputs
 
     def set_truncated_process_data(
         self,
         truncated_process_data: Mapping[str, Any] | None,
-    ):
+    ) -> None:
         self._truncated_process_data = truncated_process_data
 
     def get_response_inputs(self) -> Mapping[str, Any] | None:
@@ -106,15 +112,15 @@ class WorkflowNodeExecution(BaseModel):
         return self.inputs
 
     @property
-    def inputs_truncated(self):
+    def inputs_truncated(self) -> bool:
         return self._truncated_inputs is not None
 
     @property
-    def outputs_truncated(self):
+    def outputs_truncated(self) -> bool:
         return self._truncated_outputs is not None
 
     @property
-    def process_data_truncated(self):
+    def process_data_truncated(self) -> bool:
         return self._truncated_process_data is not None
 
     def get_response_outputs(self) -> Mapping[str, Any] | None:
@@ -135,7 +141,7 @@ class WorkflowNodeExecution(BaseModel):
         process_data: Mapping[str, Any] | None = None,
         outputs: Mapping[str, Any] | None = None,
         metadata: Mapping[WorkflowNodeExecutionMetadataKey, Any] | None = None,
-    ):
+    ) -> None:
         """Update the model from mappings.
 
         Args:

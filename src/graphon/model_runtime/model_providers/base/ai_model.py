@@ -175,72 +175,63 @@ class AIModel:
         if not schema:
             return None
 
-        # fill in the template
-        new_parameter_rules = []
-        for parameter_rule in schema.parameter_rules:
-            if parameter_rule.use_template:
-                try:
-                    default_parameter_name = DefaultParameterName.value_of(
-                        parameter_rule.use_template,
-                    )
-                    default_parameter_rule = (
-                        self._get_default_parameter_rule_variable_map(
-                            default_parameter_name,
-                        )
-                    )
-                    if not parameter_rule.max and "max" in default_parameter_rule:
-                        parameter_rule.max = default_parameter_rule["max"]
-                    if not parameter_rule.min and "min" in default_parameter_rule:
-                        parameter_rule.min = default_parameter_rule["min"]
-                    if (
-                        not parameter_rule.default
-                        and "default" in default_parameter_rule
-                    ):
-                        parameter_rule.default = default_parameter_rule["default"]
-                    if (
-                        not parameter_rule.precision
-                        and "precision" in default_parameter_rule
-                    ):
-                        parameter_rule.precision = default_parameter_rule["precision"]
-                    if (
-                        not parameter_rule.required
-                        and "required" in default_parameter_rule
-                    ):
-                        parameter_rule.required = default_parameter_rule["required"]
-                    if not parameter_rule.help and "help" in default_parameter_rule:
-                        parameter_rule.help = I18nObject(
-                            en_US=default_parameter_rule["help"]["en_US"],
-                        )
-                    if (
-                        parameter_rule.help
-                        and not parameter_rule.help.en_us
-                        and (
-                            "help" in default_parameter_rule
-                            and "en_US" in default_parameter_rule["help"]
-                        )
-                    ):
-                        parameter_rule.help.en_us = default_parameter_rule["help"][
-                            "en_US"
-                        ]
-                    if (
-                        parameter_rule.help
-                        and not parameter_rule.help.zh_hans
-                        and (
-                            "help" in default_parameter_rule
-                            and "zh_Hans" in default_parameter_rule["help"]
-                        )
-                    ):
-                        parameter_rule.help.zh_hans = default_parameter_rule[
-                            "help"
-                        ].get("zh_Hans", default_parameter_rule["help"]["en_US"])
-                except ValueError:
-                    pass
-
-            new_parameter_rules.append(parameter_rule)
-
-        schema.parameter_rules = new_parameter_rules
+        schema.parameter_rules = [
+            self._apply_parameter_rule_template(parameter_rule)
+            for parameter_rule in schema.parameter_rules
+        ]
 
         return schema
+
+    def _apply_parameter_rule_template(self, parameter_rule: Any) -> Any:
+        template_name = parameter_rule.use_template
+        if not template_name:
+            return parameter_rule
+
+        try:
+            default_parameter_name = DefaultParameterName.value_of(template_name)
+        except ValueError:
+            return parameter_rule
+
+        default_parameter_rule = self._get_default_parameter_rule_variable_map(
+            default_parameter_name,
+        )
+        self._hydrate_parameter_rule_defaults(parameter_rule, default_parameter_rule)
+        self._hydrate_parameter_rule_help(parameter_rule, default_parameter_rule)
+        return parameter_rule
+
+    @staticmethod
+    def _hydrate_parameter_rule_defaults(
+        parameter_rule: Any,
+        default_parameter_rule: dict[str, Any],
+    ) -> None:
+        for field_name in ("max", "min", "default", "precision", "required"):
+            if (
+                getattr(parameter_rule, field_name)
+                or field_name not in default_parameter_rule
+            ):
+                continue
+            setattr(parameter_rule, field_name, default_parameter_rule[field_name])
+
+    @staticmethod
+    def _hydrate_parameter_rule_help(
+        parameter_rule: Any,
+        default_parameter_rule: dict[str, Any],
+    ) -> None:
+        default_help = default_parameter_rule.get("help")
+        if not isinstance(default_help, dict) or "en_US" not in default_help:
+            return
+
+        if not parameter_rule.help:
+            parameter_rule.help = I18nObject(en_us=default_help["en_US"])
+            return
+
+        if not parameter_rule.help.en_us:
+            parameter_rule.help.en_us = default_help["en_US"]
+        if not parameter_rule.help.zh_hans:
+            parameter_rule.help.zh_hans = default_help.get(
+                "zh_Hans",
+                default_help["en_US"],
+            )
 
     def get_customizable_model_schema(
         self,

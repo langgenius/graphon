@@ -1,5 +1,5 @@
 import time
-from typing import Any
+from collections.abc import Sequence
 
 from graphon.entities.graph_config import NodeConfigDictAdapter
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
@@ -8,9 +8,11 @@ from graphon.graph_events.node import (
     NodeRunSucceededEvent,
     NodeRunVariableUpdatedEvent,
 )
+from graphon.nodes.variable_assigner.v2.entities import VariableOperationItem
 from graphon.nodes.variable_assigner.v2.enums import InputType, Operation
 from graphon.nodes.variable_assigner.v2.node import VariableAssignerNode
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.variables import (
     ArrayStringVariable,
     StringVariable,
@@ -21,8 +23,8 @@ from ...helpers import build_graph_init_params, build_variable_pool
 
 def _build_node(
     *,
-    variable_pool: Any,
-    items: Any,
+    variable_pool: VariablePool,
+    items: Sequence[VariableOperationItem],
 ) -> VariableAssignerNode:
     graph_config = {"nodes": [], "edges": []}
     init_params = build_graph_init_params(graph_config=graph_config)
@@ -47,7 +49,7 @@ def _build_node(
     )
 
 
-def test_remove_first_from_array():
+def test_remove_first_from_array() -> None:
     conversation_variable = ArrayStringVariable(
         name="test_conversation_variable",
         value=["first", "second", "third"],
@@ -75,7 +77,7 @@ def test_remove_first_from_array():
     assert updated_event.variable.value == ["second", "third"]
 
 
-def test_remove_last_from_array():
+def test_remove_last_from_array() -> None:
     conversation_variable = ArrayStringVariable(
         name="test_conversation_variable",
         value=["first", "second", "third"],
@@ -103,7 +105,7 @@ def test_remove_last_from_array():
     assert updated_event.variable.value == ["first", "second"]
 
 
-def test_multiple_operations_emit_single_final_update_per_selector():
+def test_multiple_operations_emit_single_final_update_per_selector() -> None:
     conversation_variable = ArrayStringVariable(
         name="test_conversation_variable",
         value=["first"],
@@ -153,7 +155,7 @@ def test_multiple_operations_emit_single_final_update_per_selector():
     ] == ["first", "second", "third"]
 
 
-def test_invalid_constant_input_returns_failed_event():
+def test_invalid_constant_input_returns_failed_event() -> None:
     conversation_variable = StringVariable(
         name="test_conversation_variable",
         value="before",

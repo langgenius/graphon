@@ -24,11 +24,13 @@ from .segments import (
 )
 from .types import SegmentType
 
+SHORT_TOKEN_MAX_LENGTH = 8
+
 
 def _obfuscated_token(token: str) -> str:
     if not token:
         return token
-    if len(token) <= 8:
+    if len(token) <= SHORT_TOKEN_MAX_LENGTH:
         return "*" * 20
     return token[:6] + "*" * 12 + token[-2:]
 

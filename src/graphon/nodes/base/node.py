@@ -450,10 +450,10 @@ class Node[NodeDataT: BaseNodeData](
         bucket = Node._registry.setdefault(node_type, {})
         if module_name.startswith("graphon.nodes."):
             # Production node definitions take precedence and may override
-            bucket[version] = cls  # type: ignore[index]
+            bucket[version] = cls
         else:
             # External/test subclasses may register but must not override production
-            bucket.setdefault(version, cls)  # type: ignore[index]
+            bucket.setdefault(version, cls)
         # Maintain a "latest" pointer preferring numeric versions,
         # fallback to lexicographic.
         version_keys = [v for v in bucket if v != "latest"]
@@ -483,7 +483,7 @@ class Node[NodeDataT: BaseNodeData](
         # __orig_bases__ contains the original generic bases before type erasure.
         # For `class CodeNode(Node[CodeNodeData])`, this would be
         # `(Node[CodeNodeData],)`.
-        for base in getattr(cls, "__orig_bases__", ()):  # type: ignore[attr-defined]
+        for base in getattr(cls, "__orig_bases__", ()):
             origin = get_origin(base)  # Returns `Node` for `Node[CodeNodeData]`
             if origin is Node:
                 args = get_args(
@@ -603,13 +603,13 @@ class Node[NodeDataT: BaseNodeData](
             for event in result:
                 # NOTE: this is necessary because iteration and loop nodes
                 # yield GraphNodeEventBase.
-                if isinstance(event, NodeEventBase):  # pyright: ignore[reportUnnecessaryIsInstance]
+                if isinstance(event, NodeEventBase):
                     yield self._dispatch(event)
                 elif (
                     isinstance(event, GraphNodeEventBase)
                     and not event.in_iteration_id
                     and not event.in_loop_id
-                ):  # pyright: ignore[reportUnnecessaryIsInstance]
+                ):
                     event.id = self.execution_id
                     yield event
                 else:

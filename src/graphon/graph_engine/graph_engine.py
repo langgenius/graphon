@@ -294,9 +294,9 @@ class GraphEngine:
     def _emit_terminal_events(self) -> Generator[GraphEngineEvent, None, None]:
         if self._graph_execution.is_paused:
             pause_reasons = self._graph_execution.pause_reasons
-            assert pause_reasons, (
-                "pause_reasons should not be empty when execution is paused."
-            )
+            if not pause_reasons:
+                msg = "pause_reasons should not be empty when execution is paused."
+                raise RuntimeError(msg)
             # Ensure we have a valid PauseReason for the event
             paused_event = GraphRunPausedEvent(
                 reasons=pause_reasons,

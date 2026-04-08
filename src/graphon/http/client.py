@@ -8,6 +8,8 @@ import httpx
 from .protocols import HttpClientProtocol
 from .response import HttpResponse
 
+TIMEOUT_COMPONENT_COUNT = 3
+
 
 class HttpClientMaxRetriesExceededError(Exception):
     """Raised when the client exhausts all retry attempts on request errors."""
@@ -88,7 +90,7 @@ class HttpxHttpClient(HttpClientProtocol):
 
         timeout = request_kwargs.get("timeout")
         if isinstance(timeout, Sequence) and not isinstance(timeout, str):
-            if len(timeout) != 3:
+            if len(timeout) != TIMEOUT_COMPONENT_COUNT:
                 msg = "timeout sequence must contain connect, read, and write values"
                 raise ValueError(msg)
             connect, read, write = timeout

@@ -2,7 +2,7 @@ from graphon.nodes.base.template import Template, TextSegment, VariableSegment
 
 
 class TestTemplate:
-    def test_from_answer_template_simple(self):
+    def test_from_answer_template_simple(self) -> None:
         template_str = "Hello, {{#node1.name#}}!"
         template = Template.from_answer_template(template_str)
 
@@ -14,7 +14,7 @@ class TestTemplate:
         assert isinstance(template.segments[2], TextSegment)
         assert template.segments[2].text == "!"
 
-    def test_from_answer_template_multiple_vars(self):
+    def test_from_answer_template_multiple_vars(self) -> None:
         template_str = "Hello {{#node1.name#}}, your age is {{#node2.age#}}."
         template = Template.from_answer_template(template_str)
 
@@ -30,7 +30,7 @@ class TestTemplate:
         assert isinstance(template.segments[4], TextSegment)
         assert template.segments[4].text == "."
 
-    def test_from_answer_template_no_vars(self):
+    def test_from_answer_template_no_vars(self) -> None:
         template_str = "Hello, world!"
         template = Template.from_answer_template(template_str)
 
@@ -38,7 +38,7 @@ class TestTemplate:
         assert isinstance(template.segments[0], TextSegment)
         assert template.segments[0].text == "Hello, world!"
 
-    def test_from_end_outputs_single(self):
+    def test_from_end_outputs_single(self) -> None:
         outputs_config = [{"variable": "text", "value_selector": ["node1", "text"]}]
         template = Template.from_end_outputs(outputs_config)
 
@@ -46,7 +46,7 @@ class TestTemplate:
         assert isinstance(template.segments[0], VariableSegment)
         assert template.segments[0].selector == ["node1", "text"]
 
-    def test_from_end_outputs_multiple(self):
+    def test_from_end_outputs_multiple(self) -> None:
         outputs_config = [
             {"variable": "text", "value_selector": ["node1", "text"]},
             {"variable": "result", "value_selector": ["node2", "result"]},
@@ -63,11 +63,11 @@ class TestTemplate:
         assert template.segments[2].selector == ["node2", "result"]
         assert template.segments[2].variable_name == "result"
 
-    def test_from_end_outputs_empty(self):
+    def test_from_end_outputs_empty(self) -> None:
         template = Template.from_end_outputs([])
         assert len(template.segments) == 0
 
-    def test_template_str_representation(self):
+    def test_template_str_representation(self) -> None:
         template_str = "Hello, {{#node1.name#}}!"
         template = Template.from_answer_template(template_str)
 

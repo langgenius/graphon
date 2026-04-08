@@ -10,6 +10,27 @@ _NO_VALUE_OPERATIONS = frozenset((
     Operation.REMOVE_LAST,
 ))
 _LIST_VALUE_OPERATIONS = frozenset((Operation.EXTEND, Operation.OVER_WRITE))
+_NUMERIC_SEGMENT_TYPES = frozenset((
+    SegmentType.NUMBER,
+    SegmentType.INTEGER,
+    SegmentType.FLOAT,
+))
+_SCALAR_INPUT_TYPES: dict[SegmentType, type[Any]] = {
+    SegmentType.STRING: str,
+    SegmentType.BOOLEAN: bool,
+    SegmentType.OBJECT: dict,
+}
+_ARRAY_APPEND_INPUT_TYPES: dict[
+    SegmentType,
+    type[Any] | tuple[type[Any], ...],
+] = {
+    SegmentType.ARRAY_ANY: (str, float, int, dict),
+    SegmentType.ARRAY_STRING: str,
+    SegmentType.ARRAY_NUMBER: (int, float),
+    SegmentType.ARRAY_OBJECT: dict,
+    SegmentType.ARRAY_BOOLEAN: bool,
+}
+_ARRAY_LIST_INPUT_TYPES = dict(_ARRAY_APPEND_INPUT_TYPES)
 
 
 def _is_valid_list_input(
@@ -33,7 +54,11 @@ def _is_valid_numeric_input(*, operation: Operation, value: Any) -> bool:
     return result
 
 
-def is_operation_supported(*, variable_type: SegmentType, operation: Operation):
+def is_operation_supported(
+    *,
+    variable_type: SegmentType,
+    operation: Operation,
+) -> bool:
     match operation:
         case Operation.OVER_WRITE | Operation.CLEAR:
             return True
@@ -64,7 +89,7 @@ def is_operation_supported(*, variable_type: SegmentType, operation: Operation):
             return variable_type.is_array_type()
 
 
-def is_variable_input_supported(*, operation: Operation):
+def is_variable_input_supported(*, operation: Operation) -> bool:
     return operation not in frozenset((
         Operation.SET,
         Operation.ADD,
@@ -74,7 +99,11 @@ def is_variable_input_supported(*, operation: Operation):
     ))
 
 
-def is_constant_input_supported(*, variable_type: SegmentType, operation: Operation):
+def is_constant_input_supported(
+    *,
+    variable_type: SegmentType,
+    operation: Operation,
+) -> bool:
     match variable_type:
         case SegmentType.STRING | SegmentType.OBJECT | SegmentType.BOOLEAN:
             return operation in frozenset((Operation.OVER_WRITE, Operation.SET))
@@ -96,59 +125,35 @@ def is_input_value_valid(
     variable_type: SegmentType,
     operation: Operation,
     value: Any,
-):
+) -> bool:
     if operation in _NO_VALUE_OPERATIONS:
-        result = True
-    else:
-        match variable_type, operation, value:
-            case SegmentType.STRING, _, str():
-                result = True
-            case SegmentType.BOOLEAN, _, bool():
-                result = True
-            case (
-                SegmentType.NUMBER | SegmentType.INTEGER | SegmentType.FLOAT,
-                _,
-                _,
-            ):
-                result = _is_valid_numeric_input(operation=operation, value=value)
-            case SegmentType.OBJECT, _, dict():
-                result = True
-            case (
-                SegmentType.ARRAY_ANY,
-                Operation.APPEND,
-                str() | float() | int() | dict(),
-            ):
-                result = True
-            case SegmentType.ARRAY_STRING, Operation.APPEND, str():
-                result = True
-            case SegmentType.ARRAY_NUMBER, Operation.APPEND, int() | float():
-                result = True
-            case SegmentType.ARRAY_OBJECT, Operation.APPEND, dict():
-                result = True
-            case SegmentType.ARRAY_BOOLEAN, Operation.APPEND, bool():
-                result = True
-            case SegmentType.ARRAY_ANY, operation, _ if (
-                operation in _LIST_VALUE_OPERATIONS
-            ):
-                result = _is_valid_list_input(value, (str, float, int, dict))
-            case SegmentType.ARRAY_STRING, operation, _ if (
-                operation in _LIST_VALUE_OPERATIONS
-            ):
-                result = _is_valid_list_input(value, str)
-            case SegmentType.ARRAY_NUMBER, operation, _ if (
-                operation in _LIST_VALUE_OPERATIONS
-            ):
-                result = _is_valid_list_input(value, (int, float))
-            case SegmentType.ARRAY_OBJECT, operation, _ if (
-                operation in _LIST_VALUE_OPERATIONS
-            ):
-                result = _is_valid_list_input(value, dict)
-            case (
-                SegmentType.ARRAY_BOOLEAN,
-                operation,
-                _,
-            ) if operation in _LIST_VALUE_OPERATIONS:
-                result = _is_valid_list_input(value, bool)
-            case _:
-                result = False
-    return result
+        return True
+    if variable_type in _NUMERIC_SEGMENT_TYPES:
+        return _is_valid_numeric_input(operation=operation, value=value)
+    if _is_valid_scalar_input(variable_type=variable_type, value=value):
+        return True
+    return _is_valid_array_input(
+        variable_type=variable_type,
+        operation=operation,
+        value=value,
+    )
+
+
+def _is_valid_scalar_input(*, variable_type: SegmentType, value: Any) -> bool:
+    input_type = _SCALAR_INPUT_TYPES.get(variable_type)
+    return input_type is not None and isinstance(value, input_type)
+
+
+def _is_valid_array_input(
+    *,
+    variable_type: SegmentType,
+    operation: Operation,
+    value: Any,
+) -> bool:
+    if operation == Operation.APPEND:
+        input_type = _ARRAY_APPEND_INPUT_TYPES.get(variable_type)
+        return input_type is not None and isinstance(value, input_type)
+    if operation in _LIST_VALUE_OPERATIONS:
+        input_type = _ARRAY_LIST_INPUT_TYPES.get(variable_type)
+        return input_type is not None and _is_valid_list_input(value, input_type)
+    return False

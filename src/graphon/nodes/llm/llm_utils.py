@@ -139,12 +139,10 @@ def _update_completion_prompt_content(
 ) -> None:
     prompt_content = prompt_messages[0].content
     if isinstance(prompt_content, str):
-        prompt_content = str(prompt_content)
-        if "#histories#" in prompt_content:
-            prompt_content = prompt_content.replace("#histories#", memory_text)
-        else:
-            prompt_content = memory_text + "\n" + prompt_content
-        prompt_messages[0].content = prompt_content
+        prompt_messages[0].content = _prepend_or_replace_histories(
+            prompt_content,
+            memory_text,
+        )
         if sys_query:
             prompt_messages[0].content = str(prompt_messages[0].content).replace(
                 "#sys.query#",
@@ -153,23 +151,40 @@ def _update_completion_prompt_content(
         return
 
     if isinstance(prompt_content, list):
-        for content_item in prompt_content:
-            if isinstance(content_item, TextPromptMessageContent):
-                if "#histories#" in content_item.data:
-                    content_item.data = content_item.data.replace(
-                        "#histories#",
-                        memory_text,
-                    )
-                else:
-                    content_item.data = memory_text + "\n" + content_item.data
+        _update_text_prompt_items(prompt_content, memory_text)
         if sys_query:
-            for content_item in prompt_content:
-                if isinstance(content_item, TextPromptMessageContent):
-                    content_item.data = sys_query + "\n" + content_item.data
+            _prepend_sys_query_to_text_prompt_items(prompt_content, sys_query)
         return
 
     msg = "Invalid prompt content type"
     raise ValueError(msg)
+
+
+def _prepend_or_replace_histories(text: str, memory_text: str) -> str:
+    if "#histories#" in text:
+        return text.replace("#histories#", memory_text)
+    return memory_text + "\n" + text
+
+
+def _update_text_prompt_items(
+    prompt_content: list[PromptMessageContentUnionTypes],
+    memory_text: str,
+) -> None:
+    for content_item in prompt_content:
+        if isinstance(content_item, TextPromptMessageContent):
+            content_item.data = _prepend_or_replace_histories(
+                content_item.data,
+                memory_text,
+            )
+
+
+def _prepend_sys_query_to_text_prompt_items(
+    prompt_content: list[PromptMessageContentUnionTypes],
+    sys_query: str,
+) -> None:
+    for content_item in prompt_content:
+        if isinstance(content_item, TextPromptMessageContent):
+            content_item.data = sys_query + "\n" + content_item.data
 
 
 def _filter_prompt_messages(
@@ -555,7 +570,6 @@ def _append_file_prompts(
         and isinstance(prompt_messages[-1].content, list)
     ):
         existing_contents = prompt_messages[-1].content
-        assert isinstance(existing_contents, list)
         prompt_messages[-1] = UserPromptMessage(
             content=file_prompts + existing_contents,
         )
@@ -581,7 +595,7 @@ def _coerce_resolved_value(raw: str) -> int | float | bool | str:
         return raw
 
     try:
-        parsed: object = json.loads(stripped)
+        parsed: Any = json.loads(stripped)
     except (json.JSONDecodeError, ValueError):
         return raw
 

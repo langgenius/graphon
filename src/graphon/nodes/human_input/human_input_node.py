@@ -171,7 +171,7 @@ class HumanInputNode(Node[HumanInputNodeData]):
                 continue
             resolved_value = variable_pool.get(default_value.selector)
             if resolved_value is None:
-                # TODO: How should we handle this?
+                # Treat missing variable-backed defaults as absent defaults.
                 continue
             resolved_defaults[form_input.output_variable_name] = (
                 WorkflowRuntimeTypeConverter().value_to_json_encodable_recursive(

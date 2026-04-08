@@ -1,6 +1,5 @@
 from collections.abc import Mapping, Sequence
 from datetime import datetime
-from typing import Any
 
 from pydantic import Field
 
@@ -16,7 +15,6 @@ class NodeRunStartedEvent(GraphNodeEventBase):
     start_at: datetime = Field(..., description="node start time")
     extras: dict[str, object] = Field(default_factory=dict)
 
-    # FIXME(-LAN-): only for ToolNode
     provider_type: str = ""
     provider_id: str = ""
 
@@ -37,7 +35,7 @@ class NodeRunStreamChunkEvent(GraphNodeEventBase):
 
 
 class NodeRunRetrieverResourceEvent(GraphNodeEventBase):
-    retriever_resources: Sequence[Mapping[str, Any]] = Field(
+    retriever_resources: Sequence[Mapping[str, object]] = Field(
         ...,
         description="retriever resources",
     )

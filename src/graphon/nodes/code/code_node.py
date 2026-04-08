@@ -35,7 +35,11 @@ class WorkflowCodeExecutor(Protocol):
     def is_execution_error(self, error: Exception) -> bool: ...
 
 
-def _build_default_config(*, language: CodeLanguage, code: str) -> Mapping[str, object]:
+def _build_default_config(
+    *,
+    language: CodeLanguage,
+    code: str,
+) -> Mapping[str, object]:
     return {
         "type": "code",
         "config": {
@@ -602,9 +606,8 @@ class CodeNode(Node[CodeNodeData]):
         prefix: str = "",
         depth: int = 1,
     ) -> Mapping[str, Any]:
-        # TODO(QuantumGhost): Replace native Python lists with `Array*Segment` classes.
-        # Note that `_transform_result` may produce lists containing `None` values,
-        # which don't conform to the type requirements of `Array*Segment` classes.
+        # Keep code-node outputs JSON-like. Schema-validated arrays may contain
+        # `None` items, which do not fit the stricter `Array*Segment` classes.
         if depth > self._limits.max_depth:
             msg = f"Depth limit {self._limits.max_depth} reached, object too deep."
             raise DepthLimitError(msg)

@@ -37,8 +37,8 @@ class FormInputDefault(BaseModel):
     # The selector of default variable, used when `type` is `VARIABLE`.
     selector: Sequence[str] = Field(default_factory=tuple)
 
-    # The value of the default, used when `type` is `CONSTANT`.
-    # TODO: How should we express JSON values?
+    # Constant defaults are stored as strings because current form inputs are
+    # text-based (`TEXT_INPUT` and `PARAGRAPH`).
     value: str = ""
 
     @model_validator(mode="after")

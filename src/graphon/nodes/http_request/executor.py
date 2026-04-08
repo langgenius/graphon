@@ -39,6 +39,9 @@ BODY_TYPE_TO_CONTENT_TYPE = {
     "form-data": "multipart/form-data",
     "raw-text": "text/plain",
 }
+MULTIPART_FILE_ENTRY_ITEMS = 2
+MULTIPART_FILE_REQUIRED_VALUE_ITEMS = 2
+MULTIPART_FILE_MIME_TYPE_ITEMS = 3
 
 
 class Executor:
@@ -458,7 +461,7 @@ class Executor:
         # validate response
         return self._validate_and_parse_response(response)
 
-    def to_log(self):
+    def to_log(self) -> str:
         url_parts = urlparse(self.url)
         path = self._build_log_path(url_parts)
         raw = f"{self.method.upper()} {path} HTTP/1.1\r\n"
@@ -545,11 +548,18 @@ class Executor:
     def _build_file_log_body(self, boundary: str) -> str:
         body_string = ""
         for file_entry in self.files or []:
-            if len(file_entry) != 2 or len(file_entry[1]) < 2:
+            if len(file_entry) != MULTIPART_FILE_ENTRY_ITEMS:
+                continue
+            file_value = file_entry[1]
+            if len(file_value) < MULTIPART_FILE_REQUIRED_VALUE_ITEMS:
                 continue
             key = file_entry[0]
-            filename, content = file_entry[1][0], file_entry[1][1]
-            file_mime_type = file_entry[1][2] if len(file_entry[1]) > 2 else "unknown"
+            filename, content = file_value[0], file_value[1]
+            file_mime_type = (
+                file_value[2]
+                if len(file_value) >= MULTIPART_FILE_MIME_TYPE_ITEMS
+                else "unknown"
+            )
             body_string += f"--{boundary}\r\n"
             body_string += f'Content-Disposition: form-data; name="{key}"\r\n\r\n'
             body_string += (

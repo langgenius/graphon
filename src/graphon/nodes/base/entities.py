@@ -20,7 +20,7 @@ class OutputVariableType(StrEnum):
     STRING = "string"
     NUMBER = "number"
     INTEGER = "integer"
-    SECRET = "secret"
+    SECRET = "secret"  # noqa: S105
     BOOLEAN = "boolean"
     OBJECT = "object"
     FILE = "file"
