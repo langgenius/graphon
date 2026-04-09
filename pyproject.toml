@@ -7,23 +7,23 @@ license = 'Apache-2.0'
 license-files = ['LICENSE']
 requires-python = '>=3.12'
 dependencies = [
-    'charset-normalizer>=3.4.4',
-    'httpx~=0.28.0',
-    'json-repair>=0.55.1',
-    'jsonschema>=4.25.1',
-    'orjson>=3.10.0,<4.0.0',
-    'pandas[excel]~=3.0.1',
-    'pydantic~=2.12.5',
-    'pydantic-extra-types~=2.11.0',
-    'pypdfium2==5.6.0',
-    'python-docx~=1.2.0',
-    'pyyaml~=6.0.1',
-    'tiktoken~=0.12.0',
-    'transformers~=5.3.0',
+    'charset-normalizer>=2.1',
+    'httpx>=0.28',
+    'json-repair>=0.55',
+    'jsonschema>=4',
+    'orjson>=3',
+    'pandas[excel]>=2.1',
+    'pydantic>=2.7',
+    'pydantic-extra-types>=2',
+    'pypdfium2>=5',
+    'python-docx>=1.2',
+    'pyyaml>=6',
+    'tiktoken>=0.12',
+    'transformers>=4',
     'typing-extensions>=4.10.0',
-    'unstructured[docx,epub,md,ppt,pptx]~=0.21.5',
-    'pypandoc~=1.13',
-    'webvtt-py~=0.5.1',
+    'unstructured[docx,epub,md,ppt,pptx]>=0.21',
+    'pypandoc>=1.13',
+    'webvtt-py>=0.5',
 ]
 
 [project.urls]
@@ -35,7 +35,7 @@ issues = 'https://github.com/langgenius/graphon/issues'
 dev = ['pytest', 'pytest-cov', 'pytest-mock', 'pytest-xdist', 'ruff', 'prek', 'ty']
 
 [build-system]
-requires = ['uv_build>=0.11.1,<0.12.0']
+requires = ['uv_build~=0.11']
 build-backend = 'uv_build'
 
 [tool.uv]
