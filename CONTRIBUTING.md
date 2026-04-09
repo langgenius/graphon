@@ -12,10 +12,13 @@ command.
 
 ### Requirements
 
-- Python 3.12 or newer
+- Python 3.12 or 3.13
 - [`uv`](https://docs.astral.sh/uv/)
 - `make`
 - `git`
+
+Python 3.14 is currently unsupported because `unstructured`, which is used by
+the document extraction node, currently declares `Requires-Python: <3.14`.
 
 ### Bootstrap
 
@@ -104,7 +107,7 @@ Pull requests targeting `main` currently run four kinds of checks:
 1. PR title validation with `amannn/action-semantic-pull-request`
 2. Commit history validation with `cocogitto check`
 3. `make check`
-4. `make test` on Python 3.12, 3.13, and 3.14
+4. `make test` on Python 3.12 and 3.13
 
 Keep local workflow aligned with those checks. A green local `make pre` is
 useful, but it is not a complete substitute for the exact CI flow because CI

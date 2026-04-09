@@ -28,9 +28,12 @@ Graphon is currently easiest to evaluate from a source checkout.
 
 ### Requirements
 
-- Python 3.12+
+- Python 3.12 or 3.13
 - [`uv`](https://docs.astral.sh/uv/)
 - `make`
+
+Python 3.14 is currently unsupported because `unstructured`, which backs part
+of the document extraction stack, currently declares `Requires-Python: <3.14`.
 
 ### Set up the repository
 
@@ -138,7 +141,8 @@ Contributor setup, tooling details, CLA notes, and commit/PR conventions live
 in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 CI currently validates commit messages, pull request titles, formatting, lint,
-and tests on Python 3.12, 3.13, and 3.14.
+and tests on Python 3.12 and 3.13. Python 3.14 is currently excluded because
+`unstructured` does not yet support it.
 
 ## License
 
