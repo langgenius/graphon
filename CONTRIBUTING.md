@@ -8,14 +8,16 @@ By default, use `make` for routine development. Direct
 [`prek`](https://prek.j178.dev/) usage is still fine when you need a targeted
 command.
 
-## Prerequisites
+## Development Setup
+
+### Requirements
 
 - Python 3.12 or newer
 - [`uv`](https://docs.astral.sh/uv/)
 - `make`
 - `git`
 
-## Initial Setup
+### Bootstrap
 
 ```bash
 make dev
@@ -33,7 +35,38 @@ virtual environment management. The default development environment includes
 `ruff`, `pytest`, `pytest-xdist`, `pytest-cov`, `pytest-mock`, and
 [`prek`](https://prek.j178.dev/).
 
-## Daily Workflow
+### Git Hooks
+
+`make dev` installs [`prek`](https://prek.j178.dev/) hooks from
+[`prek.toml`](prek.toml).
+
+The current hook set includes:
+
+- trailing whitespace and end-of-file cleanup
+- BOM cleanup and line ending normalization
+- TOML and YAML validation
+- shebang executable checks
+- local `make format`
+- local `make lint`
+
+Useful direct commands:
+
+```bash
+uv run prek install
+uv run prek run -a
+uv run prek list
+uv run prek validate-config
+```
+
+Use `make` by default. For targeted work, direct tool usage is still fine:
+
+```bash
+uv run ruff check src/graphon/path.py
+uv run pytest tests/path/test_file.py -k keyword
+uv run prek run -a
+```
+
+## Testing and Validation
 
 Use these commands for normal development:
 
@@ -64,7 +97,7 @@ make check
 `make pre` applies local fixes and runs the test suite. `make check` then
 confirms the non-mutating CI check job will pass.
 
-## What CI Checks
+### CI Checks
 
 Pull requests targeting `main` currently run four kinds of checks:
 
@@ -77,11 +110,11 @@ Keep local workflow aligned with those checks. A green local `make pre` is
 useful, but it is not a complete substitute for the exact CI flow because CI
 also validates commit messages, PR titles, and a Python version matrix.
 
-## Commit and Pull Request Conventions
+## Git Commits
 
 This repository enforces
-[Conventional Commits](https://www.conventionalcommits.org/) for both commit
-messages and pull request titles.
+[Conventional Commits](https://www.conventionalcommits.org/) for commit
+messages. The same format is required for pull request titles.
 
 The PR title validator currently accepts these types:
 
@@ -101,7 +134,7 @@ Rules:
 
 - use an optional scope when it improves clarity
 - mark breaking changes with `!`
-- keep the pull request title aligned with the final change being merged
+- remember that the pull request title becomes the squash merge commit message
 - keep the entire commit history reviewable, because CI validates all commits in
   the pull request
 
@@ -114,28 +147,49 @@ docs(contributing): clarify CI workflow
 refactor(api)!: remove deprecated runtime entrypoint
 ```
 
-## Git Hooks
+## Issues
 
-`make dev` installs [`prek`](https://prek.j178.dev/) hooks from
-[`prek.toml`](prek.toml).
+Before you start implementation or open a new issue, search the existing open
+and closed issues and pull requests to confirm the work is not already tracked
+or in progress.
 
-The current hook set includes:
+Rules:
 
-- trailing whitespace and end-of-file cleanup
-- BOM cleanup and line ending normalization
-- TOML and YAML validation
-- shebang executable checks
-- local `make format`
-- local `make lint`
+- do not open duplicate issues or parallel pull requests for the same change
+- if related work already exists, continue that discussion instead of starting a
+  new thread
+- if no issue exists for the change, create one before opening a pull request
+- if GitHub presents an issue template or issue form, fill out every required
+  field and keep the provided structure intact
 
-Useful direct commands:
+## Pull Requests
 
-```bash
-uv run prek install
-uv run prek run -a
-uv run prek list
-uv run prek validate-config
-```
+Every pull request must be linked to an issue. Use a closing or reference
+keyword such as `Closes #123`, `Fixes #123`, or `Refs #123` in the pull request
+body.
+
+Before you open a pull request:
+
+- search existing pull requests again to confirm there is no duplicate review in
+  progress
+- make sure the change stays focused and reviewable
+- run `make pre` before pushing and keep `make check` green locally when
+  possible
+
+When you open a pull request:
+
+- use a Conventional Commits title, and mark breaking changes with `!`, because
+  the pull request title becomes the squash merge commit message
+- link the related issue in the pull request body
+- follow [`.github/pull_request_template.md`](.github/pull_request_template.md)
+  exactly
+- do not delete required headings or checklist items from the template; if a
+  section is not applicable, say so explicitly
+- if CLA Assistant prompts you, sign [CLA.md](CLA.md) in the pull request
+  conversation before merge
+- add or update tests for behavior changes unless the change genuinely does not
+  require them
+- update contributor-facing or user-facing documentation when needed
 
 ## CLA
 
@@ -163,13 +217,3 @@ Release tags use the `v` prefix and are intended to be created from `main`.
 
 CLA signatures are stored on the dedicated `cla-signatures` branch. Maintainers
 must keep that branch available and writable to GitHub Actions.
-
-## Direct Tool Usage
-
-Use `make` by default. For targeted work, direct tool usage is still fine:
-
-```bash
-uv run ruff check src/graphon/path.py
-uv run pytest tests/path/test_file.py -k keyword
-uv run prek run -a
-```
