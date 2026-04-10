@@ -2,7 +2,7 @@
 
 Run from this directory:
 
-    python3 parallel_translation_workflow.py \
+    python3 workflow.py \
         "Graph execution is a coordination problem."
 
 The script automatically loads `.env` from this example directory.

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from io import StringIO
 
-from examples.openai_slim_parallel_translation.parallel_translation_workflow import (
+from examples.openai_slim_parallel_translation.workflow import (
     TranslationStreamWriter,
     write_stream_chunk,
 )

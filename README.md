@@ -73,7 +73,7 @@ make dev
 source .venv/bin/activate
 cd examples/openai_slim_parallel_translation
 cp .env.example .env
-python3 parallel_translation_workflow.py "Graph execution is a coordination problem."
+python3 workflow.py "Graph execution is a coordination problem."
 ```
 
 Before running either example, fill in the required values in `.env`.
