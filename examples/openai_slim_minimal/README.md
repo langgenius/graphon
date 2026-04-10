@@ -50,10 +50,9 @@ python3 workflow.py "Explain graph sparsity in one sentence."
   `.venv` exists, `workflow.py` will re-exec itself with that local virtualenv
   interpreter automatically.
 - No `slim` executable is bundled in this example directory. Provide
-  `dify-plugin-daemon-slim` via `PATH` or set `SLIM_BINARY_PATH` in `.env` if
-  you keep it elsewhere.
+  `dify-plugin-daemon-slim` via `PATH` or keep the template's recommended Unix
+  path under `~/.local/bin`.
 - Path-like variables in `.env` are resolved relative to this example
   directory, not relative to your shell's current working directory.
-- By default, `SLIM_PLUGIN_FOLDER` resolves to the repository-root
-  `.slim/plugins` cache. That keeps generated plugin files out of this example
-  directory while still letting you run `python3 workflow.py` from here.
+- The template sets `SLIM_PLUGIN_FOLDER` to the recommended Unix user-local
+  cache path under `~/.local/share/graphon/slim/plugins`.

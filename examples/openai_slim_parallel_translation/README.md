@@ -51,7 +51,9 @@ python3 workflow.py --no-stream "Graph execution is a coordination problem."
   support as the minimal example, but it is self-contained in its own example
   directory.
 - No `slim` executable is bundled in this example directory. Provide
-  `dify-plugin-daemon-slim` via `PATH` or set `SLIM_BINARY_PATH` in `.env` if
-  you keep it elsewhere.
+  `dify-plugin-daemon-slim` via `PATH` or keep the template's recommended Unix
+  path under `~/.local/bin`.
 - Path-like variables in `.env` are resolved relative to this example
   directory, not relative to your shell's current working directory.
+- The template sets `SLIM_PLUGIN_FOLDER` to the recommended Unix user-local
+  cache path under `~/.local/share/graphon/slim/plugins`.

@@ -93,13 +93,25 @@ def test_env_example_matches_allowed_env_vars(example_dir_name: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "example_dir_name",
+    ("example_dir_name", "expected_binary_path", "expected_plugin_folder"),
     [
-        "openai_slim_minimal",
-        "openai_slim_parallel_translation",
+        (
+            "openai_slim_minimal",
+            "~/.local/bin/dify-plugin-daemon-slim",
+            "~/.local/share/graphon/slim/plugins",
+        ),
+        (
+            "openai_slim_parallel_translation",
+            "~/.local/bin/dify-plugin-daemon-slim",
+            "~/.local/share/graphon/slim/plugins",
+        ),
     ],
 )
-def test_env_example_leaves_slim_binary_path_empty(example_dir_name: str) -> None:
+def test_env_example_sets_recommended_unix_defaults(
+    example_dir_name: str,
+    expected_binary_path: str,
+    expected_plugin_folder: str,
+) -> None:
     env_example = (
         Path(__file__).resolve().parents[2]
         / "examples"
@@ -113,7 +125,8 @@ def test_env_example_leaves_slim_binary_path_empty(example_dir_name: str) -> Non
         for key, value in [line.removeprefix("export ").split("=", 1)]
     }
 
-    assert not values["SLIM_BINARY_PATH"]
+    assert values["SLIM_BINARY_PATH"] == expected_binary_path
+    assert values["SLIM_PLUGIN_FOLDER"] == expected_plugin_folder
 
 
 def test_write_stream_chunk_writes_llm_text_chunks() -> None:
