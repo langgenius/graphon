@@ -1,5 +1,5 @@
 from collections.abc import Mapping, Sequence
-from typing import Any, Protocol
+from typing import Protocol
 
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.variables.segments import Segment
@@ -50,7 +50,7 @@ class ReadOnlyGraphRuntimeState(Protocol):
         ...
 
     @property
-    def outputs(self) -> dict[str, Any]:
+    def outputs(self) -> dict[str, object]:
         """Get a defensive copy of outputs (read-only)."""
         ...
 
@@ -69,7 +69,7 @@ class ReadOnlyGraphRuntimeState(Protocol):
         """Get the number of node execution exceptions recorded."""
         ...
 
-    def get_output(self, key: str, default: Any = None) -> Any:
+    def get_output(self, key: str, default: object = None) -> object:
         """Get a single output value (returns a copy)."""
         ...
 

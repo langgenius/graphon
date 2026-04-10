@@ -81,7 +81,7 @@ class MultiModalPromptMessageContent(PromptMessageContent):
     filename: str = Field(default="", description="the filename of multi-modal file")
 
     @property
-    def data(self):
+    def data(self) -> str:
         return self.url or f"data:{self.mime_type};base64,{self.base64_data}"
 
 

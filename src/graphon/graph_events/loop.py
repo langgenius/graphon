@@ -1,6 +1,5 @@
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Any
 
 from pydantic import Field
 
@@ -18,7 +17,7 @@ class NodeRunLoopStartedEvent(GraphNodeEventBase):
 class NodeRunLoopNextEvent(GraphNodeEventBase):
     node_title: str
     index: int = Field(..., description="index")
-    pre_loop_output: Any = None
+    pre_loop_output: object = None
 
 
 class NodeRunLoopSucceededEvent(GraphNodeEventBase):

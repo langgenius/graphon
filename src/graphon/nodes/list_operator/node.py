@@ -98,76 +98,24 @@ class ListOperatorNode(Node[ListOperatorNodeData]):
 
     @override
     def _run(self) -> NodeRunResult:
-        inputs: dict[str, Sequence[object]] = {}
-        process_data: dict[str, Sequence[object]] = {}
-        outputs: dict[str, Any] = {}
-
         variable = self.graph_runtime_state.variable_pool.get(self.node_data.variable)
         if variable is None:
-            error_message = (
-                f"Variable not found for selector: {self.node_data.variable}"
-            )
-            return NodeRunResult(
-                status=WorkflowNodeExecutionStatus.FAILED,
-                error=error_message,
-                inputs=inputs,
-                outputs=outputs,
+            return self._failed_result(
+                f"Variable not found for selector: {self.node_data.variable}",
             )
         if not variable.value:
-            inputs = {"variable": []}
-            process_data = {"variable": []}
-            if isinstance(variable, ArraySegment):
-                result = variable.model_copy(update={"value": []})
-            else:
-                result = ArrayAnySegment(value=[])
-            outputs = {"result": result, "first_record": None, "last_record": None}
-            return NodeRunResult(
-                status=WorkflowNodeExecutionStatus.SUCCEEDED,
-                inputs=inputs,
-                process_data=process_data,
-                outputs=outputs,
-            )
+            return self._empty_result(variable)
         if not isinstance(variable, _SUPPORTED_TYPES_TUPLE):
-            error_message = (
+            return self._failed_result(
                 f"Variable {self.node_data.variable} is not an array type, "
                 f"actual type: {type(variable)}"
             )
-            return NodeRunResult(
-                status=WorkflowNodeExecutionStatus.FAILED,
-                error=error_message,
-                inputs=inputs,
-                outputs=outputs,
-            )
 
-        if isinstance(variable, ArrayFileSegment):
-            inputs = {"variable": [item.to_dict() for item in variable.value]}
-            process_data["variable"] = [item.to_dict() for item in variable.value]
-        else:
-            inputs = {"variable": variable.value}
-            process_data["variable"] = variable.value
+        inputs, process_data = self._build_input_payloads(variable)
 
         try:
-            # Filter
-            if self.node_data.filter_by.enabled:
-                variable = self._apply_filter(variable)
-
-            # Extract
-            if self.node_data.extract_by.enabled:
-                variable = self._extract_slice(variable)
-
-            # Order
-            if self.node_data.order_by.enabled:
-                variable = self._apply_order(variable)
-
-            # Slice
-            if self.node_data.limit.enabled:
-                variable = self._apply_slice(variable)
-
-            outputs = {
-                "result": variable,
-                "first_record": variable.value[0] if variable.value else None,
-                "last_record": variable.value[-1] if variable.value else None,
-            }
+            variable = self._apply_operations(variable)
+            outputs = self._build_outputs(variable)
             return NodeRunResult(
                 status=WorkflowNodeExecutionStatus.SUCCEEDED,
                 inputs=inputs,
@@ -180,8 +128,65 @@ class ListOperatorNode(Node[ListOperatorNodeData]):
                 error=str(e),
                 inputs=inputs,
                 process_data=process_data,
-                outputs=outputs,
+                outputs={},
             )
+
+    def _failed_result(self, error_message: str) -> NodeRunResult:
+        return NodeRunResult(
+            status=WorkflowNodeExecutionStatus.FAILED,
+            error=error_message,
+            inputs={},
+            outputs={},
+        )
+
+    def _empty_result(self, variable: ArraySegment | Any) -> NodeRunResult:
+        result = (
+            variable.model_copy(update={"value": []})
+            if isinstance(variable, ArraySegment)
+            else ArrayAnySegment(value=[])
+        )
+        inputs = {"variable": []}
+        process_data = {"variable": []}
+        return NodeRunResult(
+            status=WorkflowNodeExecutionStatus.SUCCEEDED,
+            inputs=inputs,
+            process_data=process_data,
+            outputs=self._build_outputs(result),
+        )
+
+    def _build_input_payloads(
+        self,
+        variable: _SUPPORTED_TYPES_ALIAS,
+    ) -> tuple[dict[str, Sequence[object]], dict[str, Sequence[object]]]:
+        if isinstance(variable, ArrayFileSegment):
+            return (
+                {"variable": [item.to_dict() for item in variable.value]},
+                {"variable": [item.to_dict() for item in variable.value]},
+            )
+        return {"variable": variable.value}, {"variable": variable.value}
+
+    def _apply_operations(
+        self,
+        variable: _SUPPORTED_TYPES_ALIAS,
+    ) -> _SUPPORTED_TYPES_ALIAS:
+        operations = (
+            (self.node_data.filter_by.enabled, self._apply_filter),
+            (self.node_data.extract_by.enabled, self._extract_slice),
+            (self.node_data.order_by.enabled, self._apply_order),
+            (self.node_data.limit.enabled, self._apply_slice),
+        )
+        for enabled, operation in operations:
+            if enabled:
+                variable = operation(variable)
+        return variable
+
+    @staticmethod
+    def _build_outputs(variable: ArraySegment) -> dict[str, Any]:
+        return {
+            "result": variable,
+            "first_record": variable.value[0] if variable.value else None,
+            "last_record": variable.value[-1] if variable.value else None,
+        }
 
     def _apply_filter(self, variable: _SUPPORTED_TYPES_ALIAS) -> _SUPPORTED_TYPES_ALIAS:
         filter_func: Callable[[Any], bool]
@@ -310,31 +315,26 @@ def _get_file_extract_string_func(*, key: str) -> Callable[[File], str]:
 
 
 def _get_string_filter_func(*, condition: str, value: str) -> Callable[[str], bool]:
-    match condition:
-        case "contains":
-            filter_func = _contains(value)
-        case "start with":
-            filter_func = _startswith(value)
-        case "end with":
-            filter_func = _endswith(value)
-        case "is":
-            filter_func = _is(value)
-        case "in":
-            filter_func = _in(value)
-        case "empty":
-            filter_func = operator.not_
-        case "not contains":
-            filter_func = _negation(_contains(value))
-        case "is not":
-            filter_func = _negation(_is(value))
-        case "not in":
-            filter_func = _negation(_in(value))
-        case "not empty":
-            filter_func = bool
-        case _:
-            msg = f"Invalid condition: {condition}"
-            raise InvalidConditionError(msg)
-    return filter_func
+    if condition == "empty":
+        return operator.not_
+    if condition == "not empty":
+        return bool
+
+    builder_map: dict[str, Callable[[str], Callable[[str], bool]]] = {
+        "contains": _contains,
+        "start with": _startswith,
+        "end with": _endswith,
+        "is": _is,
+        "in": _in,
+        "not contains": lambda raw_value: _negation(_contains(raw_value)),
+        "is not": lambda raw_value: _negation(_is(raw_value)),
+        "not in": lambda raw_value: _negation(_in(raw_value)),
+    }
+    builder = builder_map.get(condition)
+    if builder is None:
+        msg = f"Invalid condition: {condition}"
+        raise InvalidConditionError(msg)
+    return builder(value)
 
 
 def _get_sequence_filter_func(

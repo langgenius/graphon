@@ -53,7 +53,7 @@ class ReadWriteLock:
         self._read_ready.release()
 
     @contextmanager
-    def read_lock(self):
+    def read_lock(self) -> Generator:
         """Return a context manager for read locking."""
         self.acquire_read()
         try:
@@ -62,7 +62,7 @@ class ReadWriteLock:
             self.release_read()
 
     @contextmanager
-    def write_lock(self):
+    def write_lock(self) -> Generator:
         """Return a context manager for write locking."""
         self.acquire_write()
         try:

@@ -111,17 +111,22 @@ class EventHandler:
         self._event_collector.collect(event)
         logger.warning("Unhandled event type: %s", type(event).__name__)
 
-    @_dispatch.register(NodeRunIterationStartedEvent)
-    @_dispatch.register(NodeRunIterationNextEvent)
-    @_dispatch.register(NodeRunIterationSucceededEvent)
-    @_dispatch.register(NodeRunIterationFailedEvent)
-    @_dispatch.register(NodeRunLoopStartedEvent)
-    @_dispatch.register(NodeRunLoopNextEvent)
-    @_dispatch.register(NodeRunLoopSucceededEvent)
-    @_dispatch.register(NodeRunLoopFailedEvent)
-    @_dispatch.register(NodeRunAgentLogEvent)
-    @_dispatch.register(NodeRunRetrieverResourceEvent)
-    def _(self, event: GraphNodeEventBase) -> None:
+    @_dispatch.register
+    def _(
+        self,
+        event: (
+            NodeRunIterationStartedEvent
+            | NodeRunIterationNextEvent
+            | NodeRunIterationSucceededEvent
+            | NodeRunIterationFailedEvent
+            | NodeRunLoopStartedEvent
+            | NodeRunLoopNextEvent
+            | NodeRunLoopSucceededEvent
+            | NodeRunLoopFailedEvent
+            | NodeRunAgentLogEvent
+            | NodeRunRetrieverResourceEvent
+        ),
+    ) -> None:
         self._event_collector.collect(event)
 
     @_dispatch.register
@@ -366,7 +371,11 @@ class EventHandler:
         else:
             self._graph_runtime_state.llm_usage = current_usage.plus(usage)
 
-    def _store_node_outputs(self, node_id: str, outputs: Mapping[str, object]) -> None:
+    def _store_node_outputs(
+        self,
+        node_id: str,
+        outputs: Mapping[str, object],
+    ) -> None:
         """Store node outputs in the variable pool.
 
         Args:
@@ -382,15 +391,4 @@ class EventHandler:
 
     def _update_response_outputs(self, outputs: Mapping[str, object]) -> None:
         """Update response outputs for response nodes."""
-        # TODO: Design a mechanism for nodes to notify the engine about how to
-        # update outputs in runtime state, rather than allowing nodes to
-        # directly access runtime state.
-        for key, value in outputs.items():
-            if key == "answer":
-                existing = self._graph_runtime_state.get_output("answer", "")
-                if existing:
-                    self._graph_runtime_state.set_output("answer", f"{existing}{value}")
-                else:
-                    self._graph_runtime_state.set_output("answer", value)
-            else:
-                self._graph_runtime_state.set_output(key, value)
+        self._graph_runtime_state.merge_response_outputs(outputs)

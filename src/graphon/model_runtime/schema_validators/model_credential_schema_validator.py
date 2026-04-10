@@ -12,7 +12,7 @@ class ModelCredentialSchemaValidator(CommonValidator):
         self.model_type = model_type
         self.model_credential_schema = model_credential_schema
 
-    def validate_and_filter(self, credentials: dict):
+    def validate_and_filter(self, credentials: dict) -> dict[str, str | bool]:
         """Validate model credentials and return the filtered credential map."""
         if self.model_credential_schema is None:
             msg = "Model credential schema is None"

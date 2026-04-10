@@ -92,3 +92,6 @@ class AnswerNode(Node[AnswerNodeData]):
 
         """
         return Template.from_answer_template(self.node_data.answer)
+
+    def get_streaming_text_selector(self) -> Sequence[str]:
+        return [self.id, "answer"]

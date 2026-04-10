@@ -14,7 +14,7 @@ def to_selector(node_id: str, name: str, paths: Iterable[str] = ()) -> Sequence[
     return selectors
 
 
-def segment_orjson_default(o: Any):
+def segment_orjson_default(o: Any) -> object:
     """Default function for orjson serialization of Segment types"""
     result: object
     match o:

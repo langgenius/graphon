@@ -1,3 +1,5 @@
+from typing import cast
+
 from graphon.model_runtime.entities.model_entities import ModelPropertyKey, ModelType
 from graphon.model_runtime.entities.text_embedding_entities import (
     EmbeddingInputType,
@@ -34,12 +36,11 @@ class TextEmbeddingModel(AIModel):
                     input_type=input_type,
                 )
 
-            assert multimodel_documents is not None
             return self.model_runtime.invoke_multimodal_embedding(
                 provider=self.provider,
                 model=model,
                 credentials=credentials,
-                documents=multimodel_documents,
+                documents=cast("list[dict]", multimodel_documents),
                 input_type=input_type,
             )
         except Exception as e:

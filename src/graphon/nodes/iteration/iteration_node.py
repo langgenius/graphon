@@ -4,7 +4,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextlib import suppress
 from datetime import UTC, datetime
 from threading import Lock
-from typing import TYPE_CHECKING, Any, NewType, override
+from typing import TYPE_CHECKING, Any, Literal, NewType, override
 
 from typing_extensions import TypeIs
 
@@ -16,7 +16,7 @@ from graphon.enums import (
     WorkflowNodeExecutionMetadataKey,
     WorkflowNodeExecutionStatus,
 )
-from graphon.graph_events.base import GraphNodeEventBase
+from graphon.graph_events.base import GraphEngineEvent, GraphNodeEventBase
 from graphon.graph_events.graph import (
     GraphRunAbortedEvent,
     GraphRunFailedEvent,
@@ -60,6 +60,10 @@ logger = logging.getLogger(__name__)
 _DEFAULT_CHILD_ABORT_REASON = "child graph aborted"
 
 EmptyArraySegment = NewType("EmptyArraySegment", ArraySegment)
+type _ParallelIterationResult = tuple[
+    float, list[GraphNodeEventBase], object | None, LLMUsage
+]
+type _ParallelIterationFuture = Future[_ParallelIterationResult]
 
 
 class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
@@ -91,7 +95,7 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
         return "1"
 
     @override
-    def _run(self) -> Generator[GraphNodeEventBase | NodeEventBase, None, None]:  # type: ignore
+    def _run(self) -> Generator[GraphNodeEventBase | NodeEventBase, None, None]:
         variable = self._get_iterator_variable()
 
         if self._is_empty_iteration(variable):
@@ -180,8 +184,6 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
         yield StreamCompletedEvent(
             node_run_result=NodeRunResult(
                 status=WorkflowNodeExecutionStatus.SUCCEEDED,
-                # TODO(QuantumGhost): is it possible to compute the type of `output`
-                # from graph definition?
                 outputs={"output": output},
             ),
         )
@@ -251,105 +253,154 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
         iter_run_map: dict[str, float],
         usage_accumulator: list[LLMUsage],
     ) -> Generator[GraphNodeEventBase | NodeEventBase, None, None]:
-        # Initialize outputs list with None values to maintain order
         outputs.extend([None] * len(iterator_list_value))
-
-        # Determine the number of parallel workers
         max_workers = min(self.node_data.parallel_nums, len(iterator_list_value))
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all iteration tasks
             started_child_engines: dict[int, GraphEngine] = {}
             started_child_engines_lock = Lock()
             merged_usage_indexes: set[int] = set()
-            future_to_index: dict[
-                Future[
-                    tuple[
-                        float,
-                        list[GraphNodeEventBase],
-                        object | None,
-                        LLMUsage,
-                    ]
-                ],
-                int,
-            ] = {}
+            future_to_index: dict[_ParallelIterationFuture, int] = {}
             for index, item in enumerate(iterator_list_value):
                 yield IterationNextEvent(index=index)
-                future = executor.submit(
-                    self._execute_tracked_iteration_parallel,
+                future = self._submit_parallel_iteration_task(
+                    executor=executor,
                     index=index,
                     item=item,
                     started_child_engines=started_child_engines,
                     started_child_engines_lock=started_child_engines_lock,
                 )
                 future_to_index[future] = index
-
-            # Process completed iterations as they finish
             for future in as_completed(future_to_index):
                 index = future_to_index[future]
                 try:
-                    result = future.result()
-                    (
-                        iteration_duration,
-                        events,
-                        output_value,
-                        iteration_usage,
-                    ) = result
-
-                    # Update outputs at the correct index
-                    outputs[index] = output_value
-
-                    # Yield all events from this iteration
-                    yield from events
-
-                    # The worker computes duration before we replay buffered events
-                    # here, so slow downstream consumers don't inflate
-                    # per-iteration timing.
-                    iter_run_map[str(index)] = iteration_duration
-
-                    usage_accumulator[0] = self._merge_usage(
-                        usage_accumulator[0],
-                        iteration_usage,
+                    yield from self._handle_parallel_iteration_success(
+                        index=index,
+                        result=future.result(),
+                        outputs=outputs,
+                        iter_run_map=iter_run_map,
+                        usage_accumulator=usage_accumulator,
+                        merged_usage_indexes=merged_usage_indexes,
                     )
-                    merged_usage_indexes.add(index)
-
                 except Exception as e:
-                    if index not in merged_usage_indexes:
-                        self._merge_graph_engine_usage(
-                            usage_accumulator=usage_accumulator,
-                            graph_engine=started_child_engines.get(index),
-                        )
-                        merged_usage_indexes.add(index)
-                    if isinstance(e, ChildGraphAbortedError):
-                        self._abort_parallel_siblings(
-                            future_to_index=future_to_index,
-                            current_future=future,
-                            started_child_engines=started_child_engines,
-                            reason=str(e) or _DEFAULT_CHILD_ABORT_REASON,
-                        )
-                        self._drain_parallel_siblings(
-                            future_to_index=future_to_index,
-                            current_future=future,
-                            started_child_engines=started_child_engines,
-                            usage_accumulator=usage_accumulator,
-                            merged_usage_indexes=merged_usage_indexes,
-                        )
+                    action = self._handle_parallel_iteration_exception(
+                        error=e,
+                        index=index,
+                        future=future,
+                        future_to_index=future_to_index,
+                        outputs=outputs,
+                        started_child_engines=started_child_engines,
+                        usage_accumulator=usage_accumulator,
+                        merged_usage_indexes=merged_usage_indexes,
+                    )
+                    if action == "reraise":
                         raise
+                    if action == "terminate":
+                        raise IterationNodeError(str(e)) from e
 
-                    # Handle errors based on error_handle_mode
-                    match self.node_data.error_handle_mode:
-                        case ErrorHandleMode.TERMINATED:
-                            # Cancel remaining futures and re-raise
-                            for f in future_to_index:
-                                if f != future:
-                                    f.cancel()
-                            raise IterationNodeError(str(e)) from e
-                        case ErrorHandleMode.CONTINUE_ON_ERROR:
-                            outputs[index] = None
-                        case ErrorHandleMode.REMOVE_ABNORMAL_OUTPUT:
-                            outputs[index] = None  # Will be filtered later
+        self._finalize_parallel_outputs(outputs)
 
-        # Remove None values if in REMOVE_ABNORMAL_OUTPUT mode
+    def _submit_parallel_iteration_task(
+        self,
+        *,
+        executor: ThreadPoolExecutor,
+        index: int,
+        item: object,
+        started_child_engines: dict[int, "GraphEngine"],
+        started_child_engines_lock: Lock,
+    ) -> _ParallelIterationFuture:
+        return executor.submit(
+            self._execute_tracked_iteration_parallel,
+            index=index,
+            item=item,
+            started_child_engines=started_child_engines,
+            started_child_engines_lock=started_child_engines_lock,
+        )
+
+    def _handle_parallel_iteration_success(
+        self,
+        *,
+        index: int,
+        result: _ParallelIterationResult,
+        outputs: list[object],
+        iter_run_map: dict[str, float],
+        usage_accumulator: list[LLMUsage],
+        merged_usage_indexes: set[int],
+    ) -> Generator[GraphNodeEventBase, None, None]:
+        iteration_duration, events, output_value, iteration_usage = result
+        outputs[index] = output_value
+        yield from events
+        iter_run_map[str(index)] = iteration_duration
+        usage_accumulator[0] = self._merge_usage(
+            usage_accumulator[0],
+            iteration_usage,
+        )
+        merged_usage_indexes.add(index)
+
+    def _handle_parallel_iteration_exception(
+        self,
+        *,
+        error: Exception,
+        index: int,
+        future: _ParallelIterationFuture,
+        future_to_index: Mapping[_ParallelIterationFuture, int],
+        outputs: list[object],
+        started_child_engines: Mapping[int, "GraphEngine"],
+        usage_accumulator: list[LLMUsage],
+        merged_usage_indexes: set[int],
+    ) -> Literal["handled", "reraise", "terminate"]:
+        self._merge_parallel_iteration_usage_if_needed(
+            index=index,
+            started_child_engines=started_child_engines,
+            usage_accumulator=usage_accumulator,
+            merged_usage_indexes=merged_usage_indexes,
+        )
+        if isinstance(error, ChildGraphAbortedError):
+            self._abort_parallel_siblings(
+                future_to_index=future_to_index,
+                current_future=future,
+                started_child_engines=started_child_engines,
+                reason=str(error) or _DEFAULT_CHILD_ABORT_REASON,
+            )
+            self._drain_parallel_siblings(
+                future_to_index=future_to_index,
+                current_future=future,
+                started_child_engines=started_child_engines,
+                usage_accumulator=usage_accumulator,
+                merged_usage_indexes=merged_usage_indexes,
+            )
+            return "reraise"
+
+        match self.node_data.error_handle_mode:
+            case ErrorHandleMode.TERMINATED:
+                for pending_future in future_to_index:
+                    if pending_future != future:
+                        pending_future.cancel()
+                return "terminate"
+            case (
+                ErrorHandleMode.CONTINUE_ON_ERROR
+                | ErrorHandleMode.REMOVE_ABNORMAL_OUTPUT
+            ):
+                outputs[index] = None
+                return "handled"
+
+    def _merge_parallel_iteration_usage_if_needed(
+        self,
+        *,
+        index: int,
+        started_child_engines: Mapping[int, "GraphEngine"],
+        usage_accumulator: list[LLMUsage],
+        merged_usage_indexes: set[int],
+    ) -> None:
+        if index in merged_usage_indexes:
+            return
+        self._merge_graph_engine_usage(
+            usage_accumulator=usage_accumulator,
+            graph_engine=started_child_engines.get(index),
+        )
+        merged_usage_indexes.add(index)
+
+    def _finalize_parallel_outputs(self, outputs: list[object]) -> None:
         if self.node_data.error_handle_mode == ErrorHandleMode.REMOVE_ABNORMAL_OUTPUT:
             outputs[:] = [output for output in outputs if output is not None]
 
@@ -547,7 +598,7 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
 
         if all(isinstance(output, list) for output in non_none_outputs):
             # Flatten the list of lists
-            flattened: list[Any] = []
+            flattened: list[object] = []
             for output in outputs:
                 if isinstance(output, list):
                     flattened.extend(output)
@@ -688,44 +739,73 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
         outputs: list[object],
         graph_engine: "GraphEngine",
     ) -> Generator[GraphNodeEventBase, None, None]:
-        rst = graph_engine.run()
-        # get current iteration index
-        index_variable = variable_pool.get([self._node_id, "index"])
-        if not isinstance(index_variable, IntegerVariable):
-            msg = f"iteration {self._node_id} current index not found"
-            raise IterationIndexNotFoundError(msg)
-        current_index = index_variable.value
-        stop_iteration = False
-        for event in rst:
-            match event:
-                case GraphNodeEventBase(node_type=BuiltinNodeTypes.ITERATION_START):
-                    continue
-                case GraphNodeEventBase():
-                    self._append_iteration_info_to_event(
-                        event=event,
-                        iter_run_index=current_index,
-                    )
-                    yield event
-                case GraphRunSucceededEvent() | GraphRunPartialSucceededEvent():
-                    result = variable_pool.get(self.node_data.output_selector)
-                    outputs.append(None if result is None else result.to_object())
-                    stop_iteration = True
-                case GraphRunAbortedEvent(reason=reason):
-                    raise ChildGraphAbortedError(reason or _DEFAULT_CHILD_ABORT_REASON)
-                case GraphRunFailedEvent(error=error):
-                    match self.node_data.error_handle_mode:
-                        case ErrorHandleMode.TERMINATED:
-                            raise IterationNodeError(error)
-                        case ErrorHandleMode.CONTINUE_ON_ERROR:
-                            outputs.append(None)
-                            stop_iteration = True
-                        case ErrorHandleMode.REMOVE_ABNORMAL_OUTPUT:
-                            stop_iteration = True
-
+        current_index = self._get_current_iteration_index(variable_pool)
+        for event in graph_engine.run():
+            event_to_yield, stop_iteration = self._process_single_iteration_event(
+                event=event,
+                current_index=current_index,
+                variable_pool=variable_pool,
+                outputs=outputs,
+            )
+            if event_to_yield is not None:
+                yield event_to_yield
             if stop_iteration:
                 break
 
         return
+
+    def _get_current_iteration_index(self, variable_pool: VariablePool) -> int:
+        index_variable = variable_pool.get([self._node_id, "index"])
+        if not isinstance(index_variable, IntegerVariable):
+            msg = f"iteration {self._node_id} current index not found"
+            raise IterationIndexNotFoundError(msg)
+        return index_variable.value
+
+    def _process_single_iteration_event(
+        self,
+        *,
+        event: GraphEngineEvent,
+        current_index: int,
+        variable_pool: VariablePool,
+        outputs: list[object],
+    ) -> tuple[GraphNodeEventBase | None, bool]:
+        match event:
+            case GraphNodeEventBase(node_type=BuiltinNodeTypes.ITERATION_START):
+                return None, False
+            case GraphNodeEventBase():
+                self._append_iteration_info_to_event(
+                    event=event,
+                    iter_run_index=current_index,
+                )
+                return event, False
+            case GraphRunSucceededEvent() | GraphRunPartialSucceededEvent():
+                result = variable_pool.get(self.node_data.output_selector)
+                outputs.append(None if result is None else result.to_object())
+                return None, True
+            case GraphRunAbortedEvent(reason=reason):
+                raise ChildGraphAbortedError(reason or _DEFAULT_CHILD_ABORT_REASON)
+            case GraphRunFailedEvent(error=error):
+                return self._handle_failed_single_iteration(
+                    error=error,
+                    outputs=outputs,
+                )
+            case _:
+                return None, False
+
+    def _handle_failed_single_iteration(
+        self,
+        *,
+        error: str,
+        outputs: list[object],
+    ) -> tuple[GraphNodeEventBase | None, bool]:
+        match self.node_data.error_handle_mode:
+            case ErrorHandleMode.TERMINATED:
+                raise IterationNodeError(error)
+            case ErrorHandleMode.CONTINUE_ON_ERROR:
+                outputs.append(None)
+                return None, True
+            case ErrorHandleMode.REMOVE_ABNORMAL_OUTPUT:
+                return None, True
 
     def _create_graph_engine(self, index: int, item: object) -> Any:
         # Create GraphInitParams for child graph execution.

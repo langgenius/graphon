@@ -213,7 +213,7 @@ class AIModelEntity(ProviderModel):
         return required_feature is None or required_feature in self.features
 
     @model_validator(mode="after")
-    def validate_model(self):
+    def validate_model(self) -> Self:
         supported_schema_keys = ["json_schema"]
         schema_key = next(
             (

@@ -125,7 +125,7 @@ class VariablePool(BaseModel):
         for node_id, value in values_by_node_id.items():
             self.add((self._RAG_PIPELINE_VARIABLE_NODE_ID, node_id), value)
 
-    def add(self, selector: Sequence[str], value: Any, /):
+    def add(self, selector: Sequence[str], value: Any, /) -> None:
         """Add a variable to the variable pool.
 
         This method accepts a selector path and a value, converting the value
@@ -284,7 +284,7 @@ class VariablePool(BaseModel):
                 result = None
         return result
 
-    def remove(self, selector: Sequence[str], /):
+    def remove(self, selector: Sequence[str], /) -> None:
         """Remove variables from the variable pool based on the given selector.
 
         Args:
@@ -299,7 +299,7 @@ class VariablePool(BaseModel):
         key, hash_key = self._selector_to_keys(selector)
         self.variable_dictionary[key].pop(hash_key, None)
 
-    def convert_template(self, template: str, /):
+    def convert_template(self, template: str, /) -> SegmentGroup:
         parts = VARIABLE_PATTERN.split(template)
         segments: list[Segment] = []
         for part in filter(lambda x: x, parts):

@@ -5,7 +5,7 @@ import logging
 import pathlib
 import tempfile
 import zipfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast, override
 
 import charset_normalizer
@@ -44,6 +44,111 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from graphon.entities.graph_init_params import GraphInitParams
     from graphon.runtime.graph_runtime_state import GraphRuntimeState
+
+_MIME_PLAIN_TEXT_TYPES = frozenset((
+    "text/plain",
+    "text/html",
+    "text/htm",
+    "text/markdown",
+    "text/xml",
+))
+_MIME_DIRECT_EXTRACTOR_NAMES: dict[str, str] = {
+    "application/pdf": "_extract_text_from_pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": (
+        "_extract_text_from_docx"
+    ),
+    "text/csv": "_extract_text_from_csv",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": (
+        "_extract_text_from_excel"
+    ),
+    "application/vnd.ms-excel": "_extract_text_from_excel",
+    "message/rfc822": "_extract_text_from_eml",
+    "application/vnd.ms-outlook": "_extract_text_from_msg",
+    "application/json": "_extract_text_from_json",
+    "application/x-yaml": "_extract_text_from_yaml",
+    "text/yaml": "_extract_text_from_yaml",
+    "text/vtt": "_extract_text_from_vtt",
+    "text/properties": "_extract_text_from_properties",
+}
+_MIME_UNSTRUCTURED_EXTRACTOR_NAMES: dict[str, str] = {
+    "application/msword": "_extract_text_from_doc",
+    "application/vnd.ms-powerpoint": "_extract_text_from_ppt",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": (
+        "_extract_text_from_pptx"
+    ),
+    "application/epub+zip": "_extract_text_from_epub",
+}
+_EXTENSION_PLAIN_TEXT_TYPES = frozenset((
+    ".txt",
+    ".markdown",
+    ".md",
+    ".mdx",
+    ".html",
+    ".htm",
+    ".xml",
+    ".c",
+    ".h",
+    ".cpp",
+    ".hpp",
+    ".cc",
+    ".cxx",
+    ".c++",
+    ".py",
+    ".js",
+    ".ts",
+    ".jsx",
+    ".tsx",
+    ".java",
+    ".php",
+    ".rb",
+    ".go",
+    ".rs",
+    ".swift",
+    ".kt",
+    ".scala",
+    ".sh",
+    ".bash",
+    ".bat",
+    ".ps1",
+    ".sql",
+    ".r",
+    ".m",
+    ".pl",
+    ".lua",
+    ".vim",
+    ".asm",
+    ".s",
+    ".css",
+    ".scss",
+    ".less",
+    ".sass",
+    ".ini",
+    ".cfg",
+    ".conf",
+    ".toml",
+    ".env",
+    ".log",
+    ".vtt",
+))
+_EXTENSION_DIRECT_EXTRACTOR_NAMES: dict[str, str] = {
+    ".json": "_extract_text_from_json",
+    ".yaml": "_extract_text_from_yaml",
+    ".yml": "_extract_text_from_yaml",
+    ".pdf": "_extract_text_from_pdf",
+    ".docx": "_extract_text_from_docx",
+    ".csv": "_extract_text_from_csv",
+    ".xls": "_extract_text_from_excel",
+    ".xlsx": "_extract_text_from_excel",
+    ".eml": "_extract_text_from_eml",
+    ".msg": "_extract_text_from_msg",
+    ".properties": "_extract_text_from_properties",
+}
+_EXTENSION_UNSTRUCTURED_EXTRACTOR_NAMES: dict[str, str] = {
+    ".doc": "_extract_text_from_doc",
+    ".ppt": "_extract_text_from_ppt",
+    ".pptx": "_extract_text_from_pptx",
+    ".epub": "_extract_text_from_epub",
+}
 
 
 def _partition_file_via_unstructured_api(
@@ -126,7 +231,12 @@ class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
                 error=error_message,
             )
 
-        assert variable is not None
+        if variable is None:
+            msg = f"File variable not found for selector: {variable_selector}"
+            return NodeRunResult(
+                status=WorkflowNodeExecutionStatus.FAILED,
+                error=msg,
+            )
         value = variable.value
         inputs = {"variable_selector": variable_selector}
         if isinstance(value, list):
@@ -204,58 +314,15 @@ def _extract_text_by_mime_type(
     unstructured_api_config: UnstructuredApiConfig,
 ) -> str:
     """Extract text from a file based on its MIME type."""
-    match mime_type:
-        case "text/plain" | "text/html" | "text/htm" | "text/markdown" | "text/xml":
-            extracted_text = _extract_text_from_plain_text(file_content)
-        case "application/pdf":
-            extracted_text = _extract_text_from_pdf(file_content)
-        case "application/msword":
-            extracted_text = _extract_text_from_doc(
-                file_content,
-                unstructured_api_config=unstructured_api_config,
-            )
-        case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-            extracted_text = _extract_text_from_docx(file_content)
-        case "text/csv":
-            extracted_text = _extract_text_from_csv(file_content)
-        case (
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            | "application/vnd.ms-excel"
-        ):
-            extracted_text = _extract_text_from_excel(file_content)
-        case "application/vnd.ms-powerpoint":
-            extracted_text = _extract_text_from_ppt(
-                file_content,
-                unstructured_api_config=unstructured_api_config,
-            )
-        case (
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-        ):
-            extracted_text = _extract_text_from_pptx(
-                file_content,
-                unstructured_api_config=unstructured_api_config,
-            )
-        case "application/epub+zip":
-            extracted_text = _extract_text_from_epub(
-                file_content,
-                unstructured_api_config=unstructured_api_config,
-            )
-        case "message/rfc822":
-            extracted_text = _extract_text_from_eml(file_content)
-        case "application/vnd.ms-outlook":
-            extracted_text = _extract_text_from_msg(file_content)
-        case "application/json":
-            extracted_text = _extract_text_from_json(file_content)
-        case "application/x-yaml" | "text/yaml":
-            extracted_text = _extract_text_from_yaml(file_content)
-        case "text/vtt":
-            extracted_text = _extract_text_from_vtt(file_content)
-        case "text/properties":
-            extracted_text = _extract_text_from_properties(file_content)
-        case _:
-            msg = f"Unsupported MIME type: {mime_type}"
-            raise UnsupportedFileTypeError(msg)
-    return extracted_text
+    return _dispatch_text_extractor(
+        file_content=file_content,
+        file_kind=mime_type,
+        plain_text_types=_MIME_PLAIN_TEXT_TYPES,
+        direct_extractor_names=_MIME_DIRECT_EXTRACTOR_NAMES,
+        unstructured_extractor_names=_MIME_UNSTRUCTURED_EXTRACTOR_NAMES,
+        unstructured_api_config=unstructured_api_config,
+        error_label="Unsupported MIME type",
+    )
 
 
 def _extract_text_by_file_extension(
@@ -265,102 +332,45 @@ def _extract_text_by_file_extension(
     unstructured_api_config: UnstructuredApiConfig,
 ) -> str:
     """Extract text from a file based on its file extension."""
-    match file_extension:
-        case (
-            ".txt"
-            | ".markdown"
-            | ".md"
-            | ".mdx"
-            | ".html"
-            | ".htm"
-            | ".xml"
-            | ".c"
-            | ".h"
-            | ".cpp"
-            | ".hpp"
-            | ".cc"
-            | ".cxx"
-            | ".c++"
-            | ".py"
-            | ".js"
-            | ".ts"
-            | ".jsx"
-            | ".tsx"
-            | ".java"
-            | ".php"
-            | ".rb"
-            | ".go"
-            | ".rs"
-            | ".swift"
-            | ".kt"
-            | ".scala"
-            | ".sh"
-            | ".bash"
-            | ".bat"
-            | ".ps1"
-            | ".sql"
-            | ".r"
-            | ".m"
-            | ".pl"
-            | ".lua"
-            | ".vim"
-            | ".asm"
-            | ".s"
-            | ".css"
-            | ".scss"
-            | ".less"
-            | ".sass"
-            | ".ini"
-            | ".cfg"
-            | ".conf"
-            | ".toml"
-            | ".env"
-            | ".log"
-            | ".vtt"
-        ):
-            extracted_text = _extract_text_from_plain_text(file_content)
-        case ".json":
-            extracted_text = _extract_text_from_json(file_content)
-        case ".yaml" | ".yml":
-            extracted_text = _extract_text_from_yaml(file_content)
-        case ".pdf":
-            extracted_text = _extract_text_from_pdf(file_content)
-        case ".doc":
-            extracted_text = _extract_text_from_doc(
-                file_content,
-                unstructured_api_config=unstructured_api_config,
-            )
-        case ".docx":
-            extracted_text = _extract_text_from_docx(file_content)
-        case ".csv":
-            extracted_text = _extract_text_from_csv(file_content)
-        case ".xls" | ".xlsx":
-            extracted_text = _extract_text_from_excel(file_content)
-        case ".ppt":
-            extracted_text = _extract_text_from_ppt(
-                file_content,
-                unstructured_api_config=unstructured_api_config,
-            )
-        case ".pptx":
-            extracted_text = _extract_text_from_pptx(
-                file_content,
-                unstructured_api_config=unstructured_api_config,
-            )
-        case ".epub":
-            extracted_text = _extract_text_from_epub(
-                file_content,
-                unstructured_api_config=unstructured_api_config,
-            )
-        case ".eml":
-            extracted_text = _extract_text_from_eml(file_content)
-        case ".msg":
-            extracted_text = _extract_text_from_msg(file_content)
-        case ".properties":
-            extracted_text = _extract_text_from_properties(file_content)
-        case _:
-            msg = f"Unsupported Extension Type: {file_extension}"
-            raise UnsupportedFileTypeError(msg)
-    return extracted_text
+    return _dispatch_text_extractor(
+        file_content=file_content,
+        file_kind=file_extension,
+        plain_text_types=_EXTENSION_PLAIN_TEXT_TYPES,
+        direct_extractor_names=_EXTENSION_DIRECT_EXTRACTOR_NAMES,
+        unstructured_extractor_names=_EXTENSION_UNSTRUCTURED_EXTRACTOR_NAMES,
+        unstructured_api_config=unstructured_api_config,
+        error_label="Unsupported Extension Type",
+    )
+
+
+def _dispatch_text_extractor(
+    *,
+    file_content: bytes,
+    file_kind: str,
+    plain_text_types: frozenset[str],
+    direct_extractor_names: Mapping[str, str],
+    unstructured_extractor_names: Mapping[str, str],
+    unstructured_api_config: UnstructuredApiConfig,
+    error_label: str,
+) -> str:
+    if file_kind in plain_text_types:
+        return _extract_text_from_plain_text(file_content)
+
+    extractor_name = direct_extractor_names.get(file_kind)
+    if extractor_name is not None:
+        extractor: Callable[[bytes], str] = globals()[extractor_name]
+        return extractor(file_content)
+
+    extractor_name = unstructured_extractor_names.get(file_kind)
+    if extractor_name is not None:
+        extractor: Callable[..., str] = globals()[extractor_name]
+        return extractor(
+            file_content,
+            unstructured_api_config=unstructured_api_config,
+        )
+
+    msg = f"{error_label}: {file_kind}"
+    raise UnsupportedFileTypeError(msg)
 
 
 def _extract_text_from_plain_text(file_content: bytes) -> str:
@@ -616,8 +626,7 @@ def _download_file_content(http_client: HttpClientProtocol, file: File) -> bytes
 
     try:
         if file.transfer_method == FileTransferMethod.REMOTE_URL:
-            remote_url = file.remote_url
-            assert remote_url is not None
+            remote_url = cast("str", file.remote_url)
             response = http_client.get(remote_url)
             response.raise_for_status()
             return response.content

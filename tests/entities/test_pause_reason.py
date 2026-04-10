@@ -48,7 +48,9 @@ class TestPauseReasonDiscriminator:
             ),
         ],
     )
-    def test_model_validate(self, dict_value: dict[str, Any], expected: PauseReason):
+    def test_model_validate(
+        self, dict_value: dict[str, Any], expected: PauseReason
+    ) -> None:
         holder = _Holder.model_validate(dict_value)
 
         assert type(holder.reason) is type(expected)
@@ -67,14 +69,14 @@ class TestPauseReasonDiscriminator:
         ],
         ids=lambda x: type(x).__name__,
     )
-    def test_model_construct(self, reason: PauseReason):
+    def test_model_construct(self, reason: PauseReason) -> None:
         holder = _Holder(reason=reason)
         assert holder.reason == reason
 
-    def test_model_construct_with_invalid_type(self):
+    def test_model_construct_with_invalid_type(self) -> None:
         with pytest.raises(ValidationError):
             _Holder(reason=cast(Any, object()))
 
-    def test_unknown_type_fails_validation(self):
+    def test_unknown_type_fails_validation(self) -> None:
         with pytest.raises(ValidationError):
             _Holder.model_validate({"reason": {"TYPE": "UNKNOWN"}})

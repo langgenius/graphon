@@ -17,6 +17,25 @@ _BINARY_CONTENT_MAIN_TYPES = frozenset((
     "audio",
     "video",
 ))
+_TEXT_BASED_APPLICATION_TYPES = frozenset((
+    "json",
+    "xml",
+    "javascript",
+    "x-www-form-urlencoded",
+    "yaml",
+    "graphql",
+))
+_TEXT_MARKERS = (
+    b"{",
+    b"[",
+    b"<",
+    b"function",
+    b"var ",
+    b"const ",
+    b"let ",
+)
+BYTES_PER_KIBIBYTE = 1024
+BYTES_PER_MEBIBYTE = BYTES_PER_KIBIBYTE * BYTES_PER_KIBIBYTE
 
 
 class HttpRequestNodeAuthorizationConfig(BaseModel):
@@ -137,85 +156,53 @@ class Response:
         self.headers = dict(response.headers)
 
     @property
-    def is_file(self):
+    def is_file(self) -> bool:
         """Determine if the response contains a file by checking:
         1. Content-Disposition header (RFC 6266)
         2. Content characteristics
         3. MIME type analysis
         """
         content_type = self.content_type.split(";")[0].strip().lower()
-        parsed_content_disposition = self.parsed_content_disposition
-        is_file = False
-
-        # Check if it's explicitly marked as an attachment
-        if parsed_content_disposition:
-            disp_type = (
-                parsed_content_disposition.get_content_disposition()
-            )  # Returns 'attachment', 'inline', or None
-            filename = (
-                parsed_content_disposition.get_filename()
-            )  # Returns filename if present, None otherwise
-            if disp_type == "attachment" or filename is not None:
-                is_file = True
-
-        # For 'text/' types, only 'csv' should be downloaded as file
-        if is_file:
-            return is_file
+        if self._has_file_content_disposition():
+            return True
         if content_type.startswith("text/") and "csv" not in content_type:
-            return is_file
+            return False
+        if self._is_text_based_application_content(content_type):
+            return False
 
-        # For application types, try to detect if it's a text-based format
-        if content_type.startswith("application/"):
-            # Common text-based application types
-            if any(
-                text_type in content_type
-                for text_type in (
-                    "json",
-                    "xml",
-                    "javascript",
-                    "x-www-form-urlencoded",
-                    "yaml",
-                    "graphql",
-                )
-            ):
-                return is_file
-
-            # Try to detect if content is text-based by sampling first few bytes
-            try:
-                # Sample first 1024 bytes for text detection
-                content_sample = self.response.content[:1024]
-                content_sample.decode("utf-8")
-                # If we can decode as UTF-8 and find common
-                # text patterns, likely not a file
-                text_markers = (
-                    b"{",
-                    b"[",
-                    b"<",
-                    b"function",
-                    b"var ",
-                    b"const ",
-                    b"let ",
-                )
-                if any(marker in content_sample for marker in text_markers):
-                    return is_file
-            except UnicodeDecodeError:
-                # If we can't decode as UTF-8, likely a binary file
-                is_file = True
-
-        # For other types, use MIME type analysis
         main_type, _ = mimetypes.guess_type(
             "dummy" + (mimetypes.guess_extension(content_type) or ""),
         )
         if main_type:
-            is_file = main_type.split("/")[0] in _BINARY_CONTENT_MAIN_TYPES
+            return main_type.split("/")[0] in _BINARY_CONTENT_MAIN_TYPES
+        return any(
+            media_type in content_type for media_type in ("image/", "audio/", "video/")
+        )
 
-        # For unknown types, check if it's a media type
-        if not is_file:
-            is_file = any(
-                media_type in content_type
-                for media_type in ("image/", "audio/", "video/")
-            )
-        return is_file
+    def _has_file_content_disposition(self) -> bool:
+        parsed_content_disposition = self.parsed_content_disposition
+        if not parsed_content_disposition:
+            return False
+        disp_type = parsed_content_disposition.get_content_disposition()
+        filename = parsed_content_disposition.get_filename()
+        return disp_type == "attachment" or filename is not None
+
+    def _is_text_based_application_content(self, content_type: str) -> bool:
+        if not content_type.startswith("application/"):
+            return False
+        if any(
+            text_type in content_type for text_type in _TEXT_BASED_APPLICATION_TYPES
+        ):
+            return True
+        return self._looks_like_utf8_text()
+
+    def _looks_like_utf8_text(self) -> bool:
+        try:
+            content_sample = self.response.content[:1024]
+            content_sample.decode("utf-8")
+            return any(marker in content_sample for marker in _TEXT_MARKERS)
+        except UnicodeDecodeError:
+            return False
 
     @property
     def content_type(self) -> str:
@@ -239,11 +226,11 @@ class Response:
 
     @property
     def readable_size(self) -> str:
-        if self.size < 1024:
+        if self.size < BYTES_PER_KIBIBYTE:
             return f"{self.size} bytes"
-        if self.size < 1024 * 1024:
-            return f"{(self.size / 1024):.2f} KB"
-        return f"{(self.size / 1024 / 1024):.2f} MB"
+        if self.size < BYTES_PER_MEBIBYTE:
+            return f"{(self.size / BYTES_PER_KIBIBYTE):.2f} KB"
+        return f"{(self.size / BYTES_PER_MEBIBYTE):.2f} MB"
 
     @property
     def parsed_content_disposition(self) -> Message | None:

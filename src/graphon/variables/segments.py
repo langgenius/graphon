@@ -1,9 +1,9 @@
 import json
 import sys
 from collections.abc import Mapping, Sequence
-from typing import Annotated, Any
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Discriminator, Tag, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from graphon.file.models import File
 
@@ -57,7 +57,7 @@ class Segment(BaseModel):
         """Return the size of the value in bytes."""
         return sys.getsizeof(self.value)
 
-    def to_object(self):
+    def to_object(self) -> object:
         return self.value
 
 
@@ -223,32 +223,3 @@ def get_segment_discriminator(v: Any) -> SegmentType | None:
         return seg_type
     # return None if the discriminator value isn't found
     return None
-
-
-# The `SegmentUnion` type is used to enable serialization and deserialization
-# with Pydantic.
-# Use `Segment` for type hinting when serialization is not required.
-#
-# Note:
-# - All variants in `SegmentUnion` must inherit from the `Segment` class.
-# - The union must include all non-abstract subclasses of `Segment`, except:
-#   - `SegmentGroup`, which is not added to the variable pool.
-#   - `VariableBase` and its subclasses, which are handled by `Variable`.
-type SegmentUnion = Annotated[
-    (
-        Annotated[NoneSegment, Tag(SegmentType.NONE)]
-        | Annotated[StringSegment, Tag(SegmentType.STRING)]
-        | Annotated[FloatSegment, Tag(SegmentType.FLOAT)]
-        | Annotated[IntegerSegment, Tag(SegmentType.INTEGER)]
-        | Annotated[ObjectSegment, Tag(SegmentType.OBJECT)]
-        | Annotated[FileSegment, Tag(SegmentType.FILE)]
-        | Annotated[BooleanSegment, Tag(SegmentType.BOOLEAN)]
-        | Annotated[ArrayAnySegment, Tag(SegmentType.ARRAY_ANY)]
-        | Annotated[ArrayStringSegment, Tag(SegmentType.ARRAY_STRING)]
-        | Annotated[ArrayNumberSegment, Tag(SegmentType.ARRAY_NUMBER)]
-        | Annotated[ArrayObjectSegment, Tag(SegmentType.ARRAY_OBJECT)]
-        | Annotated[ArrayFileSegment, Tag(SegmentType.ARRAY_FILE)]
-        | Annotated[ArrayBooleanSegment, Tag(SegmentType.ARRAY_BOOLEAN)]
-    ),
-    Discriminator(get_segment_discriminator),
-]

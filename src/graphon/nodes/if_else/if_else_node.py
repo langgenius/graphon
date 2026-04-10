@@ -37,36 +37,32 @@ class IfElseNode(Node[IfElseNodeData]):
         selected_case_id = "false"
         condition_processor = ConditionProcessor()
         try:
-            # Check if the new cases structure is used
-            if self.node_data.cases:
-                for case in self.node_data.cases:
-                    input_conditions, group_result, final_result = (
-                        condition_processor.process_conditions(
-                            variable_pool=self.graph_runtime_state.variable_pool,
-                            conditions=case.conditions,
-                            operator=case.logical_operator,
-                        )
-                    )
-
-                    process_data["condition_results"].append({
-                        "group": case.model_dump(),
-                        "results": group_result,
-                        "final_result": final_result,
-                    })
-
-                    # Break if a case passes (logical short-circuit)
-                    if final_result:
-                        selected_case_id = (
-                            case.case_id
-                        )  # Capture the ID of the passing case
-                        break
-
-            else:
-                # TODO: Remove this once all graph definitions use
-                # the `cases` structure.
-                # Fallback to the legacy node shape when `cases` are not defined.
+            uses_legacy_shape = not self.node_data.cases
+            for case in self.node_data.iter_cases():
                 input_conditions, group_result, final_result = (
                     condition_processor.process_conditions(
+                        variable_pool=self.graph_runtime_state.variable_pool,
+                        conditions=case.conditions,
+                        operator=case.logical_operator,
+                    )
+                )
+
+                process_data["condition_results"].append({
+                    "group": "default" if uses_legacy_shape else case.model_dump(),
+                    "results": group_result,
+                    "final_result": final_result,
+                })
+
+                # Break if a case passes (logical short-circuit)
+                if final_result:
+                    selected_case_id = "true" if uses_legacy_shape else case.case_id
+                    break
+
+            else:
+                # Keep the legacy fallback until all graph definitions use `cases`.
+                input_conditions, group_result, final_result = (
+                    _should_not_use_old_function(
+                        condition_processor=condition_processor,
                         variable_pool=self.graph_runtime_state.variable_pool,
                         conditions=self.node_data.conditions or [],
                         operator=self.node_data.logical_operator or "and",
@@ -112,7 +108,7 @@ class IfElseNode(Node[IfElseNodeData]):
     ) -> Mapping[str, Sequence[str]]:
         var_mapping: dict[str, list[str]] = {}
         _ = graph_config  # Explicitly mark as unused
-        for case in node_data.cases or []:
+        for case in node_data.iter_cases():
             for condition in case.conditions:
                 key = f"{node_id}.#{'.'.join(condition.variable_selector)}#"
                 var_mapping[key] = condition.variable_selector

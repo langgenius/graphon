@@ -24,7 +24,7 @@ class WorkflowRuntimeTypeConverter:
             return result
         return {}
 
-    def value_to_json_encodable_recursive(self, value: Any):
+    def value_to_json_encodable_recursive(self, value: Any) -> Any:
         result = value
         match value:
             case None | bool() | int() | str() | float():

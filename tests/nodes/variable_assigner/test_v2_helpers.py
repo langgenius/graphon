@@ -3,7 +3,7 @@ from graphon.nodes.variable_assigner.v2.helpers import is_input_value_valid
 from graphon.variables.types import SegmentType
 
 
-def test_is_input_value_valid_overwrite_array_string():
+def test_is_input_value_valid_overwrite_array_string() -> None:
     assert is_input_value_valid(
         variable_type=SegmentType.ARRAY_STRING,
         operation=Operation.OVER_WRITE,
@@ -32,7 +32,7 @@ def test_is_input_value_valid_overwrite_array_string():
     )
 
 
-def test_is_input_value_valid_rejects_divide_by_zero():
+def test_is_input_value_valid_rejects_divide_by_zero() -> None:
     assert not is_input_value_valid(
         variable_type=SegmentType.NUMBER,
         operation=Operation.DIVIDE,
@@ -40,7 +40,7 @@ def test_is_input_value_valid_rejects_divide_by_zero():
     )
 
 
-def test_is_input_value_valid_accepts_clear_without_input():
+def test_is_input_value_valid_accepts_clear_without_input() -> None:
     assert is_input_value_valid(
         variable_type=SegmentType.ARRAY_OBJECT,
         operation=Operation.CLEAR,

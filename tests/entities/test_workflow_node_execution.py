@@ -24,13 +24,13 @@ class TestWorkflowNodeExecutionProcessDataTruncation:
             created_at=datetime.now(UTC).replace(tzinfo=None),
         )
 
-    def test_initial_process_data_truncated_state(self):
+    def test_initial_process_data_truncated_state(self) -> None:
         execution = self.create_workflow_node_execution()
 
         assert execution.process_data_truncated is False
         assert execution.get_truncated_process_data() is None
 
-    def test_set_and_get_truncated_process_data(self):
+    def test_set_and_get_truncated_process_data(self) -> None:
         execution = self.create_workflow_node_execution()
         test_truncated_data = {"truncated": True, "key": "value"}
 
@@ -39,7 +39,7 @@ class TestWorkflowNodeExecutionProcessDataTruncation:
         assert execution.process_data_truncated is True
         assert execution.get_truncated_process_data() == test_truncated_data
 
-    def test_set_truncated_process_data_to_none(self):
+    def test_set_truncated_process_data_to_none(self) -> None:
         execution = self.create_workflow_node_execution()
 
         execution.set_truncated_process_data({"key": "value"})
@@ -49,7 +49,7 @@ class TestWorkflowNodeExecutionProcessDataTruncation:
         assert execution.process_data_truncated is False
         assert execution.get_truncated_process_data() is None
 
-    def test_get_response_process_data_with_no_truncation(self):
+    def test_get_response_process_data_with_no_truncation(self) -> None:
         original_data = {"original": True, "data": "value"}
         execution = self.create_workflow_node_execution(process_data=original_data)
 
@@ -58,7 +58,7 @@ class TestWorkflowNodeExecutionProcessDataTruncation:
         assert response_data == original_data
         assert execution.process_data_truncated is False
 
-    def test_get_response_process_data_with_truncation(self):
+    def test_get_response_process_data_with_truncation(self) -> None:
         original_data = {"original": True, "large_data": "x" * 10000}
         truncated_data = {"original": True, "large_data": "[TRUNCATED]"}
 
@@ -71,7 +71,7 @@ class TestWorkflowNodeExecutionProcessDataTruncation:
         assert response_data != original_data
         assert execution.process_data_truncated is True
 
-    def test_get_response_process_data_with_none_process_data(self):
+    def test_get_response_process_data_with_none_process_data(self) -> None:
         execution = self.create_workflow_node_execution(process_data=None)
 
         response_data = execution.get_response_process_data()
@@ -79,7 +79,7 @@ class TestWorkflowNodeExecutionProcessDataTruncation:
         assert response_data is None
         assert execution.process_data_truncated is False
 
-    def test_consistency_with_inputs_outputs_pattern(self):
+    def test_consistency_with_inputs_outputs_pattern(self) -> None:
         execution = self.create_workflow_node_execution()
         test_data = {"test": "data"}
 
@@ -185,7 +185,7 @@ class TestWorkflowNodeExecutionProcessDataScenarios:
         _get_process_data_scenarios(),
         ids=[scenario.name for scenario in _get_process_data_scenarios()],
     )
-    def test_process_data_scenarios(self, scenario: ProcessDataScenario):
+    def test_process_data_scenarios(self, scenario: ProcessDataScenario) -> None:
         execution = WorkflowNodeExecution(
             id="test-execution-id",
             workflow_id="test-workflow-id",

@@ -5,7 +5,7 @@ _http_client: HttpClientProtocol = HttpxHttpClient()
 
 
 def set_http_client(http_client: HttpClientProtocol) -> None:
-    global _http_client
+    global _http_client  # noqa: PLW0603
     _http_client = http_client
 
 

@@ -624,7 +624,7 @@ def test_slim_runtime_uses_slim_binary_path_env(
             ),
         )
 
-    assert runtime._binary_path == str(custom_binary)  # pyright: ignore[reportPrivateUsage]
+    assert runtime._binary_path == str(custom_binary)
 
 
 def test_slim_runtime_rejects_invalid_slim_binary_path_env(

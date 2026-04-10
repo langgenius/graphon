@@ -73,7 +73,12 @@ class ModelProviderFactory:
 
         return provider_entity
 
-    def provider_credentials_validate(self, *, provider: str, credentials: dict):
+    def provider_credentials_validate(
+        self,
+        *,
+        provider: str,
+        credentials: dict,
+    ) -> dict[str, str | bool]:
         """Validate provider credentials."""
         provider_entity = self.get_model_provider(provider=provider)
 
@@ -99,7 +104,7 @@ class ModelProviderFactory:
         model_type: ModelType,
         model: str,
         credentials: dict,
-    ):
+    ) -> dict[str, str | bool]:
         """Validate model credentials."""
         provider_entity = self.get_model_provider(provider=provider)
 

@@ -34,7 +34,7 @@ def _make_chunk(
     )
 
 
-def test_non_stream_result_merges_first_chunk_content_and_tool_calls():
+def test_non_stream_result_merges_first_chunk_content_and_tool_calls() -> None:
     prompt_messages = [UserPromptMessage(content="hi")]
 
     tool_calls = [
@@ -97,7 +97,7 @@ def test_non_stream_result_merges_first_chunk_content_and_tool_calls():
     ]
 
 
-def test__normalize_non_stream_runtime_result__from_first_chunk_list_content():
+def test__normalize_non_stream_runtime_result__from_first_chunk_list_content() -> None:
     prompt_messages = [UserPromptMessage(content="hi")]
 
     content_list: list[PromptMessageContentUnionTypes] = [
@@ -115,7 +115,7 @@ def test__normalize_non_stream_runtime_result__from_first_chunk_list_content():
     assert result.message.content == content_list
 
 
-def test__normalize_non_stream_runtime_result__passthrough_llm_result():
+def test__normalize_non_stream_runtime_result__passthrough_llm_result() -> None:
     prompt_messages = [UserPromptMessage(content="hi")]
     llm_result = LLMResult(
         model="test-model",
@@ -134,7 +134,7 @@ def test__normalize_non_stream_runtime_result__passthrough_llm_result():
     )
 
 
-def test__normalize_non_stream_runtime_result__empty_iterator_defaults():
+def test__normalize_non_stream_runtime_result__empty_iterator_defaults() -> None:
     prompt_messages = [UserPromptMessage(content="hi")]
 
     result = normalize_non_stream_runtime_result(
@@ -151,7 +151,7 @@ def test__normalize_non_stream_runtime_result__empty_iterator_defaults():
     assert result.system_fingerprint is None
 
 
-def test__normalize_non_stream_runtime_result__accumulates_all_chunks():
+def test__normalize_non_stream_runtime_result__accumulates_all_chunks() -> None:
     prompt_messages = [UserPromptMessage(content="hi")]
 
     closed: list[bool] = []

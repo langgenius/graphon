@@ -62,7 +62,7 @@ def _build_parameter_extractor_node() -> tuple[ParameterExtractorNode, VariableP
     return node, variable_pool
 
 
-def test_function_calling_system_prompt_formats_without_missing_placeholders():
+def test_function_calling_system_prompt_formats_without_missing_placeholders() -> None:
     rendered = FUNCTION_CALLING_EXTRACTOR_SYSTEM_PROMPT.format(
         histories="previous messages",
         instruction="Follow the schema.",
@@ -75,7 +75,7 @@ def test_function_calling_system_prompt_formats_without_missing_placeholders():
     assert "Follow the schema." in rendered
 
 
-def test_parameter_extractor_runtime_prompts_format_with_expected_arguments():
+def test_parameter_extractor_runtime_prompts_format_with_expected_arguments() -> None:
     structure = '{"type":"object"}'
     input_text = "weather in sf"
     instruction = "Return valid JSON."
@@ -110,7 +110,7 @@ def test_parameter_extractor_runtime_prompts_format_with_expected_arguments():
     assert instruction in rendered_prompts[3]
 
 
-def test_function_calling_prompt_template_renders_system_message():
+def test_function_calling_prompt_template_renders_system_message() -> None:
     node, variable_pool = _build_parameter_extractor_node()
 
     prompt_messages = node._get_function_calling_prompt_template(

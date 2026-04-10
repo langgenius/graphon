@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Iterable
+from typing import Any
 
 from graphon.model_runtime.entities.model_entities import ModelType
 from graphon.model_runtime.model_providers.base.ai_model import AIModel
@@ -36,7 +37,7 @@ class TTSModel(AIModel):
         model: str,
         credentials: dict,
         language: str | None = None,
-    ):
+    ) -> Any:
         """Retrieve the voices supported by a text-to-speech model."""
         return self.model_runtime.get_tts_model_voices(
             provider=self.provider,

@@ -38,6 +38,9 @@ if TYPE_CHECKING:
     from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
 
+_SKIP_VARIABLE_UPDATE = object()
+
+
 def _target_mapping_from_item(
     mapping: MutableMapping[str, Sequence[str]],
     node_id: str,
@@ -148,101 +151,12 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
 
         try:
             for item in self.node_data.items:
-                variable = working_variable_pool.get(item.variable_selector)
-
-                # ==================== Validation Part
-
-                # Check if variable exists
-                if not isinstance(variable, VariableBase):
-                    raise VariableNotFoundError(
-                        variable_selector=item.variable_selector,
-                    )
-
-                # Check if operation is supported
-                if not helpers.is_operation_supported(
-                    variable_type=variable.value_type,
-                    operation=item.operation,
-                ):
-                    raise OperationNotSupportedError(
-                        operation=item.operation,
-                        variable_type=variable.value_type,
-                    )
-
-                # Check if variable input is supported
-                if (
-                    item.input_type == InputType.VARIABLE
-                    and not helpers.is_variable_input_supported(
-                        operation=item.operation,
-                    )
-                ):
-                    raise InputTypeNotSupportedError(
-                        input_type=InputType.VARIABLE,
-                        operation=item.operation,
-                    )
-
-                # Check if constant input is supported
-                if (
-                    item.input_type == InputType.CONSTANT
-                    and not helpers.is_constant_input_supported(
-                        variable_type=variable.value_type,
-                        operation=item.operation,
-                    )
-                ):
-                    raise InputTypeNotSupportedError(
-                        input_type=InputType.CONSTANT,
-                        operation=item.operation,
-                    )
-
-                # Get value from variable pool
-                input_value = item.value
-                if (
-                    item.input_type == InputType.VARIABLE
-                    and item.operation
-                    not in frozenset((
-                        Operation.CLEAR,
-                        Operation.REMOVE_FIRST,
-                        Operation.REMOVE_LAST,
-                    ))
-                    and item.value is not None
-                ):
-                    value = working_variable_pool.get(item.value)
-                    if value is None:
-                        raise VariableNotFoundError(variable_selector=item.value)
-                    # Skip if value is NoneSegment
-                    if value.value_type == SegmentType.NONE:
-                        continue
-                    input_value = value.value
-
-                # If set string / bytes / bytearray to object, try converting
-                # string to object.
-                if (
-                    item.operation == Operation.SET
-                    and variable.value_type == SegmentType.OBJECT
-                    and isinstance(input_value, str | bytes | bytearray)
-                ):
-                    try:
-                        input_value = json.loads(input_value)
-                    except json.JSONDecodeError as error:
-                        raise InvalidInputValueError(value=input_value) from error
-
-                # Check if input value is valid
-                if not helpers.is_input_value_valid(
-                    variable_type=variable.value_type,
-                    operation=item.operation,
-                    value=input_value,
-                ):
-                    raise InvalidInputValueError(value=input_value)
-
-                # ==================== Execution Part
-
-                updated_value = self._handle_item(
-                    variable=variable,
-                    operation=item.operation,
-                    value=input_value,
+                updated_selector = self._apply_item(
+                    item=item,
+                    working_variable_pool=working_variable_pool,
                 )
-                updated_variable = variable.model_copy(update={"value": updated_value})
-                working_variable_pool.add(updated_variable.selector, updated_variable)
-                updated_variable_selectors.append(updated_variable.selector)
+                if updated_selector is not None:
+                    updated_variable_selectors.append(updated_selector)
         except VariableOperatorNodeError as e:
             yield StreamCompletedEvent(
                 node_run_result=NodeRunResult(
@@ -292,6 +206,112 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
             ),
         )
 
+    def _apply_item(
+        self,
+        *,
+        item: VariableOperationItem,
+        working_variable_pool: Any,
+    ) -> Sequence[str] | None:
+        variable = working_variable_pool.get(item.variable_selector)
+        if not isinstance(variable, VariableBase):
+            raise VariableNotFoundError(variable_selector=item.variable_selector)
+        self._validate_item_support(variable=variable, item=item)
+        input_value = self._resolve_item_input_value(
+            variable=variable,
+            item=item,
+            working_variable_pool=working_variable_pool,
+        )
+        if input_value is _SKIP_VARIABLE_UPDATE:
+            return None
+
+        if not helpers.is_input_value_valid(
+            variable_type=variable.value_type,
+            operation=item.operation,
+            value=input_value,
+        ):
+            raise InvalidInputValueError(value=input_value)
+
+        updated_value = self._handle_item(
+            variable=variable,
+            operation=item.operation,
+            value=input_value,
+        )
+        updated_variable = variable.model_copy(update={"value": updated_value})
+        working_variable_pool.add(updated_variable.selector, updated_variable)
+        return updated_variable.selector
+
+    @staticmethod
+    def _validate_item_support(
+        *,
+        variable: VariableBase,
+        item: VariableOperationItem,
+    ) -> None:
+        if not helpers.is_operation_supported(
+            variable_type=variable.value_type,
+            operation=item.operation,
+        ):
+            raise OperationNotSupportedError(
+                operation=item.operation,
+                variable_type=variable.value_type,
+            )
+        if item.input_type == InputType.VARIABLE:
+            if helpers.is_variable_input_supported(operation=item.operation):
+                return
+            raise InputTypeNotSupportedError(
+                input_type=InputType.VARIABLE,
+                operation=item.operation,
+            )
+        if item.input_type == InputType.CONSTANT and not (
+            helpers.is_constant_input_supported(
+                variable_type=variable.value_type,
+                operation=item.operation,
+            )
+        ):
+            raise InputTypeNotSupportedError(
+                input_type=InputType.CONSTANT,
+                operation=item.operation,
+            )
+
+    def _resolve_item_input_value(
+        self,
+        *,
+        variable: VariableBase,
+        item: VariableOperationItem,
+        working_variable_pool: Any,
+    ) -> Any:
+        input_value = item.value
+        if self._should_read_input_from_variable(item):
+            value = working_variable_pool.get(item.value)
+            if value is None:
+                raise VariableNotFoundError(variable_selector=item.value)
+            if value.value_type == SegmentType.NONE:
+                return _SKIP_VARIABLE_UPDATE
+            input_value = value.value
+
+        if (
+            item.operation == Operation.SET
+            and variable.value_type == SegmentType.OBJECT
+            and isinstance(input_value, str | bytes | bytearray)
+        ):
+            try:
+                return json.loads(input_value)
+            except json.JSONDecodeError as error:
+                raise InvalidInputValueError(value=input_value) from error
+        return input_value
+
+    @staticmethod
+    def _should_read_input_from_variable(item: VariableOperationItem) -> bool:
+        return (
+            item.input_type == InputType.VARIABLE
+            and item.operation
+            not in frozenset((
+                Operation.CLEAR,
+                Operation.REMOVE_FIRST,
+                Operation.REMOVE_LAST,
+            ))
+            and item.value is not None
+        )
+
     def _handle_item(
         self,
         *,
@@ -300,17 +320,13 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
         value: Any,
     ) -> Any:
         match operation:
-            case Operation.OVER_WRITE:
+            case Operation.OVER_WRITE | Operation.SET:
                 result = value
             case Operation.CLEAR:
                 result = SegmentType.get_zero_value(variable.value_type).to_object()
             case Operation.APPEND:
                 result = [*variable.value, value]
-            case Operation.EXTEND:
-                result = variable.value + value
-            case Operation.SET:
-                result = value
-            case Operation.ADD:
+            case Operation.EXTEND | Operation.ADD:
                 result = variable.value + value
             case Operation.SUBTRACT:
                 result = variable.value - value

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from typing import Protocol, final
+from typing import Any, Protocol, final
 
 from pydantic import TypeAdapter
 
@@ -17,7 +17,7 @@ from .validation import get_graph_validator
 logger = logging.getLogger(__name__)
 
 _ListNodeConfigDict = TypeAdapter(list[NodeConfigDict])
-_ListObjectDict = TypeAdapter(list[dict[str, object]])
+_ListObjectDict = TypeAdapter(list[dict[str, Any]])
 
 
 class NodeFactory(Protocol):
@@ -90,7 +90,7 @@ class Graph:
     @classmethod
     def _build_edges(
         cls,
-        edge_configs: list[dict[str, object]],
+        edge_configs: list[dict[str, Any]],
     ) -> tuple[dict[str, Edge], dict[str, list[str]], dict[str, list[str]]]:
         """Build edge objects and mappings from edge configurations.
 
@@ -170,8 +170,8 @@ class Graph:
 
     @staticmethod
     def _filter_canvas_only_nodes(
-        node_configs: Sequence[Mapping[str, object]],
-    ) -> list[dict[str, object]]:
+        node_configs: Sequence[Mapping[str, Any]],
+    ) -> list[dict[str, Any]]:
         """Remove editor-only nodes before `NodeConfigDict` validation.
 
         Persisted note widgets use a top-level `type == "custom-note"` but leave
@@ -183,7 +183,7 @@ class Graph:
             Raw node configs with editor-only note widgets removed.
 
         """
-        filtered_node_configs: list[dict[str, object]] = []
+        filtered_node_configs: list[dict[str, Any]] = []
         for node_config in node_configs:
             if node_config.get("type", "") == "custom-note":
                 continue
@@ -276,7 +276,7 @@ class Graph:
     def init(
         cls,
         *,
-        graph_config: Mapping[str, object],
+        graph_config: Mapping[str, Any],
         node_factory: NodeFactory,
         root_node_id: str,
         skip_validation: bool = False,

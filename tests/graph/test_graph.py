@@ -23,7 +23,7 @@ def create_mock_node(
 
 
 class TestGraphBuilder:
-    def test_build_runs_default_validators(self):
+    def test_build_runs_default_validators(self) -> None:
         root = create_mock_node("root", NodeExecutionType.EXECUTABLE)
 
         with pytest.raises(GraphValidationError) as exc:
@@ -33,7 +33,7 @@ class TestGraphBuilder:
 
 
 class TestMarkInactiveRootBranches:
-    def test_single_root_no_marking(self):
+    def test_single_root_no_marking(self) -> None:
         nodes = {
             "root1": create_mock_node("root1", NodeExecutionType.ROOT),
             "child1": create_mock_node("child1", NodeExecutionType.EXECUTABLE),
@@ -57,7 +57,7 @@ class TestMarkInactiveRootBranches:
         assert nodes["child1"].state == NodeState.UNKNOWN
         assert edges["edge1"].state == NodeState.UNKNOWN
 
-    def test_multiple_roots_mark_inactive(self):
+    def test_multiple_roots_mark_inactive(self) -> None:
         nodes = {
             "root1": create_mock_node("root1", NodeExecutionType.ROOT),
             "root2": create_mock_node("root2", NodeExecutionType.ROOT),
@@ -92,7 +92,7 @@ class TestMarkInactiveRootBranches:
         assert edges["edge1"].state == NodeState.UNKNOWN
         assert edges["edge2"].state == NodeState.SKIPPED
 
-    def test_shared_downstream_node(self):
+    def test_shared_downstream_node(self) -> None:
         nodes = {
             "root1": create_mock_node("root1", NodeExecutionType.ROOT),
             "root2": create_mock_node("root2", NodeExecutionType.ROOT),
@@ -152,7 +152,7 @@ class TestMarkInactiveRootBranches:
         assert edges["edge3"].state == NodeState.UNKNOWN
         assert edges["edge4"].state == NodeState.SKIPPED
 
-    def test_deep_branch_marking(self):
+    def test_deep_branch_marking(self) -> None:
         nodes = {
             "root1": create_mock_node("root1", NodeExecutionType.ROOT),
             "root2": create_mock_node("root2", NodeExecutionType.ROOT),
@@ -226,7 +226,7 @@ class TestMarkInactiveRootBranches:
         assert edges["edge4"].state == NodeState.SKIPPED
         assert edges["edge5"].state == NodeState.SKIPPED
 
-    def test_non_root_execution_type(self):
+    def test_non_root_execution_type(self) -> None:
         nodes = {
             "root1": create_mock_node("root1", NodeExecutionType.ROOT),
             "non_root": create_mock_node("non_root", NodeExecutionType.EXECUTABLE),
@@ -261,10 +261,10 @@ class TestMarkInactiveRootBranches:
         assert edges["edge1"].state == NodeState.UNKNOWN
         assert edges["edge2"].state == NodeState.UNKNOWN
 
-    def test_empty_graph(self):
+    def test_empty_graph(self) -> None:
         Graph._mark_inactive_root_branches({}, {}, {}, {}, "non_existent")
 
-    def test_three_roots_mark_two_inactive(self):
+    def test_three_roots_mark_two_inactive(self) -> None:
         nodes = {
             "root1": create_mock_node("root1", NodeExecutionType.ROOT),
             "root2": create_mock_node("root2", NodeExecutionType.ROOT),
@@ -318,7 +318,7 @@ class TestMarkInactiveRootBranches:
         assert edges["edge2"].state == NodeState.UNKNOWN
         assert edges["edge3"].state == NodeState.SKIPPED
 
-    def test_convergent_paths(self):
+    def test_convergent_paths(self) -> None:
         nodes = {
             "root1": create_mock_node("root1", NodeExecutionType.ROOT),
             "root2": create_mock_node("root2", NodeExecutionType.ROOT),

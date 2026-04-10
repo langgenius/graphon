@@ -1,4 +1,4 @@
-from typing import Any
+import pytest
 
 from graphon.file import helpers
 from graphon.file.enums import (
@@ -48,7 +48,7 @@ def test_file_falls_back_to_raw_reference_when_opaque_reference_is_invalid() -> 
 
 
 def test_file_to_dict_keeps_reference_and_legacy_related_id(
-    monkeypatch: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     reference = build_file_reference(
         record_id="upload-file-id",
@@ -56,7 +56,7 @@ def test_file_to_dict_keeps_reference_and_legacy_related_id(
     )
     file = _build_local_file(reference=reference)
 
-    def fake_resolve_file_url(_file: Any, *, for_external: bool = True) -> str:
+    def fake_resolve_file_url(_file: File, *, for_external: bool = True) -> str:
         _ = for_external
         return "https://example.com/report.pdf"
 

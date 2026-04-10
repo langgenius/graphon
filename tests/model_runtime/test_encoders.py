@@ -66,63 +66,67 @@ class MockWithVars:
 
 
 class TestEncoders:
-    def test_model_dump(self):
+    def test_model_dump(self) -> None:
         model = MockPydanticModel(name="test", age=20)
         result = model_dump(model)
         assert result == {"name": "test", "age": 20}
 
-    def test_isoformat(self):
+    def test_isoformat(self) -> None:
         d = datetime.date(2023, 1, 1)
         assert isoformat(d) == "2023-01-01"
         t = datetime.time(12, 0, 0)
         assert isoformat(t) == "12:00:00"
 
-    def test_decimal_encoder(self):
+    def test_decimal_encoder(self) -> None:
         assert decimal_encoder(Decimal("1.0")) == pytest.approx(1.0)
         assert decimal_encoder(Decimal(1)) == 1
         assert decimal_encoder(Decimal("1.5")) == pytest.approx(1.5)
         assert decimal_encoder(Decimal(0)) == 0
         assert decimal_encoder(Decimal(-1)) == -1
 
-    def test_generate_encoders_by_class_tuples(self):
-        type_map: dict[Any, Callable[[Any], Any]] = {int: str, float: str, str: int}
+    def test_generate_encoders_by_class_tuples(self) -> None:
+        type_map: dict[Any, Callable[[Any], Any]] = {
+            int: str,
+            float: str,
+            str: int,
+        }
         result = generate_encoders_by_class_tuples(type_map)
         assert result[str] == (int, float)
         assert result[int] == (str,)
 
-    def test_jsonable_encoder_basic_types(self):
+    def test_jsonable_encoder_basic_types(self) -> None:
         assert jsonable_encoder("string") == "string"
         assert jsonable_encoder(123) == 123
         assert jsonable_encoder(1.23) == pytest.approx(1.23)
         assert jsonable_encoder(None) is None
 
-    def test_jsonable_encoder_pydantic(self):
+    def test_jsonable_encoder_pydantic(self) -> None:
         model = MockPydanticModel(name="test", age=20)
         assert jsonable_encoder(model) == {"name": "test", "age": 20}
 
-    def test_jsonable_encoder_pydantic_root(self):
+    def test_jsonable_encoder_pydantic_root(self) -> None:
         model = MagicMock(spec=BaseModel)
         model.model_dump.return_value = {"__root__": [1, 2, 3]}
         assert jsonable_encoder(model) == [1, 2, 3]
 
-    def test_jsonable_encoder_dataclass(self):
+    def test_jsonable_encoder_dataclass(self) -> None:
         obj = MockDataclass(name="test", value=1)
         assert jsonable_encoder(obj) == {"name": "test", "value": 1}
         with pytest.raises(ValueError, match="__dict__ attribute"):
             jsonable_encoder(MockDataclass)
 
-    def test_jsonable_encoder_enum(self):
+    def test_jsonable_encoder_enum(self) -> None:
         assert jsonable_encoder(MockEnum.A) == "a"
 
-    def test_jsonable_encoder_path(self):
-        assert jsonable_encoder(Path("/tmp/test")) == "/tmp/test"
-        assert jsonable_encoder(PurePath("/tmp/test")) == "/tmp/test"
+    def test_jsonable_encoder_path(self) -> None:
+        assert jsonable_encoder(Path("/example/test")) == "/example/test"
+        assert jsonable_encoder(PurePath("/example/test")) == "/example/test"
 
-    def test_jsonable_encoder_decimal(self):
+    def test_jsonable_encoder_decimal(self) -> None:
         assert jsonable_encoder(Decimal("1.23")) == "1.23"
         assert jsonable_encoder(Decimal("1.000")) == "1.000"
 
-    def test_jsonable_encoder_dict(self):
+    def test_jsonable_encoder_dict(self) -> None:
         d = {"a": 1, "b": [2, 3], "_private": "hidden"}
         assert jsonable_encoder(d) == {"a": 1, "b": [2, 3], "_private": "hidden"}
         assert jsonable_encoder(d, excluded_key_prefixes=("_",)) == {
@@ -134,7 +138,7 @@ class TestEncoders:
         assert jsonable_encoder(d_with_none, exclude_none=True) == {"a": 1}
         assert jsonable_encoder(d_with_none, exclude_none=False) == {"a": 1, "b": None}
 
-    def test_jsonable_encoder_collections(self):
+    def test_jsonable_encoder_collections(self) -> None:
         assert jsonable_encoder([1, 2]) == [1, 2]
         assert jsonable_encoder((1, 2)) == [1, 2]
         assert jsonable_encoder({1, 2}) == [1, 2]
@@ -147,8 +151,10 @@ class TestEncoders:
 
         assert jsonable_encoder(gen()) == [1, 2]
 
-    def test_jsonable_encoder_custom_encoder(self):
-        custom: dict[Any, Callable[[Any], Any]] = {int: lambda x: str(x + 1)}
+    def test_jsonable_encoder_custom_encoder(self) -> None:
+        custom: dict[Any, Callable[[Any], Any]] = {
+            int: lambda x: str(x + 1),
+        }
         assert jsonable_encoder(1, custom_encoder=custom) == "2"
 
         class SubInt(int):
@@ -156,7 +162,7 @@ class TestEncoders:
 
         assert jsonable_encoder(SubInt(1), custom_encoder=custom) == "2"
 
-    def test_jsonable_encoder_special_types(self):
+    def test_jsonable_encoder_special_types(self) -> None:
         assert jsonable_encoder(b"bytes") == "bytes"
         assert jsonable_encoder(Color("red")) == "red"
 
@@ -201,7 +207,7 @@ class TestEncoders:
         purl = Url("https://example.com")
         assert jsonable_encoder(purl) == "https://example.com/"
 
-    def test_jsonable_encoder_fallback(self):
+    def test_jsonable_encoder_fallback(self) -> None:
         obj_dict = MockWithDict({"a": 1})
         assert jsonable_encoder(obj_dict) == {"a": 1}
 
@@ -219,7 +225,7 @@ class TestEncoders:
             jsonable_encoder(ReallyUnserializable())
         assert "not iterable" in str(exc.value)
 
-    def test_jsonable_encoder_nested(self):
+    def test_jsonable_encoder_nested(self) -> None:
         obj = {
             "model": MockPydanticModel(name="test", age=20),
             "items": [MockEnum.A, Decimal("1.23")],

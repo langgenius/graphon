@@ -52,34 +52,18 @@ required-version = '>=0.15'
 select = ['ALL']
 ignore = [
     'COM812', # Conflicts with `ruff format`.
-    'ERA',    # False positives are common.
-    'ANN',    # Full annotation coverage is too strict for this codebase.
-    'TC',     # Runtime use of typing constructs is common here.
-    'S',      # Security rules are temporarily handled separately.
-    'D',      # Docstring rules are not applicable here.
-    'PGH003', # Not applicable here.
-    'CPY',    # Not applicable here.
-    'FBT',    # Not applicable here.
-    'SLF',    # Not applicable here.
-    'TID',    # Not applicable here.
-    'FIX',    # Not applicable here.
-    ########### TODO(99): Temporarily disabled ###########
-    'C901',
-    'TRY004',
-    'TD005',
-    'TD004',
-    'TD003',
-    'TD002',
-    'TD001',
-    'PLW0603',
+    'ERA001', # False positives are common.
+    'TC',     # Runtime use of typing constructs is common now.
+    'CPY',    # Covered by the standalone LICENSE file.
+    'D',      # Too verbose.
+    'FBT',    # Too strict.
+    'TID252', # Too absolute.
+    ########### Temporarily disabled while the existing violations are worked down ###########
+    'SLF001',
+    'ANN401',
     'PLR6301',
-    'PLR2004',
-    'PLR1702',
     'PLR0917',
-    'PLR0915',
-    'PLR0914',
     'PLR0913',
-    'PLR0912',
 ]
 
 [tool.ruff.lint.pydoclint]
@@ -87,7 +71,8 @@ ignore-one-line-docstrings = true
 
 [tool.ruff.lint.per-file-ignores]
 'tests/**/*.py' = [
-    'S101', # Pytest convention relies on plain assert statements.
+    'S101',    # Assert statements used for pytest.
+    'PLR2004', # Magic value used in test cases.
 ]
 
 [tool.ty.environment]

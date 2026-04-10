@@ -69,7 +69,7 @@ class SegmentType(StrEnum):
     FLOAT = "float"
     STRING = "string"
     OBJECT = "object"
-    SECRET = "secret"
+    SECRET = "secret"  # noqa: S105
 
     FILE = "file"
     BOOLEAN = "boolean"
@@ -194,7 +194,7 @@ class SegmentType(StrEnum):
         return result
 
     @staticmethod
-    def cast_value(value: Any, type_: SegmentType):
+    def cast_value(value: Any, type_: SegmentType) -> Any:
         # Cast Python's `bool` type to `int` when the runtime type requires
         # an integer or number.
         #

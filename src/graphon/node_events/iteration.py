@@ -1,6 +1,5 @@
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Any
 
 from pydantic import Field
 
@@ -16,7 +15,7 @@ class IterationStartedEvent(NodeEventBase):
 
 class IterationNextEvent(NodeEventBase):
     index: int = Field(..., description="index")
-    pre_iteration_output: Any = None
+    pre_iteration_output: object = None
 
 
 class IterationSucceededEvent(NodeEventBase):

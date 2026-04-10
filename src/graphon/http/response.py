@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
 import charset_normalizer
@@ -76,7 +77,7 @@ class HttpResponse:
 
     @property
     def is_success(self) -> bool:
-        return 200 <= self.status_code < 300
+        return HTTPStatus.OK <= self.status_code < HTTPStatus.MULTIPLE_CHOICES
 
     @property
     def text(self) -> str:

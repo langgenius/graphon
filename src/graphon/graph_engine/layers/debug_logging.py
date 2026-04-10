@@ -6,6 +6,7 @@ graph execution for debugging purposes.
 
 import logging
 from collections.abc import Mapping
+from functools import singledispatchmethod
 from typing import Any, final, override
 
 from graphon.graph_events.base import GraphEngineEvent
@@ -119,58 +120,24 @@ class DebugLoggingLayer(GraphEngineLayer):
     @override
     def on_event(self, event: GraphEngineEvent) -> None:
         """Log individual events based on their type."""
-        event_class = event.__class__.__name__
-        match event:
-            case GraphRunStartedEvent():
-                self._log_graph_run_started_event(event)
-            case GraphRunSucceededEvent():
-                self._log_graph_run_succeeded_event(event)
-            case GraphRunPartialSucceededEvent():
-                self._log_graph_run_partial_succeeded_event(event)
-            case GraphRunFailedEvent():
-                self._log_graph_run_failed_event(event)
-            case GraphRunAbortedEvent():
-                self._log_graph_run_aborted_event(event)
-            case NodeRunRetryEvent():
-                self._log_node_run_retry_event(event)
-            case NodeRunStartedEvent():
-                self._log_node_run_started_event(event)
-            case NodeRunSucceededEvent():
-                self._log_node_run_succeeded_event(event)
-            case NodeRunFailedEvent():
-                self._log_node_run_failed_event(event)
-            case NodeRunExceptionEvent():
-                self._log_node_run_exception_event(event)
-            case NodeRunStreamChunkEvent():
-                self._log_node_run_stream_chunk_event(event)
-            case NodeRunIterationStartedEvent():
-                self._log_iteration_started_event(event)
-            case NodeRunIterationNextEvent():
-                self._log_iteration_next_event(event)
-            case NodeRunIterationSucceededEvent():
-                self._log_iteration_succeeded_event(event)
-            case NodeRunIterationFailedEvent():
-                self._log_iteration_failed_event(event)
-            case NodeRunLoopStartedEvent():
-                self._log_loop_started_event(event)
-            case NodeRunLoopNextEvent():
-                self._log_loop_next_event(event)
-            case NodeRunLoopSucceededEvent():
-                self._log_loop_succeeded_event(event)
-            case NodeRunLoopFailedEvent():
-                self._log_loop_failed_event(event)
-            case _:
-                self.logger.debug("Event: %s", event_class)
+        self._dispatch_event(event)
 
+    @singledispatchmethod
+    def _dispatch_event(self, event: GraphEngineEvent) -> None:
+        self.logger.debug("Event: %s", type(event).__name__)
+
+    @_dispatch_event.register
     def _log_graph_run_started_event(self, event: GraphRunStartedEvent) -> None:
         _ = event
         self.logger.debug("Graph run started event")
 
+    @_dispatch_event.register
     def _log_graph_run_succeeded_event(self, event: GraphRunSucceededEvent) -> None:
         self.logger.info("✅ Graph run succeeded")
         if self.include_outputs and event.outputs:
             self.logger.info("  Final outputs: %s", self._format_dict(event.outputs))
 
+    @_dispatch_event.register
     def _log_graph_run_partial_succeeded_event(
         self,
         event: GraphRunPartialSucceededEvent,
@@ -181,16 +148,19 @@ class DebugLoggingLayer(GraphEngineLayer):
         if self.include_outputs and event.outputs:
             self.logger.info("  Final outputs: %s", self._format_dict(event.outputs))
 
+    @_dispatch_event.register
     def _log_graph_run_failed_event(self, event: GraphRunFailedEvent) -> None:
         self.logger.error("❌ Graph run failed: %s", event.error)
         if event.exceptions_count > 0:
             self.logger.error("  Total exceptions: %s", event.exceptions_count)
 
+    @_dispatch_event.register
     def _log_graph_run_aborted_event(self, event: GraphRunAbortedEvent) -> None:
         self.logger.warning("⚠️ Graph run aborted: %s", event.reason)
         if event.outputs:
             self.logger.info("  Partial outputs: %s", self._format_dict(event.outputs))
 
+    @_dispatch_event.register
     def _log_node_run_retry_event(self, event: NodeRunRetryEvent) -> None:
         self.retry_count += 1
         self.logger.warning(
@@ -200,6 +170,7 @@ class DebugLoggingLayer(GraphEngineLayer):
         )
         self.logger.warning("  Previous error: %s", event.error)
 
+    @_dispatch_event.register
     def _log_node_run_started_event(self, event: NodeRunStartedEvent) -> None:
         self.node_count += 1
         self.logger.info(
@@ -214,6 +185,7 @@ class DebugLoggingLayer(GraphEngineLayer):
                 self._format_dict(event.node_run_result.inputs),
             )
 
+    @_dispatch_event.register
     def _log_node_run_succeeded_event(self, event: NodeRunSucceededEvent) -> None:
         self.success_count += 1
         self.logger.info("✅ Node succeeded: %s", event.node_id)
@@ -228,6 +200,7 @@ class DebugLoggingLayer(GraphEngineLayer):
                 self._format_dict(event.node_run_result.process_data),
             )
 
+    @_dispatch_event.register
     def _log_node_run_failed_event(self, event: NodeRunFailedEvent) -> None:
         self.failure_count += 1
         self.logger.error("❌ Node failed: %s", event.node_id)
@@ -235,10 +208,12 @@ class DebugLoggingLayer(GraphEngineLayer):
         if event.node_run_result.error:
             self.logger.error("  Details: %s", event.node_run_result.error)
 
+    @_dispatch_event.register
     def _log_node_run_exception_event(self, event: NodeRunExceptionEvent) -> None:
         self.logger.warning("⚠️ Node exception handled: %s", event.node_id)
         self.logger.warning("  Error: %s", event.error)
 
+    @_dispatch_event.register
     def _log_node_run_stream_chunk_event(self, event: NodeRunStreamChunkEvent) -> None:
         final_indicator = " (FINAL)" if event.is_final else ""
         self.logger.debug(
@@ -248,9 +223,11 @@ class DebugLoggingLayer(GraphEngineLayer):
             self._truncate_value(event.chunk),
         )
 
+    @_dispatch_event.register
     def _log_iteration_started_event(self, event: NodeRunIterationStartedEvent) -> None:
         self.logger.info("🔁 Iteration started: %s", event.node_id)
 
+    @_dispatch_event.register
     def _log_iteration_next_event(self, event: NodeRunIterationNextEvent) -> None:
         self.logger.debug(
             "  Iteration next: %s (index: %s)",
@@ -258,6 +235,7 @@ class DebugLoggingLayer(GraphEngineLayer):
             event.index,
         )
 
+    @_dispatch_event.register
     def _log_iteration_succeeded_event(
         self,
         event: NodeRunIterationSucceededEvent,
@@ -266,13 +244,16 @@ class DebugLoggingLayer(GraphEngineLayer):
         if self.include_outputs and event.outputs:
             self.logger.debug("  Outputs: %s", self._format_dict(event.outputs))
 
+    @_dispatch_event.register
     def _log_iteration_failed_event(self, event: NodeRunIterationFailedEvent) -> None:
         self.logger.error("❌ Iteration failed: %s", event.node_id)
         self.logger.error("  Error: %s", event.error)
 
+    @_dispatch_event.register
     def _log_loop_started_event(self, event: NodeRunLoopStartedEvent) -> None:
         self.logger.info("🔄 Loop started: %s", event.node_id)
 
+    @_dispatch_event.register
     def _log_loop_next_event(self, event: NodeRunLoopNextEvent) -> None:
         self.logger.debug(
             "  Loop iteration: %s (index: %s)",
@@ -280,11 +261,13 @@ class DebugLoggingLayer(GraphEngineLayer):
             event.index,
         )
 
+    @_dispatch_event.register
     def _log_loop_succeeded_event(self, event: NodeRunLoopSucceededEvent) -> None:
         self.logger.info("✅ Loop succeeded: %s", event.node_id)
         if self.include_outputs and event.outputs:
             self.logger.debug("  Outputs: %s", self._format_dict(event.outputs))
 
+    @_dispatch_event.register
     def _log_loop_failed_event(self, event: NodeRunLoopFailedEvent) -> None:
         self.logger.error("❌ Loop failed: %s", event.node_id)
         self.logger.error("  Error: %s", event.error)

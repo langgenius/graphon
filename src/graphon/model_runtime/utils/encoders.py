@@ -38,8 +38,8 @@ def isoformat(o: datetime.date | datetime.time) -> str:
     return o.isoformat()
 
 
-# Taken from Pydantic v1 as is
-# TODO: pv2 should this return strings instead?
+# Taken from Pydantic v1 as is. `jsonable_encoder` handles raw `Decimal`
+# instances separately when string-preserving JSON output is required.
 def decimal_encoder(dec_value: Decimal) -> int | float:
     """Encodes a Decimal as int of there's no exponent, otherwise float
 
@@ -260,6 +260,32 @@ def _coerce_mapping_like(obj: Any) -> Any:
             raise ValueError(str(errors)) from vars_error
 
 
+def _encode_default_object(
+    obj: Any,
+    *,
+    by_alias: bool,
+    exclude_unset: bool,
+    exclude_defaults: bool,
+    exclude_none: bool,
+    custom_encoder: dict[Any, Callable[[Any], Any]],
+    excluded_key_prefixes: Sequence[str],
+) -> Any:
+    type_encoder = _find_type_encoder(obj)
+    if type_encoder is not None:
+        return type_encoder(obj)
+
+    data = _coerce_mapping_like(obj)
+    return jsonable_encoder(
+        data,
+        by_alias=by_alias,
+        exclude_unset=exclude_unset,
+        exclude_defaults=exclude_defaults,
+        exclude_none=exclude_none,
+        custom_encoder=custom_encoder,
+        excluded_key_prefixes=excluded_key_prefixes,
+    )
+
+
 def jsonable_encoder(
     obj: Any,
     by_alias: bool = True,
@@ -320,18 +346,13 @@ def jsonable_encoder(
                     excluded_key_prefixes=excluded_key_prefixes,
                 )
             case _:
-                type_encoder = _find_type_encoder(obj)
-                if type_encoder is not None:
-                    result = type_encoder(obj)
-                else:
-                    data = _coerce_mapping_like(obj)
-                    result = jsonable_encoder(
-                        data,
-                        by_alias=by_alias,
-                        exclude_unset=exclude_unset,
-                        exclude_defaults=exclude_defaults,
-                        exclude_none=exclude_none,
-                        custom_encoder=custom_encoder,
-                        excluded_key_prefixes=excluded_key_prefixes,
-                    )
+                result = _encode_default_object(
+                    obj,
+                    by_alias=by_alias,
+                    exclude_unset=exclude_unset,
+                    exclude_defaults=exclude_defaults,
+                    exclude_none=exclude_none,
+                    custom_encoder=custom_encoder,
+                    excluded_key_prefixes=excluded_key_prefixes,
+                )
     return result

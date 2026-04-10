@@ -28,7 +28,7 @@ class StubCoordinator:
 
 
 class TestGraphRuntimeState:
-    def test_execution_context_defaults_to_empty_context(self):
+    def test_execution_context_defaults_to_empty_context(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
 
         with state.execution_context:
@@ -39,7 +39,7 @@ class TestGraphRuntimeState:
         with state.execution_context:
             assert state.execution_context is not None
 
-    def test_property_getters_and_setters(self):
+    def test_property_getters_and_setters(self) -> None:
         variable_pool = VariablePool()
         start_time = time()
 
@@ -60,7 +60,7 @@ class TestGraphRuntimeState:
         state.node_run_steps = 5
         assert state.node_run_steps == 5
 
-    def test_outputs_immutability(self):
+    def test_outputs_immutability(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
 
         outputs1 = state.outputs
@@ -79,14 +79,23 @@ class TestGraphRuntimeState:
         assert state.get_output("key2") == "value2"
         assert state.get_output("key3") == "value3"
 
-    def test_llm_usage_immutability(self):
+    def test_merge_response_outputs_appends_answer_and_overwrites_others(self) -> None:
+        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+
+        state.merge_response_outputs({"answer": "Hello", "status": "draft"})
+        state.merge_response_outputs({"answer": " world", "status": "final"})
+
+        assert state.get_output("answer") == "Hello world"
+        assert state.get_output("status") == "final"
+
+    def test_llm_usage_immutability(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
 
         usage1 = state.llm_usage
         usage2 = state.llm_usage
         assert usage1 is not usage2
 
-    def test_type_validation(self):
+    def test_type_validation(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
 
         with pytest.raises(ValueError, match="total_tokens must be non-negative"):
@@ -95,7 +104,7 @@ class TestGraphRuntimeState:
         with pytest.raises(ValueError, match="node_run_steps must be non-negative"):
             state.node_run_steps = -1
 
-    def test_helper_methods(self):
+    def test_helper_methods(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
 
         initial_steps = state.node_run_steps
@@ -109,14 +118,14 @@ class TestGraphRuntimeState:
         with pytest.raises(ValueError, match="tokens must be non-negative"):
             state.add_tokens(-1)
 
-    def test_ready_queue_default_instantiation(self):
+    def test_ready_queue_default_instantiation(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
 
         queue = state.ready_queue
 
         assert isinstance(queue, InMemoryReadyQueue)
 
-    def test_graph_execution_lazy_instantiation(self):
+    def test_graph_execution_lazy_instantiation(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
 
         execution = state.graph_execution
@@ -125,7 +134,7 @@ class TestGraphRuntimeState:
         assert not execution.workflow_id
         assert state.graph_execution is execution
 
-    def test_response_coordinator_configuration(self):
+    def test_response_coordinator_configuration(self) -> None:
         variable_pool = VariablePool()
         state = GraphRuntimeState(variable_pool=variable_pool, start_at=time())
 
@@ -158,7 +167,7 @@ class TestGraphRuntimeState:
         ):
             state.attach_graph(other_graph)
 
-    def test_read_only_wrapper_exposes_additional_state(self):
+    def test_read_only_wrapper_exposes_additional_state(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
         state.configure()
 
@@ -167,7 +176,7 @@ class TestGraphRuntimeState:
         assert wrapper.ready_queue_size == 0
         assert wrapper.exceptions_count == 0
 
-    def test_read_only_wrapper_serializes_runtime_state(self):
+    def test_read_only_wrapper_serializes_runtime_state(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
         state.total_tokens = 5
         state.set_output("result", {"success": True})
@@ -180,7 +189,7 @@ class TestGraphRuntimeState:
 
         assert wrapper_snapshot == state_snapshot
 
-    def test_dumps_and_loads_roundtrip_with_response_coordinator(self):
+    def test_dumps_and_loads_roundtrip_with_response_coordinator(self) -> None:
         variable_pool = VariablePool()
         variable_pool.add(("node1", "value"), "payload")
 
@@ -247,7 +256,7 @@ class TestGraphRuntimeState:
 
         assert new_stub.state == "configured"
 
-    def test_loads_rehydrates_existing_instance(self):
+    def test_loads_rehydrates_existing_instance(self) -> None:
         variable_pool = VariablePool()
         variable_pool.add(("node", "key"), "value")
 
@@ -301,7 +310,7 @@ class TestGraphRuntimeState:
 
         assert new_stub.state == "configured"
 
-    def test_snapshot_restore_preserves_updated_conversation_variable(self):
+    def test_snapshot_restore_preserves_updated_conversation_variable(self) -> None:
         variable_pool = VariablePool(
             conversation_variables=[
                 StringVariable(name="session_name", value="before"),
