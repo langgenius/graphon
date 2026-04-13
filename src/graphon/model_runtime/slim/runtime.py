@@ -123,6 +123,11 @@ class SlimRuntime(ModelRuntime):
         self._providers_by_name: dict[str, LoadedSlimProvider] = {}
         self._lock = Lock()
 
+    @property
+    def binary_path(self) -> str:
+        """Return the resolved slim daemon binary path."""
+        return self._binary_path
+
     def _resolve_binary_path(self) -> str:
         configured_path = os.environ.get(_SLIM_BINARY_PATH_ENV, "").strip()
         if configured_path:
@@ -262,7 +267,7 @@ class SlimRuntime(ModelRuntime):
         if model_schema is None:
             return None
 
-        converted = self._package_loader._convert_model_entity(model_schema)
+        converted = self._package_loader.convert_model_entity(model_schema)
         if converted is None:
             return None
         return converted

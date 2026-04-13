@@ -14,11 +14,13 @@ from graphon.variables.variables import IntegerVariable
 
 def test_iteration_node_single_iter_keeps_iteration_event_dispatch() -> None:
     node = IterationNode.__new__(IterationNode)
-    node._node_id = "iteration-node"
-    node._node_data = SimpleNamespace(
-        output_selector=["iteration-node", "answer"],
-        error_handle_mode=ErrorHandleMode.TERMINATED,
-    )
+    node.init_node_identity("iteration-node")
+    node.init_node_data({
+        "type": "iteration",
+        "iterator_selector": ["input", "items"],
+        "output_selector": ["iteration-node", "answer"],
+        "error_handle_mode": ErrorHandleMode.TERMINATED,
+    })
 
     variable_pool = MagicMock()
     variable_pool.get.side_effect = lambda selector: {
@@ -43,7 +45,7 @@ def test_iteration_node_single_iter_keeps_iteration_event_dispatch() -> None:
     outputs: list[object] = []
 
     yielded_events = list(
-        node._run_single_iter(
+        node.run_single_iter(
             variable_pool=variable_pool,
             outputs=outputs,
             graph_engine=graph_engine,
@@ -63,8 +65,14 @@ def test_iteration_node_single_iter_keeps_iteration_event_dispatch() -> None:
 
 def test_loop_node_single_loop_keeps_loop_end_dispatch() -> None:
     node = LoopNode.__new__(LoopNode)
-    node._node_id = "loop-node"
-    node._node_data = SimpleNamespace(loop_variables=None, outputs={})
+    node.init_node_identity("loop-node")
+    node.init_node_data({
+        "type": "loop",
+        "loop_count": 1,
+        "break_conditions": [],
+        "logical_operator": "and",
+        "outputs": {},
+    })
     node.graph_runtime_state = SimpleNamespace(variable_pool=MagicMock())
 
     loop_end_event = NodeRunSucceededEvent(
@@ -77,7 +85,7 @@ def test_loop_node_single_loop_keeps_loop_end_dispatch() -> None:
     loop_state: dict[str, bool] = {}
 
     yielded_events = list(
-        node._run_single_loop(
+        node.run_single_loop(
             graph_engine=graph_engine,
             current_index=1,
             loop_state=loop_state,

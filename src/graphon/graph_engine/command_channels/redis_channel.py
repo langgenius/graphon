@@ -118,6 +118,13 @@ class RedisChannel:
             pipe.set(self._pending_key, "1", ex=self._command_ttl)
             pipe.execute()
 
+    def deserialize_command(
+        self,
+        data: dict[str, Any],
+    ) -> GraphEngineCommand | None:
+        """Deserialize a command payload into a typed command model."""
+        return self._deserialize_command(data)
+
     def _deserialize_command(self, data: dict[str, Any]) -> GraphEngineCommand | None:
         """Deserialize a command from dictionary data.
 

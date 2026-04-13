@@ -21,12 +21,14 @@ def _message_stream(
 
 def _build_tool_node() -> tuple[ToolNode, MagicMock, MagicMock]:
     node = ToolNode.__new__(ToolNode)
-    node._node_id = "node-1"
+    node.init_node_identity("node-1")
     runtime = MagicMock()
     runtime.get_usage.return_value = LLMUsage.empty_usage()
     tool_file_manager_factory = MagicMock()
-    node._runtime = cast(Any, runtime)
-    node._tool_file_manager_factory = cast(Any, tool_file_manager_factory)
+    node.init_tool_runtime(
+        runtime=cast(Any, runtime),
+        tool_file_manager_factory=cast(Any, tool_file_manager_factory),
+    )
     return node, runtime, tool_file_manager_factory
 
 
@@ -59,7 +61,7 @@ def test_transform_message_dispatches_text_variable_and_file_messages() -> None:
     )
 
     events = list(
-        node._transform_message(
+        node.transform_message(
             messages=messages,
             tool_info={},
             parameters_for_log={},
@@ -109,7 +111,7 @@ def test_transform_message_dispatches_image_link_with_handler_map() -> None:
     runtime.build_file_reference.return_value = built_file
 
     events = list(
-        node._transform_message(
+        node.transform_message(
             messages=_message_stream(
                 ToolRuntimeMessage(
                     type=ToolRuntimeMessage.MessageType.IMAGE_LINK,
@@ -144,7 +146,7 @@ def test_transform_message_rejects_non_file_payload_in_file_message() -> None:
 
     with pytest.raises(ToolNodeError, match="Expected File object"):
         list(
-            node._transform_message(
+            node.transform_message(
                 messages=_message_stream(
                     ToolRuntimeMessage(
                         type=ToolRuntimeMessage.MessageType.FILE,

@@ -22,7 +22,7 @@ def test_extract_text_from_docx_keeps_paragraph_and_table_order() -> None:
     buffer = io.BytesIO()
     document.save(buffer)
 
-    extracted = document_extractor_node._extract_text_from_docx(buffer.getvalue())
+    extracted = document_extractor_node.extract_text_from_docx(buffer.getvalue())
 
     assert extracted == (
         "Intro\n| Name | Value |\n| --- | --- |\n| Color | Blue |\n\nOutro"
@@ -36,4 +36,4 @@ def test_download_file_content_requires_remote_url() -> None:
     file.type = FileType.DOCUMENT
 
     with pytest.raises(FileDownloadError, match="Missing URL for remote file"):
-        document_extractor_node._download_file_content(MagicMock(), file)
+        document_extractor_node.download_file_content(MagicMock(), file)

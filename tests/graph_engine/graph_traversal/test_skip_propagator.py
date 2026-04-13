@@ -106,7 +106,7 @@ class TestSkipPropagator:
 
         propagator = SkipPropagator(mock_graph, mock_state_manager)
 
-        propagator._propagate_skip_to_node("node_1")
+        propagator.propagate_skip_to_node("node_1")
 
         mock_state_manager.mark_node_skipped.assert_called_once_with("node_1")
         mock_state_manager.mark_edge_skipped.assert_any_call("edge_2")

@@ -44,7 +44,7 @@ def test_redis_channel_deserializes_command_with_model_map(
 ) -> None:
     channel = RedisChannel(redis_client=MagicMock(), channel_key="test-channel")
 
-    command = channel._deserialize_command(payload)
+    command = channel.deserialize_command(payload)
 
     assert isinstance(command, expected_command_type)
 
@@ -71,11 +71,11 @@ def test_execution_limits_layer_builds_abort_reason_with_match_case(
 ) -> None:
     layer = ExecutionLimitsLayer(max_steps=3, max_time=10)
     layer.command_channel = MagicMock()
-    layer._execution_started = True
+    layer.on_graph_start()
     layer.step_count = 4
     layer.start_time = time() - 20
 
-    layer._send_abort_command(limit_type)
+    layer.send_abort_command(limit_type)
 
     abort_command = layer.command_channel.send_command.call_args.args[0]
     assert isinstance(abort_command, AbortCommand)

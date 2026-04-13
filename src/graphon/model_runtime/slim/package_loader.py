@@ -60,6 +60,13 @@ class SlimPackageLoader:
     def __init__(self, config: SlimConfig) -> None:
         self._config = config
 
+    def convert_model_entity(
+        self,
+        raw_model: dict[str, Any],
+    ) -> AIModelEntity | None:
+        """Convert a raw provider-declared model into a validated entity."""
+        return self._convert_model_entity(raw_model)
+
     def load(self, binding: SlimProviderBinding) -> LoadedSlimProvider:
         plugin_root = (
             binding.plugin_root

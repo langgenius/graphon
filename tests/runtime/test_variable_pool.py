@@ -1,5 +1,3 @@
-from typing import Any, cast
-
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import (
     BooleanSegment,
@@ -14,34 +12,34 @@ from graphon.variables.variables import StringVariable
 class TestVariablePoolGetAndNestedAttribute:
     def test__get_nested_attribute_existing_key(self) -> None:
         pool = VariablePool.empty()
-        obj = {"a": 123}
-        segment = pool._get_nested_attribute(obj, "a")
+        pool.add(("node1", "obj"), {"a": 123})
+        segment = pool.get(("node1", "obj", "a"))
         assert segment is not None
         assert segment.value == 123
 
     def test__get_nested_attribute_missing_key(self) -> None:
         pool = VariablePool.empty()
-        obj = {"a": 123}
-        segment = pool._get_nested_attribute(obj, "b")
+        pool.add(("node1", "obj"), {"a": 123})
+        segment = pool.get(("node1", "obj", "b"))
         assert segment is None
 
     def test__get_nested_attribute_non_dict(self) -> None:
         pool = VariablePool.empty()
-        obj = ["not", "a", "dict"]
-        segment = pool._get_nested_attribute(cast(Any, obj), "a")
+        pool.add(("node1", "obj"), ["not", "a", "dict"])
+        segment = pool.get(("node1", "obj", "a"))
         assert segment is None
 
     def test__get_nested_attribute_with_none_value(self) -> None:
         pool = VariablePool.empty()
-        obj = {"a": None}
-        segment = pool._get_nested_attribute(obj, "a")
+        pool.add(("node1", "obj"), {"a": None})
+        segment = pool.get(("node1", "obj", "a"))
         assert segment is not None
         assert isinstance(segment, NoneSegment)
 
     def test__get_nested_attribute_with_empty_string(self) -> None:
         pool = VariablePool.empty()
-        obj = {"a": ""}
-        segment = pool._get_nested_attribute(obj, "a")
+        pool.add(("node1", "obj"), {"a": ""})
+        segment = pool.get(("node1", "obj", "a"))
         assert segment is not None
         assert isinstance(segment, StringSegment)
         assert not segment.value

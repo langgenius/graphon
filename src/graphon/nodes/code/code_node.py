@@ -99,6 +99,15 @@ class CodeNode(Node[CodeNodeData]):
         self._code_executor: WorkflowCodeExecutor = code_executor
         self._limits = code_limits
 
+    @property
+    def limits(self) -> CodeNodeLimits:
+        """Return the validation limits used by this node."""
+        return self._limits
+
+    @limits.setter
+    def limits(self, value: CodeNodeLimits) -> None:
+        self._limits = value
+
     @classmethod
     @override
     def get_default_config(
@@ -646,6 +655,21 @@ class CodeNode(Node[CodeNodeData]):
             raise CodeNodeError(msg)
 
         return transformed_result
+
+    def transform_result(
+        self,
+        result: Mapping[str, Any],
+        output_schema: dict[str, CodeNodeData.Output] | None,
+        prefix: str = "",
+        depth: int = 1,
+    ) -> Mapping[str, Any]:
+        """Validate and normalize code-node outputs against the schema."""
+        return self._transform_result(
+            result=result,
+            output_schema=output_schema,
+            prefix=prefix,
+            depth=depth,
+        )
 
     @classmethod
     @override

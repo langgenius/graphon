@@ -443,6 +443,20 @@ class LoopNode(LLMUsageTrackingMixin, Node[LoopNodeData]):
             self.node_data.outputs[key] = segment.value if segment else None
         self.node_data.outputs["loop_round"] = current_index + 1
 
+    def run_single_loop(
+        self,
+        *,
+        graph_engine: "GraphEngine",
+        current_index: int,
+        loop_state: dict[str, bool],
+    ) -> Generator[NodeEventBase | GraphNodeEventBase, None, None]:
+        """Run one loop iteration with explicit collaborators."""
+        yield from self._run_single_loop(
+            graph_engine=graph_engine,
+            current_index=current_index,
+            loop_state=loop_state,
+        )
+
     def _append_loop_info_to_event(
         self,
         event: GraphNodeEventBase,

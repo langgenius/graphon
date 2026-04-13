@@ -26,12 +26,14 @@ def test_process_text_segment_uses_response_node_text_selector() -> None:
         graph=graph,
     )
     coordinator.track_node_execution("end-node", "run-1")
-    coordinator._active_session = ResponseSession(
-        node_id="end-node",
-        template=Template(segments=[TextSegment(text="\n")]),
+    coordinator.activate_session(
+        ResponseSession(
+            node_id="end-node",
+            template=Template(segments=[TextSegment(text="\n")]),
+        )
     )
 
-    [event] = coordinator._process_text_segment(TextSegment(text="\n"))
+    [event] = coordinator.process_text_segment(TextSegment(text="\n"))
 
     assert event.id == "run-1"
     assert event.node_id == "end-node"

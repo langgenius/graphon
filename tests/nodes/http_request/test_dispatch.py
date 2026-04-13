@@ -46,10 +46,12 @@ def test_http_request_node_extracts_variable_selectors_from_form_data() -> None:
         },
     })
 
-    mapping = HttpRequestNode._extract_variable_selector_to_variable_mapping(
+    mapping = HttpRequestNode.extract_variable_selector_to_variable_mapping(
         graph_config={},
-        node_id="node-1",
-        node_data=node_data,
+        config={
+            "id": "node-1",
+            "data": node_data.model_dump(mode="json"),
+        },
     )
 
     assert mapping == {
@@ -150,7 +152,7 @@ def test_executor_assembling_headers_applies_bearer_auth_and_content_type() -> N
         file_manager=MagicMock(),
     )
 
-    headers = executor._assembling_headers()
+    headers = executor.build_headers()
 
     assert headers["Authorization"] == "Bearer secret-token"
     assert headers["Content-Type"] == "text/plain"

@@ -65,6 +65,10 @@ class SkipPropagator:
         if edge_states["all_skipped"]:
             self._propagate_skip_to_node(downstream_node_id)
 
+    def propagate_skip_to_node(self, node_id: str) -> None:
+        """Mark a node and its downstream edges as skipped."""
+        self._propagate_skip_to_node(node_id)
+
     def _propagate_skip_to_node(self, node_id: str) -> None:
         """Mark a node and all its outgoing edges as skipped.
 

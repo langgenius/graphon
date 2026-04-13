@@ -128,7 +128,7 @@ def test_parameter_extractor_transform_result_uses_type_dispatch() -> None:
         "reasoning_mode": "function_call",
     })
 
-    transformed = node._transform_result(
+    transformed = node.transform_result(
         node_data,
         {
             "age": "3",

@@ -152,6 +152,10 @@ class ExecutionLimitsLayer(GraphEngineLayer):
         except Exception:
             self.logger.exception("Failed to send abort command")
 
+    def send_abort_command(self, limit_type: LimitType) -> None:
+        """Send an abort command when tests or callers need explicit control."""
+        self._send_abort_command(limit_type)
+
     def _build_abort_reason(self, limit_type: LimitType) -> str:
         match limit_type:
             case LimitType.STEP_LIMIT:
