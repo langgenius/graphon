@@ -113,7 +113,7 @@ def test_parameter_extractor_runtime_prompts_format_with_expected_arguments() ->
 def test_function_calling_prompt_template_renders_system_message() -> None:
     node, variable_pool = _build_parameter_extractor_node()
 
-    prompt_messages = node._get_function_calling_prompt_template(
+    prompt_messages = node.get_function_calling_prompt_template(
         node_data=node.node_data,
         query="Extract the location from this request.",
         variable_pool=variable_pool,

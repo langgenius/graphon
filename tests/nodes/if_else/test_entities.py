@@ -33,10 +33,12 @@ def test_extract_variable_mapping_includes_legacy_conditions() -> None:
         ],
     )
 
-    mapping = IfElseNode._extract_variable_selector_to_variable_mapping(
+    mapping = IfElseNode.extract_variable_selector_to_variable_mapping(
         graph_config={},
-        node_id="if-node",
-        node_data=node_data,
+        config={
+            "id": "if-node",
+            "data": node_data.model_dump(mode="json"),
+        },
     )
 
     assert mapping == {

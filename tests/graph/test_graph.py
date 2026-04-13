@@ -51,7 +51,13 @@ class TestMarkInactiveRootBranches:
         in_edges = {"child1": ["edge1"]}
         out_edges = {"root1": ["edge1"]}
 
-        Graph._mark_inactive_root_branches(nodes, edges, in_edges, out_edges, "root1")
+        Graph.mark_inactive_root_branches(
+            nodes,
+            edges,
+            in_edges,
+            out_edges,
+            "root1",
+        )
 
         assert nodes["root1"].state == NodeState.UNKNOWN
         assert nodes["child1"].state == NodeState.UNKNOWN
@@ -83,7 +89,13 @@ class TestMarkInactiveRootBranches:
         in_edges = {"child1": ["edge1"], "child2": ["edge2"]}
         out_edges = {"root1": ["edge1"], "root2": ["edge2"]}
 
-        Graph._mark_inactive_root_branches(nodes, edges, in_edges, out_edges, "root1")
+        Graph.mark_inactive_root_branches(
+            nodes,
+            edges,
+            in_edges,
+            out_edges,
+            "root1",
+        )
 
         assert nodes["root1"].state == NodeState.UNKNOWN
         assert nodes["root2"].state == NodeState.SKIPPED
@@ -140,7 +152,13 @@ class TestMarkInactiveRootBranches:
             "child2": ["edge4"],
         }
 
-        Graph._mark_inactive_root_branches(nodes, edges, in_edges, out_edges, "root1")
+        Graph.mark_inactive_root_branches(
+            nodes,
+            edges,
+            in_edges,
+            out_edges,
+            "root1",
+        )
 
         assert nodes["root1"].state == NodeState.UNKNOWN
         assert nodes["root2"].state == NodeState.SKIPPED
@@ -211,7 +229,13 @@ class TestMarkInactiveRootBranches:
             "level2_b": ["edge5"],
         }
 
-        Graph._mark_inactive_root_branches(nodes, edges, in_edges, out_edges, "root1")
+        Graph.mark_inactive_root_branches(
+            nodes,
+            edges,
+            in_edges,
+            out_edges,
+            "root1",
+        )
 
         assert nodes["root1"].state == NodeState.UNKNOWN
         assert nodes["root2"].state == NodeState.SKIPPED
@@ -252,7 +276,13 @@ class TestMarkInactiveRootBranches:
         in_edges = {"child1": ["edge1"], "child2": ["edge2"]}
         out_edges = {"root1": ["edge1"], "non_root": ["edge2"]}
 
-        Graph._mark_inactive_root_branches(nodes, edges, in_edges, out_edges, "root1")
+        Graph.mark_inactive_root_branches(
+            nodes,
+            edges,
+            in_edges,
+            out_edges,
+            "root1",
+        )
 
         assert nodes["root1"].state == NodeState.UNKNOWN
         assert nodes["non_root"].state == NodeState.UNKNOWN
@@ -262,7 +292,7 @@ class TestMarkInactiveRootBranches:
         assert edges["edge2"].state == NodeState.UNKNOWN
 
     def test_empty_graph(self) -> None:
-        Graph._mark_inactive_root_branches({}, {}, {}, {}, "non_existent")
+        Graph.mark_inactive_root_branches({}, {}, {}, {}, "non_existent")
 
     def test_three_roots_mark_two_inactive(self) -> None:
         nodes = {
@@ -306,7 +336,13 @@ class TestMarkInactiveRootBranches:
             "root3": ["edge3"],
         }
 
-        Graph._mark_inactive_root_branches(nodes, edges, in_edges, out_edges, "root2")
+        Graph.mark_inactive_root_branches(
+            nodes,
+            edges,
+            in_edges,
+            out_edges,
+            "root2",
+        )
 
         assert nodes["root1"].state == NodeState.SKIPPED
         assert nodes["root2"].state == NodeState.UNKNOWN
@@ -374,7 +410,13 @@ class TestMarkInactiveRootBranches:
             "mid2": ["edge5"],
         }
 
-        Graph._mark_inactive_root_branches(nodes, edges, in_edges, out_edges, "root1")
+        Graph.mark_inactive_root_branches(
+            nodes,
+            edges,
+            in_edges,
+            out_edges,
+            "root1",
+        )
 
         assert nodes["root1"].state == NodeState.UNKNOWN
         assert nodes["root2"].state == NodeState.SKIPPED

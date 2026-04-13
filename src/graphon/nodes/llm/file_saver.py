@@ -83,6 +83,11 @@ class FileSaverImpl(LLMFileSaver):
         self._file_reference_factory = file_reference_factory
         self._http_client = http_client or get_http_client()
 
+    @property
+    def http_client(self) -> HttpClientProtocol:
+        """Return the HTTP client used for remote file downloads."""
+        return self._http_client
+
     def save_remote_url(self, url: str, file_type: FileType) -> File:
         http_response = self._http_client.get(url)
         http_response.raise_for_status()

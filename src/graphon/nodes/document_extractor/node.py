@@ -211,6 +211,11 @@ class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
         )
         self._http_client = http_client or get_http_client()
 
+    @property
+    def http_client(self) -> HttpClientProtocol:
+        """Return the HTTP client used to retrieve file contents."""
+        return self._http_client
+
     @override
     def _run(self) -> NodeRunResult:
         variable_selector = self.node_data.variable_selector
@@ -563,6 +568,11 @@ def _extract_text_from_docx(file_content: bytes) -> str:
         raise TextExtractionError(msg) from e
 
 
+def extract_text_from_docx(file_content: bytes) -> str:
+    """Extract text from a DOCX payload."""
+    return _extract_text_from_docx(file_content)
+
+
 def _load_docx_document(file_content: bytes) -> Document:
     try:
         return docx.Document(io.BytesIO(file_content))
@@ -634,6 +644,11 @@ def _download_file_content(http_client: HttpClientProtocol, file: File) -> bytes
     except Exception as e:
         msg = f"Error downloading file: {e!s}"
         raise FileDownloadError(msg) from e
+
+
+def download_file_content(http_client: HttpClientProtocol, file: File) -> bytes:
+    """Download file content using the document extractor rules."""
+    return _download_file_content(http_client, file)
 
 
 def _extract_text_from_file(

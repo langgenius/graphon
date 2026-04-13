@@ -34,7 +34,15 @@ homepage = 'https://github.com/langgenius/graphon'
 issues = 'https://github.com/langgenius/graphon/issues'
 
 [dependency-groups]
-dev = ['pytest', 'pytest-cov', 'pytest-mock', 'pytest-xdist', 'ruff', 'prek', 'ty']
+dev = [
+    'pytest',
+    'pytest-cov',
+    'pytest-mock',
+    'pytest-xdist',
+    'ruff',
+    'prek',
+    'ty',
+]
 
 [build-system]
 requires = ['uv_build~=0.11']
@@ -51,19 +59,17 @@ required-version = '>=0.15'
 [tool.ruff.lint]
 select = ['ALL']
 ignore = [
-    'COM812', # Conflicts with `ruff format`.
-    'ERA001', # False positives are common.
-    'TC',     # Runtime use of typing constructs is common now.
-    'CPY',    # Covered by the standalone LICENSE file.
-    'D',      # Too verbose.
-    'FBT',    # Too strict.
-    'TID252', # Too absolute.
-    ########### Temporarily disabled while the existing violations are worked down ###########
-    'SLF001',
-    'ANN401',
-    'PLR6301',
-    'PLR0917',
-    'PLR0913',
+    'COM812',  # Conflicts with `ruff format`.
+    'ERA001',  # False positives are common.
+    'TC',      # Runtime use of typing constructs is common now.
+    'CPY',     # Covered by the standalone LICENSE file.
+    'PLR0913', # Explicit is better than implicit.
+    'PLR0917', # Complex is better than complicated.
+    'PLR6301', # Violates the usual practice.
+    'D',       # Too verbose.
+    'FBT',     # Too strict.
+    'TID252',  # Too absolute.
+    'ANN401',  # We hope to enforce this, but typing is still evolving.
 ]
 
 [tool.ruff.lint.pydoclint]

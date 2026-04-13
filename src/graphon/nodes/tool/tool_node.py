@@ -80,6 +80,16 @@ class ToolNode(Node[ToolNodeData]):
             raise ValueError(msg)
         self._runtime = runtime
 
+    def init_tool_runtime(
+        self,
+        *,
+        runtime: ToolNodeRuntimeProtocol,
+        tool_file_manager_factory: ToolFileManagerProtocol,
+    ) -> None:
+        """Hydrate tool-runtime collaborators for callers bypassing `__init__`."""
+        self._runtime = runtime
+        self._tool_file_manager_factory = tool_file_manager_factory
+
     @classmethod
     @override
     def version(cls) -> str:
@@ -275,6 +285,25 @@ class ToolNode(Node[ToolNodeData]):
                 inputs=parameters_for_log,
                 llm_usage=usage,
             ),
+        )
+
+    def transform_message(
+        self,
+        messages: Generator[ToolRuntimeMessage, None, None],
+        tool_info: Mapping[str, Any],
+        parameters_for_log: dict[str, Any],
+        node_id: str,
+        tool_runtime: ToolRuntimeHandle,
+        **kwargs: Any,
+    ) -> Generator[NodeEventBase, None, None]:
+        """Convert tool runtime messages using the node's public test seam."""
+        yield from self._transform_message(
+            messages=messages,
+            tool_info=tool_info,
+            parameters_for_log=parameters_for_log,
+            node_id=node_id,
+            tool_runtime=tool_runtime,
+            **kwargs,
         )
 
     def _dispatch_message(

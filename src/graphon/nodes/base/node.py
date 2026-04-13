@@ -204,6 +204,11 @@ class _NodeDataModelMixin[NodeDataT: BaseNodeData]:
         """Hydrate `_node_data` for legacy callers that bypass `__init__`."""
         self._node_data = self.validate_node_data(cast("BaseNodeData", data))
 
+    def init_node_identity(self: Node[NodeDataT], node_id: str) -> None:
+        """Hydrate node identity for legacy callers that bypass `__init__`."""
+        self.id = node_id
+        self._node_id = node_id
+
     @property
     def retry(self) -> bool:
         return False

@@ -436,7 +436,6 @@ class _GraphRuntimeBindings:
         ready_queue: ReadyQueueProtocol | None = None,
         graph_execution: GraphExecutionProtocol | None = None,
         response_coordinator: ResponseStreamCoordinatorProtocol | None = None,
-        graph: GraphProtocol | None = None,
         execution_context: AbstractContextManager[object] | None = None,
     ) -> None:
         self._runtime_state = runtime_state
@@ -451,9 +450,6 @@ class _GraphRuntimeBindings:
         )
         self.child_engine_builder: ChildGraphEngineBuilderProtocol | None = None
 
-        if graph is not None:
-            self.attach_graph(graph, runtime_state._suspension_state)
-
     def attach_graph(
         self,
         graph: GraphProtocol,
@@ -466,7 +462,7 @@ class _GraphRuntimeBindings:
         self.graph = graph
 
         if self.response_coordinator is None:
-            self.response_coordinator = self._runtime_state._build_response_coordinator(
+            self.response_coordinator = self._runtime_state.create_response_coordinator(
                 graph,
             )
 
@@ -523,12 +519,12 @@ class _GraphRuntimeBindings:
 
     def get_ready_queue(self) -> ReadyQueueProtocol:
         if self.ready_queue is None:
-            self.ready_queue = self._runtime_state._build_ready_queue()
+            self.ready_queue = self._runtime_state.create_ready_queue()
         return self.ready_queue
 
     def get_graph_execution(self) -> GraphExecutionProtocol:
         if self.graph_execution is None:
-            self.graph_execution = self._runtime_state._build_graph_execution()
+            self.graph_execution = self._runtime_state.create_graph_execution()
         return self.graph_execution
 
     def get_response_coordinator(self) -> ResponseStreamCoordinatorProtocol:
@@ -536,7 +532,7 @@ class _GraphRuntimeBindings:
             if self.graph is None:
                 msg = "Graph must be attached before accessing response coordinator"
                 raise ValueError(msg)
-            self.response_coordinator = self._runtime_state._build_response_coordinator(
+            self.response_coordinator = self._runtime_state.create_response_coordinator(
                 self.graph,
             )
         return self.response_coordinator
@@ -551,7 +547,7 @@ class _GraphRuntimeBindings:
         if payload is None:
             self.ready_queue = None
             return
-        self.ready_queue = self._runtime_state._build_ready_queue()
+        self.ready_queue = self._runtime_state.create_ready_queue()
         self.ready_queue.loads(payload)
 
     def restore_graph_execution(
@@ -636,9 +632,10 @@ class GraphRuntimeState:  # noqa: PLR0904
             ready_queue=ready_queue,
             graph_execution=graph_execution,
             response_coordinator=response_coordinator,
-            graph=graph,
             execution_context=execution_context,
         )
+        if graph is not None:
+            self.attach_graph(graph)
 
     @property
     def variable_pool(self) -> VariablePool:
@@ -848,6 +845,21 @@ class GraphRuntimeState:  # noqa: PLR0904
     # ------------------------------------------------------------------
     # Builders
     # ------------------------------------------------------------------
+    def create_ready_queue(self) -> ReadyQueueProtocol:
+        """Create the ready queue collaborator used by this runtime state."""
+        return self._build_ready_queue()
+
+    def create_graph_execution(self) -> GraphExecutionProtocol:
+        """Create the graph execution aggregate used by this runtime state."""
+        return self._build_graph_execution()
+
+    def create_response_coordinator(
+        self,
+        graph: GraphProtocol,
+    ) -> ResponseStreamCoordinatorProtocol:
+        """Create the response coordinator bound to the attached graph."""
+        return self._build_response_coordinator(graph)
+
     def _build_ready_queue(self) -> ReadyQueueProtocol:
         # Import lazily to avoid breaching architecture boundaries
         # enforced by import-linter.

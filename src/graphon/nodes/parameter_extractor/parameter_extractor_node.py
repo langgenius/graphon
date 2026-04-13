@@ -716,6 +716,14 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
 
         return transformed_result
 
+    def transform_result(
+        self,
+        data: ParameterExtractorNodeData,
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Transform model output into the node's normalized result shape."""
+        return self._transform_result(data, result)
+
     def _transform_parameter_value(
         self,
         *,
@@ -885,6 +893,24 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
             return [system_prompt_messages, user_prompt_message]
         msg = f"Model mode {node_data.model.mode} not support."
         raise InvalidModelModeError(msg)
+
+    def get_function_calling_prompt_template(
+        self,
+        *,
+        node_data: ParameterExtractorNodeData,
+        query: str,
+        variable_pool: VariablePool,
+        memory: PromptMessageMemory | None,
+        max_token_limit: int = 2000,
+    ) -> list[LLMNodeChatModelMessage]:
+        """Build the function-calling prompt template for the current request."""
+        return self._get_function_calling_prompt_template(
+            node_data=node_data,
+            query=query,
+            variable_pool=variable_pool,
+            memory=memory,
+            max_token_limit=max_token_limit,
+        )
 
     def _get_prompt_engineering_prompt_template(
         self,

@@ -338,6 +338,10 @@ class Executor:
         headers.update(self._build_authorization_headers(authorization))
         return self._apply_content_type_header(headers)
 
+    def build_headers(self) -> dict[str, Any]:
+        """Build the request headers for the current executor state."""
+        return self._assembling_headers()
+
     def _build_authorization_headers(
         self,
         authorization: HttpRequestNodeAuthorization,

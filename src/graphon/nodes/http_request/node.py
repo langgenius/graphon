@@ -68,6 +68,11 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
         self._file_manager = file_manager
         self._file_reference_factory = file_reference_factory
 
+    @property
+    def http_client(self) -> HttpClientProtocol:
+        """Return the HTTP client used by this node."""
+        return self._http_client
+
     @classmethod
     @override
     def get_default_config(

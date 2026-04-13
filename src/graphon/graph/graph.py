@@ -202,6 +202,24 @@ class Graph:
                 node.execution_type = NodeExecutionType.BRANCH
 
     @classmethod
+    def mark_inactive_root_branches(
+        cls,
+        nodes: dict[str, Node],
+        edges: dict[str, Edge],
+        in_edges: dict[str, list[str]],
+        out_edges: dict[str, list[str]],
+        active_root_id: str,
+    ) -> None:
+        """Mark nodes and edges that belong to inactive root branches."""
+        cls._mark_inactive_root_branches(
+            nodes,
+            edges,
+            in_edges,
+            out_edges,
+            active_root_id,
+        )
+
+    @classmethod
     def _mark_inactive_root_branches(
         cls,
         nodes: dict[str, Node],

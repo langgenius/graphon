@@ -754,6 +754,20 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
 
         return
 
+    def run_single_iter(
+        self,
+        *,
+        variable_pool: VariablePool,
+        outputs: list[object],
+        graph_engine: "GraphEngine",
+    ) -> Generator[GraphNodeEventBase, None, None]:
+        """Run a single iteration with explicit collaborators."""
+        yield from self._run_single_iter(
+            variable_pool=variable_pool,
+            outputs=outputs,
+            graph_engine=graph_engine,
+        )
+
     def _get_current_iteration_index(self, variable_pool: VariablePool) -> int:
         index_variable = variable_pool.get([self._node_id, "index"])
         if not isinstance(index_variable, IntegerVariable):

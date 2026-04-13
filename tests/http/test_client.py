@@ -179,7 +179,7 @@ def test_http_request_node_uses_default_http_client_when_not_injected() -> None:
         file_reference_factory=_FileReferenceFactory(),
     )
 
-    assert node._http_client is get_http_client()
+    assert node.http_client is get_http_client()
 
 
 def test_document_extractor_node_uses_default_http_client_when_not_injected() -> None:
@@ -199,7 +199,7 @@ def test_document_extractor_node_uses_default_http_client_when_not_injected() ->
         graph_runtime_state=_build_runtime_state(),
     )
 
-    assert node._http_client is get_http_client()
+    assert node.http_client is get_http_client()
 
 
 def test_file_saver_impl_uses_default_http_client_when_not_injected() -> None:
@@ -208,7 +208,7 @@ def test_file_saver_impl_uses_default_http_client_when_not_injected() -> None:
         file_reference_factory=_FileReferenceFactory(),
     )
 
-    assert file_saver._http_client is get_http_client()
+    assert file_saver.http_client is get_http_client()
 
 
 @pytest.mark.parametrize(

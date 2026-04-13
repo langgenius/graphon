@@ -138,6 +138,11 @@ class ResponseStreamCoordinator:
         with self._lock:
             self._node_execution_ids[node_id] = execution_id
 
+    def activate_session(self, session: ResponseSession) -> None:
+        """Activate a prepared response session for controlled flushing."""
+        with self._lock:
+            self._active_session = session
+
     def _get_or_create_execution_id(self, node_id: NodeID) -> str:
         """Get the execution ID for a node, creating one if it doesn't exist.
 
@@ -479,6 +484,13 @@ class ResponseStreamCoordinator:
             is_final=is_last_segment,
         )
         return [event]
+
+    def process_text_segment(
+        self,
+        segment: TextSegment,
+    ) -> Sequence[NodeRunStreamChunkEvent]:
+        """Process a text segment for the currently active session."""
+        return self._process_text_segment(segment)
 
     def _get_text_segment_selector(self, response_node_id: str) -> Sequence[str]:
         response_node = self._graph.nodes[response_node_id]
