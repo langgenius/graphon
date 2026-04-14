@@ -2,6 +2,34 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## v0.2.0 - 2026-04-13
+#### Features
+- (**slim**) integrate plugin daemon slim runtime (#6) - (f800f54) - -LAN-
+- Add graph validation to GraphBuilder.build (#3) - (d5bcdd3) - -LAN-
+#### Bug Fixes
+- example drift in .env.example (#9) - (4f3f804) - Byron.wang
+- Pydantic deprecation warning in runtime state serialization (#4) - (23408d7) - -LAN-
+#### Documentation
+- (**readme**) move contribution guidance to CONTRIBUTING.md (#1) - (3bf170d) - -LAN-
+- clarify contribution workflow (#27) - (5bb5e18) - 99
+- improve readme and contributing guide (#17) - (8332397) - 99
+#### Continuous Integration
+- harden workflow permissions and validate PR checks (#15) - (1351275) - 99
+- integrate CLA Assistant workflow (#8) - (1f2293b) - -LAN-
+#### Refactoring
+- (**runtime**) remove provider icon resolution hook (#19) - (701864d) - -LAN-
+- (**runtime**) simplify dispatch and validation flows (#11) - (749751d) - 99
+- remove SLF001 private member access violations (#33) - (7100fc9) - 99
+- modernize typing for Python 3.12 (#13) - (76f0350) - 99
+- <span style="background-color: #d73a49; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold; font-size: 0.85em;">BREAKING</span>move workflow HTTP contracts into graphon.http (#5) - (28aa0af) - -LAN-
+#### Miscellaneous Chores
+- (**deps**) relax dependency constraints (#30) - (ba1bc08) - 99
+- (**pr-template**) add pull request template (#2) - (fd66e5d) - -LAN-
+- (**ruff**) tighten ignores and fix lint debt (#29) - (4349cf1) - 99
+- resolve ty diagnostics across runtime and nodes (#23) - (a66a8f6) - 99
+
+- - -
+
 ## v0.1.2 - 2026-03-27
 #### Bug Fixes
 - (**parameter-extractor**) align prompt placeholders - (d456361) - WH-2099
