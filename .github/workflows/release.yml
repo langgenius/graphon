@@ -1,0 +1,176 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify-tag:
+    name: Verify release tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.verify.outputs.tag }}
+      version: ${{ steps.verify.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python and uv
+        uses: astral-sh/setup-uv@v7
+
+      - id: verify
+        name: Verify tag matches pyproject.toml and main
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          project_version="$(uv version --short)"
+
+          if [[ "${version}" != "${project_version}" ]]; then
+            echo "::error::Tag ${tag} does not match project version ${project_version}."
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" "origin/main"; then
+            echo "::error::Tag ${tag} must point to a commit reachable from origin/main."
+            exit 1
+          fi
+
+          printf 'tag=%s\n' "${tag}" >> "${GITHUB_OUTPUT}"
+          printf 'version=%s\n' "${version}" >> "${GITHUB_OUTPUT}"
+
+  test:
+    name: Test
+    needs: verify-tag
+    permissions:
+      contents: read
+    uses: ./.github/workflows/test.yml
+
+  build:
+    name: Build release distributions
+    runs-on: ubuntu-latest
+    needs:
+      - verify-tag
+      - test
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install uv and Python 3.12
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+
+      - name: Build distributions
+        run: make build
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-package-distributions
+          path: dist/*
+          if-no-files-found: error
+
+  publish-github-draft:
+    name: Create GitHub draft release
+    runs-on: ubuntu-latest
+    needs:
+      - verify-tag
+      - build
+    permissions:
+      contents: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v8
+        with:
+          name: python-package-distributions
+          path: dist
+
+      - name: Create or update GitHub draft release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ needs.verify-tag.outputs.tag }}
+          name: ${{ needs.verify-tag.outputs.tag }}
+          draft: true
+          allowUpdates: true
+          artifacts: dist/*
+          artifactErrorsFailBuild: true
+          generateReleaseNotes: true
+          makeLatest: false
+          removeArtifacts: true
+          skipIfReleaseExists: true
+          updateOnlyUnreleased: true
+
+  publish-testpypi:
+    name: Publish package distributions to TestPyPI
+    runs-on: ubuntu-latest
+    needs:
+      - verify-tag
+      - build
+      - publish-github-draft
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/graphon/${{ needs.verify-tag.outputs.version }}/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v8
+        with:
+          name: python-package-distributions
+          path: dist
+
+      - name: Publish package distributions to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  publish-pypi:
+    name: Publish package distributions to PyPI
+    runs-on: ubuntu-latest
+    needs:
+      - verify-tag
+      - build
+      - publish-testpypi
+    environment:
+      name: pypi
+      url: https://pypi.org/project/graphon/${{ needs.verify-tag.outputs.version }}/
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v8
+        with:
+          name: python-package-distributions
+          path: dist
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Publish GitHub draft release
+        uses: ncipollo/release-action@v1.21.0
+        with:
+          tag: ${{ needs.verify-tag.outputs.tag }}
+          allowUpdates: true
+          draft: false
+          makeLatest: true
+          omitBodyDuringUpdate: true
+          omitNameDuringUpdate: true
+          skipIfReleaseExists: true
+          updateOnlyUnreleased: true

@@ -37,23 +37,6 @@ jobs:
             chore
             revert
 
-  validate-commit-messages:
-    name: Validate commit messages
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout PR head
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
-
-      - name: Validate commit history against CONTRIBUTING.md
-        uses: cocogitto/cocogitto-action@v4
-        with:
-          command: check
-
   check:
     name: Check
     runs-on: ubuntu-latest
@@ -70,6 +53,7 @@ jobs:
         run: make check
 
   test:
+    name: Test
     needs: check
     permissions:
       contents: read

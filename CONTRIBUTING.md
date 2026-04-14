@@ -102,16 +102,15 @@ confirms the non-mutating CI check job will pass.
 
 ### CI Checks
 
-Pull requests targeting `main` currently run four kinds of checks:
+Pull requests targeting `main` currently run three kinds of checks:
 
 1. PR title validation with `amannn/action-semantic-pull-request`
-2. Commit history validation with `cocogitto check`
-3. `make check`
-4. `make test` on Python 3.12 and 3.13
+2. `make check`
+3. `make test` on Python 3.12 and 3.13
 
 Keep local workflow aligned with those checks. A green local `make pre` is
 useful, but it is not a complete substitute for the exact CI flow because CI
-also validates commit messages, PR titles, and a Python version matrix.
+also validates PR titles and a Python version matrix.
 
 ## Git Commits
 
@@ -138,8 +137,6 @@ Rules:
 - use an optional scope when it improves clarity
 - mark breaking changes with `!`
 - remember that the pull request title becomes the squash merge commit message
-- keep the entire commit history reviewable, because CI validates all commits in
-  the pull request
 
 Examples:
 
@@ -207,16 +204,34 @@ The CLA workflow is separate from the normal PR checks.
 
 ## Maintainer Notes
 
-Version bumps and changelog updates are managed with
-[`uv`](https://docs.astral.sh/uv/) `version` and `cog`:
+Version updates are managed manually with [`uv`](https://docs.astral.sh/uv/)
+`version`:
 
 ```bash
-make bump SEM=patch
-make bump SEM=minor
-make bump SEM=major
+uv version --no-sync --bump patch
+uv version --no-sync --bump minor
+uv version --no-sync --bump major
 ```
 
-Release tags use the `v` prefix and are intended to be created from `main`.
+Those commands update the package version in `pyproject.toml`. If the lock file
+also needs to reflect the new root package version, refresh and commit
+`uv.lock` as part of the version bump change. The version update step does not
+create tags, releases, or changelog entries.
+
+Release tags use the `v` prefix and are intended to be created from `main`
+after the version bump pull request has been merged. The pushed tag must match
+`[project].version` in `pyproject.toml`.
+
+Pushing `vX.Y.Z` triggers the release workflow. It:
+
+1. verifies the tag matches `pyproject.toml` and points to a commit reachable
+   from `main`
+2. runs tests and builds release distributions once
+3. creates or updates a GitHub draft release and publishes the same build
+   artifacts to TestPyPI
+4. waits for approval on the `pypi` environment
+5. publishes the same build artifacts to PyPI and publishes the GitHub draft
+   release
 
 CLA signatures are stored on the dedicated `cla-signatures` branch. Maintainers
 must keep that branch available and writable to GitHub Actions.

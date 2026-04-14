@@ -343,7 +343,7 @@ wheels = [
 
 [[package]]
 name = "graphon"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "charset-normalizer" },
@@ -484,7 +484,7 @@ wheels = [
 
 [[package]]
 name = "huggingface-hub"
-version = "1.10.1"
+version = "1.10.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filelock" },
@@ -497,9 +497,9 @@ dependencies = [
     { name = "typer" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e4/28/baf5d745559503ce8d28cf5bc9551f5ac59158eafd7b6a6afff0bcdb0f50/huggingface_hub-1.10.1.tar.gz", hash = "sha256:696c53cf9c2ac9befbfb5dd41d05392a031c69fc6930d1ed9671debd405b6fff", size = 758094, upload-time = "2026-04-09T15:01:18.928Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0c/4d/00734890c7fcfe2c7ff04f1c1a167186c42b19e370a2dd8cfd8c34fc92c4/huggingface_hub-1.10.2.tar.gz", hash = "sha256:4b276f820483b709dc86a53bcb8183ea496b8d8447c9f7f88a115a12b498a95f", size = 758428, upload-time = "2026-04-14T10:42:28.498Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/83/8c/c7a33f3efaa8d6a5bc40e012e5ecc2d72c2e6124550ca9085fe0ceed9993/huggingface_hub-1.10.1-py3-none-any.whl", hash = "sha256:6b981107a62fbe68c74374418983399c632e35786dcd14642a9f2972633c8b5a", size = 642630, upload-time = "2026-04-09T15:01:17.35Z" },
+    { url = "https://files.pythonhosted.org/packages/5e/c9/4c1e1216b24bcab140c83acdf8bc89a846ea17cd8a06cd18e3fd308a297f/huggingface_hub-1.10.2-py3-none-any.whl", hash = "sha256:c26c908767cc711493978dc0b4f5747ba7841602997cc98bfd628450a28cf9bc", size = 642581, upload-time = "2026-04-14T10:42:26.563Z" },
 ]
 
 [[package]]
@@ -543,11 +543,11 @@ wheels = [
 
 [[package]]
 name = "json-repair"
-version = "0.59.2"
+version = "0.59.3"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ed/cb/a49f1661737a78098ce33668350590c981a4163055bc9a01e0cc688d896a/json_repair-0.59.2.tar.gz", hash = "sha256:1d8abb2fa94c4035a66ef9892ea3785dace8dcf09c583e6de781cfd31b278b3d", size = 48341, upload-time = "2026-04-11T15:55:41.145Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fd/bc/6a0af79421a5843dcd2062ed3959bc84cf7ae92d6a44bfbc91197a9fd14e/json_repair-0.59.3.tar.gz", hash = "sha256:b6f0158724c28b8f2c0fb9a3dbcd89e16462a3d752039283661f46877a791dbd", size = 46368, upload-time = "2026-04-14T10:02:49.886Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e1/03/7afcecb4242d93b684708b47fb014abdc1922a01b38c0e30f1117ae74a83/json_repair-0.59.2-py3-none-any.whl", hash = "sha256:6ca6238519c24f671bcb05d1f38a0d6a452bb4ca5af82137595c5c2f1a0fb785", size = 46918, upload-time = "2026-04-11T15:55:39.817Z" },
+    { url = "https://files.pythonhosted.org/packages/26/17/167e5b6fbbbe4f5bcfc7bb5e650f3dbb49ac73ea4c23730efca2fe56d501/json_repair-0.59.3-py3-none-any.whl", hash = "sha256:c374cde3c0b53bf0950d3045395c7b6953a161621f6048259a1f33c5c58ee86c", size = 45507, upload-time = "2026-04-14T10:02:48.394Z" },
 ]
 
 [[package]]
@@ -1166,11 +1166,11 @@ wheels = [
 
 [[package]]
 name = "pypdf"
-version = "6.10.0"
+version = "6.10.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/b8/9f/ca96abf18683ca12602065e4ed2bec9050b672c87d317f1079abc7b6d993/pypdf-6.10.0.tar.gz", hash = "sha256:4c5a48ba258c37024ec2505f7e8fd858525f5502784a2e1c8d415604af29f6ef", size = 5314833, upload-time = "2026-04-10T09:34:57.102Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/66/79/f2730c42ec7891a75a2fcea2eb4f356872bcbc671b711418060424796612/pypdf-6.10.1.tar.gz", hash = "sha256:62e6ca7f65aaa28b3d192addb44f97296e4be1748f57ed0f4efb2d4915841880", size = 5315704, upload-time = "2026-04-14T12:55:20.996Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/55/f2/7ebe366f633f30a6ad105f650f44f24f98cb1335c4157d21ae47138b3482/pypdf-6.10.0-py3-none-any.whl", hash = "sha256:90005e959e1596c6e6c84c8b0ad383285b3e17011751cedd17f2ce8fcdfc86de", size = 334459, upload-time = "2026-04-10T09:34:54.966Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/04/e3aa7f1f14dbc53429cae34666261eb935d99bd61d24756ab94d7e0309da/pypdf-6.10.1-py3-none-any.whl", hash = "sha256:6331940d3bfe75b7e6601d35db7adabab5fc1d716efaeb384e3c0c3957d033de", size = 335606, upload-time = "2026-04-14T12:55:18.941Z" },
 ]
 
 [[package]]
@@ -2001,7 +2001,7 @@ wheels = [
 
 [[package]]
 name = "unstructured"
-version = "0.22.18"
+version = "0.22.20"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -2028,9 +2028,9 @@ dependencies = [
     { name = "unstructured-client" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6d/7c/0a83aab91e4af230526d1864c37879e335fb7f13b35814c3bd877c66fd8e/unstructured-0.22.18.tar.gz", hash = "sha256:91e1af7dda1568b5fe33f56e18be359ff5805e7aebff7139900f531c22287617", size = 1518991, upload-time = "2026-04-08T14:03:14.033Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/17/a6/597110041311eee551cb7b0760ef8f77d8ba0a2c37b54b87798375b042c2/unstructured-0.22.20.tar.gz", hash = "sha256:8e195f1c1cc27a2149b520f148eb1b0bf248def8087245dbbfd151d813baff93", size = 1519084, upload-time = "2026-04-14T01:24:39.587Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/51/36/927f8786b43cf6fa37905bbe8dbc0b0af399689d84431851760096bc974d/unstructured-0.22.18-py3-none-any.whl", hash = "sha256:4ab389035d58474213a4f2cd0c5febc02171d9e43ad0db06c28403806581e23e", size = 1574708, upload-time = "2026-04-08T14:03:11.9Z" },
+    { url = "https://files.pythonhosted.org/packages/44/9b/98210fab38ba3a3990759424aba6fb6a31a9c38968cd6e9195fb03b3f8a7/unstructured-0.22.20-py3-none-any.whl", hash = "sha256:f9608e590165b05322f0e1b186381c377b244dcbd6184c6ddbcbc004d4af65bd", size = 1574859, upload-time = "2026-04-14T01:24:37.227Z" },
 ]
 
 [package.optional-dependencies]

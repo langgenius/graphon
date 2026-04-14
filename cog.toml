@@ -1,2 +1,0 @@
-branch_whitelist = ['main']
-tag_prefix = "v"
