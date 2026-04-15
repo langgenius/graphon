@@ -1,28 +1,47 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from typing import cast
 
+from graphon.entities.base_node_data import BaseNodeData
 from graphon.model_runtime.entities.llm_entities import LLMMode
-from graphon.nodes.base.entities import OutputVariableType
+from graphon.nodes.base.entities import OutputVariableType, VariableSelector
+from graphon.nodes.base.node import Node
 from graphon.nodes.end.end_node import EndNode
 from graphon.nodes.end.entities import EndNodeData
 from graphon.nodes.llm import LLMNodeData, ModelConfig
 from graphon.nodes.llm.runtime_protocols import PreparedLLMProtocol
 from graphon.nodes.start.entities import StartNodeData
+from graphon.nodes.template_transform.entities import TemplateTransformNodeData
+from graphon.nodes.template_transform.template_transform_node import (
+    TemplateTransformNode,
+)
+from graphon.nodes.variable_aggregator.entities import VariableAggregatorNodeData
+from graphon.nodes.variable_aggregator.variable_aggregator_node import (
+    VariableAggregatorNode,
+)
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.runtime.variable_pool import VariablePool
+from graphon.template_rendering import Jinja2TemplateRenderer
+from graphon.variables.input_entities import VariableEntityType
 from graphon.workflow_builder import (
+    NodeMaterializationContext,
     NodeOutputRef,
     WorkflowBuilder,
     WorkflowRuntime,
     completion_prompt,
+    input_variable,
     paragraph_input,
     system,
     template,
-    text_input,
     user,
 )
+
+
+class _EchoTemplateRenderer(Jinja2TemplateRenderer):
+    def render_template(self, template: str, variables: Mapping[str, object]) -> str:
+        return template.replace("{{ content }}", str(variables["content"]))
 
 
 def test_llm_node_data_defaults_context_to_disabled() -> None:
@@ -140,13 +159,103 @@ def test_workflow_builder_helpers_produce_typed_authoring_values() -> None:
     ref = NodeOutputRef(node_id="llm", output_name="text")
     prompt = completion_prompt("Answer in one sentence: ", ref)
     binding = ref.output("answer", value_type=OutputVariableType.STRING)
-    text = text_input("question", required=True, max_length=512)
+    text = input_variable(
+        "question",
+        variable_type=VariableEntityType.TEXT_INPUT,
+        required=True,
+        max_length=512,
+    )
 
-    assert template("Result: ", ref).render() == "Result: {{#llm.text#}}"
+    assert template("Result: ", ref) == "Result: {{#llm.text#}}"
     assert prompt.text == "Answer in one sentence: {{#llm.text#}}"
     assert binding.variable == "answer"
     assert tuple(binding.value_selector) == ("llm", "text")
     assert binding.value_type is OutputVariableType.STRING
     assert text.variable == "question"
-    assert text.type.value == "text-input"
+    assert text.type is VariableEntityType.TEXT_INPUT
     assert text.max_length == 512
+
+
+def test_workflow_builder_materializes_non_example_builtin_node() -> None:
+    graph_runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=time.time(),
+    )
+    builder = WorkflowBuilder()
+
+    start = builder.root(
+        "start",
+        StartNodeData(
+            variables=[paragraph_input("content", required=True)],
+        ),
+    )
+    aggregate = start.then(
+        "aggregate",
+        VariableAggregatorNodeData(
+            output_type="string",
+            variables=[["start", "content"]],
+        ),
+    )
+    aggregate.then(
+        "output",
+        EndNodeData(outputs=[]),
+    )
+
+    graph = builder.build().materialize(
+        WorkflowRuntime(
+            workflow_id="aggregate",
+            graph_runtime_state=graph_runtime_state,
+        ),
+    )
+
+    assert isinstance(graph.nodes["aggregate"], VariableAggregatorNode)
+
+
+def test_workflow_builder_supports_runtime_kwargs_for_service_nodes() -> None:
+    graph_runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=time.time(),
+    )
+    builder = WorkflowBuilder()
+
+    start = builder.root(
+        "start",
+        StartNodeData(
+            variables=[paragraph_input("content", required=True)],
+        ),
+    )
+    transform = start.then(
+        "transform",
+        TemplateTransformNodeData(
+            variables=[
+                VariableSelector(
+                    variable="content",
+                    value_selector=("start", "content"),
+                ),
+            ],
+            template="{{ content }}",
+        ),
+    )
+    transform.then(
+        "output",
+        EndNodeData(outputs=[]),
+    )
+
+    def node_kwargs_factory(
+        context: NodeMaterializationContext[BaseNodeData],
+        node_cls: type[Node],
+    ) -> Mapping[str, object]:
+        _ = context
+        if node_cls is TemplateTransformNode:
+            return {"jinja2_template_renderer": _EchoTemplateRenderer()}
+        return {}
+
+    graph = builder.build().materialize(
+        WorkflowRuntime(
+            workflow_id="transform",
+            graph_runtime_state=graph_runtime_state,
+            node_kwargs_factory=node_kwargs_factory,
+        ),
+    )
+
+    assert isinstance(graph.nodes["transform"], TemplateTransformNode)

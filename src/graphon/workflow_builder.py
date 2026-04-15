@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import importlib
+import inspect
+import pkgutil
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, cast, final
+from typing import Any, Final, cast, final
 
+import graphon.nodes
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.entities.graph_config import NodeConfigDict
 from graphon.entities.graph_init_params import GraphInitParams
-from graphon.enums import NodeType
 from graphon.file.enums import FileTransferMethod, FileType
 from graphon.file.models import File
 from graphon.graph.graph import Graph
@@ -16,24 +19,32 @@ from graphon.model_runtime.entities.message_entities import (
     PromptMessage,
     PromptMessageRole,
 )
-from graphon.nodes.answer.answer_node import AnswerNode
 from graphon.nodes.base.entities import OutputVariableEntity, OutputVariableType
 from graphon.nodes.base.node import Node
-from graphon.nodes.end.end_node import EndNode
 from graphon.nodes.llm import (
-    LLMNode,
     LLMNodeChatModelMessage,
     LLMNodeCompletionModelPromptTemplate,
-    LLMNodeData,
 )
 from graphon.nodes.llm.file_saver import LLMFileSaver
 from graphon.nodes.llm.runtime_protocols import (
     PreparedLLMProtocol,
     PromptMessageSerializerProtocol,
 )
-from graphon.nodes.start import StartNode
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.template_rendering import Jinja2TemplateRenderer
 from graphon.variables.input_entities import VariableEntity, VariableEntityType
+
+_NODE_INIT_BASE_PARAMS: Final[frozenset[str]] = frozenset(
+    {
+        "self",
+        "node_id",
+        "config",
+        "graph_init_params",
+        "graph_runtime_state",
+    },
+)
+
+_BUILTIN_NODE_MODULES_LOADED = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +56,8 @@ class WorkflowRuntime:
     prepared_llm: PreparedLLMProtocol | None = None
     llm_file_saver: LLMFileSaver | None = None
     prompt_message_serializer: PromptMessageSerializerProtocol | None = None
+    jinja2_template_renderer: Jinja2TemplateRenderer | None = None
+    node_kwargs_factory: NodeKwargsFactory | None = None
 
     @classmethod
     def from_graph_init_params(
@@ -55,6 +68,8 @@ class WorkflowRuntime:
         prepared_llm: PreparedLLMProtocol | None = None,
         llm_file_saver: LLMFileSaver | None = None,
         prompt_message_serializer: PromptMessageSerializerProtocol | None = None,
+        jinja2_template_renderer: Jinja2TemplateRenderer | None = None,
+        node_kwargs_factory: NodeKwargsFactory | None = None,
     ) -> WorkflowRuntime:
         return cls(
             workflow_id=graph_init_params.workflow_id,
@@ -64,6 +79,8 @@ class WorkflowRuntime:
             prepared_llm=prepared_llm,
             llm_file_saver=llm_file_saver,
             prompt_message_serializer=prompt_message_serializer,
+            jinja2_template_renderer=jinja2_template_renderer,
+            node_kwargs_factory=node_kwargs_factory,
         )
 
     def create_graph_init_params(
@@ -88,16 +105,10 @@ class NodeMaterializationContext[NodeDataT: BaseNodeData]:
     graph_runtime_state: GraphRuntimeState
 
 
-type NodeMaterializer[NodeDataT: BaseNodeData] = Callable[
-    [NodeMaterializationContext[NodeDataT]],
-    Node[NodeDataT],
+type NodeKwargsFactory = Callable[
+    [NodeMaterializationContext[BaseNodeData], type[Node]],
+    Mapping[str, object],
 ]
-
-
-@dataclass(frozen=True, slots=True)
-class _RegisteredNodeMaterializer[NodeDataT: BaseNodeData]:
-    data_type: type[NodeDataT]
-    materializer: NodeMaterializer[NodeDataT]
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,39 +160,6 @@ class OutputBinding(OutputVariableEntity):
 
 
 @dataclass(frozen=True, slots=True)
-class TemplateExpr:
-    parts: tuple[str | NodeOutputRef, ...]
-
-    def render(self) -> str:
-        return "".join(
-            part.as_template() if isinstance(part, NodeOutputRef) else part
-            for part in self.parts
-        )
-
-    def __str__(self) -> str:
-        return self.render()
-
-    @classmethod
-    def from_parts(
-        cls,
-        *parts: str | NodeOutputRef | TemplateExpr,
-    ) -> TemplateExpr:
-        normalized_parts: list[str | NodeOutputRef] = []
-        for part in parts:
-            if isinstance(part, TemplateExpr):
-                normalized_parts.extend(part.parts)
-            elif isinstance(part, (str, NodeOutputRef)):
-                normalized_parts.append(part)
-            else:
-                msg = (
-                    "Template expressions only support string literals, "
-                    "NodeOutputRef values, or other TemplateExpr instances."
-                )
-                raise TypeError(msg)
-        return cls(parts=tuple(normalized_parts))
-
-
-@dataclass(frozen=True, slots=True)
 class WorkflowNodeSpec[NodeDataT: BaseNodeData]:
     node_id: str
     data: NodeDataT
@@ -218,12 +196,12 @@ class WorkflowSpec:
         }
 
     def materialize(self, runtime: WorkflowRuntime) -> Graph:
-        return WorkflowMaterializer(runtime=runtime).materialize(self)
+        return _WorkflowMaterializer(runtime=runtime).materialize(self)
 
 
 @dataclass(frozen=True, slots=True)
 class NodeHandle:
-    _builder: WorkflowBuilder
+    builder: WorkflowBuilder
     node_id: str
 
     def then(
@@ -233,7 +211,7 @@ class NodeHandle:
         *,
         source_handle: str = "source",
     ) -> NodeHandle:
-        return self._builder.add_node(
+        return self.builder.add_node(
             node_id=node_id,
             data=data,
             from_node_id=self.node_id,
@@ -246,7 +224,7 @@ class NodeHandle:
         *,
         source_handle: str = "source",
     ) -> NodeHandle:
-        return self._builder.connect(
+        return self.builder.connect(
             tail=self,
             head=target,
             source_handle=source_handle,
@@ -363,7 +341,7 @@ class WorkflowBuilder:
         return self.build().materialize(runtime)
 
     def _remember_handle(self, node_id: str) -> NodeHandle:
-        handle = NodeHandle(_builder=self, node_id=node_id)
+        handle = NodeHandle(builder=self, node_id=node_id)
         self._handles[node_id] = handle
         return handle
 
@@ -375,7 +353,7 @@ class WorkflowBuilder:
         self._node_specs[node_id] = WorkflowNodeSpec(node_id=node_id, data=data)
 
     def _ensure_owned_handle(self, handle: NodeHandle) -> None:
-        if handle._builder is not self:
+        if handle.builder is not self:
             msg = "NodeHandle belongs to a different WorkflowBuilder instance."
             raise ValueError(msg)
 
@@ -387,25 +365,22 @@ class _WorkflowNodeFactory:
         *,
         runtime: WorkflowRuntime,
         graph_init_params: GraphInitParams,
-        registrations_by_type: Mapping[
-            type[BaseNodeData],
-            _RegisteredNodeMaterializer[BaseNodeData],
-        ],
-        registrations_by_identity: Mapping[
-            tuple[NodeType, str],
-            _RegisteredNodeMaterializer[BaseNodeData],
-        ],
     ) -> None:
         self._runtime = runtime
         self._graph_init_params = graph_init_params
-        self._registrations_by_type = registrations_by_type
-        self._registrations_by_identity = registrations_by_identity
+        self._llm_file_saver = runtime.llm_file_saver or _TextOnlyFileSaver()
+        self._prompt_message_serializer = (
+            runtime.prompt_message_serializer or _PassthroughPromptMessageSerializer()
+        )
 
     def create_node(self, node_config: NodeConfigDict) -> Node:
         node_id = node_config["id"]
         node_data = node_config["data"]
-        registration = self._resolve_registration(node_data)
-        typed_node_data = self._coerce_node_data(node_data, registration.data_type)
+        node_cls = _resolve_node_class(node_data)
+        typed_node_data = cast(
+            "BaseNodeData",
+            node_cls.validate_node_data(node_data),
+        )
         context = NodeMaterializationContext(
             node_id=node_id,
             data=typed_node_data,
@@ -413,151 +388,72 @@ class _WorkflowNodeFactory:
             graph_init_params=self._graph_init_params,
             graph_runtime_state=self._runtime.graph_runtime_state,
         )
-        materializer = cast(
-            "NodeMaterializer[BaseNodeData]",
-            registration.materializer,
-        )
-        return materializer(context)
-
-    def _resolve_registration(
-        self,
-        node_data: BaseNodeData,
-    ) -> _RegisteredNodeMaterializer[BaseNodeData]:
-        for data_type in type(node_data).__mro__:
-            if not issubclass(data_type, BaseNodeData):
-                continue
-            registration = self._registrations_by_type.get(data_type)
-            if registration is not None:
-                return registration
-
-        registration = self._registrations_by_identity.get(
-            (node_data.type, node_data.version),
-        )
-        if registration is not None:
-            return registration
-
-        msg = (
-            "No node materializer registered for "
-            f"{type(node_data).__name__} "
-            f"(type={node_data.type!r}, version={node_data.version!r}). "
-            "Use `WorkflowMaterializer.register_node_materializer()` "
-            "or `WorkflowMaterializer.register_node_class()`."
-        )
-        raise ValueError(msg)
-
-    @staticmethod
-    def _coerce_node_data[NodeDataT: BaseNodeData](
-        node_data: BaseNodeData,
-        data_type: type[NodeDataT],
-    ) -> NodeDataT:
-        if isinstance(node_data, data_type):
-            return node_data
-        return data_type.model_validate(node_data.model_dump(mode="python"))
-
-
-class WorkflowMaterializer:
-    def __init__(self, *, runtime: WorkflowRuntime) -> None:
-        self._runtime = runtime
-        self._llm_file_saver = runtime.llm_file_saver or _TextOnlyFileSaver()
-        self._prompt_message_serializer = (
-            runtime.prompt_message_serializer or _PassthroughPromptMessageSerializer()
-        )
-        self._registrations_by_type: dict[
-            type[BaseNodeData],
-            _RegisteredNodeMaterializer[BaseNodeData],
-        ] = {}
-        self._registrations_by_identity: dict[
-            tuple[NodeType, str],
-            _RegisteredNodeMaterializer[BaseNodeData],
-        ] = {}
-        self.register_node_class(StartNode)
-        self.register_node_class(AnswerNode)
-        self.register_node_class(EndNode)
-        self.register_node_materializer(LLMNodeData, self._materialize_llm_node)
-
-    @property
-    def runtime(self) -> WorkflowRuntime:
-        return self._runtime
-
-    def register_node_materializer[NodeDataT: BaseNodeData](
-        self,
-        data_type: type[NodeDataT],
-        materializer: NodeMaterializer[NodeDataT],
-    ) -> None:
-        registration = _RegisteredNodeMaterializer(
-            data_type=data_type,
-            materializer=materializer,
-        )
-        self._registrations_by_type[data_type] = cast(
-            "_RegisteredNodeMaterializer[BaseNodeData]",
-            registration,
-        )
-
-        identity = self._extract_node_identity(data_type)
-        if identity is not None:
-            self._registrations_by_identity[identity] = cast(
-                "_RegisteredNodeMaterializer[BaseNodeData]",
-                registration,
-            )
-
-    def register_node_class[NodeDataT: BaseNodeData](
-        self,
-        node_cls: type[Node[NodeDataT]],
-        *,
-        extra_kwargs_factory: (
-            Callable[[NodeMaterializationContext[NodeDataT]], Mapping[str, object]]
-            | None
-        ) = None,
-    ) -> None:
-        data_type = cast("type[NodeDataT]", node_cls._node_data_type)
-
-        def _materializer(context: NodeMaterializationContext[NodeDataT]) -> Node:
-            extra_kwargs = (
-                dict(extra_kwargs_factory(context))
-                if extra_kwargs_factory is not None
-                else {}
-            )
-            return node_cls(
-                **self._base_node_kwargs(context),
-                **extra_kwargs,
-            )
-
-        self.register_node_materializer(data_type, _materializer)
-
-    def materialize(self, workflow: WorkflowSpec) -> Graph:
-        graph_config = workflow.graph_config
-        graph_init_params = self._runtime.create_graph_init_params(
-            graph_config=graph_config,
-        )
-        node_factory = _WorkflowNodeFactory(
-            runtime=self._runtime,
-            graph_init_params=graph_init_params,
-            registrations_by_type=self._registrations_by_type,
-            registrations_by_identity=self._registrations_by_identity,
-        )
-        return Graph.init(
-            graph_config=graph_config,
-            node_factory=node_factory,
-            root_node_id=workflow.root_node_id,
-        )
-
-    def _materialize_llm_node(
-        self,
-        context: NodeMaterializationContext[LLMNodeData],
-    ) -> LLMNode:
-        if context.runtime.prepared_llm is None:
-            msg = "LLM nodes require `prepared_llm` when materializing a workflow."
-            raise ValueError(msg)
-        return LLMNode(
+        return node_cls(
             **self._base_node_kwargs(context),
-            model_instance=context.runtime.prepared_llm,
-            llm_file_saver=self._llm_file_saver,
-            prompt_message_serializer=self._prompt_message_serializer,
+            **self._build_extra_node_kwargs(node_cls, context),
         )
 
+    def _build_extra_node_kwargs(
+        self,
+        node_cls: type[Node],
+        context: NodeMaterializationContext[BaseNodeData],
+    ) -> dict[str, object]:
+        init_parameters = inspect.signature(node_cls.__init__).parameters
+        extra_kwargs: dict[str, object] = {}
+
+        if (
+            "model_instance" in init_parameters
+            and context.runtime.prepared_llm is not None
+        ):
+            extra_kwargs["model_instance"] = context.runtime.prepared_llm
+        if "llm_file_saver" in init_parameters:
+            extra_kwargs["llm_file_saver"] = self._llm_file_saver
+        if "prompt_message_serializer" in init_parameters:
+            extra_kwargs["prompt_message_serializer"] = self._prompt_message_serializer
+        if (
+            "jinja2_template_renderer" in init_parameters
+            and context.runtime.jinja2_template_renderer is not None
+        ):
+            extra_kwargs["jinja2_template_renderer"] = (
+                context.runtime.jinja2_template_renderer
+            )
+        if (
+            "template_renderer" in init_parameters
+            and context.runtime.jinja2_template_renderer is not None
+        ):
+            extra_kwargs["template_renderer"] = context.runtime.jinja2_template_renderer
+
+        if context.runtime.node_kwargs_factory is not None:
+            extra_kwargs.update(
+                dict(context.runtime.node_kwargs_factory(context, node_cls)),
+            )
+
+        missing_kwargs = [
+            name
+            for name, parameter in init_parameters.items()
+            if name not in _NODE_INIT_BASE_PARAMS
+            and name not in extra_kwargs
+            and parameter.kind
+            in {
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            }
+            and parameter.default is inspect.Parameter.empty
+        ]
+        if missing_kwargs:
+            missing_args = ", ".join(sorted(missing_kwargs))
+            msg = (
+                f"{node_cls.__name__} requires additional runtime arguments: "
+                f"{missing_args}. "
+                "Provide them through WorkflowRuntime or `node_kwargs_factory`."
+            )
+            raise ValueError(msg)
+
+        return extra_kwargs
+
     @staticmethod
-    def _base_node_kwargs[NodeDataT: BaseNodeData](
-        context: NodeMaterializationContext[NodeDataT],
+    def _base_node_kwargs(
+        context: NodeMaterializationContext[BaseNodeData],
     ) -> dict[str, object]:
         return {
             "node_id": context.node_id,
@@ -566,52 +462,96 @@ class WorkflowMaterializer:
             "graph_runtime_state": context.graph_runtime_state,
         }
 
-    @staticmethod
-    def _extract_node_identity(
-        data_type: type[BaseNodeData],
-    ) -> tuple[NodeType, str] | None:
-        type_field = data_type.model_fields.get("type")
-        version_field = data_type.model_fields.get("version")
-        if type_field is None or version_field is None:
-            return None
 
-        node_type = type_field.default
-        version = version_field.default
-        if not isinstance(node_type, str) or not isinstance(version, str):
-            return None
+@final
+class _WorkflowMaterializer:
+    def __init__(self, *, runtime: WorkflowRuntime) -> None:
+        self._runtime = runtime
 
-        return (cast("NodeType", node_type), version)
+    def materialize(self, workflow: WorkflowSpec) -> Graph:
+        graph_config = workflow.graph_config
+        graph_init_params = self._runtime.create_graph_init_params(
+            graph_config=graph_config,
+        )
+        return Graph.init(
+            graph_config=graph_config,
+            node_factory=_WorkflowNodeFactory(
+                runtime=self._runtime,
+                graph_init_params=graph_init_params,
+            ),
+            root_node_id=workflow.root_node_id,
+        )
 
 
-def template(*parts: str | NodeOutputRef | TemplateExpr) -> TemplateExpr:
-    return TemplateExpr.from_parts(*parts)
+def _resolve_node_class(node_data: BaseNodeData) -> type[Node]:
+    _bootstrap_builtin_node_registry()
+    version_mapping = Node.get_node_type_classes_mapping().get(node_data.type)
+    if version_mapping is None:
+        msg = (
+            f"No node class registered for node type {node_data.type!r}. "
+            "Ensure the node module has been imported before materialization."
+        )
+        raise ValueError(msg)
+
+    node_cls = version_mapping.get(node_data.version)
+    if node_cls is None:
+        versions = ", ".join(sorted(key for key in version_mapping if key != "latest"))
+        msg = (
+            f"No node class registered for node type {node_data.type!r} "
+            f"with version {node_data.version!r}. "
+            f"Available versions: {versions or '<none>'}."
+        )
+        raise ValueError(msg)
+
+    return node_cls
+
+
+def _bootstrap_builtin_node_registry() -> None:
+    global _BUILTIN_NODE_MODULES_LOADED  # noqa: PLW0603
+    if _BUILTIN_NODE_MODULES_LOADED:
+        return
+
+    for module_info in pkgutil.walk_packages(
+        graphon.nodes.__path__,
+        graphon.nodes.__name__ + ".",
+    ):
+        module_leaf = module_info.name.rsplit(".", maxsplit=1)[-1]
+        if module_leaf == "node" or module_leaf.endswith("_node"):
+            importlib.import_module(module_info.name)
+
+    _BUILTIN_NODE_MODULES_LOADED = True
+
+
+def template(*parts: str | NodeOutputRef) -> str:
+    return "".join(
+        part.as_template() if isinstance(part, NodeOutputRef) else part
+        for part in parts
+    )
 
 
 def chat_message(
     role: PromptMessageRole,
-    *parts: str | NodeOutputRef | TemplateExpr,
+    *parts: str | NodeOutputRef,
 ) -> LLMNodeChatModelMessage:
-    return LLMNodeChatModelMessage(role=role, text=template(*parts).render())
+    return LLMNodeChatModelMessage(role=role, text=template(*parts))
 
 
-def system(*parts: str | NodeOutputRef | TemplateExpr) -> LLMNodeChatModelMessage:
+def system(*parts: str | NodeOutputRef) -> LLMNodeChatModelMessage:
     return chat_message(PromptMessageRole.SYSTEM, *parts)
 
 
-def user(*parts: str | NodeOutputRef | TemplateExpr) -> LLMNodeChatModelMessage:
+def user(*parts: str | NodeOutputRef) -> LLMNodeChatModelMessage:
     return chat_message(PromptMessageRole.USER, *parts)
 
 
-def assistant(
-    *parts: str | NodeOutputRef | TemplateExpr,
-) -> LLMNodeChatModelMessage:
+def assistant(*parts: str | NodeOutputRef) -> LLMNodeChatModelMessage:
     return chat_message(PromptMessageRole.ASSISTANT, *parts)
 
 
 def completion_prompt(
-    *parts: str | NodeOutputRef | TemplateExpr,
+    *parts: str | NodeOutputRef,
 ) -> LLMNodeCompletionModelPromptTemplate:
-    return LLMNodeCompletionModelPromptTemplate(text=template(*parts).render())
+    return LLMNodeCompletionModelPromptTemplate(text=template(*parts))
 
 
 def input_variable(
@@ -647,28 +587,6 @@ def input_variable(
     )
 
 
-def text_input(
-    variable: str,
-    *,
-    label: str | None = None,
-    description: str = "",
-    required: bool = False,
-    hide: bool = False,
-    default: str | None = None,
-    max_length: int | None = None,
-) -> VariableEntity:
-    return input_variable(
-        variable,
-        variable_type=VariableEntityType.TEXT_INPUT,
-        label=label,
-        description=description,
-        required=required,
-        hide=hide,
-        default=default,
-        max_length=max_length,
-    )
-
-
 def paragraph_input(
     variable: str,
     *,
@@ -691,163 +609,22 @@ def paragraph_input(
     )
 
 
-def number_input(
-    variable: str,
-    *,
-    label: str | None = None,
-    description: str = "",
-    required: bool = False,
-    hide: bool = False,
-    default: float | None = None,
-) -> VariableEntity:
-    return input_variable(
-        variable,
-        variable_type=VariableEntityType.NUMBER,
-        label=label,
-        description=description,
-        required=required,
-        hide=hide,
-        default=default,
-    )
-
-
-def select_input(
-    variable: str,
-    *,
-    options: Sequence[str],
-    label: str | None = None,
-    description: str = "",
-    required: bool = False,
-    hide: bool = False,
-    default: str | None = None,
-) -> VariableEntity:
-    return input_variable(
-        variable,
-        variable_type=VariableEntityType.SELECT,
-        label=label,
-        description=description,
-        required=required,
-        hide=hide,
-        default=default,
-        options=options,
-    )
-
-
-def checkbox_input(
-    variable: str,
-    *,
-    label: str | None = None,
-    description: str = "",
-    required: bool = False,
-    hide: bool = False,
-    default: bool | None = None,
-) -> VariableEntity:
-    return input_variable(
-        variable,
-        variable_type=VariableEntityType.CHECKBOX,
-        label=label,
-        description=description,
-        required=required,
-        hide=hide,
-        default=default,
-    )
-
-
-def json_input(
-    variable: str,
-    *,
-    label: str | None = None,
-    description: str = "",
-    required: bool = False,
-    hide: bool = False,
-    default: object | None = None,
-    json_schema: Mapping[str, Any] | None = None,
-) -> VariableEntity:
-    return input_variable(
-        variable,
-        variable_type=VariableEntityType.JSON_OBJECT,
-        label=label,
-        description=description,
-        required=required,
-        hide=hide,
-        default=default,
-        json_schema=json_schema,
-    )
-
-
-def file_input(
-    variable: str,
-    *,
-    label: str | None = None,
-    description: str = "",
-    required: bool = False,
-    hide: bool = False,
-    allowed_file_types: Sequence[FileType] | None = (),
-    allowed_file_extensions: Sequence[str] | None = (),
-    allowed_file_upload_methods: Sequence[FileTransferMethod] | None = (),
-) -> VariableEntity:
-    return input_variable(
-        variable,
-        variable_type=VariableEntityType.FILE,
-        label=label,
-        description=description,
-        required=required,
-        hide=hide,
-        allowed_file_types=allowed_file_types,
-        allowed_file_extensions=allowed_file_extensions,
-        allowed_file_upload_methods=allowed_file_upload_methods,
-    )
-
-
-def file_list_input(
-    variable: str,
-    *,
-    label: str | None = None,
-    description: str = "",
-    required: bool = False,
-    hide: bool = False,
-    allowed_file_types: Sequence[FileType] | None = (),
-    allowed_file_extensions: Sequence[str] | None = (),
-    allowed_file_upload_methods: Sequence[FileTransferMethod] | None = (),
-) -> VariableEntity:
-    return input_variable(
-        variable,
-        variable_type=VariableEntityType.FILE_LIST,
-        label=label,
-        description=description,
-        required=required,
-        hide=hide,
-        allowed_file_types=allowed_file_types,
-        allowed_file_extensions=allowed_file_extensions,
-        allowed_file_upload_methods=allowed_file_upload_methods,
-    )
-
-
 __all__ = [
     "NodeHandle",
     "NodeMaterializationContext",
     "NodeOutputRef",
     "OutputBinding",
-    "TemplateExpr",
     "WorkflowBuilder",
     "WorkflowEdgeSpec",
-    "WorkflowMaterializer",
     "WorkflowNodeSpec",
     "WorkflowRuntime",
     "WorkflowSpec",
     "assistant",
     "chat_message",
-    "checkbox_input",
     "completion_prompt",
-    "file_input",
-    "file_list_input",
     "input_variable",
-    "json_input",
-    "number_input",
     "paragraph_input",
-    "select_input",
     "system",
     "template",
-    "text_input",
     "user",
 ]

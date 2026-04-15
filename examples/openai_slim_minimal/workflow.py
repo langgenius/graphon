@@ -84,7 +84,7 @@ def build_workflow(*, provider: str) -> WorkflowSpec:
         "output",
         AnswerNodeData(
             title="Output",
-            answer=template(llm.ref("text")).render(),
+            answer=template(llm.ref("text")),
         ),
     )
     return workflow.build()
