@@ -1,14 +1,16 @@
 import time
 from collections.abc import Sequence
 
-from graphon.entities.graph_config import NodeConfigDictAdapter
-from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
+from graphon.enums import WorkflowNodeExecutionStatus
 from graphon.graph_events.node import (
     NodeRunFailedEvent,
     NodeRunSucceededEvent,
     NodeRunVariableUpdatedEvent,
 )
-from graphon.nodes.variable_assigner.v2.entities import VariableOperationItem
+from graphon.nodes.variable_assigner.v2.entities import (
+    VariableAssignerNodeData,
+    VariableOperationItem,
+)
 from graphon.nodes.variable_assigner.v2.enums import InputType, Operation
 from graphon.nodes.variable_assigner.v2.node import VariableAssignerNode
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
@@ -37,15 +39,11 @@ def _build_node(
         node_id="assigner",
         graph_init_params=init_params,
         graph_runtime_state=runtime_state,
-        config=NodeConfigDictAdapter.validate_python({
-            "id": "assigner",
-            "data": {
-                "type": BuiltinNodeTypes.VARIABLE_ASSIGNER,
-                "title": "Variable Assigner",
-                "version": "2",
-                "items": items,
-            },
-        }),
+        config=VariableAssignerNodeData(
+            title="Variable Assigner",
+            version="2",
+            items=items,
+        ),
     )
 
 

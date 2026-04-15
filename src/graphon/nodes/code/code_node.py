@@ -3,7 +3,6 @@ from decimal import Decimal
 from textwrap import dedent
 from typing import TYPE_CHECKING, Any, Protocol, cast, override
 
-from graphon.entities.graph_config import NodeConfigDict
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.node import Node
@@ -83,10 +82,10 @@ class CodeNode(Node[CodeNodeData]):
     def __init__(
         self,
         node_id: str,
-        config: NodeConfigDict,
+        config: CodeNodeData,
+        *,
         graph_init_params: "GraphInitParams",
         graph_runtime_state: "GraphRuntimeState",
-        *,
         code_executor: WorkflowCodeExecutor,
         code_limits: CodeNodeLimits,
     ) -> None:

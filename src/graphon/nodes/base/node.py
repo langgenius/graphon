@@ -523,10 +523,15 @@ class Node[NodeDataT: BaseNodeData](
     def __init__(
         self,
         node_id: str,
-        config: NodeConfigDict,
+        config: NodeDataT,
+        *,
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,
     ) -> None:
+        if not node_id:
+            msg = "node_id is required"
+            raise ValueError(msg)
+
         self._graph_init_params = graph_init_params
         self._run_context = MappingProxyType(dict(graph_init_params.run_context))
         self.id = node_id
@@ -536,19 +541,11 @@ class Node[NodeDataT: BaseNodeData](
         self.graph_runtime_state = graph_runtime_state
         self.state: NodeState = NodeState.UNKNOWN  # node execution state
 
-        config_node_id = config["id"]
-        if node_id != config_node_id:
-            msg = (
-                "node_id must match config['id'], "
-                f"got node_id={node_id!r}, config['id']={config_node_id!r}"
-            )
-            raise ValueError(msg)
-
-        self._node_id = config_node_id
+        self._node_id = node_id
         self._node_execution_id: str = ""
         self._start_at = datetime.now(UTC).replace(tzinfo=None)
 
-        self._node_data = self.validate_node_data(config["data"])
+        self._node_data = self.validate_node_data(config)
 
         self.post_init()
 

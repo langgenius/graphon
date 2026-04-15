@@ -21,7 +21,6 @@ from docx.oxml.text.paragraph import CT_P
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 
-from graphon.entities.graph_config import NodeConfigDict
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.file import file_manager
 from graphon.file.enums import FileTransferMethod
@@ -193,10 +192,10 @@ class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
     def __init__(
         self,
         node_id: str,
-        config: NodeConfigDict,
+        config: DocumentExtractorNodeData,
+        *,
         graph_init_params: "GraphInitParams",
         graph_runtime_state: "GraphRuntimeState",
-        *,
         unstructured_api_config: UnstructuredApiConfig | None = None,
         http_client: HttpClientProtocol | None = None,
     ) -> None:

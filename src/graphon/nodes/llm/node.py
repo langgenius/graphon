@@ -10,7 +10,6 @@ from collections.abc import Generator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, override
 
-from graphon.entities.graph_config import NodeConfigDict
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import (
     BuiltinNodeTypes,
@@ -132,10 +131,10 @@ class LLMNode(Node[LLMNodeData]):
     def __init__(
         self,
         node_id: str,
-        config: NodeConfigDict,
+        config: LLMNodeData,
+        *,
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,
-        *,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
         model_instance: PreparedLLMProtocol,

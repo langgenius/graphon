@@ -3,7 +3,6 @@ import mimetypes
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, override
 
-from graphon.entities.graph_config import NodeConfigDict
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.file.enums import FileTransferMethod
 from graphon.file.models import File
@@ -45,10 +44,10 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
     def __init__(
         self,
         node_id: str,
-        config: NodeConfigDict,
+        config: HttpRequestNodeData,
+        *,
         graph_init_params: "GraphInitParams",
         graph_runtime_state: "GraphRuntimeState",
-        *,
         http_request_config: HttpRequestNodeConfig,
         http_client: HttpClientProtocol | None = None,
         tool_file_manager_factory: Callable[[], ToolFileManagerProtocol],

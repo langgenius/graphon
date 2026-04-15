@@ -7,7 +7,6 @@ import httpx
 import pytest
 from pytest_mock import MockerFixture
 
-from graphon.entities.graph_config import NodeConfigDictAdapter
 from graphon.file.models import File
 from graphon.http import (
     HttpClientMaxRetriesExceededError,
@@ -16,8 +15,13 @@ from graphon.http import (
     HttpxHttpClient,
     get_http_client,
 )
+from graphon.nodes.document_extractor.entities import DocumentExtractorNodeData
 from graphon.nodes.document_extractor.node import DocumentExtractorNode
-from graphon.nodes.http_request import HttpRequestNode, build_http_request_config
+from graphon.nodes.http_request import (
+    HttpRequestNode,
+    HttpRequestNodeData,
+    build_http_request_config,
+)
 from graphon.nodes.llm.file_saver import FileSaverImpl
 from graphon.nodes.llm.node import LLMNode
 from graphon.nodes.question_classifier.question_classifier_node import (
@@ -156,19 +160,15 @@ def test_httpx_http_client_raises_request_error_without_retry_wrapping(
 def test_http_request_node_uses_default_http_client_when_not_injected() -> None:
     node = HttpRequestNode(
         node_id="http",
-        config=NodeConfigDictAdapter.validate_python({
-            "id": "http",
-            "data": {
-                "type": "http-request",
-                "title": "HTTP Request",
-                "method": "get",
-                "url": "https://example.com",
-                "authorization": {"type": "no-auth"},
-                "headers": "",
-                "params": "",
-                "body": {"type": "none", "data": []},
-            },
-        }),
+        config=HttpRequestNodeData(
+            title="HTTP Request",
+            method="get",
+            url="https://example.com",
+            authorization={"type": "no-auth"},
+            headers="",
+            params="",
+            body={"type": "none", "data": []},
+        ),
         graph_init_params=build_graph_init_params(
             graph_config={"nodes": [], "edges": []},
         ),
@@ -185,14 +185,10 @@ def test_http_request_node_uses_default_http_client_when_not_injected() -> None:
 def test_document_extractor_node_uses_default_http_client_when_not_injected() -> None:
     node = DocumentExtractorNode(
         node_id="extractor",
-        config=NodeConfigDictAdapter.validate_python({
-            "id": "extractor",
-            "data": {
-                "type": "document-extractor",
-                "title": "Document Extractor",
-                "variable_selector": ["inputs", "file"],
-            },
-        }),
+        config=DocumentExtractorNodeData(
+            title="Document Extractor",
+            variable_selector=["inputs", "file"],
+        ),
         graph_init_params=build_graph_init_params(
             graph_config={"nodes": [], "edges": []},
         ),

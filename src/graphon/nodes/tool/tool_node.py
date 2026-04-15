@@ -2,7 +2,6 @@ from collections.abc import Generator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, override
 
-from graphon.entities.graph_config import NodeConfigDict
 from graphon.enums import (
     BuiltinNodeTypes,
     WorkflowNodeExecutionMetadataKey,
@@ -61,12 +60,15 @@ class ToolNode(Node[ToolNodeData]):
     def __init__(
         self,
         node_id: str,
-        config: NodeConfigDict,
+        config: ToolNodeData,
+        *,
         graph_init_params: "GraphInitParams",
         graph_runtime_state: "GraphRuntimeState",
-        *,
         tool_file_manager_factory: ToolFileManagerProtocol,
-        runtime: ToolNodeRuntimeProtocol | None = None,
+        # TODO @-LAN: See https://github.com/langgenius/graphon/issues/new/choose.  # noqa: FIX002
+        # Make `runtime` optional once Graphon provides a default tool runtime
+        # adapter at the workflow boundary.
+        runtime: ToolNodeRuntimeProtocol,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -75,9 +77,6 @@ class ToolNode(Node[ToolNodeData]):
             graph_runtime_state=graph_runtime_state,
         )
         self._tool_file_manager_factory = tool_file_manager_factory
-        if runtime is None:
-            msg = "runtime is required"
-            raise ValueError(msg)
         self._runtime = runtime
 
     def init_tool_runtime(

@@ -2,7 +2,6 @@ import json
 from collections.abc import Generator, Mapping, MutableMapping, Sequence
 from typing import TYPE_CHECKING, Any, cast, override
 
-from graphon.entities.graph_config import NodeConfigDict
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.node_events.base import (
     NodeEventBase,
@@ -84,7 +83,8 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
     def __init__(
         self,
         node_id: str,
-        config: NodeConfigDict,
+        config: VariableAssignerNodeData,
+        *,
         graph_init_params: "GraphInitParams",
         graph_runtime_state: "GraphRuntimeState",
     ) -> None:

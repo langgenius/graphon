@@ -7,7 +7,6 @@ from dataclasses import dataclass
 import pytest
 
 from graphon.entities.base_node_data import BaseNodeData
-from graphon.entities.graph_config import NodeConfigDict, NodeConfigDictAdapter
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import BuiltinNodeTypes, ErrorStrategy, NodeExecutionType, NodeType
 from graphon.graph.graph import Graph
@@ -37,7 +36,7 @@ class _TestNode(Node[_TestNodeData]):
         self,
         *,
         node_id: str,
-        config: NodeConfigDict,
+        config: _TestNodeData,
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,
     ) -> None:
@@ -76,10 +75,11 @@ class _SimpleNodeFactory:
     graph_runtime_state: GraphRuntimeState
 
     def create_node(self, node_config: Mapping[str, object]) -> _TestNode:
-        node_id = str(node_config["id"])
         return _TestNode(
-            node_id=node_id,
-            config=NodeConfigDictAdapter.validate_python(node_config),
+            node_id=str(node_config["id"]),
+            config=_TestNode.validate_node_data(
+                node_config["data"],  # type: ignore[arg-type]
+            ),
             graph_init_params=self.graph_init_params,
             graph_runtime_state=self.graph_runtime_state,
         )

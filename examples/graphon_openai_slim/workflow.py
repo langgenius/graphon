@@ -255,48 +255,42 @@ def build_graph(
 ) -> Graph:
     start_node = StartNode(
         node_id="start",
-        config={
-            "id": "start",
-            "data": StartNodeData(
-                title="Start",
-                variables=[
-                    VariableEntity(
-                        variable="query",
-                        label="Query",
-                        type=VariableEntityType.PARAGRAPH,
-                        required=True,
-                    ),
-                ],
-            ),
-        },
+        config=StartNodeData(
+            title="Start",
+            variables=[
+                VariableEntity(
+                    variable="query",
+                    label="Query",
+                    type=VariableEntityType.PARAGRAPH,
+                    required=True,
+                ),
+            ],
+        ),
         graph_init_params=graph_init_params,
         graph_runtime_state=graph_runtime_state,
     )
 
     llm_node = LLMNode(
         node_id="llm",
-        config={
-            "id": "llm",
-            "data": LLMNodeData(
-                title="LLM",
-                model=ModelConfig(
-                    provider=provider,
-                    name="gpt-5.4",
-                    mode=LLMMode.CHAT,
-                ),
-                prompt_template=[
-                    LLMNodeChatModelMessage(
-                        role=PromptMessageRole.SYSTEM,
-                        text="You are a concise assistant.",
-                    ),
-                    LLMNodeChatModelMessage(
-                        role=PromptMessageRole.USER,
-                        text="{{#start.query#}}",
-                    ),
-                ],
-                context=ContextConfig(enabled=False),
+        config=LLMNodeData(
+            title="LLM",
+            model=ModelConfig(
+                provider=provider,
+                name="gpt-5.4",
+                mode=LLMMode.CHAT,
             ),
-        },
+            prompt_template=[
+                LLMNodeChatModelMessage(
+                    role=PromptMessageRole.SYSTEM,
+                    text="You are a concise assistant.",
+                ),
+                LLMNodeChatModelMessage(
+                    role=PromptMessageRole.USER,
+                    text="{{#start.query#}}",
+                ),
+            ],
+            context=ContextConfig(enabled=False),
+        ),
         graph_init_params=graph_init_params,
         graph_runtime_state=graph_runtime_state,
         model_instance=prepared_llm,
@@ -306,13 +300,10 @@ def build_graph(
 
     output_node = AnswerNode(
         node_id="output",
-        config={
-            "id": "output",
-            "data": AnswerNodeData(
-                title="Output",
-                answer="{{#llm.text#}}",
-            ),
-        },
+        config=AnswerNodeData(
+            title="Output",
+            answer="{{#llm.text#}}",
+        ),
         graph_init_params=graph_init_params,
         graph_runtime_state=graph_runtime_state,
     )

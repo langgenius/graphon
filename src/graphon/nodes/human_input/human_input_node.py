@@ -4,7 +4,6 @@ from collections.abc import Generator, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, override
 
-from graphon.entities.graph_config import NodeConfigDict
 from graphon.entities.pause_reason import HumanInputRequired
 from graphon.enums import (
     BuiltinNodeTypes,
@@ -64,10 +63,14 @@ class HumanInputNode(Node[HumanInputNodeData]):
     def __init__(
         self,
         node_id: str,
-        config: NodeConfigDict,
+        config: HumanInputNodeData,
+        *,
         graph_init_params: "GraphInitParams",
         graph_runtime_state: "GraphRuntimeState",
-        runtime: HumanInputNodeRuntimeProtocol | None = None,
+        # TODO @-LAN: See https://github.com/langgenius/graphon/issues/new/choose.  # noqa: FIX002
+        # Make `runtime` optional once Graphon provides a default human-input
+        # runtime adapter instead of requiring an embedding-specific implementation.
+        runtime: HumanInputNodeRuntimeProtocol,
         form_repository: object | None = None,
     ) -> None:
         super().__init__(
@@ -76,13 +79,9 @@ class HumanInputNode(Node[HumanInputNodeData]):
             graph_init_params=graph_init_params,
             graph_runtime_state=graph_runtime_state,
         )
-        resolved_runtime = runtime
-        if resolved_runtime is None:
-            msg = "runtime is required"
-            raise ValueError(msg)
         if form_repository is not None:
             with_form_repository = getattr(
-                resolved_runtime,
+                runtime,
                 "with_form_repository",
                 None,
             )
@@ -91,8 +90,8 @@ class HumanInputNode(Node[HumanInputNodeData]):
                 if not isinstance(updated_runtime, HumanInputNodeRuntimeProtocol):
                     msg = "with_form_repository() must return a HumanInput runtime"
                     raise TypeError(msg)
-                resolved_runtime = updated_runtime
-        self._runtime: HumanInputNodeRuntimeProtocol = resolved_runtime
+                runtime = updated_runtime
+        self._runtime: HumanInputNodeRuntimeProtocol = runtime
 
     @classmethod
     @override

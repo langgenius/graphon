@@ -1,10 +1,9 @@
 import time
 from unittest.mock import Mock
 
-from graphon.entities.graph_config import NodeConfigDictAdapter
-from graphon.enums import BuiltinNodeTypes
 from graphon.model_runtime.entities.llm_entities import LLMMode
 from graphon.model_runtime.entities.message_entities import PromptMessageRole
+from graphon.nodes.parameter_extractor.entities import ParameterExtractorNodeData
 from graphon.nodes.parameter_extractor.parameter_extractor_node import (
     ParameterExtractorNode,
 )
@@ -31,29 +30,25 @@ def _build_parameter_extractor_node() -> tuple[ParameterExtractorNode, VariableP
     init_params = build_graph_init_params(graph_config={"nodes": [], "edges": []})
     node = ParameterExtractorNode(
         node_id="extractor",
-        config=NodeConfigDictAdapter.validate_python({
-            "id": "extractor",
-            "data": {
-                "type": BuiltinNodeTypes.PARAMETER_EXTRACTOR,
-                "title": "Parameter Extractor",
-                "model": {
-                    "provider": "test",
-                    "name": "test-model",
-                    "mode": LLMMode.CHAT,
-                },
-                "query": ["start", "query"],
-                "parameters": [
-                    {
-                        "name": "location",
-                        "type": "string",
-                        "description": "The target location",
-                        "required": True,
-                    },
-                ],
-                "instruction": "Follow {{#start.rule#}} instructions.",
-                "reasoning_mode": "function_call",
+        config=ParameterExtractorNodeData(
+            title="Parameter Extractor",
+            model={
+                "provider": "test",
+                "name": "test-model",
+                "mode": LLMMode.CHAT,
             },
-        }),
+            query=["start", "query"],
+            parameters=[
+                {
+                    "name": "location",
+                    "type": "string",
+                    "description": "The target location",
+                    "required": True,
+                },
+            ],
+            instruction="Follow {{#start.rule#}} instructions.",
+            reasoning_mode="function_call",
+        ),
         graph_init_params=init_params,
         graph_runtime_state=runtime_state,
         model_instance=Mock(),

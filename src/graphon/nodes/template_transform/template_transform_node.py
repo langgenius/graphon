@@ -1,7 +1,6 @@
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast, override
 
-from graphon.entities.graph_config import NodeConfigDict
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.entities import VariableSelector
@@ -28,10 +27,10 @@ class TemplateTransformNode(Node[TemplateTransformNodeData]):
     def __init__(
         self,
         node_id: str,
-        config: NodeConfigDict,
+        config: TemplateTransformNodeData,
+        *,
         graph_init_params: "GraphInitParams",
         graph_runtime_state: "GraphRuntimeState",
-        *,
         jinja2_template_renderer: Jinja2TemplateRenderer,
         max_output_length: int | None = None,
     ) -> None:

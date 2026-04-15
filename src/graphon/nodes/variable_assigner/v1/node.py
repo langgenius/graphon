@@ -1,7 +1,6 @@
 from collections.abc import Generator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast, override
 
-from graphon.entities.graph_config import NodeConfigDict
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.node_events.base import (
@@ -34,7 +33,8 @@ class VariableAssignerNode(Node[VariableAssignerData]):
     def __init__(
         self,
         node_id: str,
-        config: NodeConfigDict,
+        config: VariableAssignerData,
+        *,
         graph_init_params: "GraphInitParams",
         graph_runtime_state: "GraphRuntimeState",
     ) -> None:
