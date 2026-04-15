@@ -132,6 +132,20 @@ def test_graph_initialization_runs_default_validators(
     assert "answer" in graph.nodes
 
 
+def test_node_data_from_mapping_returns_typed_node_data() -> None:
+    node_data = _TestNode.node_data_from_mapping(
+        {
+            "type": BuiltinNodeTypes.ANSWER,
+            "title": "Answer",
+            "execution_type": NodeExecutionType.EXECUTABLE,
+        },
+    )
+
+    assert isinstance(node_data, _TestNodeData)
+    assert node_data.type == BuiltinNodeTypes.ANSWER
+    assert node_data.execution_type == NodeExecutionType.EXECUTABLE
+
+
 def test_graph_validation_fails_for_unknown_edge_targets(
     graph_init_dependencies: tuple[_SimpleNodeFactory, dict[str, object]],
 ) -> None:

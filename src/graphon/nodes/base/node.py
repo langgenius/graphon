@@ -175,6 +175,23 @@ class _NodeDataModelMixin[NodeDataT: BaseNodeData]:
     """Typed node-data hydration helpers."""
 
     @classmethod
+    def node_data_from_mapping(
+        cls: type[Node[NodeDataT]],
+        node_data: Mapping[str, Any],
+    ) -> NodeDataT:
+        """Build the concrete node-data instance from a Python mapping.
+
+        This convenience wrapper keeps direct node construction ergonomic for
+        callers that naturally start from plain dictionaries while preserving the
+        stricter `Node.__init__(..., config=NodeDataT, ...)` contract.
+
+        Returns:
+            The validated node data instance for the concrete node subclass.
+
+        """
+        return cls.validate_node_data(node_data)
+
+    @classmethod
     def validate_node_data(
         cls: type[Node[NodeDataT]],
         node_data: BaseNodeData | Mapping[str, Any],
