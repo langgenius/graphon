@@ -1,7 +1,5 @@
 from collections.abc import Mapping, Sequence
-from typing import Any, Literal, override
-
-from typing_extensions import deprecated
+from typing import Any, override
 
 from graphon.enums import (
     BuiltinNodeTypes,
@@ -11,9 +9,7 @@ from graphon.enums import (
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.node import Node
 from graphon.nodes.if_else.entities import IfElseNodeData
-from graphon.runtime.variable_pool import VariablePool
-from graphon.utils.condition.entities import Condition
-from graphon.utils.condition.processor import ConditionCheckResult, ConditionProcessor
+from graphon.utils.condition.processor import ConditionProcessor
 
 
 class IfElseNode(Node[IfElseNodeData]):
@@ -37,7 +33,7 @@ class IfElseNode(Node[IfElseNodeData]):
         selected_case_id = "false"
         condition_processor = ConditionProcessor()
         try:
-            uses_legacy_shape = not self.node_data.cases
+            uses_legacy_shape = self.node_data.cases is None
             for case in self.node_data.iter_cases():
                 input_conditions, group_result, final_result = (
                     condition_processor.process_conditions(
@@ -58,25 +54,6 @@ class IfElseNode(Node[IfElseNodeData]):
                     selected_case_id = "true" if uses_legacy_shape else case.case_id
                     break
 
-            else:
-                # Keep the legacy fallback until all graph definitions use `cases`.
-                input_conditions, group_result, final_result = (
-                    _should_not_use_old_function(
-                        condition_processor=condition_processor,
-                        variable_pool=self.graph_runtime_state.variable_pool,
-                        conditions=self.node_data.conditions or [],
-                        operator=self.node_data.logical_operator or "and",
-                    )
-                )
-
-                selected_case_id = "true" if final_result else "false"
-
-                process_data["condition_results"].append({
-                    "group": "default",
-                    "results": group_result,
-                    "final_result": final_result,
-                })
-
             node_inputs["conditions"] = input_conditions
 
         except (TypeError, ValueError) as e:
@@ -93,7 +70,7 @@ class IfElseNode(Node[IfElseNodeData]):
             status=WorkflowNodeExecutionStatus.SUCCEEDED,
             inputs=node_inputs,
             process_data=process_data,
-            edge_source_handle=selected_case_id or "false",  # Use case ID or 'default'
+            edge_source_handle=selected_case_id or "false",
             outputs=outputs,
         )
 
@@ -114,18 +91,3 @@ class IfElseNode(Node[IfElseNodeData]):
                 var_mapping[key] = condition.variable_selector
 
         return var_mapping
-
-
-@deprecated("This function is deprecated. You should use the new cases structure.")
-def _should_not_use_old_function(
-    *,
-    condition_processor: ConditionProcessor,
-    variable_pool: VariablePool,
-    conditions: list[Condition],
-    operator: Literal["and", "or"],
-) -> ConditionCheckResult:
-    return condition_processor.process_conditions(
-        variable_pool=variable_pool,
-        conditions=conditions,
-        operator=operator,
-    )

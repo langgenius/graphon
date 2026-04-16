@@ -25,7 +25,7 @@ class IfElseNodeData(BaseNodeData):
     cases: list[Case] | None = None
 
     def iter_cases(self) -> list[Case]:
-        if self.cases:
+        if self.cases is not None:
             return list(self.cases)
         legacy_conditions = self.__dict__.get("conditions") or []
         return [
