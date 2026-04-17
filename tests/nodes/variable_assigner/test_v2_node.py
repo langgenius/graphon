@@ -39,7 +39,7 @@ def _build_node(
         node_id="assigner",
         graph_init_params=init_params,
         graph_runtime_state=runtime_state,
-        config=VariableAssignerNodeData(
+        data=VariableAssignerNodeData(
             title="Variable Assigner",
             version="2",
             items=items,

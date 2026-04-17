@@ -183,7 +183,7 @@ class _NodeDataModelMixin[NodeDataT: BaseNodeData]:
 
         This convenience wrapper keeps direct node construction ergonomic for
         callers that naturally start from plain dictionaries while preserving the
-        stricter `Node.__init__(..., config=NodeDataT, ...)` contract.
+        stricter `Node.__init__(..., data=NodeDataT, ...)` contract.
 
         Returns:
             The validated node data instance for the concrete node subclass.
@@ -552,7 +552,7 @@ class Node[NodeDataT: BaseNodeData](
     def __init__(
         self,
         node_id: str,
-        config: NodeDataT,
+        data: NodeDataT,
         *,
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,
@@ -574,7 +574,7 @@ class Node[NodeDataT: BaseNodeData](
         self._node_execution_id: str = ""
         self._start_at = datetime.now(UTC).replace(tzinfo=None)
 
-        self._node_data = self.validate_node_data(config)
+        self._node_data = self.validate_node_data(data)
 
         self.post_init()
 

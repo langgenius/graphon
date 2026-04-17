@@ -234,7 +234,7 @@ def test_set_http_client_updates_process_default() -> None:
 def test_http_request_node_accepts_public_dependency_bundle() -> None:
     node = HttpRequestNode(
         node_id="http",
-        config=HttpRequestNodeData(
+        data=HttpRequestNodeData(
             title="HTTP Request",
             method="get",
             url="https://example.com",
@@ -311,7 +311,7 @@ def test_http_request_node_uses_configured_default_http_client() -> None:
 def test_document_extractor_node_uses_default_http_client_when_not_injected() -> None:
     node = DocumentExtractorNode(
         node_id="extractor",
-        config=DocumentExtractorNodeData(
+        data=DocumentExtractorNodeData(
             title="Document Extractor",
             variable_selector=["inputs", "file"],
         ),

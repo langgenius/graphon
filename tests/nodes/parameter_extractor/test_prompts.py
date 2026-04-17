@@ -60,7 +60,7 @@ def _build_parameter_extractor_node() -> tuple[ParameterExtractorNode, VariableP
         ParameterExtractorNode,
         _call_parameter_extractor_constructor(
             node_id="extractor",
-            config=ParameterExtractorNodeData(
+            data=ParameterExtractorNodeData(
                 title="Parameter Extractor",
                 model=ModelConfig(
                     provider="test",
@@ -232,7 +232,7 @@ def test_parameter_extractor_accepts_dependency_bundle() -> None:
         ParameterExtractorNode,
         _call_parameter_extractor_constructor(
             node_id="extractor",
-            config=ParameterExtractorNodeData(
+            data=ParameterExtractorNodeData(
                 title="Parameter Extractor",
                 model=ModelConfig(
                     provider="test",
@@ -260,7 +260,7 @@ def test_parameter_extractor_rejects_mixed_dependency_styles() -> None:
     with pytest.raises(TypeError, match="Pass either dependencies="):
         _call_parameter_extractor_constructor(
             node_id="extractor",
-            config=ParameterExtractorNodeData(
+            data=ParameterExtractorNodeData(
                 title="Parameter Extractor",
                 model=ModelConfig(
                     provider="test",
@@ -300,7 +300,7 @@ def test_parameter_extractor_legacy_dependency_keywords_still_work() -> None:
 
     node = ParameterExtractorNode(
         node_id="extractor",
-        config=ParameterExtractorNodeData(
+        data=ParameterExtractorNodeData(
             title="Parameter Extractor",
             model=ModelConfig(
                 provider="test",

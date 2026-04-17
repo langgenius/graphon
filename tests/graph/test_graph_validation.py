@@ -37,13 +37,13 @@ class _TestNode(Node[_TestNodeData]):
         self,
         *,
         node_id: str,
-        config: _TestNodeData,
+        data: _TestNodeData,
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,
     ) -> None:
         super().__init__(
             node_id=node_id,
-            config=config,
+            data=data,
             graph_init_params=graph_init_params,
             graph_runtime_state=graph_runtime_state,
         )
@@ -78,7 +78,7 @@ class _SimpleNodeFactory:
     def create_node(self, node_config: NodeConfigDict) -> _TestNode:
         return _TestNode(
             node_id=str(node_config["id"]),
-            config=_TestNode.validate_node_data(node_config["data"]),
+            data=_TestNode.validate_node_data(node_config["data"]),
             graph_init_params=self.graph_init_params,
             graph_runtime_state=self.graph_runtime_state,
         )
