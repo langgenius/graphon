@@ -7,10 +7,12 @@ import shutil
 import subprocess  # noqa: S404
 import tempfile
 from collections.abc import Generator, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
-from typing import IO, Any, NoReturn, cast
+from typing import IO, Any, Literal, NoReturn, overload
+
+from pydantic import StrictStr, TypeAdapter, ValidationError
 
 from graphon.model_runtime.entities.llm_entities import (
     LLMResult,
@@ -19,7 +21,6 @@ from graphon.model_runtime.entities.llm_entities import (
     LLMResultChunkWithStructuredOutput,
     LLMResultWithStructuredOutput,
     LLMUsage,
-    LLMUsageMetadata,
 )
 from graphon.model_runtime.entities.message_entities import (
     AssistantPromptMessage,
@@ -28,6 +29,7 @@ from graphon.model_runtime.entities.message_entities import (
     ImagePromptMessageContent,
     PromptMessage,
     PromptMessageContentType,
+    PromptMessageRole,
     PromptMessageTool,
     SystemPromptMessage,
     TextPromptMessageContent,
@@ -80,6 +82,8 @@ _PROMPT_CONTENT_TYPE_TO_CLASS = {
     PromptMessageContentType.VIDEO.value: VideoPromptMessageContent,
     PromptMessageContentType.DOCUMENT.value: DocumentPromptMessageContent,
 }
+_OPTIONAL_STR_ADAPTER = TypeAdapter(StrictStr | None)
+_STRUCTURED_OUTPUT_ADAPTER = TypeAdapter(dict[StrictStr, Any] | None)
 
 _I18N_OBJECT_ATTR_BY_LANG = {
     "en": "en_us",
@@ -113,6 +117,44 @@ class _SlimDoneEvent:
 class _SlimErrorEvent:
     code: str
     message: str
+
+
+class SlimStructuredOutputParseError(ValueError):
+    """Raised when a structured-output response cannot be validated."""
+
+
+_MISSING_STRUCTURED_OUTPUT_MESSAGE = (
+    "Slim structured-output response is missing structured_output data"
+)
+
+
+@dataclass(slots=True)
+class _StructuredOutputAccumulator:
+    structured_output: Mapping[str, Any] | None = None
+    has_structured_output: bool = False
+
+    def consume(self, structured_output: Mapping[str, Any] | None) -> None:
+        if structured_output is None:
+            return
+        self.structured_output = structured_output
+        self.has_structured_output = True
+
+    def finalize(self, *, expect_structured_output: bool) -> Mapping[str, Any] | None:
+        if self.has_structured_output:
+            return self.structured_output
+        if expect_structured_output:
+            raise SlimStructuredOutputParseError(_MISSING_STRUCTURED_OUTPUT_MESSAGE)
+        return None
+
+
+@dataclass(slots=True)
+class _CollectedLLMResult:
+    content_text: str = ""
+    content_parts: list[Any] = field(default_factory=list)
+    usage: LLMUsage = field(default_factory=LLMUsage.empty_usage)
+    tool_calls: list[AssistantPromptMessage.ToolCall] = field(default_factory=list)
+    structured_output: Mapping[str, Any] | None = None
+    system_fingerprint: str | None = None
 
 
 class SlimRuntime(ModelRuntime):
@@ -272,6 +314,34 @@ class SlimRuntime(ModelRuntime):
             return None
         return converted
 
+    @overload
+    def invoke_llm(
+        self,
+        *,
+        provider: str,
+        model: str,
+        credentials: dict[str, Any],
+        model_parameters: dict[str, Any],
+        prompt_messages: Sequence[PromptMessage],
+        tools: list[PromptMessageTool] | None,
+        stop: Sequence[str] | None,
+        stream: Literal[False],
+    ) -> LLMResult: ...
+
+    @overload
+    def invoke_llm(
+        self,
+        *,
+        provider: str,
+        model: str,
+        credentials: dict[str, Any],
+        model_parameters: dict[str, Any],
+        prompt_messages: Sequence[PromptMessage],
+        tools: list[PromptMessageTool] | None,
+        stop: Sequence[str] | None,
+        stream: Literal[True],
+    ) -> Generator[LLMResultChunk, None, None]: ...
+
     def invoke_llm(
         self,
         *,
@@ -284,6 +354,153 @@ class SlimRuntime(ModelRuntime):
         stop: Sequence[str] | None,
         stream: bool,
     ) -> LLMResult | Generator[LLMResultChunk, None, None]:
+        return self._invoke_llm_internal(
+            provider=provider,
+            model=model,
+            credentials=credentials,
+            model_parameters=model_parameters,
+            prompt_messages=prompt_messages,
+            tools=tools,
+            stop=stop,
+            stream=stream,
+            expect_structured_output=False,
+        )
+
+    @overload
+    def invoke_llm_with_structured_output(
+        self,
+        *,
+        provider: str,
+        model: str,
+        credentials: dict[str, Any],
+        json_schema: dict[str, Any],
+        model_parameters: dict[str, Any],
+        prompt_messages: Sequence[PromptMessage],
+        stop: Sequence[str] | None,
+        stream: Literal[False],
+    ) -> LLMResultWithStructuredOutput: ...
+
+    @overload
+    def invoke_llm_with_structured_output(
+        self,
+        *,
+        provider: str,
+        model: str,
+        credentials: dict[str, Any],
+        json_schema: dict[str, Any],
+        model_parameters: dict[str, Any],
+        prompt_messages: Sequence[PromptMessage],
+        stop: Sequence[str] | None,
+        stream: Literal[True],
+    ) -> Generator[LLMResultChunkWithStructuredOutput, None, None]: ...
+
+    def invoke_llm_with_structured_output(
+        self,
+        *,
+        provider: str,
+        model: str,
+        credentials: dict[str, Any],
+        json_schema: dict[str, Any],
+        model_parameters: dict[str, Any],
+        prompt_messages: Sequence[PromptMessage],
+        stop: Sequence[str] | None,
+        stream: bool,
+    ) -> (
+        LLMResultWithStructuredOutput
+        | Generator[LLMResultChunkWithStructuredOutput, None, None]
+    ):
+        structured_parameters = dict(model_parameters)
+        structured_parameters["json_schema"] = json.dumps(json_schema)
+        return self._invoke_llm_internal(
+            provider=provider,
+            model=model,
+            credentials=credentials,
+            model_parameters=structured_parameters,
+            prompt_messages=prompt_messages,
+            tools=None,
+            stop=stop,
+            stream=stream,
+            expect_structured_output=True,
+        )
+
+    @overload
+    def _invoke_llm_internal(
+        self,
+        *,
+        provider: str,
+        model: str,
+        credentials: dict[str, Any],
+        model_parameters: dict[str, Any],
+        prompt_messages: Sequence[PromptMessage],
+        tools: list[PromptMessageTool] | None,
+        stop: Sequence[str] | None,
+        stream: Literal[False],
+        expect_structured_output: Literal[False],
+    ) -> LLMResult: ...
+
+    @overload
+    def _invoke_llm_internal(
+        self,
+        *,
+        provider: str,
+        model: str,
+        credentials: dict[str, Any],
+        model_parameters: dict[str, Any],
+        prompt_messages: Sequence[PromptMessage],
+        tools: list[PromptMessageTool] | None,
+        stop: Sequence[str] | None,
+        stream: Literal[True],
+        expect_structured_output: Literal[False],
+    ) -> Generator[LLMResultChunk, None, None]: ...
+
+    @overload
+    def _invoke_llm_internal(
+        self,
+        *,
+        provider: str,
+        model: str,
+        credentials: dict[str, Any],
+        model_parameters: dict[str, Any],
+        prompt_messages: Sequence[PromptMessage],
+        tools: list[PromptMessageTool] | None,
+        stop: Sequence[str] | None,
+        stream: Literal[False],
+        expect_structured_output: Literal[True],
+    ) -> LLMResultWithStructuredOutput: ...
+
+    @overload
+    def _invoke_llm_internal(
+        self,
+        *,
+        provider: str,
+        model: str,
+        credentials: dict[str, Any],
+        model_parameters: dict[str, Any],
+        prompt_messages: Sequence[PromptMessage],
+        tools: list[PromptMessageTool] | None,
+        stop: Sequence[str] | None,
+        stream: Literal[True],
+        expect_structured_output: Literal[True],
+    ) -> Generator[LLMResultChunkWithStructuredOutput, None, None]: ...
+
+    def _invoke_llm_internal(
+        self,
+        *,
+        provider: str,
+        model: str,
+        credentials: dict[str, Any],
+        model_parameters: dict[str, Any],
+        prompt_messages: Sequence[PromptMessage],
+        tools: list[PromptMessageTool] | None,
+        stop: Sequence[str] | None,
+        stream: bool,
+        expect_structured_output: bool,
+    ) -> (
+        LLMResult
+        | Generator[LLMResultChunk, None, None]
+        | LLMResultWithStructuredOutput
+        | Generator[LLMResultChunkWithStructuredOutput, None, None]
+    ):
         loaded = self._get_loaded_provider(provider)
         payload = {
             "provider": loaded.provider_entity.provider,
@@ -305,10 +522,27 @@ class SlimRuntime(ModelRuntime):
             data=payload,
         )
 
+        if expect_structured_output:
+            generator = self._llm_chunk_generator(
+                model=model,
+                prompt_messages=prompt_messages,
+                event_iter=event_iter,
+                expect_structured_output=True,
+            )
+            if stream:
+                return generator
+            return self._collect_llm_result(
+                model=model,
+                prompt_messages=prompt_messages,
+                chunks=generator,
+                expect_structured_output=True,
+            )
+
         generator = self._llm_chunk_generator(
             model=model,
             prompt_messages=prompt_messages,
             event_iter=event_iter,
+            expect_structured_output=False,
         )
         if stream:
             return generator
@@ -316,6 +550,7 @@ class SlimRuntime(ModelRuntime):
             model=model,
             prompt_messages=prompt_messages,
             chunks=generator,
+            expect_structured_output=False,
         )
 
     def get_llm_num_tokens(
@@ -769,13 +1004,37 @@ class SlimRuntime(ModelRuntime):
             ),
         )
 
+    @overload
     def _llm_chunk_generator(
         self,
         *,
         model: str,
         prompt_messages: Sequence[PromptMessage],
         event_iter: Iterable[_SlimChunkEvent | _SlimDoneEvent],
+        expect_structured_output: Literal[False],
+    ) -> Generator[LLMResultChunk, None, None]: ...
+
+    @overload
+    def _llm_chunk_generator(
+        self,
+        *,
+        model: str,
+        prompt_messages: Sequence[PromptMessage],
+        event_iter: Iterable[_SlimChunkEvent | _SlimDoneEvent],
+        expect_structured_output: Literal[True],
+    ) -> Generator[LLMResultChunkWithStructuredOutput, None, None]: ...
+
+    def _llm_chunk_generator(
+        self,
+        *,
+        model: str,
+        prompt_messages: Sequence[PromptMessage],
+        event_iter: Iterable[_SlimChunkEvent | _SlimDoneEvent],
+        expect_structured_output: bool,
     ) -> Generator[LLMResultChunk, None, None]:
+        structured_output_accumulator = (
+            _StructuredOutputAccumulator() if expect_structured_output else None
+        )
         for event in event_iter:
             if isinstance(event, _SlimDoneEvent):
                 break
@@ -783,11 +1042,41 @@ class SlimRuntime(ModelRuntime):
             if not isinstance(chunk, dict):
                 msg = f"Unexpected LLM chunk payload: {chunk!r}"
                 raise TypeError(msg)
-            yield self._parse_llm_chunk(
+            parsed_chunk = self._parse_llm_chunk(
                 model=model,
                 prompt_messages=prompt_messages,
                 chunk=chunk,
+                expect_structured_output=expect_structured_output,
             )
+            self._consume_structured_output_chunk(
+                chunk=parsed_chunk,
+                accumulator=structured_output_accumulator,
+            )
+            yield parsed_chunk
+        self._finalize_structured_output(
+            accumulator=structured_output_accumulator,
+            expect_structured_output=expect_structured_output,
+        )
+
+    @overload
+    def _collect_llm_result(
+        self,
+        *,
+        model: str,
+        prompt_messages: Sequence[PromptMessage],
+        chunks: Iterable[LLMResultChunk],
+        expect_structured_output: Literal[False],
+    ) -> LLMResult: ...
+
+    @overload
+    def _collect_llm_result(
+        self,
+        *,
+        model: str,
+        prompt_messages: Sequence[PromptMessage],
+        chunks: Iterable[LLMResultChunkWithStructuredOutput],
+        expect_structured_output: Literal[True],
+    ) -> LLMResultWithStructuredOutput: ...
 
     def _collect_llm_result(
         self,
@@ -795,55 +1084,112 @@ class SlimRuntime(ModelRuntime):
         model: str,
         prompt_messages: Sequence[PromptMessage],
         chunks: Iterable[LLMResultChunk],
+        expect_structured_output: bool,
     ) -> LLMResult:
-        content_text = ""
-        content_parts: list[Any] = []
-        usage = LLMUsage.empty_usage()
-        finish_reason: str | None = None
-        tool_calls: list[AssistantPromptMessage.ToolCall] = []
-        structured_output: Mapping[str, Any] | None = None
-        system_fingerprint: str | None = None
+        collected = _CollectedLLMResult()
+        structured_output_accumulator = (
+            _StructuredOutputAccumulator() if expect_structured_output else None
+        )
 
         for chunk in chunks:
-            delta_message = chunk.delta.message
-            if isinstance(delta_message.content, str):
-                content_text += delta_message.content
-            elif isinstance(delta_message.content, list):
-                content_parts.extend(delta_message.content)
+            self._accumulate_llm_chunk(
+                collected=collected,
+                chunk=chunk,
+                structured_output_accumulator=structured_output_accumulator,
+            )
 
-            if delta_message.tool_calls:
-                merge_tool_call_deltas(delta_message.tool_calls, tool_calls)
-            if chunk.delta.usage is not None:
-                usage = chunk.delta.usage
-            if chunk.delta.finish_reason is not None:
-                finish_reason = chunk.delta.finish_reason
-            if isinstance(chunk, LLMResultChunkWithStructuredOutput):
-                structured_output = chunk.structured_output
-            if chunk.system_fingerprint is not None:
-                system_fingerprint = chunk.system_fingerprint
+        collected.structured_output = self._finalize_structured_output(
+            accumulator=structured_output_accumulator,
+            expect_structured_output=expect_structured_output,
+        )
 
-        _ = finish_reason
         prompt_messages_list = list(prompt_messages)
         assistant_message = AssistantPromptMessage(
-            content=content_text or content_parts,
-            tool_calls=tool_calls,
+            content=collected.content_text or collected.content_parts,
+            tool_calls=collected.tool_calls,
         )
-        if structured_output is not None:
+        if collected.structured_output is not None:
             return LLMResultWithStructuredOutput(
                 model=model,
                 prompt_messages=prompt_messages_list,
                 message=assistant_message,
-                usage=usage,
-                system_fingerprint=system_fingerprint,
-                structured_output=structured_output,
+                usage=collected.usage,
+                system_fingerprint=collected.system_fingerprint,
+                structured_output=collected.structured_output,
             )
         return LLMResult(
             model=model,
             prompt_messages=prompt_messages_list,
             message=assistant_message,
-            usage=usage,
-            system_fingerprint=system_fingerprint,
+            usage=collected.usage,
+            system_fingerprint=collected.system_fingerprint,
         )
+
+    def _accumulate_llm_chunk(
+        self,
+        *,
+        collected: _CollectedLLMResult,
+        chunk: LLMResultChunk,
+        structured_output_accumulator: _StructuredOutputAccumulator | None = None,
+    ) -> None:
+        delta_message = chunk.delta.message
+        if isinstance(delta_message.content, str):
+            collected.content_text += delta_message.content
+        elif isinstance(delta_message.content, list):
+            collected.content_parts.extend(delta_message.content)
+
+        if delta_message.tool_calls:
+            merge_tool_call_deltas(delta_message.tool_calls, collected.tool_calls)
+        if chunk.delta.usage is not None:
+            collected.usage = chunk.delta.usage
+        self._consume_structured_output_chunk(
+            chunk=chunk,
+            accumulator=structured_output_accumulator,
+        )
+        if chunk.system_fingerprint is not None:
+            collected.system_fingerprint = chunk.system_fingerprint
+
+    @staticmethod
+    def _consume_structured_output_chunk(
+        *,
+        chunk: LLMResultChunk,
+        accumulator: _StructuredOutputAccumulator | None,
+    ) -> None:
+        if accumulator is None or not isinstance(
+            chunk, LLMResultChunkWithStructuredOutput
+        ):
+            return
+        accumulator.consume(chunk.structured_output)
+
+    @staticmethod
+    def _finalize_structured_output(
+        *,
+        accumulator: _StructuredOutputAccumulator | None,
+        expect_structured_output: bool,
+    ) -> Mapping[str, Any] | None:
+        if accumulator is None:
+            return None
+        return accumulator.finalize(expect_structured_output=expect_structured_output)
+
+    @overload
+    def _parse_llm_chunk(
+        self,
+        *,
+        model: str,
+        prompt_messages: Sequence[PromptMessage],
+        chunk: dict[str, Any],
+        expect_structured_output: Literal[False],
+    ) -> LLMResultChunk: ...
+
+    @overload
+    def _parse_llm_chunk(
+        self,
+        *,
+        model: str,
+        prompt_messages: Sequence[PromptMessage],
+        chunk: dict[str, Any],
+        expect_structured_output: Literal[True],
+    ) -> LLMResultChunkWithStructuredOutput: ...
 
     def _parse_llm_chunk(
         self,
@@ -851,33 +1197,41 @@ class SlimRuntime(ModelRuntime):
         model: str,
         prompt_messages: Sequence[PromptMessage],
         chunk: dict[str, Any],
+        expect_structured_output: bool,
     ) -> LLMResultChunk:
         delta_payload = chunk.get("delta") or {}
         usage_payload = delta_payload.get("usage")
-        message = cast(
-            AssistantPromptMessage,
-            self._deserialize_prompt_message(delta_payload.get("message") or {}),
+        if not isinstance(delta_payload, Mapping):
+            msg = f"Unexpected LLM delta payload: {delta_payload!r}"
+            raise TypeError(msg)
+        message = self._deserialize_assistant_prompt_message(
+            delta_payload.get("message") or {},
         )
         finish_reason = delta_payload.get("finish_reason")
         delta = LLMResultChunkDelta(
             index=int(delta_payload.get("index", 0)),
             message=message,
-            usage=(
-                self._parse_llm_usage(usage_payload)
-                if usage_payload is not None
-                else None
-            ),
-            finish_reason=str(finish_reason) if finish_reason is not None else None,
+            usage=self._parse_optional_llm_usage(usage_payload),
+            finish_reason=_OPTIONAL_STR_ADAPTER.validate_python(finish_reason),
         )
         prompt_messages_list = list(prompt_messages)
-        system_fingerprint = cast("str | None", chunk.get("system_fingerprint"))
-        if "structured_output" in chunk:
+        system_fingerprint = _OPTIONAL_STR_ADAPTER.validate_python(
+            chunk.get("system_fingerprint"),
+        )
+        if expect_structured_output:
+            try:
+                structured_output = _STRUCTURED_OUTPUT_ADAPTER.validate_python(
+                    chunk.get("structured_output"),
+                )
+            except ValidationError as e:
+                msg = "Invalid structured_output payload"
+                raise SlimStructuredOutputParseError(msg) from e
             return LLMResultChunkWithStructuredOutput(
                 model=model,
                 prompt_messages=prompt_messages_list,
                 system_fingerprint=system_fingerprint,
                 delta=delta,
-                structured_output=chunk.get("structured_output"),
+                structured_output=structured_output,
             )
         return LLMResultChunk(
             model=model,
@@ -889,10 +1243,12 @@ class SlimRuntime(ModelRuntime):
     def _serialize_prompt_message(self, message: PromptMessage) -> dict[str, Any]:
         return jsonable_encoder(message)
 
-    def _deserialize_prompt_message(self, payload: dict[str, Any]) -> PromptMessage:
-        role = str(payload.get("role", "assistant"))
-        message_cls = _PROMPT_MESSAGE_ROLE_TO_CLASS.get(role, AssistantPromptMessage)
-        content = payload.get("content")
+    def _normalize_prompt_message_payload(
+        self,
+        payload: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized_payload = dict(payload)
+        content = normalized_payload.get("content")
         if isinstance(content, list):
             converted_content = []
             for item in content:
@@ -904,13 +1260,41 @@ class SlimRuntime(ModelRuntime):
                     converted_content.append(item)
                     continue
                 converted_content.append(content_cls.model_validate(item))
-            payload = dict(payload)
-            payload["content"] = converted_content
-        return message_cls.model_validate(payload)
+            normalized_payload["content"] = converted_content
+        return normalized_payload
+
+    def _deserialize_prompt_message(self, payload: dict[str, Any]) -> PromptMessage:
+        normalized_payload = self._normalize_prompt_message_payload(payload)
+        role = str(normalized_payload.get("role", "assistant"))
+        message_cls = _PROMPT_MESSAGE_ROLE_TO_CLASS.get(role, AssistantPromptMessage)
+        return message_cls.model_validate(normalized_payload)
+
+    def _deserialize_assistant_prompt_message(
+        self,
+        payload: Mapping[str, Any],
+    ) -> AssistantPromptMessage:
+        normalized_payload = self._normalize_prompt_message_payload(payload)
+        normalized_payload["role"] = PromptMessageRole.ASSISTANT.value
+        return AssistantPromptMessage.model_validate(normalized_payload)
 
     @staticmethod
-    def _parse_llm_usage(payload: Mapping[str, Any]) -> LLMUsage:
-        return LLMUsage.from_metadata(cast("LLMUsageMetadata", dict(payload)))
+    def _parse_optional_llm_usage(payload: object) -> LLMUsage | None:
+        if payload is None:
+            return None
+        if not isinstance(payload, Mapping):
+            msg = f"Unexpected LLM usage payload: {payload!r}"
+            raise TypeError(msg)
+        normalized_payload: dict[str, object] = {}
+        for key, value in payload.items():
+            if not isinstance(key, str):
+                msg = f"Unexpected LLM usage payload key: {key!r}"
+                raise TypeError(msg)
+            normalized_payload[key] = value
+        return SlimRuntime._parse_llm_usage(normalized_payload)
+
+    @staticmethod
+    def _parse_llm_usage(payload: Mapping[str, object]) -> LLMUsage:
+        return LLMUsage.from_metadata(dict(payload))
 
     @staticmethod
     def _parse_embedding_usage(payload: Mapping[str, Any]) -> EmbeddingUsage:

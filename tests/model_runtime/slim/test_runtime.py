@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import sys
 import textwrap
+from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
+from typing import Any
 from unittest.mock import patch
 
 import pytest
+from pydantic import TypeAdapter, ValidationError
 
 from graphon.model_runtime.entities.llm_entities import (
-    LLMResult,
     LLMResultWithStructuredOutput,
+    LLMUsage,
 )
 from graphon.model_runtime.entities.message_entities import (
+    AssistantPromptMessage,
     PromptMessageTool,
     UserPromptMessage,
 )
@@ -24,6 +27,7 @@ from graphon.model_runtime.slim import (
     SlimProviderBinding,
     SlimRuntime,
 )
+from graphon.model_runtime.slim.runtime import SlimStructuredOutputParseError
 
 
 @pytest.fixture(autouse=True)
@@ -291,18 +295,58 @@ def _write_fake_slim(binary_path: Path) -> None:
             elif action == "invoke_llm":
                 emit("message", {"stage": "init", "message": "ready"})
                 if data["model_parameters"].get("json_schema"):
-                    emit(
-                        "chunk",
-                        {
-                            "delta": {
-                                "index": 0,
-                                "message": {"role": "assistant", "content": "done"},
-                                "usage": usage,
-                                "finish_reason": "stop",
+                    structured_output = {"answer": "structured"}
+                    if data["model_parameters"]["json_schema"] == '{"type": "invalid"}':
+                        structured_output = ["bad"]
+                    elif (
+                        data["model_parameters"]["json_schema"]
+                        == '{"type": "missing"}'
+                    ):
+                        structured_output = None
+                    if data["model_parameters"]["json_schema"] == '{"type": "partial"}':
+                        emit(
+                            "chunk",
+                            {
+                                "delta": {
+                                    "index": 0,
+                                    "message": {"role": "assistant", "content": "done"},
+                                    "usage": usage,
+                                    "finish_reason": None,
+                                },
+                                "structured_output": structured_output,
                             },
-                            "structured_output": {"answer": "structured"},
-                        },
-                    )
+                        )
+                        emit(
+                            "chunk",
+                            {
+                                "delta": {
+                                    "index": 1,
+                                    "message": {
+                                        "role": "assistant",
+                                        "content": " again",
+                                    },
+                                    "usage": None,
+                                    "finish_reason": "stop",
+                                },
+                                "structured_output": None,
+                            },
+                        )
+                    else:
+                        emit(
+                            "chunk",
+                            {
+                                "delta": {
+                                    "index": 0,
+                                    "message": {
+                                        "role": "assistant",
+                                        "content": "done",
+                                    },
+                                    "usage": usage,
+                                    "finish_reason": "stop",
+                                },
+                                "structured_output": structured_output,
+                            },
+                        )
                 elif data["tools"]:
                     emit(
                         "chunk",
@@ -355,6 +399,11 @@ def _write_fake_slim(binary_path: Path) -> None:
                             "delta": {
                                 "index": 0,
                                 "message": {"role": "assistant", "content": "hello"},
+                                "usage": (
+                                    ["bad"]
+                                    if data["model_parameters"].get("broken_usage")
+                                    else None
+                                ),
                             }
                         },
                     )
@@ -529,7 +578,6 @@ def test_slim_runtime_merges_non_stream_tool_call_deltas(tmp_path: Path) -> None
         stream=False,
     )
 
-    result = cast(LLMResult, result)
     assert len(result.message.tool_calls) == 1
     assert result.message.tool_calls[0].function.name == "extract"
     assert result.message.tool_calls[0].function.arguments == '{"query": "Hello"}'
@@ -555,6 +603,231 @@ def test_slim_runtime_keeps_blocking_structured_output(tmp_path: Path) -> None:
     assert isinstance(result, LLMResultWithStructuredOutput)
     assert result.structured_output == {"answer": "structured"}
     assert prepared.is_structured_output_parse_error(ValueError("boom")) is False
+
+
+def test_slim_runtime_keeps_blocking_partial_structured_output(
+    tmp_path: Path,
+) -> None:
+    runtime = _build_runtime(tmp_path)
+    prepared = SlimPreparedLLM(
+        runtime=runtime,
+        provider="fake-provider",
+        model_name="fake-chat",
+        credentials={"api_key": "secret"},
+    )
+
+    result = prepared.invoke_llm_with_structured_output(
+        prompt_messages=[UserPromptMessage(content="Hello")],
+        json_schema={"type": "partial"},
+        model_parameters={},
+        stop=None,
+        stream=False,
+    )
+
+    assert isinstance(result, LLMResultWithStructuredOutput)
+    assert result.message.content == "done again"
+    assert result.structured_output == {"answer": "structured"}
+
+
+def test_slim_runtime_keeps_streaming_partial_structured_output(
+    tmp_path: Path,
+) -> None:
+    runtime = _build_runtime(tmp_path)
+    prepared = SlimPreparedLLM(
+        runtime=runtime,
+        provider="fake-provider",
+        model_name="fake-chat",
+        credentials={"api_key": "secret"},
+    )
+
+    results = list(
+        prepared.invoke_llm_with_structured_output(
+            prompt_messages=[UserPromptMessage(content="Hello")],
+            json_schema={"type": "partial"},
+            model_parameters={},
+            stop=None,
+            stream=True,
+        )
+    )
+
+    assert len(results) == 2
+    assert results[0].structured_output == {"answer": "structured"}
+    assert results[1].structured_output is None
+
+
+def test_slim_runtime_merges_prepared_parameters_for_structured_output(
+    tmp_path: Path,
+) -> None:
+    runtime = _build_runtime(tmp_path)
+    prepared = SlimPreparedLLM(
+        runtime=runtime,
+        provider="fake-provider",
+        model_name="fake-chat",
+        credentials={"api_key": "secret"},
+        parameters={"temperature": 0.2, "max_tokens": 128},
+        stop=["DONE"],
+    )
+    captured: dict[str, object] = {}
+
+    def _capture_invoke(
+        *,
+        provider: str,
+        model: str,
+        credentials: dict[str, Any],
+        json_schema: dict[str, Any],
+        model_parameters: dict[str, Any],
+        prompt_messages: Sequence[UserPromptMessage],
+        stop: Sequence[str] | None,
+        stream: bool,
+    ) -> LLMResultWithStructuredOutput:
+        captured["provider"] = provider
+        captured["model"] = model
+        captured["credentials"] = credentials
+        captured["json_schema"] = json_schema
+        captured["model_parameters"] = model_parameters
+        captured["prompt_messages"] = prompt_messages
+        captured["stop"] = stop
+        captured["stream"] = stream
+        return LLMResultWithStructuredOutput(
+            model=model,
+            prompt_messages=prompt_messages,
+            message=AssistantPromptMessage(content="done"),
+            usage=LLMUsage.empty_usage(),
+            structured_output={"answer": "ok"},
+        )
+
+    with patch.object(
+        runtime,
+        "invoke_llm_with_structured_output",
+        side_effect=_capture_invoke,
+    ):
+        prepared.invoke_llm_with_structured_output(
+            prompt_messages=[UserPromptMessage(content="Hello")],
+            json_schema={"type": "object"},
+            model_parameters={"top_p": 0.9},
+            stop=None,
+            stream=False,
+        )
+
+    assert captured["model_parameters"] == {
+        "temperature": 0.2,
+        "max_tokens": 128,
+        "top_p": 0.9,
+    }
+    assert captured["json_schema"] == {"type": "object"}
+    assert captured["stop"] == ["DONE"]
+    assert captured["stream"] is False
+
+
+def test_slim_runtime_rejects_non_mapping_structured_output(tmp_path: Path) -> None:
+    runtime = _build_runtime(tmp_path)
+    prepared = SlimPreparedLLM(
+        runtime=runtime,
+        provider="fake-provider",
+        model_name="fake-chat",
+        credentials={"api_key": "secret"},
+    )
+
+    with pytest.raises(
+        SlimStructuredOutputParseError,
+        match="Invalid structured_output payload",
+    ) as exc_info:
+        list(
+            prepared.invoke_llm_with_structured_output(
+                prompt_messages=[UserPromptMessage(content="Hello")],
+                json_schema={"type": "invalid"},
+                model_parameters={},
+                stop=None,
+                stream=True,
+            )
+        )
+
+    assert prepared.is_structured_output_parse_error(exc_info.value) is True
+
+
+def test_slim_runtime_marks_missing_structured_output_as_parse_error(
+    tmp_path: Path,
+) -> None:
+    runtime = _build_runtime(tmp_path)
+    prepared = SlimPreparedLLM(
+        runtime=runtime,
+        provider="fake-provider",
+        model_name="fake-chat",
+        credentials={"api_key": "secret"},
+    )
+
+    with pytest.raises(
+        SlimStructuredOutputParseError,
+        match="missing structured_output",
+    ) as exc_info:
+        list(
+            prepared.invoke_llm_with_structured_output(
+                prompt_messages=[UserPromptMessage(content="Hello")],
+                json_schema={"type": "missing"},
+                model_parameters={},
+                stop=None,
+                stream=True,
+            )
+        )
+
+    assert prepared.is_structured_output_parse_error(exc_info.value) is True
+
+
+def test_slim_runtime_marks_missing_blocking_structured_output_as_parse_error(
+    tmp_path: Path,
+) -> None:
+    runtime = _build_runtime(tmp_path)
+    prepared = SlimPreparedLLM(
+        runtime=runtime,
+        provider="fake-provider",
+        model_name="fake-chat",
+        credentials={"api_key": "secret"},
+    )
+
+    with pytest.raises(
+        SlimStructuredOutputParseError,
+        match="missing structured_output",
+    ) as exc_info:
+        prepared.invoke_llm_with_structured_output(
+            prompt_messages=[UserPromptMessage(content="Hello")],
+            json_schema={"type": "missing"},
+            model_parameters={},
+            stop=None,
+            stream=False,
+        )
+
+    assert prepared.is_structured_output_parse_error(exc_info.value) is True
+
+
+def test_slim_runtime_only_flags_custom_parse_errors(tmp_path: Path) -> None:
+    runtime = _build_runtime(tmp_path)
+    prepared = SlimPreparedLLM(
+        runtime=runtime,
+        provider="fake-provider",
+        model_name="fake-chat",
+        credentials={"api_key": "secret"},
+    )
+
+    with pytest.raises(ValidationError) as exc_info:
+        TypeAdapter(int).validate_python("invalid")
+
+    assert prepared.is_structured_output_parse_error(exc_info.value) is False
+
+
+def test_slim_runtime_rejects_non_mapping_llm_usage_payload(tmp_path: Path) -> None:
+    runtime = _build_runtime(tmp_path)
+
+    with pytest.raises(TypeError, match="Unexpected LLM usage payload"):
+        runtime.invoke_llm(
+            prompt_messages=[UserPromptMessage(content="Hello")],
+            provider="fake-provider",
+            model="fake-chat",
+            credentials={"api_key": "secret"},
+            model_parameters={"broken_usage": True},
+            tools=None,
+            stop=None,
+            stream=False,
+        )
 
 
 def test_slim_config_auto_discovers_uv_and_python(

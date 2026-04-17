@@ -3,13 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING
 
 from .in_memory import InMemoryReadyQueue
-from .protocol import ReadyQueueState
-
-if TYPE_CHECKING:
-    from .protocol import ReadyQueue
+from .protocol import ReadyQueue, ReadyQueueState
 
 _READY_QUEUE_BUILDERS: dict[str, tuple[Callable[[], ReadyQueue], str]] = {
     "InMemoryReadyQueue": (InMemoryReadyQueue, "1.0"),

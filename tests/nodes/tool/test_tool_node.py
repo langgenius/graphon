@@ -1,5 +1,4 @@
 from collections.abc import Generator
-from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,15 +18,42 @@ def _message_stream(
     yield from messages
 
 
-def _build_tool_node() -> tuple[ToolNode, MagicMock, MagicMock]:
+class _StubToolRuntime:
+    def __init__(self) -> None:
+        self.get_usage = MagicMock(return_value=LLMUsage.empty_usage())
+        self.build_file_reference = MagicMock()
+
+    def get_runtime(self, **_: object) -> ToolRuntimeHandle:
+        msg = "not used in this test"
+        raise AssertionError(msg)
+
+    def get_runtime_parameters(self, **_: object) -> list[object]:
+        return []
+
+    def invoke(self, **_: object) -> Generator[ToolRuntimeMessage, None, None]:
+        msg = "not used in this test"
+        raise AssertionError(msg)
+
+
+class _StubToolFileManagerFactory:
+    def __init__(self) -> None:
+        self.get_file_generator_by_tool_file_id = MagicMock(return_value=(None, None))
+
+    def create_file_by_raw(self, **_: object) -> object:
+        msg = "not used in this test"
+        raise AssertionError(msg)
+
+
+def _build_tool_node() -> tuple[
+    ToolNode, _StubToolRuntime, _StubToolFileManagerFactory
+]:
     node = ToolNode.__new__(ToolNode)
     node.init_node_identity("node-1")
-    runtime = MagicMock()
-    runtime.get_usage.return_value = LLMUsage.empty_usage()
-    tool_file_manager_factory = MagicMock()
+    runtime = _StubToolRuntime()
+    tool_file_manager_factory = _StubToolFileManagerFactory()
     node.init_tool_runtime(
-        runtime=cast(Any, runtime),
-        tool_file_manager_factory=cast(Any, tool_file_manager_factory),
+        runtime=runtime,
+        tool_file_manager_factory=tool_file_manager_factory,
     )
     return node, runtime, tool_file_manager_factory
 

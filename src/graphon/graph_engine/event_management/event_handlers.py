@@ -3,7 +3,7 @@
 import logging
 from collections.abc import Mapping
 from functools import singledispatchmethod
-from typing import TYPE_CHECKING, final
+from typing import final
 
 from graphon.enums import ErrorStrategy, NodeExecutionType, NodeState
 from graphon.graph.graph import Graph
@@ -39,11 +39,10 @@ from graphon.runtime.graph_runtime_state import (
     ResponseStreamCoordinatorProtocol,
 )
 
-if TYPE_CHECKING:
-    from ..error_handler import ErrorHandler
-    from ..graph_state_manager import GraphStateManager
-    from ..graph_traversal import EdgeProcessor
-    from .event_manager import EventManager
+from ..error_handler import ErrorHandler
+from ..graph_state_manager import GraphStateManager
+from ..graph_traversal.edge_processor import EdgeProcessor
+from .event_manager import EventManager
 
 logger = logging.getLogger(__name__)
 
@@ -62,10 +61,10 @@ class EventHandler:
         graph_runtime_state: GraphRuntimeState,
         graph_execution: GraphExecutionProtocol,
         response_coordinator: ResponseStreamCoordinatorProtocol,
-        event_collector: "EventManager",
-        edge_processor: "EdgeProcessor",
-        state_manager: "GraphStateManager",
-        error_handler: "ErrorHandler",
+        event_collector: EventManager,
+        edge_processor: EdgeProcessor,
+        state_manager: GraphStateManager,
+        error_handler: ErrorHandler,
     ) -> None:
         """Initialize the event handler registry.
 

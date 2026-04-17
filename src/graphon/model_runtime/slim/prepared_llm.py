@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Generator, Mapping, Sequence
-from typing import Any, Literal, cast, overload, override
+from typing import Any, Literal, overload, override
 
 from graphon.model_runtime.entities.llm_entities import (
     LLMResult,
@@ -17,7 +16,7 @@ from graphon.model_runtime.entities.message_entities import (
 from graphon.model_runtime.entities.model_entities import AIModelEntity, ModelType
 from graphon.nodes.llm.runtime_protocols import PreparedLLMProtocol
 
-from .runtime import SlimRuntime
+from .runtime import SlimRuntime, SlimStructuredOutputParseError
 
 
 class SlimPreparedLLM(PreparedLLMProtocol):
@@ -168,32 +167,20 @@ class SlimPreparedLLM(PreparedLLMProtocol):
         LLMResultWithStructuredOutput
         | Generator[LLMResultChunkWithStructuredOutput, None, None]
     ):
-        structured_parameters = dict(model_parameters)
-        structured_parameters["json_schema"] = json.dumps(json_schema)
-        if stream:
-            return cast(
-                "Generator[LLMResultChunkWithStructuredOutput, None, None]",
-                self.invoke_llm(
-                    prompt_messages=prompt_messages,
-                    model_parameters=structured_parameters,
-                    tools=None,
-                    stop=stop,
-                    stream=True,
-                ),
-            )
-        return cast(
-            "LLMResultWithStructuredOutput",
-            self.invoke_llm(
-                prompt_messages=prompt_messages,
-                model_parameters=structured_parameters,
-                tools=None,
-                stop=stop,
-                stream=False,
-            ),
+        merged_parameters = dict(self._parameters)
+        merged_parameters.update(model_parameters)
+        return self._runtime.invoke_llm_with_structured_output(
+            provider=self._provider,
+            model=self._model_name,
+            credentials=self._credentials,
+            json_schema=dict(json_schema),
+            model_parameters=merged_parameters,
+            prompt_messages=prompt_messages,
+            stop=stop if stop is not None else self._stop,
+            stream=stream,
         )
 
     @override
     def is_structured_output_parse_error(self, error: Exception) -> bool:
         _ = self
-        _ = error
-        return False
+        return isinstance(error, SlimStructuredOutputParseError)

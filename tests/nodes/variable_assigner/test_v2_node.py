@@ -58,12 +58,12 @@ def test_remove_first_from_array() -> None:
     node = _build_node(
         variable_pool=variable_pool,
         items=[
-            {
-                "variable_selector": ["conversation", conversation_variable.name],
-                "input_type": InputType.VARIABLE,
-                "operation": Operation.REMOVE_FIRST,
-                "value": None,
-            },
+            VariableOperationItem(
+                variable_selector=["conversation", conversation_variable.name],
+                input_type=InputType.VARIABLE,
+                operation=Operation.REMOVE_FIRST,
+                value=None,
+            ),
         ],
     )
 
@@ -86,12 +86,12 @@ def test_remove_last_from_array() -> None:
     node = _build_node(
         variable_pool=variable_pool,
         items=[
-            {
-                "variable_selector": ["conversation", conversation_variable.name],
-                "input_type": InputType.VARIABLE,
-                "operation": Operation.REMOVE_LAST,
-                "value": None,
-            },
+            VariableOperationItem(
+                variable_selector=["conversation", conversation_variable.name],
+                input_type=InputType.VARIABLE,
+                operation=Operation.REMOVE_LAST,
+                value=None,
+            ),
         ],
     )
 
@@ -119,18 +119,18 @@ def test_multiple_operations_emit_single_final_update_per_selector() -> None:
     node = _build_node(
         variable_pool=variable_pool,
         items=[
-            {
-                "variable_selector": ["conversation", conversation_variable.name],
-                "input_type": InputType.VARIABLE,
-                "operation": Operation.APPEND,
-                "value": ["inputs", "second"],
-            },
-            {
-                "variable_selector": ["conversation", conversation_variable.name],
-                "input_type": InputType.VARIABLE,
-                "operation": Operation.APPEND,
-                "value": ["inputs", "third"],
-            },
+            VariableOperationItem(
+                variable_selector=["conversation", conversation_variable.name],
+                input_type=InputType.VARIABLE,
+                operation=Operation.APPEND,
+                value=["inputs", "second"],
+            ),
+            VariableOperationItem(
+                variable_selector=["conversation", conversation_variable.name],
+                input_type=InputType.VARIABLE,
+                operation=Operation.APPEND,
+                value=["inputs", "third"],
+            ),
         ],
     )
 
@@ -164,12 +164,12 @@ def test_invalid_constant_input_returns_failed_event() -> None:
     node = _build_node(
         variable_pool=variable_pool,
         items=[
-            {
-                "variable_selector": ["conversation", conversation_variable.name],
-                "input_type": InputType.CONSTANT,
-                "operation": Operation.OVER_WRITE,
-                "value": 123,
-            },
+            VariableOperationItem(
+                variable_selector=["conversation", conversation_variable.name],
+                input_type=InputType.CONSTANT,
+                operation=Operation.OVER_WRITE,
+                value=123,
+            ),
         ],
     )
 

@@ -4,7 +4,7 @@ import re
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -18,7 +18,7 @@ from graphon.variables.factory import (
 )
 from graphon.variables.segment_group import SegmentGroup
 from graphon.variables.segments import FileSegment, ObjectSegment, Segment
-from graphon.variables.variables import RAGPipelineVariableInput, Variable, VariableBase
+from graphon.variables.variables import RAGPipelineVariableInput, Variable
 
 type VariableValue = str | int | float | dict[str, object] | list[object] | File
 
@@ -154,8 +154,6 @@ class VariablePool(BaseModel):
             raise ValueError(msg)
 
         match value:
-            case VariableBase():
-                variable = value
             case Segment():
                 variable = segment_to_variable(segment=value, selector=selector)
             case _:
@@ -163,10 +161,7 @@ class VariablePool(BaseModel):
                 variable = segment_to_variable(segment=segment, selector=selector)
 
         node_id, name = self._selector_to_keys(selector)
-        # Based on the definition of `Variable`,
-        # `VariableBase` instances can be safely used as `Variable`
-        # since they are compatible.
-        self.variable_dictionary[node_id][name] = cast("Variable", variable)
+        self.variable_dictionary[node_id][name] = variable
 
     @classmethod
     def _selector_to_keys(cls, selector: Sequence[str]) -> tuple[str, str]:
@@ -219,6 +214,14 @@ class VariablePool(BaseModel):
                     selector=selector[2:],
                 )
         return result
+
+    def get_variable(self, selector: Sequence[str], /) -> Variable | None:
+        """Retrieve a stored top-level variable without attribute traversal."""
+        if len(selector) != SELECTORS_LENGTH:
+            return None
+        node_id, name = self._selector_to_keys(selector)
+        node_map = self.variable_dictionary.get(node_id)
+        return node_map.get(name) if node_map is not None else None
 
     def _get_file_attribute_segment(
         self,

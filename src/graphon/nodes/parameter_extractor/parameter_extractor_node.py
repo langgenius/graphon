@@ -1,11 +1,14 @@
+from __future__ import annotations
+
 import contextlib
 import json
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, override
+from typing import Any, override
 
+from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import (
     BuiltinNodeTypes,
     WorkflowNodeExecutionMetadataKey,
@@ -42,6 +45,7 @@ from graphon.nodes.llm.runtime_protocols import (
     PreparedLLMProtocol,
     PromptMessageSerializerProtocol,
 )
+from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.factory import build_segment_with_type
 from graphon.variables.types import ArrayValidation, SegmentType
@@ -70,10 +74,6 @@ from .prompts import (
 )
 
 logger = logging.getLogger(__name__)
-
-if TYPE_CHECKING:
-    from graphon.entities.graph_init_params import GraphInitParams
-    from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
 _JSON_OPEN_TOKENS = frozenset(("{", "["))
 _JSON_CLOSE_TOKENS = frozenset(("}", "]"))
@@ -140,8 +140,8 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         node_id: str,
         config: ParameterExtractorNodeData,
         *,
-        graph_init_params: "GraphInitParams",
-        graph_runtime_state: "GraphRuntimeState",
+        graph_init_params: GraphInitParams,
+        graph_runtime_state: GraphRuntimeState,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
         model_instance: PreparedLLMProtocol,

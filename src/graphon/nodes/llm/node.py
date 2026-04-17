@@ -8,7 +8,7 @@ import re
 import time
 from collections.abc import Generator, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, override
+from typing import Any, Literal, override
 
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import (
@@ -61,6 +61,7 @@ from graphon.nodes.llm.runtime_protocols import (
     RetrieverAttachmentLoaderProtocol,
 )
 from graphon.prompt_entities import MemoryConfig
+from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.template_rendering import Jinja2TemplateRenderer, TemplateRenderError
 from graphon.variables.segments import (
@@ -88,10 +89,6 @@ from .exc import (
     VariableNotFoundError,
 )
 from .file_saver import LLMFileSaver
-
-if TYPE_CHECKING:
-    from graphon.file.models import File
-    from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
 logger = logging.getLogger(__name__)
 
@@ -364,6 +361,9 @@ class LLMNode(Node[LLMNodeData]):
 
             if isinstance(event, LLMStructuredOutput):
                 structured_output = event
+                continue
+
+            if not isinstance(event, ModelInvokeCompletedEvent):
                 continue
 
             usage = event.usage
@@ -883,7 +883,7 @@ class LLMNode(Node[LLMNodeData]):
 
     @staticmethod
     def _extract_memory_query_variable_selectors(
-        memory: PromptMessageMemory | None,
+        memory: MemoryConfig | None,
     ) -> list[VariableSelector]:
         if not memory or not memory.query_prompt_template:
             return []
@@ -957,7 +957,10 @@ class LLMNode(Node[LLMNodeData]):
         retriever_resource = self._convert_to_original_retriever_resource(item)
         return context, retriever_resource
 
-    def _load_context_files(self, retriever_resource: dict[str, Any]) -> list[File]:
+    def _load_context_files(
+        self,
+        retriever_resource: dict[str, Any],
+    ) -> Sequence[File]:
         segment_id = retriever_resource.get("segment_id")
         if not segment_id or self._retriever_attachment_loader is None:
             return []
@@ -1378,7 +1381,10 @@ class LLMNode(Node[LLMNodeData]):
         variable_mapping: dict[str, Sequence[str]],
         node_data: LLMNodeData,
     ) -> None:
-        if node_data.context.enabled:
+        if (
+            node_data.context.enabled
+            and node_data.context.variable_selector is not None
+        ):
             variable_mapping["#context#"] = node_data.context.variable_selector
         if node_data.vision.enabled:
             variable_mapping["#files#"] = node_data.vision.configs.variable_selector

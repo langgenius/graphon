@@ -2,6 +2,7 @@ import inspect
 import time
 from collections.abc import Callable, Generator, Mapping
 from http import HTTPStatus
+from typing import Any
 
 import httpx
 import pytest
@@ -21,6 +22,10 @@ from graphon.nodes.http_request import (
     HttpRequestNode,
     HttpRequestNodeData,
     build_http_request_config,
+)
+from graphon.nodes.http_request.entities import (
+    HttpRequestNodeAuthorization,
+    HttpRequestNodeBody,
 )
 from graphon.nodes.llm.file_saver import FileSaverImpl
 from graphon.nodes.llm.node import LLMNode
@@ -58,9 +63,9 @@ class _FileReferenceFactory:
     def build_from_mapping(
         self,
         *,
-        mapping: Mapping[str, object],
-    ) -> Mapping[str, object]:
-        return mapping
+        mapping: Mapping[str, Any],
+    ) -> File:
+        return File.model_validate(mapping)
 
 
 def _build_runtime_state() -> GraphRuntimeState:
@@ -164,10 +169,10 @@ def test_http_request_node_uses_default_http_client_when_not_injected() -> None:
             title="HTTP Request",
             method="get",
             url="https://example.com",
-            authorization={"type": "no-auth"},
+            authorization=HttpRequestNodeAuthorization(type="no-auth"),
             headers="",
             params="",
-            body={"type": "none", "data": []},
+            body=HttpRequestNodeBody(type="none", data=[]),
         ),
         graph_init_params=build_graph_init_params(
             graph_config={"nodes": [], "edges": []},

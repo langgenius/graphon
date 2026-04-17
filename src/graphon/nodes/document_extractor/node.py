@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import csv
 import io
 import json
@@ -6,7 +8,7 @@ import pathlib
 import tempfile
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import Any, override
 
 import charset_normalizer
 import docx
@@ -21,6 +23,7 @@ from docx.oxml.text.paragraph import CT_P
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 
+from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.file import file_manager
 from graphon.file.enums import FileTransferMethod
@@ -28,6 +31,7 @@ from graphon.file.models import File
 from graphon.http import HttpClientProtocol, get_http_client
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.node import Node
+from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.variables.segments import ArrayFileSegment, ArrayStringSegment, FileSegment
 
 from .entities import DocumentExtractorNodeData, UnstructuredApiConfig
@@ -39,10 +43,6 @@ from .exc import (
 )
 
 logger = logging.getLogger(__name__)
-
-if TYPE_CHECKING:
-    from graphon.entities.graph_init_params import GraphInitParams
-    from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
 _MIME_PLAIN_TEXT_TYPES = frozenset((
     "text/plain",
@@ -194,8 +194,8 @@ class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
         node_id: str,
         config: DocumentExtractorNodeData,
         *,
-        graph_init_params: "GraphInitParams",
-        graph_runtime_state: "GraphRuntimeState",
+        graph_init_params: GraphInitParams,
+        graph_runtime_state: GraphRuntimeState,
         unstructured_api_config: UnstructuredApiConfig | None = None,
         http_client: HttpClientProtocol | None = None,
     ) -> None:
@@ -634,9 +634,11 @@ def _download_file_content(http_client: HttpClientProtocol, file: File) -> bytes
         raise FileDownloadError(msg)
 
     try:
-        if file.transfer_method == FileTransferMethod.REMOTE_URL:
-            remote_url = cast("str", file.remote_url)
-            response = http_client.get(remote_url)
+        if (
+            file.transfer_method == FileTransferMethod.REMOTE_URL
+            and file.remote_url is not None
+        ):
+            response = http_client.get(file.remote_url)
             response.raise_for_status()
             return response.content
         return file_manager.download(file)
@@ -743,7 +745,9 @@ def _extract_text_from_excel(file_content: bytes) -> str:
         markdown_table = ""
         for sheet_name in excel_file.sheet_names:
             try:
-                df = cast("pd.DataFrame", excel_file.parse(sheet_name=sheet_name))
+                df = excel_file.parse(sheet_name=sheet_name)
+                if not isinstance(df, pd.DataFrame):
+                    continue
                 df = df.dropna(how="all")
 
                 # Combine multi-line text in each cell into a single line

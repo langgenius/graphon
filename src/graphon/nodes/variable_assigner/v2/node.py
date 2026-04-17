@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import json
 from collections.abc import Generator, Mapping, MutableMapping, Sequence
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import Any, override
 
+from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.node_events.base import (
     NodeEventBase,
@@ -14,12 +17,10 @@ from graphon.node_events.node import (
 from graphon.nodes.base.node import Node
 from graphon.nodes.variable_assigner.common import helpers as common_helpers
 from graphon.nodes.variable_assigner.common.exc import VariableOperatorNodeError
+from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.variables.consts import SELECTORS_LENGTH
 from graphon.variables.types import SegmentType
-from graphon.variables.variables import (
-    Variable,
-    VariableBase,
-)
+from graphon.variables.variables import VariableBase
 
 from . import helpers
 from .entities import VariableAssignerNodeData, VariableOperationItem
@@ -31,11 +32,6 @@ from .exc import (
     OperationNotSupportedError,
     VariableNotFoundError,
 )
-
-if TYPE_CHECKING:
-    from graphon.entities.graph_init_params import GraphInitParams
-    from graphon.runtime.graph_runtime_state import GraphRuntimeState
-
 
 _SKIP_VARIABLE_UPDATE = object()
 
@@ -85,8 +81,8 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
         node_id: str,
         config: VariableAssignerNodeData,
         *,
-        graph_init_params: "GraphInitParams",
-        graph_runtime_state: "GraphRuntimeState",
+        graph_init_params: GraphInitParams,
+        graph_runtime_state: GraphRuntimeState,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -176,8 +172,8 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
         )
 
         for selector in updated_variable_selectors:
-            variable = working_variable_pool.get(selector)
-            if not isinstance(variable, VariableBase):
+            variable = working_variable_pool.get_variable(selector)
+            if variable is None:
                 raise VariableNotFoundError(variable_selector=selector)
             process_data[variable.name] = variable.value
 
@@ -192,10 +188,10 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
             updated_variables,
         )
         for selector in updated_variable_selectors:
-            variable = working_variable_pool.get(selector)
-            if not isinstance(variable, VariableBase):
+            variable = working_variable_pool.get_variable(selector)
+            if variable is None:
                 raise VariableNotFoundError(variable_selector=selector)
-            yield VariableUpdatedEvent(variable=cast("Variable", variable))
+            yield VariableUpdatedEvent(variable=variable)
 
         yield StreamCompletedEvent(
             node_run_result=NodeRunResult(
