@@ -1,7 +1,10 @@
 from collections.abc import Generator, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, override
+from typing import Any, override
 
+from typing_extensions import TypeIs
+
+from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import (
     BuiltinNodeTypes,
     WorkflowNodeExecutionMetadataKey,
@@ -28,19 +31,12 @@ from graphon.nodes.tool_runtime_entities import (
     ToolRuntimeMessage,
     ToolRuntimeParameter,
 )
+from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import ArrayFileSegment
 
 from .entities import ToolNodeData
-from .exc import (
-    ToolFileError,
-    ToolNodeError,
-    ToolParameterError,
-)
-
-if TYPE_CHECKING:
-    from graphon.entities.graph_init_params import GraphInitParams
-    from graphon.runtime.graph_runtime_state import GraphRuntimeState
-    from graphon.runtime.variable_pool import VariablePool
+from .exc import ToolFileError, ToolNodeError, ToolParameterError
 
 
 @dataclass(slots=True)
@@ -49,6 +45,10 @@ class _ToolMessageState:
     files: list[File] = field(default_factory=list)
     json_values: list[dict | list] = field(default_factory=list)
     variables: dict[str, Any] = field(default_factory=dict)
+
+
+def _is_variable_selector(value: object) -> TypeIs[list[str]]:
+    return isinstance(value, list) and all(isinstance(part, str) for part in value)
 
 
 class ToolNode(Node[ToolNodeData]):
@@ -62,8 +62,8 @@ class ToolNode(Node[ToolNodeData]):
         node_id: str,
         config: ToolNodeData,
         *,
-        graph_init_params: "GraphInitParams",
-        graph_runtime_state: "GraphRuntimeState",
+        graph_init_params: GraphInitParams,
+        graph_runtime_state: GraphRuntimeState,
         tool_file_manager_factory: ToolFileManagerProtocol,
         # TODO @-LAN: See https://github.com/langgenius/graphon/issues/new/choose.  # noqa: FIX002
         # Make `runtime` optional once Graphon provides a default tool runtime
@@ -196,7 +196,7 @@ class ToolNode(Node[ToolNodeData]):
         self,
         *,
         tool_parameters: Sequence[ToolRuntimeParameter],
-        variable_pool: "VariablePool",
+        variable_pool: VariablePool,
         node_data: ToolNodeData,
         for_log: bool = False,
     ) -> dict[str, Any]:
@@ -230,6 +230,9 @@ class ToolNode(Node[ToolNodeData]):
                 continue
             tool_input = node_data.tool_parameters[parameter_name]
             if tool_input.type == "variable":
+                if not _is_variable_selector(tool_input.value):
+                    msg = "Variable tool input value must be a list of strings."
+                    raise ToolParameterError(msg)
                 variable = variable_pool.get(tool_input.value)
                 if variable is None:
                     if parameter.required:
@@ -478,8 +481,7 @@ class ToolNode(Node[ToolNodeData]):
         state: _ToolMessageState,
         **_: Any,
     ) -> Generator[NodeEventBase, None, None]:
-        _ = payload
-
+        del payload
         tool_file_id = (meta or {}).get("tool_file_id")
         if not isinstance(tool_file_id, str) or not tool_file_id:
             msg = "tool blob message is missing tool_file_id metadata"
@@ -583,7 +585,7 @@ class ToolNode(Node[ToolNodeData]):
         state: _ToolMessageState,
         **_: Any,
     ) -> Generator[NodeEventBase, None, None]:
-        _ = payload
+        del payload
         if "file" not in meta:
             msg = "File message is missing 'file' key in meta"
             raise ToolNodeError(msg)
@@ -602,7 +604,7 @@ class ToolNode(Node[ToolNodeData]):
         payload: ToolRuntimeMessage.LogMessage,
         **_: Any,
     ) -> Generator[NodeEventBase, None, None]:
-        _ = payload
+        del payload
         yield from ()
 
     def _emit_final_stream_events(
@@ -670,6 +672,9 @@ class ToolNode(Node[ToolNodeData]):
                     for selector in selectors:
                         result[selector.variable] = selector.value_selector
                 case "variable":
+                    if not _is_variable_selector(tool_input.value):
+                        msg = "Variable tool input value must be a list of strings."
+                        raise TypeError(msg)
                     selector_key = ".".join(tool_input.value)
                     result[f"#{selector_key}#"] = tool_input.value
                 case "constant":

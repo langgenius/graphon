@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+
 from graphon.nodes.if_else.entities import IfElseNodeData
 from graphon.nodes.if_else.if_else_node import IfElseNode
 from graphon.utils.condition.entities import Condition
@@ -11,7 +13,9 @@ def _condition(selector: list[str], value: str) -> Condition:
     )
 
 
-def _extract_variable_mapping(node_data: IfElseNodeData) -> dict[str, list[str]]:
+def _extract_variable_mapping(
+    node_data: IfElseNodeData,
+) -> dict[str, Sequence[str]]:
     return dict(
         IfElseNode.extract_variable_selector_to_variable_mapping(
             graph_config={},

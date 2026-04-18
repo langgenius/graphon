@@ -7,7 +7,7 @@ from collections.abc import Generator, Mapping, Sequence
 from datetime import UTC, datetime
 from functools import singledispatchmethod
 from types import MappingProxyType
-from typing import Any, ClassVar, cast, get_args, get_origin
+from typing import Any, ClassVar, get_args, get_origin
 from uuid import uuid4
 
 from graphon.entities.base_node_data import BaseNodeData, RetryConfig
@@ -212,14 +212,14 @@ class _NodeDataModelMixin[NodeDataT: BaseNodeData]:
             payload = node_data.model_dump(mode="python")
         else:
             payload = dict(node_data)
-        return cast("NodeDataT", cls._node_data_type.model_validate(payload))
+        return cls._get_node_data_type().model_validate(payload)
 
     def init_node_data(
         self: Node[NodeDataT],
         data: BaseNodeData | Mapping[str, Any],
     ) -> None:
         """Hydrate `_node_data` for legacy callers that bypass `__init__`."""
-        self._node_data = self.validate_node_data(cast("BaseNodeData", data))
+        self._node_data = self.validate_node_data(data)
 
     def init_node_identity(self: Node[NodeDataT], node_id: str) -> None:
         """Hydrate node identity for legacy callers that bypass `__init__`."""
@@ -488,7 +488,9 @@ class Node[NodeDataT: BaseNodeData](
         Node._registry_version += 1
 
     @classmethod
-    def _extract_node_data_type_from_generic(cls) -> type[BaseNodeData] | None:
+    def _extract_node_data_type_from_generic(
+        cls: type[Node[NodeDataT]],
+    ) -> type[NodeDataT] | None:
         """Extract the node data type from the generic parameter `Node[T]`.
 
         Inspects `__orig_bases__` to find the `Node[T]` parameterization and
@@ -532,6 +534,16 @@ class Node[NodeDataT: BaseNodeData](
                 return candidate
 
         return None
+
+    @classmethod
+    def _get_node_data_type(cls: type[Node[NodeDataT]]) -> type[NodeDataT]:
+        node_data_type = cls._extract_node_data_type_from_generic()
+        if node_data_type is None:
+            msg = (
+                f"{cls.__name__} must inherit from Node[T] with a BaseNodeData subtype"
+            )
+            raise TypeError(msg)
+        return node_data_type
 
     # Global registry populated via __init_subclass__
     _registry: ClassVar[dict[NodeType, dict[str, type[Node]]]] = {}
@@ -583,7 +595,9 @@ class Node[NodeDataT: BaseNodeData](
         return str(execution_id)
 
     @abstractmethod
-    def _run(self) -> NodeRunResult | Generator[NodeEventBase, None, None]:
+    def _run(
+        self,
+    ) -> NodeRunResult | Generator[NodeEventBase | GraphNodeEventBase, None, None]:
         """Run the node and return either a result object or an event stream."""
         raise NotImplementedError
 

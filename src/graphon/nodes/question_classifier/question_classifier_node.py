@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, override
+from typing import Any, override
 
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import (
@@ -11,12 +13,16 @@ from graphon.enums import (
     WorkflowNodeExecutionMetadataKey,
     WorkflowNodeExecutionStatus,
 )
+from graphon.file.models import File
 from graphon.http import HttpClientProtocol
 from graphon.model_runtime.entities.llm_entities import (
     LLMMode,
     LLMUsage,
 )
-from graphon.model_runtime.entities.message_entities import PromptMessageRole
+from graphon.model_runtime.entities.message_entities import (
+    PromptMessage,
+    PromptMessageRole,
+)
 from graphon.model_runtime.entities.model_entities import ModelPropertyKey
 from graphon.model_runtime.memory.prompt_message_memory import PromptMessageMemory
 from graphon.model_runtime.utils.encoders import jsonable_encoder
@@ -36,6 +42,7 @@ from graphon.nodes.llm.runtime_protocols import (
     PreparedLLMProtocol,
     PromptMessageSerializerProtocol,
 )
+from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.template_rendering import Jinja2TemplateRenderer
 from graphon.utils.json_in_md_parser import parse_and_check_json_markdown
 
@@ -51,13 +58,14 @@ from .template_prompts import (
     QUESTION_CLASSIFIER_USER_PROMPT_3,
 )
 
-if TYPE_CHECKING:
-    from graphon.file.models import File
-    from graphon.runtime.graph_runtime_state import GraphRuntimeState
-
 
 class _PassthroughPromptMessageSerializer:
-    def serialize(self, *, model_mode: Any, prompt_messages: Sequence[Any]) -> Any:
+    def serialize(
+        self,
+        *,
+        model_mode: Any,
+        prompt_messages: Sequence[PromptMessage],
+    ) -> Any:
         _ = model_mode
         return list(prompt_messages)
 
@@ -66,7 +74,7 @@ class _PassthroughPromptMessageSerializer:
 class _QuestionClassifierRunContext:
     inputs: dict[str, Any]
     model_instance: PreparedLLMProtocol
-    prompt_messages: list[Any]
+    prompt_messages: Sequence[PromptMessage]
     stop: Sequence[str] | None
     rendered_classes: list[Any]
 
@@ -75,7 +83,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
     node_type = BuiltinNodeTypes.QUESTION_CLASSIFIER
     execution_type = NodeExecutionType.BRANCH
 
-    _file_outputs: list["File"]
+    _file_outputs: list[File]
     _llm_file_saver: LLMFileSaver
     _prompt_message_serializer: PromptMessageSerializerProtocol
     _model_instance: PreparedLLMProtocol
@@ -88,8 +96,8 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         node_id: str,
         config: QuestionClassifierNodeData,
         *,
-        graph_init_params: "GraphInitParams",
-        graph_runtime_state: "GraphRuntimeState",
+        graph_init_params: GraphInitParams,
+        graph_runtime_state: GraphRuntimeState,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
         model_instance: PreparedLLMProtocol,
@@ -211,7 +219,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         query: str,
         model_instance: PreparedLLMProtocol,
         files: Sequence[Any],
-    ) -> tuple[list[Any], Sequence[str] | None]:
+    ) -> tuple[Sequence[PromptMessage], Sequence[str] | None]:
         rest_token = self._calculate_rest_token(
             node_data=self.node_data,
             query=query,

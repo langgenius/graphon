@@ -1,13 +1,17 @@
+from __future__ import annotations
+
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from textwrap import dedent
-from typing import TYPE_CHECKING, Any, Protocol, cast, override
+from typing import Any, Protocol, TypeGuard, override
 
+from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.node import Node
 from graphon.nodes.code.entities import CodeLanguage, CodeNodeData
 from graphon.nodes.code.limits import CodeNodeLimits
+from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.variables.segments import ArrayFileSegment
 from graphon.variables.types import SegmentType
 
@@ -16,10 +20,6 @@ from .exc import (
     DepthLimitError,
     OutputValidationError,
 )
-
-if TYPE_CHECKING:
-    from graphon.entities.graph_init_params import GraphInitParams
-    from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
 
 class WorkflowCodeExecutor(Protocol):
@@ -84,8 +84,8 @@ class CodeNode(Node[CodeNodeData]):
         node_id: str,
         config: CodeNodeData,
         *,
-        graph_init_params: "GraphInitParams",
-        graph_runtime_state: "GraphRuntimeState",
+        graph_init_params: GraphInitParams,
+        graph_runtime_state: GraphRuntimeState,
         code_executor: WorkflowCodeExecutor,
         code_limits: CodeNodeLimits,
     ) -> None:
@@ -248,6 +248,47 @@ class CodeNode(Node[CodeNodeData]):
     def _output_path_with_index(prefix: str, output_name: str, index: int) -> str:
         return f"{CodeNode._output_path(prefix, output_name)}[{index}]"
 
+    @staticmethod
+    def _is_output_object(value: Any) -> TypeGuard[dict[str, Any]]:
+        """Treat JSON-like object outputs as string-keyed dictionaries."""
+        return isinstance(value, dict)
+
+    def _normalize_output_object_array(
+        self,
+        *,
+        value: Any,
+        output_name: str,
+        prefix: str,
+    ) -> list[dict[str, Any] | None] | None:
+        output_path = self._output_path(prefix, output_name)
+        if not isinstance(value, list):
+            if value is None:
+                return None
+            msg = f"Output {output_path} is not an array, got {type(value)} instead."
+            raise OutputValidationError(msg)
+
+        if len(value) > self._limits.max_object_array_length:
+            msg = (
+                f"The length of output variable `{output_path}` must be "
+                f"less than {self._limits.max_object_array_length} elements."
+            )
+            raise OutputValidationError(msg)
+
+        normalized_values: list[dict[str, Any] | None] = []
+        for i, inner_value in enumerate(value):
+            if inner_value is None:
+                normalized_values.append(None)
+                continue
+            if not self._is_output_object(inner_value):
+                msg = (
+                    f"Output {output_path}[{i}] is not an object, got "
+                    f"{type(inner_value)} instead at index {i}."
+                )
+                raise OutputValidationError(msg)
+            normalized_values.append(inner_value)
+
+        return normalized_values
+
     def _validate_untyped_list(
         self,
         *,
@@ -354,7 +395,7 @@ class CodeNode(Node[CodeNodeData]):
         output_schema: dict[str, CodeNodeData.Output] | None,
     ) -> Mapping[str, Any] | None:
         output_path = self._output_path(prefix, output_name)
-        if not isinstance(value, dict):
+        if not self._is_output_object(value):
             if value is None:
                 return None
             msg = f"Output {output_path} is not an object, got {type(value)} instead."
@@ -479,44 +520,28 @@ class CodeNode(Node[CodeNodeData]):
         depth: int,
         output_schema: dict[str, CodeNodeData.Output] | None,
     ) -> list[Mapping[str, Any] | None] | None:
-        output_path = self._output_path(prefix, output_name)
-        if not isinstance(value, list):
-            if value is None:
-                return None
-            msg = f"Output {output_path} is not an array, got {type(value)} instead."
-            raise OutputValidationError(msg)
+        normalized_object_values = self._normalize_output_object_array(
+            value=value,
+            output_name=output_name,
+            prefix=prefix,
+        )
+        if normalized_object_values is None:
+            return None
 
-        if len(value) > self._limits.max_object_array_length:
-            msg = (
-                f"The length of output variable `{output_path}` must be "
-                f"less than {self._limits.max_object_array_length} elements."
-            )
-            raise OutputValidationError(msg)
-
-        for i, inner_value in enumerate(value):
-            if not isinstance(inner_value, dict):
-                if inner_value is None:
-                    continue
-                msg = (
-                    f"Output {output_path}[{i}] is not an object, got "
-                    f"{type(inner_value)} instead at index {i}."
-                )
-                raise OutputValidationError(msg)
-
-        normalized_values: list[Mapping[str, Any] | None] = []
-        for i, inner_value in enumerate(value):
+        transformed_values: list[Mapping[str, Any] | None] = []
+        for i, inner_value in enumerate(normalized_object_values):
             if inner_value is None:
-                normalized_values.append(None)
+                transformed_values.append(None)
                 continue
-            normalized_values.append(
+            transformed_values.append(
                 self._transform_result(
-                    result=cast("Mapping[str, Any]", inner_value),
+                    result=inner_value,
                     output_schema=output_schema,
                     prefix=self._output_path_with_index(prefix, output_name, i),
                     depth=depth + 1,
                 ),
             )
-        return normalized_values
+        return transformed_values
 
     def _transform_array_boolean_output(
         self,

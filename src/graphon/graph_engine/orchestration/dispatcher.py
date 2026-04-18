@@ -4,7 +4,7 @@ import logging
 import queue
 import threading
 import time
-from typing import TYPE_CHECKING, final
+from typing import final
 
 from graphon.graph_events.base import GraphNodeEventBase
 from graphon.graph_events.node import (
@@ -14,10 +14,8 @@ from graphon.graph_events.node import (
 )
 
 from ..event_management import EventManager
+from ..event_management.event_handlers import EventHandler
 from .execution_coordinator import ExecutionCoordinator
-
-if TYPE_CHECKING:
-    from ..event_management import EventHandler
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +37,7 @@ class Dispatcher:
     def __init__(
         self,
         event_queue: queue.Queue[GraphNodeEventBase],
-        event_handler: "EventHandler",
+        event_handler: EventHandler,
         execution_coordinator: ExecutionCoordinator,
         event_emitter: EventManager | None = None,
     ) -> None:

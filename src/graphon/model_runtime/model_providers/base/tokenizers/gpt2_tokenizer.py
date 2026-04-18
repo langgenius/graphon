@@ -38,12 +38,6 @@ class GPT2Tokenizer:
 
     @staticmethod
     def get_num_tokens(text: str) -> int:
-        # Because this process needs more cpu resource, we turn this back
-        # before we find a better way to handle it.
-        #
-        # future = _executor.submit(GPT2Tokenizer._get_num_tokens_by_gpt2, text)
-        # result = future.result()
-        # return cast(int, result)
         return GPT2Tokenizer._get_num_tokens_by_gpt2(text)
 
     @staticmethod
@@ -54,7 +48,6 @@ class GPT2Tokenizer:
         with _lock:
             if _tokenizer is None:
                 # Try to use tiktoken to get the tokenizer because it is faster
-                #
                 _tokenizer = _try_load_tiktoken_encoder()
                 if _tokenizer is None:
                     import transformers  # noqa: PLC0415

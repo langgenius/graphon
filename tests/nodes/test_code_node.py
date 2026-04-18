@@ -51,3 +51,25 @@ def test_transform_result_rejects_non_string_array_elements_with_validation_erro
             result={"items": ["valid", 1]},
             output_schema=output_schema,
         )
+
+
+def test_transform_result_prioritizes_array_object_shape_errors() -> None:
+    node = _build_code_node()
+    output_schema = {
+        "items": CodeNodeData.Output(
+            type=SegmentType.ARRAY_OBJECT,
+            children={"child": CodeNodeData.Output(type=SegmentType.STRING)},
+        ),
+    }
+
+    with pytest.raises(
+        OutputValidationError,
+        match=(
+            r"Output items\[1\] is not an object, got <class 'int'> "
+            r"instead at index 1\."
+        ),
+    ):
+        node.transform_result(
+            result={"items": [{"child": 1}, 1]},
+            output_schema=output_schema,
+        )

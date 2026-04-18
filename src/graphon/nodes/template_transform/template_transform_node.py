@@ -1,21 +1,31 @@
-from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, cast, override
+from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from typing import Any, override
+
+from typing_extensions import TypeIs
+
+from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.entities import VariableSelector
 from graphon.nodes.base.node import Node
 from graphon.nodes.template_transform.entities import TemplateTransformNodeData
+from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.template_rendering import (
     Jinja2TemplateRenderer,
     TemplateRenderError,
 )
 
-if TYPE_CHECKING:
-    from graphon.entities.graph_init_params import GraphInitParams
-    from graphon.runtime.graph_runtime_state import GraphRuntimeState
-
 DEFAULT_TEMPLATE_TRANSFORM_MAX_OUTPUT_LENGTH = 400_000
+
+
+def _is_string_sequence(value: object) -> TypeIs[Sequence[str]]:
+    return (
+        isinstance(value, Sequence)
+        and not isinstance(value, str)
+        and all(isinstance(selector_part, str) for selector_part in value)
+    )
 
 
 class TemplateTransformNode(Node[TemplateTransformNodeData]):
@@ -29,8 +39,8 @@ class TemplateTransformNode(Node[TemplateTransformNodeData]):
         node_id: str,
         config: TemplateTransformNodeData,
         *,
-        graph_init_params: "GraphInitParams",
-        graph_runtime_state: "GraphRuntimeState",
+        graph_init_params: GraphInitParams,
+        graph_runtime_state: GraphRuntimeState,
         jinja2_template_renderer: Jinja2TemplateRenderer,
         max_output_length: int | None = None,
     ) -> None:
@@ -134,16 +144,7 @@ class TemplateTransformNode(Node[TemplateTransformNodeData]):
 
             variable = variable_selector.get("variable")
             value_selector = variable_selector.get("value_selector")
-            if (
-                isinstance(variable, str)
-                and isinstance(value_selector, Sequence)
-                and all(
-                    isinstance(selector_part, str) for selector_part in value_selector
-                )
-            ):
-                variable_mapping[node_id + "." + variable] = cast(
-                    Sequence[str],
-                    value_selector,
-                )
+            if isinstance(variable, str) and _is_string_sequence(value_selector):
+                variable_mapping[node_id + "." + variable] = value_selector
 
         return variable_mapping
