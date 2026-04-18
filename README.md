@@ -44,7 +44,9 @@ make test
 ```
 
 `make dev` installs the project, syncs development dependencies, and sets up
-[`prek`](https://prek.j178.dev/) Git hooks.
+[`prek`](https://prek.j178.dev/) Git hooks. `make test` is the progressive
+local validation entrypoint: it formats, applies lint fixes, runs `ty check`,
+and then runs `pytest`.
 
 ## Run the Example Workflow
 
@@ -140,8 +142,8 @@ construction, input seeding, and streamed output handling.
 Contributor setup, tooling details, CLA notes, and commit/PR conventions live
 in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-CI currently validates commit messages, pull request titles, formatting, lint,
-and tests on Python 3.12 and 3.13. Python 3.14 is currently excluded because
+CI currently validates pull request titles, runs `make check`, and runs
+`make test` on Python 3.12 and 3.13. Python 3.14 is currently excluded because
 `unstructured` does not yet support it.
 
 ## License

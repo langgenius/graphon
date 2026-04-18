@@ -49,8 +49,7 @@ The current hook set includes:
 - BOM cleanup and line ending normalization
 - TOML and YAML validation
 - shebang executable checks
-- local `make format`
-- local `make lint`
+- local `make tc` (which runs `format`, `lint`, and `ty check` in sequence)
 
 Useful direct commands:
 
@@ -74,31 +73,36 @@ uv run prek run -a
 Use these commands for normal development:
 
 - `make format`: run `uv run ruff format`
-- `make lint`: run `uv run ruff check --fix`
-- `make check`: run `uv run ruff format --check && uv run ruff check`
-- `make test`: run `uv run --frozen pytest`
-- `make pre`: run `format`, `lint`, and `test`
+- `make lint`: run `make format`, then `uv run ruff check --fix`
+- `make tc`: run `make lint`, then `uv run ty check`
+- `make check`: run `uv run ruff format --check && uv run ruff check && uv run ty check`
+- `make test`: run `make tc`, then `uv run pytest`
 - `make build`: build the package distributions
 - `make clean`: remove build artifacts and caches
 
 Notes:
 
 - `make lint` is mutating. It may rewrite files.
-- `make check` is the non-mutating style and lint check used in CI.
+- `make tc` is the local type-check entrypoint used by Git hooks. It includes
+  formatting and lint fixes first.
+- `make test` is the progressive local full-chain target. It formats, applies
+  lint fixes, runs `ty check`, and then runs the test suite.
+- `make check` aggregates the same non-mutating lint and type-check commands
+  used by CI.
 - `pytest` is configured with `-n auto` and `testpaths = ['tests']`, so the
   test suite runs in parallel by default.
-- `make test` uses `--frozen`. If you change dependencies, refresh and commit
-  `uv.lock` before opening a pull request.
+- If you change dependencies, refresh and commit `uv.lock` before opening a
+  pull request.
 
 For most changes, a good local sequence is:
 
 ```bash
-make pre
+make test
 make check
 ```
 
-`make pre` applies local fixes and runs the test suite. `make check` then
-confirms the non-mutating CI check job will pass.
+`make test` applies local fixes, runs `ty check`, and then runs the test suite.
+`make check` then confirms the non-mutating CI check job will pass.
 
 ### CI Checks
 
@@ -108,9 +112,9 @@ Pull requests targeting `main` currently run three kinds of checks:
 2. `make check`
 3. `make test` on Python 3.12 and 3.13
 
-Keep local workflow aligned with those checks. A green local `make pre` is
-useful, but it is not a complete substitute for the exact CI flow because CI
-also validates PR titles and a Python version matrix.
+Keep local workflow aligned with those checks. A green local `make test` plus
+`make check` is useful, but it is not a complete substitute for the exact CI
+flow because CI also validates PR titles and a Python version matrix.
 
 ## Git Commits
 
@@ -173,7 +177,7 @@ Before you open a pull request:
 - search existing pull requests again to confirm there is no duplicate review in
   progress
 - make sure the change stays focused and reviewable
-- run `make pre` before pushing and keep `make check` green locally when
+- run `make test` before pushing and keep `make check` green locally when
   possible
 
 When you open a pull request:
@@ -226,7 +230,7 @@ Pushing `vX.Y.Z` triggers the release workflow. It:
 
 1. verifies the tag matches `pyproject.toml` and points to a commit reachable
    from `main`
-2. runs tests and builds release distributions once
+2. runs tests before building release distributions
 3. creates or updates a GitHub draft release and publishes the same build
    artifacts to TestPyPI
 4. waits for approval on the `pypi` environment
