@@ -32,6 +32,8 @@ class FormInputDefault(BaseModel):
     # value when switching between `VARIABLE` and `CONSTANT` types. This
     # necessitates retaining all fields, making a discriminated union unsuitable.
 
+    # NOTE: This class is renamed from FormInputDefault.
+
     type: PlaceholderType
 
     # The selector of default variable, used when `type` is `VARIABLE`.
@@ -57,6 +59,7 @@ class FormInputDefault(BaseModel):
 class FormInput(BaseModel):
     """Form input definition."""
 
+    # NOTE: This class is renamed from FormInput.
     type: FormInputType
     output_variable_name: str
     default: FormInputDefault | None = None
