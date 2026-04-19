@@ -42,10 +42,27 @@ class TimeoutUnit(enum.StrEnum):
 
 
 class FormInputType(enum.StrEnum):
-    """Form input types."""
+    """Form input types.
 
+    Name for this enumeration are intentionally keep the same as those for `VariableEntityType`.
+    """
+
+    # Both `TEXT_INPUT` and `PARAGRAPH` represent string input fields.
+    # The corresponding generated variable type is `SegmentType.STRING`.
     TEXT_INPUT = enum.auto()
     PARAGRAPH = enum.auto()
+
+    # A single-select input field (e.g., a dropdown or radio buttons).
+    # The corresponding generated variable type is `SegmentType.STRING`.
+    SELECT = enum.auto()
+
+    # A file input field that accepts a single file.
+    #  The corresponding generated variable type is `SegmentType.FILE`.
+    FILE = enum.auto()
+
+    # A file input field that accepts zero or more files.
+    # The corresponding generated variable type is `SegmentType.ARRAY_FILE`.
+    FILE_LIST = enum.auto()
 
 
 class PlaceholderType(enum.StrEnum):
