@@ -2,9 +2,12 @@ import time
 
 from graphon.model_runtime.entities.model_entities import ModelType
 from graphon.model_runtime.model_providers.base.ai_model import AIModel
+from graphon.model_runtime.protocols.moderation_runtime import (
+    ModerationModelRuntime,
+)
 
 
-class ModerationModel(AIModel):
+class ModerationModel(AIModel[ModerationModelRuntime]):
     """Model class for moderation model."""
 
     model_type: ModelType = ModelType.MODERATION

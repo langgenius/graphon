@@ -58,7 +58,7 @@ from graphon.model_runtime.errors.invoke import (
 from graphon.model_runtime.model_providers.base.large_language_model import (
     merge_tool_call_deltas,
 )
-from graphon.model_runtime.runtime import ModelRuntime
+from graphon.model_runtime.protocols.runtime import ModelRuntime
 from graphon.model_runtime.utils.encoders import jsonable_encoder
 
 from .config import SlimConfig

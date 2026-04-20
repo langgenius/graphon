@@ -1,6 +1,8 @@
 # Model Runtime
 
-This module provides the interface for invoking and authenticating various models, and offers Dify a unified information and credentials form rule for model providers.
+This module provides the interfaces for invoking and authenticating various
+models, and offers Dify a unified information and credentials form rule for
+model providers.
 
 - On one hand, it decouples models from upstream and downstream processes, facilitating horizontal expansion for developers,
 - On the other hand, it allows for direct display of providers and models in the frontend interface by simply defining them in the backend, eliminating the need to modify frontend logic.
@@ -32,7 +34,21 @@ This module provides the interface for invoking and authenticating various model
 
 ## Structure
 
-Model Runtime is divided into three layers:
+Model Runtime is divided into protocol and implementation layers:
+
+- Provider/runtime protocols
+
+  Shared provider concerns live in `protocols/provider_runtime.py`, while each
+  model capability has its own protocol module such as
+  `protocols/llm_runtime.py`, `protocols/text_embedding_runtime.py`, and
+  `protocols/tts_runtime.py`. Downstream runtimes can implement only the
+  capabilities they need instead of satisfying a single monolithic interface.
+
+- Aggregate runtime protocol
+
+  `protocols/runtime.py` composes the individual capability protocols into
+  `ModelRuntime` for adapters that intentionally implement the full surface
+  area.
 
 - The outermost layer is the factory method
 

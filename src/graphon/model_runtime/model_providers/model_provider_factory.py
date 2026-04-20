@@ -22,7 +22,7 @@ from graphon.model_runtime.model_providers.base.text_embedding_model import (
     TextEmbeddingModel,
 )
 from graphon.model_runtime.model_providers.base.tts_model import TTSModel
-from graphon.model_runtime.runtime import ModelRuntime
+from graphon.model_runtime.protocols.runtime import ModelRuntime
 from graphon.model_runtime.schema_validators.model_credential_schema_validator import (
     ModelCredentialSchemaValidator,
 )

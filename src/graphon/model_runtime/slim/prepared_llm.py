@@ -14,9 +14,10 @@ from graphon.model_runtime.entities.message_entities import (
     PromptMessageTool,
 )
 from graphon.model_runtime.entities.model_entities import AIModelEntity, ModelType
+from graphon.model_runtime.protocols.llm_runtime import LLMModelRuntime
 from graphon.nodes.llm.runtime_protocols import PreparedLLMProtocol
 
-from .runtime import SlimRuntime, SlimStructuredOutputParseError
+from .runtime import SlimStructuredOutputParseError
 
 
 class SlimPreparedLLM(PreparedLLMProtocol):
@@ -24,7 +25,7 @@ class SlimPreparedLLM(PreparedLLMProtocol):
     def __init__(
         self,
         *,
-        runtime: SlimRuntime,
+        runtime: LLMModelRuntime,
         provider: str,
         model_name: str,
         credentials: Mapping[str, Any],

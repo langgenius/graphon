@@ -22,6 +22,7 @@ from graphon.model_runtime.entities.model_entities import (
     PriceType,
 )
 from graphon.model_runtime.model_providers.base.ai_model import AIModel
+from graphon.model_runtime.protocols.llm_runtime import LLMModelRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -227,7 +228,7 @@ def _invoke_llm_via_runtime(
     )
 
 
-class LargeLanguageModel(AIModel):
+class LargeLanguageModel(AIModel[LLMModelRuntime]):
     """Model class for large language model."""
 
     model_type: ModelType = ModelType.LLM

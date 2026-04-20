@@ -4,7 +4,20 @@ from graphon.graph.graph import NodeFactory
 from graphon.graph.validation import GraphValidationRule
 from graphon.http.protocols import HttpClientProtocol, HttpResponseProtocol
 from graphon.model_runtime.memory.prompt_message_memory import PromptMessageMemory
-from graphon.model_runtime.runtime import ModelRuntime
+from graphon.model_runtime.protocols.llm_runtime import LLMModelRuntime
+from graphon.model_runtime.protocols.moderation_runtime import (
+    ModerationModelRuntime,
+)
+from graphon.model_runtime.protocols.provider_runtime import ModelProviderRuntime
+from graphon.model_runtime.protocols.rerank_runtime import RerankModelRuntime
+from graphon.model_runtime.protocols.runtime import ModelRuntime
+from graphon.model_runtime.protocols.speech_to_text_runtime import (
+    SpeechToTextModelRuntime,
+)
+from graphon.model_runtime.protocols.text_embedding_runtime import (
+    TextEmbeddingModelRuntime,
+)
+from graphon.model_runtime.protocols.tts_runtime import TTSModelRuntime
 from graphon.nodes.code.code_node import WorkflowCodeExecutor
 from graphon.nodes.llm.protocols import CredentialsProvider, ModelFactory
 from graphon.nodes.llm.runtime_protocols import (
@@ -40,8 +53,11 @@ from graphon.protocols import (
 from graphon.protocols import (
     HumanInputNodeRuntimeProtocol as PublicHumanInputNodeRuntimeProtocol,
 )
+from graphon.protocols import LLMModelRuntime as PublicLLMModelRuntime
 from graphon.protocols import ModelFactory as PublicModelFactory
+from graphon.protocols import ModelProviderRuntime as PublicModelProviderRuntime
 from graphon.protocols import ModelRuntime as PublicModelRuntime
+from graphon.protocols import ModerationModelRuntime as PublicModerationModelRuntime
 from graphon.protocols import NodeFactory as PublicNodeFactory
 from graphon.protocols import PreparedLLMProtocol as PublicPreparedLLMProtocol
 from graphon.protocols import PromptMessageMemory as PublicPromptMessageMemory
@@ -52,11 +68,19 @@ from graphon.protocols import (
     ReadOnlyGraphRuntimeState as PublicReadOnlyGraphRuntimeState,
 )
 from graphon.protocols import ReadOnlyVariablePool as PublicReadOnlyVariablePool
+from graphon.protocols import RerankModelRuntime as PublicRerankModelRuntime
 from graphon.protocols import (
     RetrieverAttachmentLoaderProtocol as PublicRetrieverAttachmentLoaderProtocol,
 )
+from graphon.protocols import (
+    SpeechToTextModelRuntime as PublicSpeechToTextModelRuntime,
+)
+from graphon.protocols import (
+    TextEmbeddingModelRuntime as PublicTextEmbeddingModelRuntime,
+)
 from graphon.protocols import ToolFileManagerProtocol as PublicToolFileManagerProtocol
 from graphon.protocols import ToolNodeRuntimeProtocol as PublicToolNodeRuntimeProtocol
+from graphon.protocols import TTSModelRuntime as PublicTTSModelRuntime
 from graphon.protocols import VariableLoader as PublicVariableLoader
 from graphon.protocols import WorkflowCodeExecutor as PublicWorkflowCodeExecutor
 from graphon.protocols import (
@@ -75,6 +99,13 @@ def test_public_protocol_exports_match_canonical_definitions() -> None:
     assert PublicWorkflowFileRuntimeProtocol is WorkflowFileRuntimeProtocol
     assert PublicNodeFactory is NodeFactory
     assert PublicGraphValidationRule is GraphValidationRule
+    assert PublicModelProviderRuntime is ModelProviderRuntime
+    assert PublicLLMModelRuntime is LLMModelRuntime
+    assert PublicTextEmbeddingModelRuntime is TextEmbeddingModelRuntime
+    assert PublicRerankModelRuntime is RerankModelRuntime
+    assert PublicSpeechToTextModelRuntime is SpeechToTextModelRuntime
+    assert PublicModerationModelRuntime is ModerationModelRuntime
+    assert PublicTTSModelRuntime is TTSModelRuntime
     assert PublicModelRuntime is ModelRuntime
     assert PublicPromptMessageMemory is PromptMessageMemory
     assert PublicWorkflowCodeExecutor is WorkflowCodeExecutor
@@ -104,15 +135,22 @@ def test_public_protocol_package_exports_are_stable() -> None:
         "HttpResponseProtocol",
         "HumanInputFormStateProtocol",
         "HumanInputNodeRuntimeProtocol",
+        "LLMModelRuntime",
         "ModelFactory",
+        "ModelProviderRuntime",
         "ModelRuntime",
+        "ModerationModelRuntime",
         "NodeFactory",
         "PreparedLLMProtocol",
         "PromptMessageMemory",
         "PromptMessageSerializerProtocol",
         "ReadOnlyGraphRuntimeState",
         "ReadOnlyVariablePool",
+        "RerankModelRuntime",
         "RetrieverAttachmentLoaderProtocol",
+        "SpeechToTextModelRuntime",
+        "TTSModelRuntime",
+        "TextEmbeddingModelRuntime",
         "ToolFileManagerProtocol",
         "ToolNodeRuntimeProtocol",
         "VariableLoader",

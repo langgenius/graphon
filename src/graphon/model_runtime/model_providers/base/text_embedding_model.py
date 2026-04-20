@@ -6,9 +6,12 @@ from graphon.model_runtime.entities.text_embedding_entities import (
     EmbeddingResult,
 )
 from graphon.model_runtime.model_providers.base.ai_model import AIModel
+from graphon.model_runtime.protocols.text_embedding_runtime import (
+    TextEmbeddingModelRuntime,
+)
 
 
-class TextEmbeddingModel(AIModel):
+class TextEmbeddingModel(AIModel[TextEmbeddingModelRuntime]):
     """Model class for text embedding model."""
 
     model_type: ModelType = ModelType.TEXT_EMBEDDING
