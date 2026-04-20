@@ -131,6 +131,10 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
     def version(cls) -> str:
         return "1"
 
+    @staticmethod
+    def _default_class_label(index: int) -> str:
+        return f"CLASS {index}"
+
     @override
     def _run(self) -> NodeRunResult:
         run_context = self._prepare_run_context()
@@ -140,7 +144,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
             result_text, usage, finish_reason = self._invoke_classifier(
                 run_context=run_context,
             )
-            category_name, category_id = self._resolve_category(
+            category_name, category_id, category_label = self._resolve_category(
                 rendered_classes=run_context.rendered_classes,
                 result_text=result_text,
             )
@@ -149,6 +153,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
                 usage=usage,
                 finish_reason=finish_reason,
                 category_name=category_name,
+                category_label=category_label,
                 category_id=category_id,
             )
         except ValueError as e:
@@ -277,22 +282,35 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         *,
         rendered_classes: Sequence[Any],
         result_text: str,
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, str]:
         category_name = rendered_classes[0].name
         category_id = rendered_classes[0].id
+        category_label = rendered_classes[
+            0
+        ].label or QuestionClassifierNode._default_class_label(1)
         cleaned_result_text = QuestionClassifierNode._strip_think_tags(result_text)
         result_text_json = parse_and_check_json_markdown(cleaned_result_text, [])
         if (
             "category_name" not in result_text_json
             or "category_id" not in result_text_json
         ):
-            return category_name, category_id
+            return category_name, category_id, category_label
 
         category_id_result = result_text_json["category_id"]
-        classes_map = {class_.id: class_.name for class_ in rendered_classes}
+        classes_map = {
+            class_.id: {
+                "name": class_.name,
+                "label": (
+                    class_.label
+                    or QuestionClassifierNode._default_class_label(index + 1)
+                ),
+            }
+            for index, class_ in enumerate(rendered_classes)
+        }
         if category_id_result in classes_map:
-            return classes_map[category_id_result], category_id_result
-        return category_name, category_id
+            category = classes_map[category_id_result]
+            return category["name"], category_id_result, category["label"]
+        return category_name, category_id, category_label
 
     @staticmethod
     def _strip_think_tags(result_text: str) -> str:
@@ -312,6 +330,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         usage: LLMUsage,
         finish_reason: str | None,
         category_name: str,
+        category_label: str,
         category_id: str,
     ) -> NodeRunResult:
         process_data = {
@@ -327,6 +346,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         }
         outputs = {
             "class_name": category_name,
+            "class_label": category_label,
             "class_id": category_id,
             "usage": jsonable_encoder(usage),
         }
