@@ -21,8 +21,8 @@ class ClassConfig(BaseModel):
             "and returned as class_name."
         ),
     )
-    label: str | None = Field(
-        default=None,
+    label: str = Field(
+        default="",
         description=(
             "Optional user-facing branch label exposed separately as class_label."
         ),

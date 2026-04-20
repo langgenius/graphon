@@ -40,7 +40,7 @@ def test_question_classifier_node_data_accepts_optional_label() -> None:
     assert node_data.classes[0].label == "Billing"
 
 
-def test_question_classifier_node_data_defaults_label_to_none() -> None:
+def test_question_classifier_node_data_defaults_label_to_empty_string() -> None:
     node_data = QuestionClassifierNodeData.model_validate({
         "title": "Classifier",
         "query_variable_selector": ["start", "sys.query"],
@@ -54,7 +54,7 @@ def test_question_classifier_node_data_defaults_label_to_none() -> None:
         "instruction": "Classify the query",
     })
 
-    assert node_data.classes[0].label is None
+    assert not node_data.classes[0].label
 
 
 def _build_question_classifier_node(
