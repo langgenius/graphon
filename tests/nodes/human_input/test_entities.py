@@ -1,7 +1,9 @@
 from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import BaseModel
 
+from graphon.nodes.base.entities import VariableSelector
 from graphon.nodes.human_input.entities import (
     FormDefinition,
     HumanInputNodeData,
@@ -55,7 +57,7 @@ class _FormInputHolder(BaseModel):
 
 class TestHumanInputNodeDataDeserialization:
     def test_model_validate_accepts_current_form_input_payload(self) -> None:
-        payload = {
+        payload: dict[str, Any] = {
             "type": "human-input",
             "title": "Collect Input",
             "form_content": "Name: {{#$output.name#}}",
@@ -71,12 +73,16 @@ class TestHumanInputNodeDataDeserialization:
         assert restored.title == "Collect Input"
         assert restored.form_content == "Name: {{#$output.name#}}"
         assert len(restored.inputs) == 2
+        assert isinstance(restored.inputs[0], ParagraphInput)
         assert restored.inputs[0].type == FormInputType.PARAGRAPH
         assert restored.inputs[0].output_variable_name == "name"
         assert restored.inputs[0].default is not None
         assert restored.inputs[0].default.type == ValueSourceType.CONSTANT
         assert restored.inputs[0].default.selector == []
         assert restored.inputs[0].default.value == "Alice"
+
+        assert isinstance(restored.inputs[1], ParagraphInput)
+
         assert restored.inputs[1].type == FormInputType.PARAGRAPH
         assert restored.inputs[1].default is not None
         assert restored.inputs[1].default.type == ValueSourceType.VARIABLE
@@ -92,7 +98,7 @@ class TestHumanInputNodeDataDeserialization:
 
 class TestFormDefinitionDeserialization:
     def test_model_validate_accepts_current_form_input_payload(self) -> None:
-        payload = {
+        payload: dict[str, Any] = {
             "form_content": "Name: {{#$output.name#}}",
             "inputs": _FORM_INPUTS_JSON_PAYLOAD,
             "user_actions": _USER_ACTIONS_JSON_PAYLOAD,
@@ -108,10 +114,14 @@ class TestFormDefinitionDeserialization:
         assert restored.form_content == "Name: {{#$output.name#}}"
         assert restored.rendered_content == "Name: Alice"
         assert len(restored.inputs) == 2
+
+        assert isinstance(restored.inputs[0], ParagraphInput)
         assert restored.inputs[0].type == FormInputType.PARAGRAPH
         assert restored.inputs[0].default is not None
         assert restored.inputs[0].default.type == ValueSourceType.CONSTANT
         assert restored.inputs[0].default.value == "Alice"
+
+        assert isinstance(restored.inputs[1], ParagraphInput)
         assert restored.inputs[1].type == FormInputType.PARAGRAPH
         assert restored.inputs[1].default is not None
         assert restored.inputs[1].default.selector == ["start", "bio"]

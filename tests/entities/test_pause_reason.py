@@ -8,6 +8,7 @@ from graphon.entities.pause_reason import (
     PauseReason,
     SchedulingPause,
 )
+from graphon.nodes.human_input.entities import ParagraphInput
 from graphon.nodes.human_input.enums import (
     FormInputType,
     ValueSourceType,
@@ -131,23 +132,27 @@ class TestPauseReasonDiscriminator:
         }
 
         restored = _Holder.model_validate(payload)
+        restored_reason = restored.reason
+        assert isinstance(restored_reason, HumanInputRequired)
+        assert restored_reason.form_id == "form_id"
+        assert restored_reason.form_content == "form_content"
+        assert restored_reason.node_id == "node_id"
+        assert restored_reason.node_title == "node_title"
+        assert len(restored_reason.inputs) == 2
 
-        assert isinstance(restored.reason, HumanInputRequired)
-        assert restored.reason.form_id == "form_id"
-        assert restored.reason.form_content == "form_content"
-        assert restored.reason.node_id == "node_id"
-        assert restored.reason.node_title == "node_title"
-        assert len(restored.reason.inputs) == 2
-        assert restored.reason.inputs[0].type == FormInputType.PARAGRAPH
-        assert restored.reason.inputs[0].output_variable_name == "name"
-        assert restored.reason.inputs[0].default is not None
-        assert restored.reason.inputs[0].default.type == ValueSourceType.CONSTANT
-        assert restored.reason.inputs[0].default.value == "Alice"
-        assert restored.reason.inputs[1].type == FormInputType.PARAGRAPH
-        assert restored.reason.inputs[1].default is not None
-        assert restored.reason.inputs[1].default.type == ValueSourceType.VARIABLE
-        assert restored.reason.inputs[1].default.selector == ["start", "bio"]
-        assert restored.reason.inputs[1].default.value == ""
-        assert [action.id for action in restored.reason.actions] == ["approve"]
-        assert restored.reason.actions[0].button_style.value == "primary"
-        assert restored.reason.resolved_default_values == {"name": "Alice"}
+        assert isinstance(restored_reason.inputs[0], ParagraphInput)
+        assert restored_reason.inputs[0].type == FormInputType.PARAGRAPH
+        assert restored_reason.inputs[0].output_variable_name == "name"
+        assert restored_reason.inputs[0].default is not None
+        assert restored_reason.inputs[0].default.type == ValueSourceType.CONSTANT
+        assert restored_reason.inputs[0].default.value == "Alice"
+
+        assert isinstance(restored_reason.inputs[1], ParagraphInput)
+        assert restored_reason.inputs[1].type == FormInputType.PARAGRAPH
+        assert restored_reason.inputs[1].default is not None
+        assert restored_reason.inputs[1].default.type == ValueSourceType.VARIABLE
+        assert restored_reason.inputs[1].default.selector == ["start", "bio"]
+        assert restored_reason.inputs[1].default.value == ""
+        assert [action.id for action in restored_reason.actions] == ["approve"]
+        assert restored_reason.actions[0].button_style.value == "primary"
+        assert restored_reason.resolved_default_values == {"name": "Alice"}

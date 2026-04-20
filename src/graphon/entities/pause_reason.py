@@ -4,7 +4,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
-from graphon.nodes.human_input.entities import ParagraphInput, UserAction
+from graphon.nodes.human_input.entities import FormInput, UserAction
 
 
 class PauseReasonType(StrEnum):
@@ -18,8 +18,8 @@ class HumanInputRequired(BaseModel):
     )
     form_id: str
     form_content: str
-    inputs: list[ParagraphInput] = Field(default_factory=list)
-    actions: list[UserAction] = Field(default_factory=list)
+    inputs: list[FormInput] = Field(default_factory=list[FormInput])
+    actions: list[UserAction] = Field(default_factory=list[UserAction])
     node_id: str
     node_title: str
 
