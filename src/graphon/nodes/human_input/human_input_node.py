@@ -259,8 +259,8 @@ class HumanInputNode(Node[HumanInputNodeData]):
                 f"form_id={form.id}"
             )
             raise AssertionError(msg)
-        submitted_data = form.submitted_data or {}
-        outputs: dict[str, Any] = dict(submitted_data)
+        submitted_inputs = dict(form.submitted_data or {})
+        outputs: dict[str, Any] = dict(submitted_inputs)
         outputs[self._OUTPUT_FIELD_ACTION_ID] = selected_action_id
         rendered_content = self.render_form_content_with_outputs(
             form.rendered_content,
@@ -281,6 +281,7 @@ class HumanInputNode(Node[HumanInputNodeData]):
         yield StreamCompletedEvent(
             node_run_result=NodeRunResult(
                 status=WorkflowNodeExecutionStatus.SUCCEEDED,
+                inputs=submitted_inputs,
                 outputs=outputs,
                 edge_source_handle=selected_action_id,
             ),
