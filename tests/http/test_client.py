@@ -21,6 +21,7 @@ from graphon.nodes.document_extractor.node import DocumentExtractorNode
 from graphon.nodes.http_request import (
     HttpRequestNode,
     HttpRequestNodeData,
+    HttpRequestNodeDependencies,
     build_http_request_config,
 )
 from graphon.nodes.http_request.entities import (
@@ -185,6 +186,63 @@ def test_http_request_node_uses_default_http_client_when_not_injected() -> None:
     )
 
     assert node.http_client is get_http_client()
+
+
+def test_http_request_node_accepts_dependency_bundle() -> None:
+    node = HttpRequestNode(
+        node_id="http",
+        config=HttpRequestNodeData(
+            title="HTTP Request",
+            method="get",
+            url="https://example.com",
+            authorization=HttpRequestNodeAuthorization(type="no-auth"),
+            headers="",
+            params="",
+            body=HttpRequestNodeBody(type="none", data=[]),
+        ),
+        graph_init_params=build_graph_init_params(
+            graph_config={"nodes": [], "edges": []},
+        ),
+        graph_runtime_state=_build_runtime_state(),
+        http_request_config=build_http_request_config(),
+        dependencies=HttpRequestNodeDependencies(
+            tool_file_manager_factory=_ToolFileManager,
+            file_manager=_FileManager(),
+            file_reference_factory=_FileReferenceFactory(),
+        ),
+    )
+
+    assert node.http_client is get_http_client()
+
+
+def test_http_request_node_rejects_mixed_dependency_inputs() -> None:
+    with pytest.raises(
+        TypeError,
+        match=r"accepts either dependencies=\.\.\. or legacy dependency keywords",
+    ):
+        HttpRequestNode(
+            node_id="http",
+            config=HttpRequestNodeData(
+                title="HTTP Request",
+                method="get",
+                url="https://example.com",
+                authorization=HttpRequestNodeAuthorization(type="no-auth"),
+                headers="",
+                params="",
+                body=HttpRequestNodeBody(type="none", data=[]),
+            ),
+            graph_init_params=build_graph_init_params(
+                graph_config={"nodes": [], "edges": []},
+            ),
+            graph_runtime_state=_build_runtime_state(),
+            http_request_config=build_http_request_config(),
+            dependencies=HttpRequestNodeDependencies(
+                tool_file_manager_factory=_ToolFileManager,
+                file_manager=_FileManager(),
+                file_reference_factory=_FileReferenceFactory(),
+            ),
+            file_manager=_FileManager(),
+        )
 
 
 def test_document_extractor_node_uses_default_http_client_when_not_injected() -> None:
