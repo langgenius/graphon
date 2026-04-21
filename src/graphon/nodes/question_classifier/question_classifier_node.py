@@ -80,7 +80,7 @@ class _QuestionClassifierRunContext:
 
 
 @dataclass(frozen=True, slots=True)
-class _QuestionClassifierDependencies:
+class QuestionClassifierNodeDependencies:
     """Runtime collaborators required to execute a question-classifier node."""
 
     model_instance: PreparedLLMProtocol
@@ -109,7 +109,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         *,
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,
-        dependencies: _QuestionClassifierDependencies | None = None,
+        dependencies: QuestionClassifierNodeDependencies | None = None,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
         model_instance: PreparedLLMProtocol | None = None,
@@ -155,13 +155,13 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
     @staticmethod
     def _resolve_dependencies(
         *,
-        dependencies: _QuestionClassifierDependencies | None,
+        dependencies: QuestionClassifierNodeDependencies | None,
         model_instance: PreparedLLMProtocol | None,
         template_renderer: Jinja2TemplateRenderer | None,
         memory: PromptMessageMemory | None,
         llm_file_saver: LLMFileSaver | None,
         prompt_message_serializer: PromptMessageSerializerProtocol | None,
-    ) -> _QuestionClassifierDependencies:
+    ) -> QuestionClassifierNodeDependencies:
         if dependencies is not None:
             duplicate_arguments = [
                 argument_name
@@ -202,7 +202,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
             )
             raise TypeError(msg)
 
-        return _QuestionClassifierDependencies(
+        return QuestionClassifierNodeDependencies(
             model_instance=cast(PreparedLLMProtocol, model_instance),
             template_renderer=cast(Jinja2TemplateRenderer, template_renderer),
             llm_file_saver=cast(LLMFileSaver, llm_file_saver),

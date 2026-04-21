@@ -1,4 +1,4 @@
-import importlib
+import inspect
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
@@ -10,6 +10,7 @@ from graphon.node_events.node import ModelInvokeCompletedEvent
 from graphon.nodes.question_classifier import (
     QuestionClassifierNode,
     QuestionClassifierNodeData,
+    QuestionClassifierNodeDependencies,
 )
 from graphon.nodes.question_classifier.question_classifier_node import llm_utils
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
@@ -17,14 +18,10 @@ from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from ...helpers import build_graph_init_params
 
 
-def _build_question_classifier_dependencies(**kwargs: Any) -> Any:
-    question_classifier_node_module = importlib.import_module(
-        "graphon.nodes.question_classifier.question_classifier_node",
-    )
-    dependencies_class = (
-        question_classifier_node_module._QuestionClassifierDependencies  # noqa: SLF001
-    )
-    return dependencies_class(**kwargs)
+def _build_question_classifier_dependencies(
+    **kwargs: Any,
+) -> QuestionClassifierNodeDependencies:
+    return QuestionClassifierNodeDependencies(**kwargs)
 
 
 def test_question_classifier_node_data_accepts_optional_label() -> None:
@@ -225,6 +222,13 @@ def test_question_classifier_constructor_rejects_mixed_dependency_inputs() -> No
                 parameters={},
             ),
         )
+
+
+def test_question_classifier_signature_exposes_public_dependencies() -> None:
+    parameters = inspect.signature(QuestionClassifierNode.__init__).parameters
+
+    assert "dependencies" in parameters
+    assert parameters["dependencies"].default is None
 
 
 def test_question_classifier_run_returns_custom_class_label(
