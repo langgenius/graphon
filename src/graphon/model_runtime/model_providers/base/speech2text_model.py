@@ -2,9 +2,12 @@ from typing import IO
 
 from graphon.model_runtime.entities.model_entities import ModelType
 from graphon.model_runtime.model_providers.base.ai_model import AIModel
+from graphon.model_runtime.protocols.speech_to_text_runtime import (
+    SpeechToTextModelRuntime,
+)
 
 
-class Speech2TextModel(AIModel):
+class Speech2TextModel(AIModel[SpeechToTextModelRuntime]):
     """Model class for speech2text model."""
 
     model_type: ModelType = ModelType.SPEECH2TEXT

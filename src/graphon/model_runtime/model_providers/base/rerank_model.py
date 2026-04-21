@@ -4,9 +4,10 @@ from graphon.model_runtime.entities.rerank_entities import (
     RerankResult,
 )
 from graphon.model_runtime.model_providers.base.ai_model import AIModel
+from graphon.model_runtime.protocols.rerank_runtime import RerankModelRuntime
 
 
-class RerankModel(AIModel):
+class RerankModel(AIModel[RerankModelRuntime]):
     """Base Model class for rerank model."""
 
     model_type: ModelType = ModelType.RERANK

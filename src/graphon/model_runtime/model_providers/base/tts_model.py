@@ -4,11 +4,12 @@ from typing import Any
 
 from graphon.model_runtime.entities.model_entities import ModelType
 from graphon.model_runtime.model_providers.base.ai_model import AIModel
+from graphon.model_runtime.protocols.tts_runtime import TTSModelRuntime
 
 logger = logging.getLogger(__name__)
 
 
-class TTSModel(AIModel):
+class TTSModel(AIModel[TTSModelRuntime]):
     """Model class for TTS model."""
 
     model_type: ModelType = ModelType.TTS

@@ -1,6 +1,8 @@
 # Model Runtime
 
-This module provides the interface for invoking and authenticating various models, and offers Dify a unified information and credentials form rule for model providers.
+This module provides the interfaces for invoking and authenticating various
+models, and offers Dify a unified information and credentials form rule for
+model providers.
 
 - On one hand, it decouples models from upstream and downstream processes, facilitating horizontal expansion for developers,
 - On the other hand, it allows for direct display of providers and models in the frontend interface by simply defining them in the backend, eliminating the need to modify frontend logic.
@@ -32,19 +34,35 @@ This module provides the interface for invoking and authenticating various model
 
 ## Structure
 
-Model Runtime is divided into three layers:
+Model Runtime is divided into protocol and implementation layers:
 
-- The outermost layer is the factory method
+- Provider/runtime protocols
 
-  It provides methods for obtaining all providers, all model lists, getting provider instances, and authenticating provider/model credentials.
+  Shared provider concerns live in `protocols/provider_runtime.py`, while each
+  model capability has its own protocol module such as
+  `protocols/llm_runtime.py`, `protocols/text_embedding_runtime.py`, and
+  `protocols/tts_runtime.py`. Downstream runtimes can implement only the
+  capabilities they need instead of satisfying a single monolithic interface.
 
-- The second layer is the provider layer
+- Aggregate runtime protocol
 
-  It provides the current provider's model list, model instance obtaining, provider credential authentication, and provider configuration rule information, **allowing horizontal expansion** to support different providers.
+  `protocols/runtime.py` composes the individual capability protocols into
+  `ModelRuntime` for adapters that intentionally implement the full surface
+  area.
 
-- The bottom layer is the model layer
+- Provider factory
 
-  It offers direct invocation of various model types, predefined model configuration information, getting predefined/remote model lists, model credential authentication methods. Different models provide additional special methods, like LLM's pre-computed tokens method, cost information obtaining method, etc., **allowing horizontal expansion** for different models under the same provider (within supported model types).
+  `model_providers/model_provider_factory.py` now depends only on
+  `ModelProviderRuntime`. It handles provider discovery, provider/model schema
+  lookup, credential validation, provider icon lookup, and provider-level model
+  list projection without assuming any invocation capability.
+
+- Model wrappers
+
+  Capability wrappers such as `LargeLanguageModel`, `TextEmbeddingModel`,
+  `RerankModel`, `Speech2TextModel`, `ModerationModel`, and `TTSModel` depend
+  only on their matching capability protocol. Instantiate those wrappers
+  directly when you need invocation behavior.
 
 ## Documentation
 

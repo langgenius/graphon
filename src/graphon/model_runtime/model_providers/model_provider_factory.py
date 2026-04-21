@@ -7,22 +7,7 @@ from graphon.model_runtime.entities.provider_entities import (
     ProviderEntity,
     SimpleProviderEntity,
 )
-from graphon.model_runtime.model_providers.base.ai_model import AIModel
-from graphon.model_runtime.model_providers.base.large_language_model import (
-    LargeLanguageModel,
-)
-from graphon.model_runtime.model_providers.base.moderation_model import (
-    ModerationModel,
-)
-from graphon.model_runtime.model_providers.base.rerank_model import RerankModel
-from graphon.model_runtime.model_providers.base.speech2text_model import (
-    Speech2TextModel,
-)
-from graphon.model_runtime.model_providers.base.text_embedding_model import (
-    TextEmbeddingModel,
-)
-from graphon.model_runtime.model_providers.base.tts_model import TTSModel
-from graphon.model_runtime.runtime import ModelRuntime
+from graphon.model_runtime.protocols.provider_runtime import ModelProviderRuntime
 from graphon.model_runtime.schema_validators.model_credential_schema_validator import (
     ModelCredentialSchemaValidator,
 )
@@ -31,26 +16,15 @@ from ..schema_validators.provider_credential_schema_validator import (
     ProviderCredentialSchemaValidator,
 )
 
-_MODEL_CLASS_BY_TYPE: dict[ModelType, type[AIModel]] = {
-    ModelType.LLM: LargeLanguageModel,
-    ModelType.TEXT_EMBEDDING: TextEmbeddingModel,
-    ModelType.RERANK: RerankModel,
-    ModelType.SPEECH2TEXT: Speech2TextModel,
-    ModelType.MODERATION: ModerationModel,
-    ModelType.TTS: TTSModel,
-}
-
 
 class ModelProviderFactory:
-    """Factory for provider schemas and model-type instances
-    backed by a runtime adapter.
-    """
+    """Factory for provider schemas and credential flows backed by a runtime."""
 
-    def __init__(self, model_runtime: ModelRuntime) -> None:
-        if model_runtime is None:
-            msg = "model_runtime is required."
+    def __init__(self, runtime: ModelProviderRuntime) -> None:
+        if runtime is None:
+            msg = "runtime is required."
             raise ValueError(msg)
-        self.model_runtime = model_runtime
+        self.runtime = runtime
 
     def get_providers(self) -> Sequence[ProviderEntity]:
         """Get all providers."""
@@ -58,7 +32,7 @@ class ModelProviderFactory:
 
     def get_model_providers(self) -> Sequence[ProviderEntity]:
         """Get all model providers exposed by the runtime adapter."""
-        return self.model_runtime.fetch_model_providers()
+        return self.runtime.fetch_model_providers()
 
     def get_provider_schema(self, provider: str) -> ProviderEntity:
         """Get provider schema."""
@@ -90,7 +64,7 @@ class ModelProviderFactory:
         validator = ProviderCredentialSchemaValidator(provider_credential_schema)
         filtered_credentials = validator.validate_and_filter(credentials)
 
-        self.model_runtime.validate_provider_credentials(
+        self.runtime.validate_provider_credentials(
             provider=provider_entity.provider,
             credentials=filtered_credentials,
         )
@@ -116,7 +90,7 @@ class ModelProviderFactory:
         validator = ModelCredentialSchemaValidator(model_type, model_credential_schema)
         filtered_credentials = validator.validate_and_filter(credentials)
 
-        self.model_runtime.validate_model_credentials(
+        self.runtime.validate_model_credentials(
             provider=provider_entity.provider,
             model_type=model_type,
             model=model,
@@ -135,7 +109,7 @@ class ModelProviderFactory:
     ) -> AIModelEntity | None:
         """Get model schema."""
         provider_entity = self.get_model_provider(provider)
-        return self.model_runtime.get_model_schema(
+        return self.runtime.get_model_schema(
             provider=provider_entity.provider,
             model_type=model_type,
             model=model,
@@ -168,18 +142,6 @@ class ModelProviderFactory:
 
         return providers
 
-    def get_model_type_instance(self, provider: str, model_type: ModelType) -> AIModel:
-        """Get model type instance by provider name and model type."""
-        provider_schema = self.get_model_provider(provider)
-        model_class = _MODEL_CLASS_BY_TYPE.get(model_type)
-        if model_class is None:
-            msg = f"Unsupported model type: {model_type}"
-            raise ValueError(msg)
-        return model_class(
-            provider_schema=provider_schema,
-            model_runtime=self.model_runtime,
-        )
-
     def get_provider_icon(
         self,
         provider: str,
@@ -188,7 +150,7 @@ class ModelProviderFactory:
     ) -> tuple[bytes, str]:
         """Get provider icon."""
         provider_entity = self.get_model_provider(provider)
-        return self.model_runtime.get_provider_icon(
+        return self.runtime.get_provider_icon(
             provider=provider_entity.provider,
             icon_type=icon_type,
             lang=lang,

@@ -2,7 +2,6 @@ import inspect
 import time
 from collections.abc import Callable, Generator, Mapping
 from http import HTTPStatus
-from importlib import import_module
 from typing import Any
 
 import httpx
@@ -16,13 +15,16 @@ from graphon.http import (
     HttpResponse,
     HttpStatusError,
     HttpxHttpClient,
+    get_default_http_client,
     get_http_client,
+    set_http_client,
 )
 from graphon.nodes.document_extractor.entities import DocumentExtractorNodeData
 from graphon.nodes.document_extractor.node import DocumentExtractorNode
 from graphon.nodes.http_request import (
     HttpRequestNode,
     HttpRequestNodeData,
+    HttpRequestNodeDependencies,
     build_http_request_config,
 )
 from graphon.nodes.http_request.entities import (
@@ -37,9 +39,6 @@ from graphon.nodes.question_classifier.question_classifier_node import (
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
 from ..helpers import build_graph_init_params, build_variable_pool
-
-_http_request_node_module = import_module("graphon.nodes.http_request.node")
-_internal_dependencies_name = "_HttpRequestNodeDependencies"
 
 
 class _ToolFileManager:
@@ -73,6 +72,43 @@ class _FileReferenceFactory:
         return File.model_validate(mapping)
 
 
+class _StubHttpClient:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    @property
+    def max_retries_exceeded_error(self) -> type[Exception]:
+        return RuntimeError
+
+    @property
+    def request_error(self) -> type[Exception]:
+        return RuntimeError
+
+    def get(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
+        return self._raise("GET", url, max_retries=max_retries, **kwargs)
+
+    def head(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
+        return self._raise("HEAD", url, max_retries=max_retries, **kwargs)
+
+    def post(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
+        return self._raise("POST", url, max_retries=max_retries, **kwargs)
+
+    def put(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
+        return self._raise("PUT", url, max_retries=max_retries, **kwargs)
+
+    def delete(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
+        return self._raise("DELETE", url, max_retries=max_retries, **kwargs)
+
+    def patch(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
+        return self._raise("PATCH", url, max_retries=max_retries, **kwargs)
+
+    def _raise(self, method: str, url: str, **kwargs: Any) -> HttpResponse:
+        msg = (
+            f"unexpected {method} request in test stub {self.name}: {url!r}, {kwargs!r}"
+        )
+        raise AssertionError(msg)
+
+
 def _build_runtime_state() -> GraphRuntimeState:
     return GraphRuntimeState(
         variable_pool=build_variable_pool(),
@@ -80,12 +116,18 @@ def _build_runtime_state() -> GraphRuntimeState:
     )
 
 
-def _build_internal_dependencies(
+@pytest.fixture(autouse=True)
+def _restore_default_http_client() -> Generator[None, None, None]:
+    default_http_client = get_default_http_client()
+    yield
+    set_http_client(default_http_client)
+
+
+def _build_dependencies(
     *,
     http_client: HttpClientProtocol | None = None,
-) -> Any:
-    dependencies_cls = getattr(_http_request_node_module, _internal_dependencies_name)
-    return dependencies_cls(
+) -> HttpRequestNodeDependencies:
+    return HttpRequestNodeDependencies(
         tool_file_manager_factory=_ToolFileManager,
         file_manager=_FileManager(),
         file_reference_factory=_FileReferenceFactory(),
@@ -180,7 +222,16 @@ def test_httpx_http_client_raises_request_error_without_retry_wrapping(
         HttpxHttpClient().get("https://example.com")
 
 
-def test_http_request_node_uses_default_http_client_when_not_injected() -> None:
+def test_set_http_client_updates_process_default() -> None:
+    default_http_client = _StubHttpClient("default")
+
+    set_http_client(default_http_client)
+
+    assert get_default_http_client() is default_http_client
+    assert get_http_client() is default_http_client
+
+
+def test_http_request_node_accepts_public_dependency_bundle() -> None:
     node = HttpRequestNode(
         node_id="http",
         config=HttpRequestNodeData(
@@ -197,32 +248,7 @@ def test_http_request_node_uses_default_http_client_when_not_injected() -> None:
         ),
         graph_runtime_state=_build_runtime_state(),
         http_request_config=build_http_request_config(),
-        tool_file_manager_factory=_ToolFileManager,
-        file_manager=_FileManager(),
-        file_reference_factory=_FileReferenceFactory(),
-    )
-
-    assert node.http_client is get_http_client()
-
-
-def test_http_request_node_accepts_internal_dependency_bundle() -> None:
-    node = HttpRequestNode(
-        node_id="http",
-        config=HttpRequestNodeData(
-            title="HTTP Request",
-            method="get",
-            url="https://example.com",
-            authorization=HttpRequestNodeAuthorization(type="no-auth"),
-            headers="",
-            params="",
-            body=HttpRequestNodeBody(type="none", data=[]),
-        ),
-        graph_init_params=build_graph_init_params(
-            graph_config={"nodes": [], "edges": []},
-        ),
-        graph_runtime_state=_build_runtime_state(),
-        http_request_config=build_http_request_config(),
-        dependencies=_build_internal_dependencies(),
+        dependencies=_build_dependencies(),
     )
 
     assert node.http_client is get_http_client()
@@ -249,9 +275,37 @@ def test_http_request_node_rejects_mixed_dependency_inputs() -> None:
             ),
             graph_runtime_state=_build_runtime_state(),
             http_request_config=build_http_request_config(),
-            dependencies=_build_internal_dependencies(),
+            dependencies=_build_dependencies(),
             file_manager=_FileManager(),
         )
+
+
+def test_http_request_node_uses_configured_default_http_client() -> None:
+    default_http_client = _StubHttpClient("http-request")
+    set_http_client(default_http_client)
+
+    node = HttpRequestNode(
+        node_id="http",
+        config=HttpRequestNodeData(
+            title="HTTP Request",
+            method="get",
+            url="https://example.com",
+            authorization=HttpRequestNodeAuthorization(type="no-auth"),
+            headers="",
+            params="",
+            body=HttpRequestNodeBody(type="none", data=[]),
+        ),
+        graph_init_params=build_graph_init_params(
+            graph_config={"nodes": [], "edges": []},
+        ),
+        graph_runtime_state=_build_runtime_state(),
+        http_request_config=build_http_request_config(),
+        tool_file_manager_factory=_ToolFileManager,
+        file_manager=_FileManager(),
+        file_reference_factory=_FileReferenceFactory(),
+    )
+
+    assert node.http_client is default_http_client
 
 
 def test_document_extractor_node_uses_default_http_client_when_not_injected() -> None:
@@ -270,6 +324,25 @@ def test_document_extractor_node_uses_default_http_client_when_not_injected() ->
     assert node.http_client is get_http_client()
 
 
+def test_document_extractor_node_uses_configured_default_http_client() -> None:
+    default_http_client = _StubHttpClient("document-extractor")
+    set_http_client(default_http_client)
+
+    node = DocumentExtractorNode(
+        node_id="extractor",
+        config=DocumentExtractorNodeData(
+            title="Document Extractor",
+            variable_selector=["inputs", "file"],
+        ),
+        graph_init_params=build_graph_init_params(
+            graph_config={"nodes": [], "edges": []},
+        ),
+        graph_runtime_state=_build_runtime_state(),
+    )
+
+    assert node.http_client is default_http_client
+
+
 def test_file_saver_impl_uses_default_http_client_when_not_injected() -> None:
     file_saver = FileSaverImpl.with_runtime(
         tool_file_manager=_ToolFileManager(),
@@ -277,6 +350,18 @@ def test_file_saver_impl_uses_default_http_client_when_not_injected() -> None:
     )
 
     assert file_saver.http_client is get_http_client()
+
+
+def test_file_saver_impl_uses_configured_default_http_client() -> None:
+    default_http_client = _StubHttpClient("file-saver")
+    set_http_client(default_http_client)
+
+    file_saver = FileSaverImpl(
+        tool_file_manager=_ToolFileManager(),
+        file_reference_factory=_FileReferenceFactory(),
+    )
+
+    assert file_saver.http_client is default_http_client
 
 
 @pytest.mark.parametrize(
@@ -296,3 +381,10 @@ def test_http_client_injection_is_optional(
     parameter = inspect.signature(callable_obj).parameters[parameter_name]
 
     assert parameter.default is None
+
+
+def test_http_request_node_signature_exposes_public_dependencies() -> None:
+    parameters = inspect.signature(HttpRequestNode.__init__).parameters
+
+    assert "dependencies" in parameters
+    assert parameters["dependencies"].default is None
