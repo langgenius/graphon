@@ -271,7 +271,7 @@ def test_document_extractor_node_uses_default_http_client_when_not_injected() ->
 
 
 def test_file_saver_impl_uses_default_http_client_when_not_injected() -> None:
-    file_saver = FileSaverImpl(
+    file_saver = FileSaverImpl.with_runtime(
         tool_file_manager=_ToolFileManager(),
         file_reference_factory=_FileReferenceFactory(),
     )
