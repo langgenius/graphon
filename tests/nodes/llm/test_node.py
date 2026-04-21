@@ -13,7 +13,7 @@ from ...helpers import build_graph_init_params, build_variable_pool
 def _build_llm_node() -> LLMNode:
     return LLMNode(
         node_id="llm",
-        config=LLMNodeData.model_validate({
+        data=LLMNodeData.model_validate({
             "title": "LLM",
             "model": {
                 "provider": "openai",

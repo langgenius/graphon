@@ -147,7 +147,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
     def __init__(
         self,
         node_id: str,
-        config: ParameterExtractorNodeData,
+        data: ParameterExtractorNodeData,
         *,
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,
@@ -163,7 +163,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
     def __init__(
         self,
         node_id: str,
-        config: ParameterExtractorNodeData,
+        data: ParameterExtractorNodeData,
         *,
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,

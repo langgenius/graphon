@@ -74,7 +74,7 @@ def _build_question_classifier_node(
 ) -> QuestionClassifierNode:
     return QuestionClassifierNode(
         node_id="classifier",
-        config=node_data,
+        data=node_data,
         graph_init_params=build_graph_init_params(
             graph_config={"nodes": [], "edges": []},
         ),
@@ -136,7 +136,7 @@ def test_question_classifier_constructor_accepts_dependency_bundle(
     )
     node = QuestionClassifierNode(
         node_id="classifier",
-        config=node_data,
+        data=node_data,
         graph_init_params=build_graph_init_params(
             graph_config={"nodes": [], "edges": []},
         ),
@@ -206,7 +206,7 @@ def test_question_classifier_constructor_rejects_mixed_dependency_inputs() -> No
     with pytest.raises(TypeError, match="runtime collaborators twice"):
         QuestionClassifierNode(
             node_id="classifier",
-            config=node_data,
+            data=node_data,
             graph_init_params=build_graph_init_params(
                 graph_config={"nodes": [], "edges": []},
             ),
