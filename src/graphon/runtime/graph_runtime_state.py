@@ -1016,7 +1016,9 @@ def _reconcile_graph_known_legacy_writable_variables(
     graph: GraphProtocol | Graph | None,
     graph_execution: GraphExecutionProtocol | None,
 ) -> None:
-    if graph_execution is not None and graph_execution.completed:
+    if graph_execution is not None and (
+        graph_execution.completed or graph_execution.aborted
+    ):
         return
 
     if graph is None or not isinstance(graph.nodes, Mapping):
