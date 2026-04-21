@@ -180,7 +180,17 @@ class HumanInputNodeData(BaseNodeData):
         return action_id
 
     def must_resolve_action_value(self, action_id: str) -> str:
-        """Resolve the selected action's workflow-facing value by id."""
+        """Resolve the selected action's workflow-facing value by id.
+
+        This method should only be called with action ids that have already been
+        validated against the node configuration.
+
+        Returns:
+            The configured workflow-facing value for the selected action id.
+
+        Raises:
+            AssertionError: If the action id is not present in the node config.
+        """
         for action in self.user_actions:
             if action.id == action_id:
                 return action.title
