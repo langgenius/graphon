@@ -13,7 +13,7 @@ class WorkflowFileRuntimeNotConfiguredError(RuntimeError):
 def _not_configured_error() -> WorkflowFileRuntimeNotConfiguredError:
     msg = (
         "workflow file runtime is not configured; call "
-        "configure_workflow_file_runtime(...) first or use "
+        "set_workflow_file_runtime(...) first or use "
         "use_workflow_file_runtime(...) for a scoped override"
     )
     return WorkflowFileRuntimeNotConfiguredError(msg)
@@ -28,7 +28,7 @@ class WorkflowFileRuntimeRegistry:
     ) -> None:
         self._runtime = runtime
 
-    def configure(
+    def set(
         self,
         runtime: WorkflowFileRuntimeProtocol,
     ) -> WorkflowFileRuntimeProtocol:
@@ -50,21 +50,21 @@ class WorkflowFileRuntimeRegistry:
         runtime: WorkflowFileRuntimeProtocol,
     ) -> Iterator[WorkflowFileRuntimeProtocol]:
         previous_runtime = self.peek()
-        self.configure(runtime)
+        self.set(runtime)
         try:
             yield runtime
         finally:
             self._runtime = previous_runtime
 
 
-workflow_file_runtime_registry = WorkflowFileRuntimeRegistry()
+_workflow_file_runtime_registry = WorkflowFileRuntimeRegistry()
 
 
 def configure_workflow_file_runtime(
     runtime: WorkflowFileRuntimeProtocol,
 ) -> WorkflowFileRuntimeProtocol:
-    """Configure the default runtime used by file helpers."""
-    return workflow_file_runtime_registry.configure(runtime)
+    """Compatibility alias for set_workflow_file_runtime()."""
+    return _workflow_file_runtime_registry.set(runtime)
 
 
 @contextmanager
@@ -72,18 +72,17 @@ def use_workflow_file_runtime(
     runtime: WorkflowFileRuntimeProtocol,
 ) -> Iterator[WorkflowFileRuntimeProtocol]:
     """Temporarily override the configured runtime within a scope."""
-    with workflow_file_runtime_registry.use(runtime) as configured_runtime:
+    with _workflow_file_runtime_registry.use(runtime) as configured_runtime:
         yield configured_runtime
 
 
 def set_workflow_file_runtime(runtime: WorkflowFileRuntimeProtocol) -> None:
-    """Backward-compatible alias for configure_workflow_file_runtime()."""
-    configure_workflow_file_runtime(runtime)
+    _workflow_file_runtime_registry.set(runtime)
 
 
 def get_workflow_file_runtime() -> WorkflowFileRuntimeProtocol:
-    return workflow_file_runtime_registry.get()
+    return _workflow_file_runtime_registry.get()
 
 
 def peek_workflow_file_runtime() -> WorkflowFileRuntimeProtocol | None:
-    return workflow_file_runtime_registry.peek()
+    return _workflow_file_runtime_registry.peek()

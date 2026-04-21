@@ -18,7 +18,7 @@ def test_runtime_registry_raises_until_explicitly_configured() -> None:
 
     with pytest.raises(
         WorkflowFileRuntimeNotConfiguredError,
-        match="configure_workflow_file_runtime",
+        match="set_workflow_file_runtime",
     ):
         registry.get()
 
@@ -29,10 +29,13 @@ def test_runtime_registry_peek_returns_none_when_unconfigured() -> None:
     assert registry.peek() is None
 
 
-def test_runtime_registry_use_restores_previous_runtime() -> None:
+def test_runtime_registry_set_and_use_restore_previous_runtime() -> None:
     outer_runtime = MagicMock()
     scoped_runtime = MagicMock()
-    registry = WorkflowFileRuntimeRegistry(outer_runtime)
+    registry = WorkflowFileRuntimeRegistry()
+
+    assert registry.set(outer_runtime) is outer_runtime
+    assert registry.get() is outer_runtime
 
     with registry.use(scoped_runtime) as configured_runtime:
         assert configured_runtime is scoped_runtime
