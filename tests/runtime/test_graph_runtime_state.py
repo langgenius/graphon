@@ -311,7 +311,7 @@ class TestGraphRuntimeState:
         assert new_stub.state == "configured"
 
     def test_snapshot_restore_preserves_updated_conversation_variable(self) -> None:
-        variable_pool = VariablePool(
+        variable_pool = VariablePool.from_bootstrap(
             conversation_variables=[
                 StringVariable(name="session_name", value="before"),
             ],
