@@ -75,7 +75,7 @@ Use these commands for normal development:
 - `make format`: run `uv run ruff format`
 - `make lint`: run `make format`, then `uv run ruff check --fix`
 - `make tc`: run `make lint`, then `uv run ty check`
-- `make check`: run `uv run ruff format --check && uv run ruff check && uv run ty check`
+- `make check`: run `uv lock --check && uv run ruff format --check && uv run ruff check && uv run ty check`
 - `make test`: run `make tc`, then `uv run pytest`
 - `make build`: build the package distributions
 - `make clean`: remove build artifacts and caches
@@ -87,8 +87,8 @@ Notes:
   formatting and lint fixes first.
 - `make test` is the progressive local full-chain target. It formats, applies
   lint fixes, runs `ty check`, and then runs the test suite.
-- `make check` aggregates the same non-mutating lint and type-check commands
-  used by CI.
+- `make check` aggregates the same non-mutating lockfile, lint, and type-check
+  commands used by CI.
 - `pytest` is configured with `-n auto` and `testpaths = ['tests']`, so the
   test suite runs in parallel by default.
 - If you change dependencies, refresh and commit `uv.lock` before opening a
@@ -109,8 +109,8 @@ make check
 Pull requests targeting `main` currently run three kinds of checks:
 
 1. PR title validation with `amannn/action-semantic-pull-request`
-2. `make check`
-3. `make test` on Python 3.12 and 3.13
+2. `make check` including `uv.lock` freshness validation
+3. `uv run pytest` on Python 3.12 and 3.13
 
 Keep local workflow aligned with those checks. A green local `make test` plus
 `make check` is useful, but it is not a complete substitute for the exact CI
