@@ -186,6 +186,40 @@ class TestVariablePoolGetAndNestedAttribute:
         assert segment is not None
         assert segment.value == "Paris"
 
+    def test_add_defaults_new_variables_to_read_only(self) -> None:
+        pool = VariablePool.empty()
+
+        pool.add(("node1", "result"), "value")
+
+        variable = pool.get_variable(("node1", "result"))
+        assert variable is not None
+        assert variable.writable is False
+
+    def test_add_can_override_writable_for_new_variables(self) -> None:
+        pool = VariablePool.empty()
+
+        pool.add(("conversation", "session_name"), "before", writable=True)
+
+        variable = pool.get_variable(("conversation", "session_name"))
+        assert variable is not None
+        assert variable.writable is True
+
+    def test_from_bootstrap_marks_variable_writability(self) -> None:
+        pool = VariablePool.from_bootstrap(
+            system_variables=[StringVariable(name="system_name", value="sys-value")],
+            conversation_variables=[
+                StringVariable(name="session_name", value="before"),
+            ],
+        )
+
+        system_variable = pool.get_variable(("sys", "system_name"))
+        conversation_variable = pool.get_variable(("conversation", "session_name"))
+
+        assert system_variable is not None
+        assert system_variable.writable is False
+        assert conversation_variable is not None
+        assert conversation_variable.writable is True
+
 
 class TestVariablePoolGetNotModifyVariableDictionary:
     _NODE_ID = "start"
