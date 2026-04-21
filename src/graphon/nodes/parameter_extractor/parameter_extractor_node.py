@@ -126,7 +126,7 @@ class _ParameterExtractorRunContext:
 
 
 @dataclass(frozen=True)
-class ParameterExtractorNodeDependencies:
+class _ParameterExtractorNodeDependencies:
     """Runtime collaborators used directly by ParameterExtractorNode."""
 
     model_instance: PreparedLLMProtocol
@@ -151,7 +151,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         *,
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,
-        dependencies: ParameterExtractorNodeDependencies,
+        dependencies: _ParameterExtractorNodeDependencies,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
         model_instance: None = None,
@@ -183,7 +183,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         *,
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,
-        dependencies: ParameterExtractorNodeDependencies | None = None,
+        dependencies: _ParameterExtractorNodeDependencies | None = None,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
         model_instance: PreparedLLMProtocol | None = None,
@@ -212,11 +212,11 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
     @staticmethod
     def _resolve_dependencies(
         *,
-        dependencies: ParameterExtractorNodeDependencies | None,
+        dependencies: _ParameterExtractorNodeDependencies | None,
         model_instance: PreparedLLMProtocol | None,
         memory: PromptMessageMemory | None,
         prompt_message_serializer: PromptMessageSerializerProtocol | None,
-    ) -> ParameterExtractorNodeDependencies:
+    ) -> _ParameterExtractorNodeDependencies:
         if dependencies is not None:
             if (
                 model_instance is not None
@@ -224,8 +224,8 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
                 or prompt_message_serializer is not None
             ):
                 msg = (
-                    "Pass either dependencies=ParameterExtractorNodeDependencies(...) "
-                    "or the legacy model_instance=/memory=/"
+                    "Pass either dependencies=... or the legacy "
+                    "model_instance=/memory=/"
                     "prompt_message_serializer= keywords, not both."
                 )
                 raise TypeError(msg)
@@ -239,27 +239,18 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         if missing_dependencies:
             missing = ", ".join(missing_dependencies)
             msg = (
-                "ParameterExtractorNode requires either "
-                "dependencies=ParameterExtractorNodeDependencies(...) or legacy "
-                f"{missing} keyword arguments."
+                "ParameterExtractorNode requires either dependencies=... or "
+                f"legacy {missing} keyword arguments."
             )
             raise TypeError(msg)
 
-        return ParameterExtractorNodeDependencies(
+        return _ParameterExtractorNodeDependencies(
             model_instance=cast(PreparedLLMProtocol, model_instance),
             prompt_message_serializer=cast(
                 PromptMessageSerializerProtocol,
                 prompt_message_serializer,
             ),
             memory=memory,
-        )
-
-    @property
-    def dependencies(self) -> ParameterExtractorNodeDependencies:
-        return ParameterExtractorNodeDependencies(
-            model_instance=self._model_instance,
-            prompt_message_serializer=self._prompt_message_serializer,
-            memory=self._memory,
         )
 
     @classmethod

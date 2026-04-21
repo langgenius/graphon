@@ -1,6 +1,3 @@
-from .parameter_extractor_node import (
-    ParameterExtractorNode,
-    ParameterExtractorNodeDependencies,
-)
+from .parameter_extractor_node import ParameterExtractorNode
 
-__all__ = ["ParameterExtractorNode", "ParameterExtractorNodeDependencies"]
+__all__ = ["ParameterExtractorNode"]

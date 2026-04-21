@@ -7,13 +7,13 @@ import pytest
 from graphon.model_runtime.entities.llm_entities import LLMMode
 from graphon.model_runtime.entities.message_entities import PromptMessageRole
 from graphon.nodes.llm.entities import ModelConfig
+from graphon.nodes.parameter_extractor import parameter_extractor_node
 from graphon.nodes.parameter_extractor.entities import (
     ParameterConfig,
     ParameterExtractorNodeData,
 )
 from graphon.nodes.parameter_extractor.parameter_extractor_node import (
     ParameterExtractorNode,
-    ParameterExtractorNodeDependencies,
 )
 from graphon.nodes.parameter_extractor.prompts import (
     CHAT_GENERATE_JSON_PROMPT,
@@ -35,6 +35,11 @@ def _call_parameter_extractor_constructor(**kwargs: object) -> Any:
     return constructor(**kwargs)
 
 
+def _build_dependencies(**kwargs: object) -> object:
+    constructor = vars(parameter_extractor_node)["_ParameterExtractorNodeDependencies"]
+    return constructor(**kwargs)
+
+
 def _build_parameter_extractor_node() -> tuple[ParameterExtractorNode, VariablePool]:
     variable_pool = build_variable_pool(variables=[(("start", "rule"), "strictly")])
     runtime_state = GraphRuntimeState(
@@ -44,32 +49,35 @@ def _build_parameter_extractor_node() -> tuple[ParameterExtractorNode, VariableP
     init_params = build_graph_init_params(graph_config={"nodes": [], "edges": []})
     model_instance = Mock()
     prompt_message_serializer = Mock()
-    node = ParameterExtractorNode(
-        node_id="extractor",
-        config=ParameterExtractorNodeData(
-            title="Parameter Extractor",
-            model=ModelConfig(
-                provider="test",
-                name="test-model",
-                mode=LLMMode.CHAT,
-            ),
-            query=["start", "query"],
-            parameters=[
-                ParameterConfig(
-                    name="location",
-                    type=SegmentType.STRING,
-                    description="The target location",
-                    required=True,
+    node = cast(
+        ParameterExtractorNode,
+        _call_parameter_extractor_constructor(
+            node_id="extractor",
+            config=ParameterExtractorNodeData(
+                title="Parameter Extractor",
+                model=ModelConfig(
+                    provider="test",
+                    name="test-model",
+                    mode=LLMMode.CHAT,
                 ),
-            ],
-            instruction="Follow {{#start.rule#}} instructions.",
-            reasoning_mode="function_call",
-        ),
-        graph_init_params=init_params,
-        graph_runtime_state=runtime_state,
-        dependencies=ParameterExtractorNodeDependencies(
-            model_instance=model_instance,
-            prompt_message_serializer=prompt_message_serializer,
+                query=["start", "query"],
+                parameters=[
+                    ParameterConfig(
+                        name="location",
+                        type=SegmentType.STRING,
+                        description="The target location",
+                        required=True,
+                    ),
+                ],
+                instruction="Follow {{#start.rule#}} instructions.",
+                reasoning_mode="function_call",
+            ),
+            graph_init_params=init_params,
+            graph_runtime_state=runtime_state,
+            dependencies=_build_dependencies(
+                model_instance=model_instance,
+                prompt_message_serializer=prompt_message_serializer,
+            ),
         ),
     )
     return node, variable_pool
@@ -154,31 +162,32 @@ def test_parameter_extractor_accepts_dependency_bundle() -> None:
     prompt_message_serializer = Mock()
     memory = Mock()
 
-    node = ParameterExtractorNode(
-        node_id="extractor",
-        config=ParameterExtractorNodeData(
-            title="Parameter Extractor",
-            model=ModelConfig(
-                provider="test",
-                name="test-model",
-                mode=LLMMode.CHAT,
+    node = cast(
+        ParameterExtractorNode,
+        _call_parameter_extractor_constructor(
+            node_id="extractor",
+            config=ParameterExtractorNodeData(
+                title="Parameter Extractor",
+                model=ModelConfig(
+                    provider="test",
+                    name="test-model",
+                    mode=LLMMode.CHAT,
+                ),
+                query=["start", "query"],
+                parameters=[],
+                reasoning_mode="function_call",
             ),
-            query=["start", "query"],
-            parameters=[],
-            reasoning_mode="function_call",
-        ),
-        graph_init_params=init_params,
-        graph_runtime_state=runtime_state,
-        dependencies=ParameterExtractorNodeDependencies(
-            model_instance=model_instance,
-            prompt_message_serializer=prompt_message_serializer,
-            memory=memory,
+            graph_init_params=init_params,
+            graph_runtime_state=runtime_state,
+            dependencies=_build_dependencies(
+                model_instance=model_instance,
+                prompt_message_serializer=prompt_message_serializer,
+                memory=memory,
+            ),
         ),
     )
 
     assert node.model_instance is model_instance
-    assert node.dependencies.prompt_message_serializer is prompt_message_serializer
-    assert node.dependencies.memory is memory
 
 
 def test_parameter_extractor_rejects_mixed_dependency_styles() -> None:
@@ -203,7 +212,7 @@ def test_parameter_extractor_rejects_mixed_dependency_styles() -> None:
                 variable_pool=build_variable_pool(variables=[]),
                 start_at=time.perf_counter(),
             ),
-            dependencies=ParameterExtractorNodeDependencies(
+            dependencies=_build_dependencies(
                 model_instance=Mock(),
                 prompt_message_serializer=Mock(),
             ),
@@ -244,5 +253,3 @@ def test_parameter_extractor_legacy_dependency_keywords_still_work() -> None:
     )
 
     assert node.model_instance is model_instance
-    assert node.dependencies.prompt_message_serializer is prompt_message_serializer
-    assert node.dependencies.memory is memory
