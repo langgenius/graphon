@@ -10,8 +10,23 @@ from graphon.prompt_entities import MemoryConfig
 
 
 class ClassConfig(BaseModel):
-    id: str
-    name: str
+    """Question Classifier branch configuration."""
+
+    id: str = Field(
+        description="Stable branch identifier used for routing and edge handles.",
+    )
+    name: str = Field(
+        description=(
+            "Classifier-facing category description used in prompts "
+            "and returned as class_name."
+        ),
+    )
+    label: str = Field(
+        default="",
+        description=(
+            "Optional user-facing branch label exposed separately as class_label."
+        ),
+    )
 
 
 class QuestionClassifierNodeData(BaseNodeData):
