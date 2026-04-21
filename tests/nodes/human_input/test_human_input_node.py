@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from time import time
+from typing import Any
 
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.node_events.node import HumanInputFormTimeoutEvent, StreamCompletedEvent
@@ -45,7 +47,7 @@ class _FakeHumanInputRuntime:
         node_id: str,
         node_data: HumanInputNodeData,
         rendered_content: str,
-        resolved_default_values: dict[str, object],
+        resolved_default_values: Mapping[str, Any],
     ) -> _FakeForm:
         _ = (node_id, node_data, rendered_content, resolved_default_values)
         msg = "create_form should not be called in these tests"
