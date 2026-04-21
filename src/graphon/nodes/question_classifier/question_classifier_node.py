@@ -80,7 +80,7 @@ class _QuestionClassifierRunContext:
 
 
 @dataclass(frozen=True, slots=True)
-class QuestionClassifierDependencies:
+class _QuestionClassifierDependencies:
     """Runtime collaborators required to execute a question-classifier node."""
 
     model_instance: PreparedLLMProtocol
@@ -109,7 +109,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         *,
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,
-        dependencies: QuestionClassifierDependencies | None = None,
+        dependencies: _QuestionClassifierDependencies | None = None,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
         model_instance: PreparedLLMProtocol | None = None,
@@ -155,13 +155,13 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
     @staticmethod
     def _resolve_dependencies(
         *,
-        dependencies: QuestionClassifierDependencies | None,
+        dependencies: _QuestionClassifierDependencies | None,
         model_instance: PreparedLLMProtocol | None,
         template_renderer: Jinja2TemplateRenderer | None,
         memory: PromptMessageMemory | None,
         llm_file_saver: LLMFileSaver | None,
         prompt_message_serializer: PromptMessageSerializerProtocol | None,
-    ) -> QuestionClassifierDependencies:
+    ) -> _QuestionClassifierDependencies:
         if dependencies is not None:
             duplicate_arguments = [
                 argument_name
@@ -197,12 +197,12 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
             missing_arguments_str = ", ".join(sorted(missing_arguments))
             msg = (
                 "QuestionClassifierNode requires either "
-                "'dependencies=QuestionClassifierDependencies(...)' or the "
-                f"legacy keyword arguments: {missing_arguments_str}."
+                "'dependencies' or the legacy keyword arguments: "
+                f"{missing_arguments_str}."
             )
             raise TypeError(msg)
 
-        return QuestionClassifierDependencies(
+        return _QuestionClassifierDependencies(
             model_instance=cast(PreparedLLMProtocol, model_instance),
             template_renderer=cast(Jinja2TemplateRenderer, template_renderer),
             llm_file_saver=cast(LLMFileSaver, llm_file_saver),
@@ -442,10 +442,6 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
             },
             llm_usage=usage,
         )
-
-    @property
-    def model_instance(self) -> PreparedLLMProtocol:
-        return self._model_instance
 
     @classmethod
     @override

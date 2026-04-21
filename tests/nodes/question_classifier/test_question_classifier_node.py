@@ -1,4 +1,6 @@
+import importlib
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -6,7 +8,6 @@ import pytest
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.node_events.node import ModelInvokeCompletedEvent
 from graphon.nodes.question_classifier import (
-    QuestionClassifierDependencies,
     QuestionClassifierNode,
     QuestionClassifierNodeData,
 )
@@ -14,6 +15,16 @@ from graphon.nodes.question_classifier.question_classifier_node import llm_utils
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
 from ...helpers import build_graph_init_params
+
+
+def _build_question_classifier_dependencies(**kwargs: Any) -> Any:
+    question_classifier_node_module = importlib.import_module(
+        "graphon.nodes.question_classifier.question_classifier_node",
+    )
+    dependencies_class = (
+        question_classifier_node_module._QuestionClassifierDependencies  # noqa: SLF001
+    )
+    return dependencies_class(**kwargs)
 
 
 def test_question_classifier_node_data_accepts_optional_label() -> None:
@@ -120,7 +131,7 @@ def test_question_classifier_constructor_accepts_dependency_bundle(
     )
     prompt_message_serializer = MagicMock()
     prompt_message_serializer.serialize.return_value = ["serialized prompt"]
-    dependencies = QuestionClassifierDependencies(
+    dependencies = _build_question_classifier_dependencies(
         model_instance=model_instance,
         template_renderer=template_renderer,
         llm_file_saver=MagicMock(),
@@ -167,7 +178,6 @@ def test_question_classifier_constructor_accepts_dependency_bundle(
 
     result = node._run()  # noqa: SLF001
 
-    assert node.model_instance is model_instance
     assert result.process_data["prompts"] == ["serialized prompt"]
 
 
@@ -185,7 +195,7 @@ def test_question_classifier_constructor_rejects_mixed_dependency_inputs() -> No
         "instruction": "Classify the query",
     })
     variable_pool = MagicMock()
-    dependencies = QuestionClassifierDependencies(
+    dependencies = _build_question_classifier_dependencies(
         model_instance=MagicMock(
             provider="openai",
             model_name="gpt-4o",

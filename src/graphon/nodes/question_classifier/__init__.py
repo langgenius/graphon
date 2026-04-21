@@ -1,11 +1,4 @@
 from .entities import QuestionClassifierNodeData
-from .question_classifier_node import (
-    QuestionClassifierDependencies,
-    QuestionClassifierNode,
-)
+from .question_classifier_node import QuestionClassifierNode
 
-__all__ = [
-    "QuestionClassifierDependencies",
-    "QuestionClassifierNode",
-    "QuestionClassifierNodeData",
-]
+__all__ = ["QuestionClassifierNode", "QuestionClassifierNodeData"]
