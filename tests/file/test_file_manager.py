@@ -10,7 +10,7 @@ from graphon.file.enums import (
 )
 from graphon.file.file_manager import download, to_prompt_message_content
 from graphon.file.models import File
-from graphon.file.runtime import get_workflow_file_runtime, set_workflow_file_runtime
+from graphon.file.runtime import use_workflow_file_runtime
 from graphon.model_runtime.entities.message_entities import (
     DocumentPromptMessageContent,
     ImagePromptMessageContent,
@@ -45,13 +45,9 @@ def _build_file(
 
 @pytest.fixture
 def workflow_file_runtime() -> Generator[MagicMock, None, None]:
-    previous_runtime = get_workflow_file_runtime()
     runtime = MagicMock()
-    set_workflow_file_runtime(runtime)
-    try:
+    with use_workflow_file_runtime(runtime):
         yield runtime
-    finally:
-        set_workflow_file_runtime(previous_runtime)
 
 
 @pytest.mark.parametrize(
