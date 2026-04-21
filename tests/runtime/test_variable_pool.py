@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import (
     BooleanSegment,
@@ -6,7 +9,72 @@ from graphon.variables.segments import (
     ObjectSegment,
     StringSegment,
 )
-from graphon.variables.variables import StringVariable
+from graphon.variables.variables import (
+    RAGPipelineVariable,
+    RAGPipelineVariableInput,
+    StringVariable,
+)
+
+
+class TestVariablePoolConstruction:
+    def test_default_constructor_starts_empty(self) -> None:
+        assert VariablePool().flatten() == {}
+
+    def test_from_bootstrap_loads_legacy_inputs(self) -> None:
+        system_variable = StringVariable(
+            name="system_name",
+            value="sys-value",
+            selector=["wrong", "system_name"],
+        )
+        conversation_variable = StringVariable(
+            name="session_name",
+            value="before",
+        )
+        rag_variable = RAGPipelineVariableInput(
+            variable=RAGPipelineVariable(
+                belong_to_node_id="retriever",
+                type="text-input",
+                label="Question",
+                variable="query",
+            ),
+            value="answer",
+        )
+
+        pool = VariablePool.from_bootstrap(
+            system_variables=[system_variable],
+            conversation_variables=[conversation_variable],
+            rag_pipeline_variables=[rag_variable],
+            user_inputs={"query": "ignored"},
+        )
+
+        normalized_system_variable = pool.get_variable(("sys", "system_name"))
+        assert normalized_system_variable is not None
+        assert tuple(normalized_system_variable.selector) == ("sys", "system_name")
+
+        conversation_segment = pool.get(("conversation", "session_name"))
+        assert conversation_segment is not None
+        assert conversation_segment.value == "before"
+
+        rag_segment = pool.get(("rag", "retriever"))
+        assert rag_segment is not None
+        assert rag_segment.value == {"query": "answer"}
+
+    def test_constructor_rejects_legacy_bootstrap_kwargs(self) -> None:
+        with pytest.raises(ValidationError, match="from_bootstrap"):
+            VariablePool.model_validate({
+                "conversation_variables": [
+                    StringVariable(name="session", value="x"),
+                ],
+            })
+
+    def test_from_legacy_bootstrap_preserves_compatibility(self) -> None:
+        pool = VariablePool.from_legacy_bootstrap(
+            conversation_variables=[StringVariable(name="session_name", value="value")],
+        )
+
+        segment = pool.get(("conversation", "session_name"))
+        assert segment is not None
+        assert segment.value == "value"
 
 
 class TestVariablePoolGetAndNestedAttribute:
