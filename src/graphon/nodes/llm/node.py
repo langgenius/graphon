@@ -372,8 +372,6 @@ class LLMNode(Node[LLMNodeData]):
             usage = event.usage
             usage_holder["value"] = usage
             finish_reason = event.finish_reason
-            if event.model:
-                model_name = event.model
             reasoning_content = event.reasoning_content or ""
             clean_text = self._extract_clean_text(event.text)
             if event.structured_output:
@@ -383,10 +381,7 @@ class LLMNode(Node[LLMNodeData]):
             break
 
         node_inputs.update(
-            llm_utils.build_model_identity_inputs(
-                model_instance=self._model_instance,
-                model_name=model_name,
-            ),
+            llm_utils.build_model_identity_inputs(model_instance=self._model_instance),
         )
         process_data.update(
             self._build_process_data(
@@ -676,7 +671,6 @@ class LLMNode(Node[LLMNodeData]):
             # Use clean_text for separated mode, full_text for tagged mode
             text=clean_text if reasoning_format == "separated" else full_text,
             usage=usage,
-            model=model or None,
             finish_reason=finish_reason,
             # Reasoning content for workflow variables and downstream nodes
             reasoning_content=reasoning_content,
@@ -1659,7 +1653,6 @@ class LLMNode(Node[LLMNodeData]):
             # Use clean_text for separated mode, full_text for tagged mode
             text=clean_text if reasoning_format == "separated" else full_text,
             usage=invoke_result.usage,
-            model=invoke_result.model,
             finish_reason=None,
             # Reasoning content for workflow variables and downstream nodes
             reasoning_content=reasoning_content,

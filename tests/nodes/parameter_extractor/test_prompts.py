@@ -183,7 +183,7 @@ def test_prepare_run_context_exposes_model_identity_in_inputs(
     assert run_context.inputs["model_name"] == "test-model"
 
 
-def test_parameter_extractor_run_emits_concrete_model_identity_in_inputs(
+def test_parameter_extractor_run_emits_model_identity_in_inputs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     node, variable_pool = _build_parameter_extractor_node()
@@ -202,7 +202,6 @@ def test_parameter_extractor_run_emits_concrete_model_identity_in_inputs(
     monkeypatch.setattr(node, "_build_run_prompt", lambda **_: ([], []))
 
     invoke_result = SimpleNamespace(
-        model="gpt-4.1-mini",
         usage=LLMUsage.empty_usage(),
         message=SimpleNamespace(
             get_text_content=lambda: "{}",
@@ -215,7 +214,7 @@ def test_parameter_extractor_run_emits_concrete_model_identity_in_inputs(
 
     assert result.inputs["query"] == "weather in sf"
     assert result.inputs["model_provider"] == "test"
-    assert result.inputs["model_name"] == "gpt-4.1-mini"
+    assert result.inputs["model_name"] == "test-model"
 
 
 def test_parameter_extractor_accepts_dependency_bundle() -> None:

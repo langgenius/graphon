@@ -141,13 +141,9 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         usage = LLMUsage.empty_usage()
 
         try:
-            result_text, usage, finish_reason, actual_model_name = (
-                self._invoke_classifier(
-                    run_context=run_context,
-                )
+            result_text, usage, finish_reason = self._invoke_classifier(
+                run_context=run_context,
             )
-            if actual_model_name:
-                run_context.inputs["model_name"] = actual_model_name
             category_name, category_id, category_label = self._resolve_category(
                 rendered_classes=run_context.rendered_classes,
                 result_text=result_text,
@@ -156,7 +152,6 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
                 run_context=run_context,
                 usage=usage,
                 finish_reason=finish_reason,
-                model_name=actual_model_name or run_context.model_instance.model_name,
                 category_name=category_name,
                 category_label=category_label,
                 category_id=category_id,
@@ -264,11 +259,10 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         self,
         *,
         run_context: _QuestionClassifierRunContext,
-    ) -> tuple[str, LLMUsage, str | None, str | None]:
+    ) -> tuple[str, LLMUsage, str | None]:
         result_text = ""
         usage = LLMUsage.empty_usage()
         finish_reason = None
-        model_name = None
         generator = LLMNode.invoke_llm(
             model_instance=run_context.model_instance,
             prompt_messages=run_context.prompt_messages,
@@ -284,9 +278,8 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
                 result_text = event.text
                 usage = event.usage
                 finish_reason = event.finish_reason
-                model_name = event.model
                 break
-        return result_text, usage, finish_reason, model_name
+        return result_text, usage, finish_reason
 
     @staticmethod
     def _resolve_category(
@@ -340,7 +333,6 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         run_context: _QuestionClassifierRunContext,
         usage: LLMUsage,
         finish_reason: str | None,
-        model_name: str,
         category_name: str,
         category_label: str,
         category_id: str,
@@ -354,7 +346,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
             "usage": jsonable_encoder(usage),
             "finish_reason": finish_reason,
             "model_provider": run_context.model_instance.provider,
-            "model_name": model_name,
+            "model_name": run_context.model_instance.model_name,
         }
         outputs = {
             "class_name": category_name,

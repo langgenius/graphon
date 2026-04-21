@@ -15,10 +15,6 @@ from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from ...helpers import build_graph_init_params
 
 
-class _ModelInvokeCompletedWithConcreteModel(ModelInvokeCompletedEvent):
-    model: str
-
-
 def test_question_classifier_node_data_accepts_optional_label() -> None:
     node_data = QuestionClassifierNodeData.model_validate({
         "title": "Classifier",
@@ -141,14 +137,13 @@ def test_question_classifier_run_returns_custom_class_label(
     monkeypatch.setattr(
         "graphon.nodes.question_classifier.question_classifier_node.LLMNode.invoke_llm",
         lambda **_: iter([
-            _ModelInvokeCompletedWithConcreteModel(
+            ModelInvokeCompletedEvent(
                 text=(
                     '{"category_id": "refund", '
                     '"category_name": "Questions about refunds"}'
                 ),
                 usage=LLMUsage.empty_usage(),
                 finish_reason="stop",
-                model="gpt-4.1-mini",
             ),
         ]),
     )
@@ -159,7 +154,7 @@ def test_question_classifier_run_returns_custom_class_label(
     assert result.outputs["class_label"] == "Refund desk"
     assert result.outputs["class_id"] == "refund"
     assert result.inputs["model_provider"] == "openai"
-    assert result.inputs["model_name"] == "gpt-4.1-mini"
+    assert result.inputs["model_name"] == "gpt-4o"
 
 
 def test_question_classifier_run_falls_back_to_canonical_class_label(

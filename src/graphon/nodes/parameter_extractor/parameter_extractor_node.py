@@ -285,15 +285,12 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         run_context = self._prepare_run_context()
 
         try:
-            text, usage, tool_call, actual_model_name = self._invoke(
+            text, usage, tool_call = self._invoke(
                 model_instance=run_context.model_instance,
                 prompt_messages=run_context.prompt_messages,
                 tools=run_context.prompt_message_tools,
                 stop=run_context.model_instance.stop,
             )
-            if actual_model_name:
-                run_context.inputs["model_name"] = actual_model_name
-                run_context.process_data["model_name"] = actual_model_name
             run_context.process_data["usage"] = jsonable_encoder(usage)
             run_context.process_data["tool_call"] = jsonable_encoder(tool_call)
             run_context.process_data["llm_text"] = text
@@ -480,7 +477,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         prompt_messages: list[PromptMessage],
         tools: list[PromptMessageTool],
         stop: Sequence[str] | None,
-    ) -> tuple[str, LLMUsage, AssistantPromptMessage.ToolCall | None, str | None]:
+    ) -> tuple[str, LLMUsage, AssistantPromptMessage.ToolCall | None]:
         invoke_result = model_instance.invoke_llm(
             prompt_messages=prompt_messages,
             model_parameters=dict(model_instance.parameters),
@@ -503,7 +500,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
             else None
         )
 
-        return text, usage, tool_call, invoke_result.model
+        return text, usage, tool_call
 
     def _generate_function_call_prompt(
         self,

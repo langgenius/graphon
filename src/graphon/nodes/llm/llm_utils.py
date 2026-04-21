@@ -70,12 +70,11 @@ def fetch_model_schema(*, model_instance: PreparedLLMProtocol) -> AIModelEntity:
 def build_model_identity_inputs(
     *,
     model_instance: PreparedLLMProtocol,
-    model_name: str | None = None,
 ) -> dict[str, Any]:
-    """Expose the runtime-resolved model identity in node inputs."""
+    """Expose the prepared model identity in node inputs."""
     return {
         "model_provider": model_instance.provider,
-        "model_name": model_name or model_instance.model_name,
+        "model_name": model_instance.model_name,
     }
 
 
