@@ -44,6 +44,12 @@ class NodeFactory(Protocol):
 class Graph:
     """Graph representation with nodes and edges for workflow execution."""
 
+    nodes: dict[str, Node]
+    edges: dict[str, Edge]
+    in_edges: dict[str, list[str]]
+    out_edges: dict[str, list[str]]
+    root_node: Node
+
     def __init__(
         self,
         *,

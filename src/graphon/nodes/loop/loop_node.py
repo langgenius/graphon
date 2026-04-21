@@ -3,7 +3,7 @@ import json
 import logging
 from collections.abc import Callable, Generator, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Literal, override
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, override
 
 from graphon.entities.graph_config import NodeConfigDictAdapter
 from graphon.entities.graph_init_params import GraphInitParams
@@ -38,6 +38,7 @@ from graphon.nodes.loop.entities import (
     LoopNodeData,
     LoopVariableData,
 )
+from graphon.utils.condition.entities import Condition
 from graphon.utils.condition.processor import ConditionProcessor
 from graphon.variables.factory import (
     TypeMismatchError,
@@ -57,6 +58,13 @@ _JSON_ARRAY_LOOP_TYPES = frozenset((
     SegmentType.ARRAY_OBJECT,
     SegmentType.ARRAY_STRING,
 ))
+
+
+class _IterationState(TypedDict, total=False):
+    iteration_usage: LLMUsage
+    reach_break_node: bool
+    loop_duration: float
+    single_loop_variable: dict[str, object]
 
 
 class LoopNode(LLMUsageTrackingMixin, Node[LoopNodeData]):
@@ -103,7 +111,7 @@ class LoopNode(LLMUsageTrackingMixin, Node[LoopNodeData]):
                 loop_count = 0
 
             for i in range(loop_count):
-                iteration_state: dict[str, object] = {}
+                iteration_state: _IterationState = {}
                 try:
                     yield from self._execute_loop_iteration(
                         current_index=i,
@@ -166,15 +174,15 @@ class LoopNode(LLMUsageTrackingMixin, Node[LoopNodeData]):
     def _record_iteration_state(
         *,
         current_index: int,
-        iteration_state: dict[str, object],
+        iteration_state: _IterationState,
         loop_duration_map: dict[str, float],
         single_loop_variable_map: dict[str, dict[str, object]],
     ) -> bool:
         loop_duration_map[str(current_index)] = float(iteration_state["loop_duration"])
-        single_loop_variable_map[str(current_index)] = dict(
-            iteration_state["single_loop_variable"],
-        )
-        return bool(iteration_state["reach_break_node"])
+        single_loop_variable_map[str(current_index)] = iteration_state[
+            "single_loop_variable"
+        ]
+        return iteration_state["reach_break_node"]
 
     def _initialize_loop_run(
         self,
@@ -245,7 +253,7 @@ class LoopNode(LLMUsageTrackingMixin, Node[LoopNodeData]):
         self,
         *,
         condition_processor: ConditionProcessor,
-        break_conditions: Sequence[Mapping[str, Any]] | None,
+        break_conditions: Sequence[Condition] | None,
         logical_operator: Literal["and", "or"],
         suppress_errors: bool = False,
     ) -> bool:
@@ -276,7 +284,7 @@ class LoopNode(LLMUsageTrackingMixin, Node[LoopNodeData]):
         root_node_id: str,
         loop_node_ids: set[str],
         loop_variable_selectors: Mapping[str, Sequence[str]],
-        iteration_state: dict[str, object],
+        iteration_state: _IterationState,
     ) -> Generator[
         NodeEventBase | GraphNodeEventBase,
         None,

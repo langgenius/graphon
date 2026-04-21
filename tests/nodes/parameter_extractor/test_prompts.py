@@ -3,7 +3,11 @@ from unittest.mock import Mock
 
 from graphon.model_runtime.entities.llm_entities import LLMMode
 from graphon.model_runtime.entities.message_entities import PromptMessageRole
-from graphon.nodes.parameter_extractor.entities import ParameterExtractorNodeData
+from graphon.nodes.llm.entities import ModelConfig
+from graphon.nodes.parameter_extractor.entities import (
+    ParameterConfig,
+    ParameterExtractorNodeData,
+)
 from graphon.nodes.parameter_extractor.parameter_extractor_node import (
     ParameterExtractorNode,
 )
@@ -17,6 +21,7 @@ from graphon.nodes.parameter_extractor.prompts import (
 )
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.runtime.variable_pool import VariablePool
+from graphon.variables.types import SegmentType
 
 from ...helpers import build_graph_init_params, build_variable_pool
 
@@ -32,19 +37,19 @@ def _build_parameter_extractor_node() -> tuple[ParameterExtractorNode, VariableP
         node_id="extractor",
         config=ParameterExtractorNodeData(
             title="Parameter Extractor",
-            model={
-                "provider": "test",
-                "name": "test-model",
-                "mode": LLMMode.CHAT,
-            },
+            model=ModelConfig(
+                provider="test",
+                name="test-model",
+                mode=LLMMode.CHAT,
+            ),
             query=["start", "query"],
             parameters=[
-                {
-                    "name": "location",
-                    "type": "string",
-                    "description": "The target location",
-                    "required": True,
-                },
+                ParameterConfig(
+                    name="location",
+                    type=SegmentType.STRING,
+                    description="The target location",
+                    required=True,
+                ),
             ],
             instruction="Follow {{#start.rule#}} instructions.",
             reasoning_mode="function_call",

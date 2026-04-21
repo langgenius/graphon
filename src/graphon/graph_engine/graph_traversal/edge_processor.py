@@ -1,7 +1,7 @@
 """Edge processing logic for graph traversal."""
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, final
+from typing import final
 
 from graphon.enums import NodeExecutionType
 from graphon.graph.edge import Edge
@@ -10,9 +10,7 @@ from graphon.graph_events.node import NodeRunStreamChunkEvent
 from graphon.runtime.graph_runtime_state import ResponseStreamCoordinatorProtocol
 
 from ..graph_state_manager import GraphStateManager
-
-if TYPE_CHECKING:
-    from .skip_propagator import SkipPropagator
+from .skip_propagator import SkipPropagator
 
 
 @final
@@ -29,7 +27,7 @@ class EdgeProcessor:
         graph: Graph,
         state_manager: GraphStateManager,
         response_coordinator: ResponseStreamCoordinatorProtocol,
-        skip_propagator: "SkipPropagator",
+        skip_propagator: SkipPropagator,
     ) -> None:
         """Initialize the edge processor.
 

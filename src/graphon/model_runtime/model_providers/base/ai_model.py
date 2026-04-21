@@ -222,7 +222,7 @@ class AIModel:
             return
 
         if not parameter_rule.help:
-            parameter_rule.help = I18nObject(en_us=default_help["en_US"])
+            parameter_rule.help = I18nObject(en_US=default_help["en_US"])
             return
 
         if not parameter_rule.help.en_us:

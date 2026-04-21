@@ -1,6 +1,8 @@
 import json
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, Literal, NamedTuple, cast
+from typing import Any, Literal, NamedTuple
+
+from typing_extensions import TypeIs
 
 from graphon.file import file_manager
 from graphon.file.enums import FileAttribute
@@ -89,16 +91,16 @@ class ConditionProcessor:
                 msg = f"Variable {condition.variable_selector} not found"
                 raise ValueError(msg)
 
-            if _should_process_file_sub_conditions(
-                variable=variable,
-                comparison_operator=condition.comparison_operator,
+            if (
+                _is_array_file_segment(variable)
+                and condition.comparison_operator in _FILE_SUB_CONDITION_OPERATORS
             ):
                 # check sub conditions
                 if not condition.sub_variable_condition:
                     msg = "Sub variable is required"
                     raise ValueError(msg)
                 result = _process_sub_conditions(
-                    variable=cast("ArrayFileSegment", variable),
+                    variable=variable,
                     sub_conditions=condition.sub_variable_condition.conditions,
                     operator=condition.sub_variable_condition.logical_operator,
                 )
@@ -155,17 +157,20 @@ def _evaluate_condition(
     return evaluator(value=value, expected=expected)
 
 
-def _should_process_file_sub_conditions(
-    *,
-    variable: Any,
-    comparison_operator: SupportedComparisonOperator,
-) -> bool:
-    match variable:
-        case ArrayFileSegment():
-            result = comparison_operator in _FILE_SUB_CONDITION_OPERATORS
-        case _:
-            result = False
-    return result
+def _is_array_file_segment(variable: object) -> TypeIs[ArrayFileSegment]:
+    return isinstance(variable, ArrayFileSegment)
+
+
+def _is_string_sequence(value: object) -> TypeIs[Sequence[str]]:
+    return (
+        isinstance(value, Sequence)
+        and not isinstance(value, str)
+        and all(isinstance(item, str) for item in value)
+    )
+
+
+def _is_bool_sequence(value: object) -> TypeIs[Sequence[bool]]:
+    return isinstance(value, Sequence) and all(isinstance(item, bool) for item in value)
 
 
 def _prepare_expected_value(
@@ -190,10 +195,16 @@ def _prepare_expected_value(
             return [_convert_to_bool(item) for item in normalized_expected_value]
         return _convert_to_bool(normalized_expected_value)
 
-    return cast(
-        "str | Sequence[str] | bool | list[bool] | None",
-        normalized_expected_value,
-    )
+    if normalized_expected_value is None or isinstance(
+        normalized_expected_value, str | bool
+    ):
+        return normalized_expected_value
+    if _is_string_sequence(normalized_expected_value):
+        return normalized_expected_value
+    if _is_bool_sequence(normalized_expected_value):
+        return list(normalized_expected_value)
+    msg = f"unexpected expected value: {normalized_expected_value!r}"
+    raise TypeError(msg)
 
 
 def _evaluate_all_of_condition(*, value: Any, expected: Any) -> bool:

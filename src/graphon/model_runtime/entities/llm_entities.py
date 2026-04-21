@@ -5,7 +5,16 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Self, TypedDict
 
-from pydantic import BaseModel, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictFloat,
+    StrictInt,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 
 from graphon.model_runtime.entities.message_entities import (
     AssistantPromptMessage,
@@ -40,6 +49,41 @@ class LLMUsageMetadata(TypedDict, total=False):
     latency: float
     time_to_first_token: float
     time_to_generate: float
+
+
+class _LLMUsageMetadataInput(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    prompt_tokens: StrictInt = 0
+    completion_tokens: StrictInt = 0
+    total_tokens: StrictInt = 0
+    prompt_unit_price: Decimal = Decimal(0)
+    completion_unit_price: Decimal = Decimal(0)
+    total_price: Decimal = Decimal(0)
+    currency: str = "USD"
+    prompt_price_unit: Decimal = Decimal(0)
+    completion_price_unit: Decimal = Decimal(0)
+    prompt_price: Decimal = Decimal(0)
+    completion_price: Decimal = Decimal(0)
+    latency: StrictInt | StrictFloat = 0.0
+    time_to_first_token: StrictInt | StrictFloat | None = None
+    time_to_generate: StrictInt | StrictFloat | None = None
+
+    @field_validator("currency", mode="before")
+    @classmethod
+    def _normalize_currency(cls, value: object) -> str:
+        return str(value)
+
+    @model_validator(mode="after")
+    def _derive_total_tokens(self) -> _LLMUsageMetadataInput:
+        if self.total_tokens == 0 and (
+            self.prompt_tokens > 0 or self.completion_tokens > 0
+        ):
+            self.total_tokens = self.prompt_tokens + self.completion_tokens
+        return self
+
+
+_LLM_USAGE_METADATA_INPUT_ADAPTER = TypeAdapter(_LLMUsageMetadataInput)
 
 
 class LLMUsage(ModelUsage):
@@ -80,7 +124,7 @@ class LLMUsage(ModelUsage):
         )
 
     @classmethod
-    def from_metadata(cls, metadata: LLMUsageMetadata) -> LLMUsage:
+    def from_metadata(cls, metadata: Mapping[str, object]) -> LLMUsage:
         """Create LLMUsage instance from metadata dictionary with default values.
 
         Args:
@@ -90,35 +134,22 @@ class LLMUsage(ModelUsage):
             LLMUsage instance with values from metadata or defaults
 
         """
-        prompt_tokens = metadata.get("prompt_tokens", 0)
-        completion_tokens = metadata.get("completion_tokens", 0)
-        total_tokens = metadata.get("total_tokens", 0)
-
-        # If total_tokens is not provided but prompt and completion tokens are,
-        # calculate total_tokens
-        if total_tokens == 0 and (prompt_tokens > 0 or completion_tokens > 0):
-            total_tokens = prompt_tokens + completion_tokens
-
-        return cls(
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            prompt_unit_price=Decimal(str(metadata.get("prompt_unit_price", 0))),
-            completion_unit_price=Decimal(
-                str(metadata.get("completion_unit_price", 0)),
-            ),
-            total_price=Decimal(str(metadata.get("total_price", 0))),
-            currency=metadata.get("currency", "USD"),
-            prompt_price_unit=Decimal(str(metadata.get("prompt_price_unit", 0))),
-            completion_price_unit=Decimal(
-                str(metadata.get("completion_price_unit", 0)),
-            ),
-            prompt_price=Decimal(str(metadata.get("prompt_price", 0))),
-            completion_price=Decimal(str(metadata.get("completion_price", 0))),
-            latency=metadata.get("latency", 0.0),
-            time_to_first_token=metadata.get("time_to_first_token"),
-            time_to_generate=metadata.get("time_to_generate"),
+        normalized_metadata = _LLM_USAGE_METADATA_INPUT_ADAPTER.validate_python(
+            metadata,
         )
+        payload = normalized_metadata.model_dump(mode="python")
+        payload["latency"] = float(normalized_metadata.latency)
+        payload["time_to_first_token"] = (
+            float(normalized_metadata.time_to_first_token)
+            if normalized_metadata.time_to_first_token is not None
+            else None
+        )
+        payload["time_to_generate"] = (
+            float(normalized_metadata.time_to_generate)
+            if normalized_metadata.time_to_generate is not None
+            else None
+        )
+        return cls.model_validate(payload)
 
     def plus(self, other: LLMUsage) -> LLMUsage:
         """Add two LLMUsage instances together.

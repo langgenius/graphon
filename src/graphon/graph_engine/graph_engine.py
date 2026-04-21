@@ -9,8 +9,9 @@ from __future__ import annotations
 import logging
 import queue
 from collections.abc import Generator
-from typing import TYPE_CHECKING, final
+from typing import final
 
+from graphon.entities.graph_init_params import GraphInitParams
 from graphon.entities.workflow_start_reason import WorkflowStartReason
 from graphon.enums import NodeExecutionType
 from graphon.graph.graph import Graph
@@ -49,9 +50,6 @@ from .graph_traversal import EdgeProcessor, SkipPropagator
 from .layers.base import GraphEngineLayer
 from .orchestration import Dispatcher, ExecutionCoordinator
 from .worker_management import WorkerPool
-
-if TYPE_CHECKING:
-    from graphon.entities.graph_init_params import GraphInitParams
 
 logger = logging.getLogger(__name__)
 

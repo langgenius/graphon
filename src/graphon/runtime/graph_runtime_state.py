@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel, Field
 from pydantic_core import to_jsonable_python
@@ -18,6 +18,7 @@ from graphon.runtime.variable_pool import VariablePool
 if TYPE_CHECKING:
     from graphon.entities.graph_init_params import GraphInitParams
     from graphon.entities.pause_reason import PauseReason
+    from graphon.graph.graph import Graph
     from graphon.graph_events.node import NodeRunStreamChunkEvent, NodeRunSucceededEvent
 
 
@@ -185,7 +186,7 @@ class NodeProtocol(Protocol):
     id: str
     state: NodeState
     execution_type: NodeExecutionType
-    node_type: ClassVar[NodeType]
+    node_type: NodeType
 
     def blocks_variable_output(
         self,
@@ -379,7 +380,7 @@ class _GraphRuntimeSuspensionState:
 
     def snapshot_graph_state(
         self,
-        graph: GraphProtocol | None,
+        graph: GraphProtocol | Graph | None,
     ) -> _GraphStateSnapshot:
         if graph is None:
             if (
@@ -409,7 +410,7 @@ class _GraphRuntimeSuspensionState:
 
         return _GraphStateSnapshot(nodes=node_states, edges=edge_states)
 
-    def apply_pending_graph_state(self, graph: GraphProtocol | None) -> None:
+    def apply_pending_graph_state(self, graph: GraphProtocol | Graph | None) -> None:
         if graph is None:
             return
         if self.pending_graph_node_states:
@@ -439,7 +440,7 @@ class _GraphRuntimeBindings:
         execution_context: AbstractContextManager[object] | None = None,
     ) -> None:
         self._runtime_state = runtime_state
-        self.graph: GraphProtocol | None = None
+        self.graph: GraphProtocol | Graph | None = None
         self.ready_queue: ReadyQueueProtocol | None = ready_queue
         self.graph_execution: GraphExecutionProtocol | None = graph_execution
         self.response_coordinator: ResponseStreamCoordinatorProtocol | None = (
@@ -452,7 +453,7 @@ class _GraphRuntimeBindings:
 
     def attach_graph(
         self,
-        graph: GraphProtocol,
+        graph: GraphProtocol | Graph,
         suspension_state: _GraphRuntimeSuspensionState,
     ) -> None:
         if self.graph is not None and self.graph is not graph:
@@ -481,7 +482,7 @@ class _GraphRuntimeBindings:
         self,
         suspension_state: _GraphRuntimeSuspensionState,
         *,
-        graph: GraphProtocol | None = None,
+        graph: GraphProtocol | Graph | None = None,
     ) -> None:
         if graph is not None:
             self.attach_graph(graph, suspension_state)
@@ -615,7 +616,7 @@ class GraphRuntimeState:  # noqa: PLR0904
         ready_queue: ReadyQueueProtocol | None = None,
         graph_execution: GraphExecutionProtocol | None = None,
         response_coordinator: ResponseStreamCoordinatorProtocol | None = None,
-        graph: GraphProtocol | None = None,
+        graph: GraphProtocol | Graph | None = None,
         execution_context: AbstractContextManager[object] | None = None,
     ) -> None:
         self._execution_data = _GraphRuntimeExecutionData(
@@ -730,14 +731,14 @@ class GraphRuntimeState:  # noqa: PLR0904
     def add_tokens(self, tokens: int) -> None:
         self._execution_data.add_tokens(tokens)
 
-    def attach_graph(self, graph: GraphProtocol) -> None:
+    def attach_graph(self, graph: GraphProtocol | Graph) -> None:
         """Attach the materialized graph to the runtime state."""
         self._bindings.attach_graph(graph, self._suspension_state)
 
     def configure(
         self,
         *,
-        graph: GraphProtocol | None = None,
+        graph: GraphProtocol | Graph | None = None,
     ) -> None:
         """Ensure core collaborators are initialized with the provided context."""
         self._bindings.configure(self._suspension_state, graph=graph)
@@ -855,7 +856,7 @@ class GraphRuntimeState:  # noqa: PLR0904
 
     def create_response_coordinator(
         self,
-        graph: GraphProtocol,
+        graph: GraphProtocol | Graph,
     ) -> ResponseStreamCoordinatorProtocol:
         """Create the response coordinator bound to the attached graph."""
         return self._build_response_coordinator(graph)
@@ -873,13 +874,11 @@ class GraphRuntimeState:  # noqa: PLR0904
         graph_execution_cls = module.GraphExecution
         workflow_id = self._suspension_state.pending_graph_execution_workflow_id or ""
         self._suspension_state.pending_graph_execution_workflow_id = None
-        return cast(
-            GraphExecutionProtocol, graph_execution_cls(workflow_id=workflow_id)
-        )
+        return graph_execution_cls(workflow_id=workflow_id)
 
     def _build_response_coordinator(
         self,
-        graph: GraphProtocol,
+        graph: GraphProtocol | Graph,
     ) -> ResponseStreamCoordinatorProtocol:
         # Lazily import to keep the runtime domain decoupled from graph_engine modules.
         module = importlib.import_module("graphon.graph_engine.response_coordinator")

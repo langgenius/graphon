@@ -267,7 +267,7 @@ def _encode_default_object(
     exclude_unset: bool,
     exclude_defaults: bool,
     exclude_none: bool,
-    custom_encoder: dict[Any, Callable[[Any], Any]],
+    custom_encoder: Mapping[type[Any], Callable[[Any], Any]],
     excluded_key_prefixes: Sequence[str],
 ) -> Any:
     type_encoder = _find_type_encoder(obj)

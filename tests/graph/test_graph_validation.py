@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Generator, Mapping
+from collections.abc import Generator
 from dataclasses import dataclass
 
 import pytest
 
 from graphon.entities.base_node_data import BaseNodeData
+from graphon.entities.graph_config import NodeConfigDict
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import BuiltinNodeTypes, ErrorStrategy, NodeExecutionType, NodeType
 from graphon.graph.graph import Graph
@@ -74,12 +75,10 @@ class _SimpleNodeFactory:
     graph_init_params: GraphInitParams
     graph_runtime_state: GraphRuntimeState
 
-    def create_node(self, node_config: Mapping[str, object]) -> _TestNode:
+    def create_node(self, node_config: NodeConfigDict) -> _TestNode:
         return _TestNode(
             node_id=str(node_config["id"]),
-            config=_TestNode.validate_node_data(
-                node_config["data"],  # type: ignore[arg-type]
-            ),
+            config=_TestNode.validate_node_data(node_config["data"]),
             graph_init_params=self.graph_init_params,
             graph_runtime_state=self.graph_runtime_state,
         )

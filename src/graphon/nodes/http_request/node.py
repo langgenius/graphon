@@ -1,8 +1,12 @@
+from __future__ import annotations
+
 import logging
 import mimetypes
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, override
+from dataclasses import dataclass
+from typing import Any, cast, override
 
+from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.file.enums import FileTransferMethod
 from graphon.file.models import File
@@ -17,6 +21,7 @@ from graphon.nodes.protocols import (
     FileReferenceFactoryProtocol,
     ToolFileManagerProtocol,
 )
+from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.variables.segments import ArrayFileSegment
 
 from .config import build_http_request_config, resolve_http_request_config
@@ -32,9 +37,13 @@ from .exc import HttpRequestNodeError, RequestBodyError
 
 logger = logging.getLogger(__name__)
 
-if TYPE_CHECKING:
-    from graphon.entities.graph_init_params import GraphInitParams
-    from graphon.runtime.graph_runtime_state import GraphRuntimeState
+
+@dataclass(frozen=True, slots=True)
+class _HttpRequestNodeDependencies:
+    tool_file_manager_factory: Callable[[], ToolFileManagerProtocol]
+    file_manager: FileManagerProtocol
+    file_reference_factory: FileReferenceFactoryProtocol
+    http_client: HttpClientProtocol | None = None
 
 
 class HttpRequestNode(Node[HttpRequestNodeData]):
@@ -46,13 +55,14 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
         node_id: str,
         config: HttpRequestNodeData,
         *,
-        graph_init_params: "GraphInitParams",
-        graph_runtime_state: "GraphRuntimeState",
+        graph_init_params: GraphInitParams,
+        graph_runtime_state: GraphRuntimeState,
         http_request_config: HttpRequestNodeConfig,
+        dependencies: _HttpRequestNodeDependencies | None = None,
         http_client: HttpClientProtocol | None = None,
-        tool_file_manager_factory: Callable[[], ToolFileManagerProtocol],
-        file_manager: FileManagerProtocol,
-        file_reference_factory: FileReferenceFactoryProtocol,
+        tool_file_manager_factory: Callable[[], ToolFileManagerProtocol] | None = None,
+        file_manager: FileManagerProtocol | None = None,
+        file_reference_factory: FileReferenceFactoryProtocol | None = None,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -61,11 +71,72 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
             graph_runtime_state=graph_runtime_state,
         )
 
+        resolved_dependencies = self._resolve_dependencies(
+            dependencies=dependencies,
+            http_client=http_client,
+            tool_file_manager_factory=tool_file_manager_factory,
+            file_manager=file_manager,
+            file_reference_factory=file_reference_factory,
+        )
         self._http_request_config = http_request_config
-        self._http_client = http_client or get_http_client()
-        self._tool_file_manager_factory = tool_file_manager_factory
-        self._file_manager = file_manager
-        self._file_reference_factory = file_reference_factory
+        self._http_client = resolved_dependencies.http_client or get_http_client()
+        self._tool_file_manager_factory = (
+            resolved_dependencies.tool_file_manager_factory
+        )
+        self._file_manager = resolved_dependencies.file_manager
+        self._file_reference_factory = resolved_dependencies.file_reference_factory
+
+    @staticmethod
+    def _resolve_dependencies(
+        *,
+        dependencies: _HttpRequestNodeDependencies | None,
+        http_client: HttpClientProtocol | None,
+        tool_file_manager_factory: Callable[[], ToolFileManagerProtocol] | None,
+        file_manager: FileManagerProtocol | None,
+        file_reference_factory: FileReferenceFactoryProtocol | None,
+    ) -> _HttpRequestNodeDependencies:
+        legacy_dependencies = {
+            "http_client": http_client,
+            "tool_file_manager_factory": tool_file_manager_factory,
+            "file_manager": file_manager,
+            "file_reference_factory": file_reference_factory,
+        }
+        if dependencies is not None:
+            mixed_inputs = sorted(
+                name for name, value in legacy_dependencies.items() if value is not None
+            )
+            if mixed_inputs:
+                msg = (
+                    "HttpRequestNode accepts either dependencies=... or legacy "
+                    f"dependency keywords, not both: {', '.join(mixed_inputs)}"
+                )
+                raise TypeError(msg)
+            return dependencies
+
+        missing_dependencies = [
+            name
+            for name, value in legacy_dependencies.items()
+            if name != "http_client" and value is None
+        ]
+        if missing_dependencies:
+            msg = (
+                "HttpRequestNode requires dependencies=... or legacy dependency "
+                f"keywords for: {', '.join(missing_dependencies)}"
+            )
+            raise TypeError(msg)
+
+        return _HttpRequestNodeDependencies(
+            tool_file_manager_factory=cast(
+                Callable[[], ToolFileManagerProtocol],
+                tool_file_manager_factory,
+            ),
+            file_manager=cast(FileManagerProtocol, file_manager),
+            file_reference_factory=cast(
+                FileReferenceFactoryProtocol,
+                file_reference_factory,
+            ),
+            http_client=http_client,
+        )
 
     @property
     def http_client(self) -> HttpClientProtocol:

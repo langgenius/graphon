@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import json
 import logging
 from collections.abc import Generator, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, override
+from typing import Any, override
 
+from graphon.entities.graph_init_params import GraphInitParams
 from graphon.entities.pause_reason import HumanInputRequired
 from graphon.enums import (
     BuiltinNodeTypes,
@@ -22,15 +25,11 @@ from graphon.nodes.runtime import (
     HumanInputFormStateProtocol,
     HumanInputNodeRuntimeProtocol,
 )
+from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.workflow_type_encoder import WorkflowRuntimeTypeConverter
 
 from .entities import HumanInputNodeData
 from .enums import HumanInputFormStatus, PlaceholderType
-
-if TYPE_CHECKING:
-    from graphon.entities.graph_init_params import GraphInitParams
-    from graphon.runtime.graph_runtime_state import GraphRuntimeState
-
 
 _SELECTED_BRANCH_KEY = "selected_branch"
 
@@ -66,8 +65,8 @@ class HumanInputNode(Node[HumanInputNodeData]):
         node_id: str,
         config: HumanInputNodeData,
         *,
-        graph_init_params: "GraphInitParams",
-        graph_runtime_state: "GraphRuntimeState",
+        graph_init_params: GraphInitParams,
+        graph_runtime_state: GraphRuntimeState,
         # TODO @-LAN: See https://github.com/langgenius/graphon/issues/new/choose.  # noqa: FIX002
         # Make `runtime` optional once Graphon provides a default human-input
         # runtime adapter instead of requiring an embedding-specific implementation.
@@ -264,8 +263,8 @@ class HumanInputNode(Node[HumanInputNodeData]):
                 f"form_id={form.id}"
             )
             raise AssertionError(msg)
-        submitted_data = form.submitted_data or {}
-        outputs: dict[str, Any] = dict(submitted_data)
+        submitted_inputs = dict(form.submitted_data or {})
+        outputs: dict[str, Any] = dict(submitted_inputs)
         outputs[self._OUTPUT_FIELD_ACTION_ID] = selected_action_id
         outputs[self._OUTPUT_FIELD_ACTION_VALUE] = self._node_data.find_action_value(
             selected_action_id,
@@ -289,6 +288,7 @@ class HumanInputNode(Node[HumanInputNodeData]):
         yield StreamCompletedEvent(
             node_run_result=NodeRunResult(
                 status=WorkflowNodeExecutionStatus.SUCCEEDED,
+                inputs=submitted_inputs,
                 outputs=outputs,
                 edge_source_handle=selected_action_id,
             ),

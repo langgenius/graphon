@@ -1,14 +1,10 @@
-"""Main ResponseStreamCoordinator implementation.
-
-This module contains the public ResponseStreamCoordinator class that manages
-response streaming sessions and ensures ordered streaming of responses.
-"""
+from __future__ import annotations
 
 import logging
 from collections import deque
 from collections.abc import Sequence
 from threading import RLock
-from typing import Literal, final
+from typing import TYPE_CHECKING, Literal, final
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -24,6 +20,9 @@ from graphon.runtime.variable_pool import VariablePool
 
 from .path import Path
 from .session import ResponseSession
+
+if TYPE_CHECKING:
+    from graphon.graph.graph import Graph
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +77,9 @@ class ResponseStreamCoordinator:
     Ensures ordered streaming of responses based on upstream node outputs and constants.
     """
 
-    def __init__(self, variable_pool: "VariablePool", graph: GraphProtocol) -> None:
+    def __init__(
+        self, variable_pool: VariablePool, graph: GraphProtocol | Graph
+    ) -> None:
         """Initialize coordinator with variable pool.
 
         Args:

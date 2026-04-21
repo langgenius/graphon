@@ -3,24 +3,27 @@ dev:
 	uv sync
 	uv run prek install
 
-.PHONY: pre
-pre: format lint test
-
 .PHONY: format
 format:
 	uv run ruff format
 
 .PHONY: lint
-lint:
+lint: format
 	uv run ruff check --fix
+
+.PHONY: tc
+tc: lint
+	uv run ty check
+
+.PHONY: test
+test: tc
+	uv run pytest
 
 .PHONY: check
 check:
-	uv run ruff format --check && uv run ruff check
-
-.PHONY: test
-test:
-	uv run --frozen pytest
+	uv run ruff format --check
+	uv run ruff check
+	uv run ty check
 
 .PHONY: build
 build:
@@ -28,6 +31,6 @@ build:
 
 .PHONY: clean
 clean:
-	rm -rf dist/ .pytest_cache/
 	find . -type d -name '__pycache__' -prune -exec rm -rf {} +
+	rm -rf dist/ .pytest_cache/
 	uv run ruff clean

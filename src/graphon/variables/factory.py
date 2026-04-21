@@ -5,8 +5,8 @@ independent from top-level API factory modules so graph nodes and state
 containers can operate without importing application-layer packages.
 """
 
-from collections.abc import Callable, Mapping, Sequence
-from typing import Any, cast
+from collections.abc import Mapping, Sequence
+from typing import Any
 from uuid import uuid4
 
 from graphon.file.models import File
@@ -42,6 +42,7 @@ from .variables import (
     IntegerVariable,
     NoneVariable,
     ObjectVariable,
+    SecretVariable,
     StringVariable,
     Variable,
     VariableBase,
@@ -56,47 +57,222 @@ class TypeMismatchError(Exception):
     pass
 
 
-SEGMENT_TO_VARIABLE_MAP: Mapping[type[Segment], type[Variable]] = {
-    ArrayAnySegment: ArrayAnyVariable,
-    ArrayBooleanSegment: ArrayBooleanVariable,
-    ArrayFileSegment: ArrayFileVariable,
-    ArrayNumberSegment: ArrayNumberVariable,
-    ArrayObjectSegment: ArrayObjectVariable,
-    ArrayStringSegment: ArrayStringVariable,
-    BooleanSegment: BooleanVariable,
-    FileSegment: FileVariable,
-    FloatSegment: FloatVariable,
-    IntegerSegment: IntegerVariable,
-    NoneSegment: NoneVariable,
-    ObjectSegment: ObjectVariable,
-    StringSegment: StringVariable,
-}
-
 _NUMERICAL_SEGMENT_TYPES = frozenset((
     SegmentType.NUMBER,
     SegmentType.INTEGER,
     SegmentType.FLOAT,
 ))
-_ARRAY_SEGMENT_FACTORY_BY_VALUE_TYPE: Mapping[SegmentType, type[Segment]] = {
-    SegmentType.STRING: ArrayStringSegment,
-    SegmentType.NUMBER: ArrayNumberSegment,
-    SegmentType.INTEGER: ArrayNumberSegment,
-    SegmentType.FLOAT: ArrayNumberSegment,
-    SegmentType.BOOLEAN: ArrayBooleanSegment,
-    SegmentType.OBJECT: ArrayObjectSegment,
-    SegmentType.FILE: ArrayFileSegment,
-    SegmentType.NONE: ArrayAnySegment,
-}
-_EMPTY_ARRAY_SEGMENT_FACTORY: Mapping[SegmentType, type[Segment]] = {
-    SegmentType.ARRAY_ANY: ArrayAnySegment,
-    SegmentType.ARRAY_STRING: ArrayStringSegment,
-    SegmentType.ARRAY_BOOLEAN: ArrayBooleanSegment,
-    SegmentType.ARRAY_NUMBER: ArrayNumberSegment,
-    SegmentType.ARRAY_OBJECT: ArrayObjectSegment,
-    SegmentType.ARRAY_FILE: ArrayFileSegment,
-}
 
-type SegmentFactory = Callable[..., Segment]
+
+def _build_uniform_array_segment(
+    *,
+    element_type: SegmentType,
+    value: list[Any],
+) -> Segment:
+    match element_type:
+        case SegmentType.STRING:
+            result: Segment = ArrayStringSegment(value=value)
+        case SegmentType.NUMBER | SegmentType.INTEGER | SegmentType.FLOAT:
+            result = ArrayNumberSegment(value=value)
+        case SegmentType.BOOLEAN:
+            result = ArrayBooleanSegment(value=value)
+        case SegmentType.OBJECT:
+            result = ArrayObjectSegment(value=value)
+        case SegmentType.FILE:
+            result = ArrayFileSegment(value=value)
+        case SegmentType.NONE:
+            result = ArrayAnySegment(value=value)
+        case _:
+            msg = f"not supported value {value}"
+            raise ValueError(msg)
+    return result
+
+
+def _build_empty_array_segment_for_type(
+    *,
+    segment_type: SegmentType,
+    value: list[Any],
+) -> Segment | None:
+    match segment_type:
+        case SegmentType.ARRAY_ANY:
+            result: Segment | None = ArrayAnySegment(value=value)
+        case SegmentType.ARRAY_STRING:
+            result = ArrayStringSegment(value=value)
+        case SegmentType.ARRAY_BOOLEAN:
+            result = ArrayBooleanSegment(value=value)
+        case SegmentType.ARRAY_NUMBER:
+            result = ArrayNumberSegment(value=value)
+        case SegmentType.ARRAY_OBJECT:
+            result = ArrayObjectSegment(value=value)
+        case SegmentType.ARRAY_FILE:
+            result = ArrayFileSegment(value=value)
+        case _:
+            result = None
+    return result
+
+
+def _existing_variable_from_segment(segment: VariableBase) -> Variable:
+    if isinstance(
+        segment,
+        (
+            ArrayAnyVariable,
+            ArrayBooleanVariable,
+            ArrayFileVariable,
+            ArrayNumberVariable,
+            ArrayObjectVariable,
+            ArrayStringVariable,
+        ),
+    ):
+        return segment
+    if isinstance(
+        segment,
+        (
+            BooleanVariable,
+            FileVariable,
+            FloatVariable,
+            IntegerVariable,
+            NoneVariable,
+            ObjectVariable,
+            SecretVariable,
+            StringVariable,
+        ),
+    ):
+        return segment
+    msg = f"not supported segment type {type(segment)}"
+    raise UnsupportedSegmentTypeError(msg)
+
+
+def _build_array_variable(
+    *,
+    segment: Segment,
+    variable_id: str,
+    name: str,
+    description: str,
+    selector: list[str],
+) -> Variable:
+    match segment:
+        case ArrayAnySegment():
+            result: Variable = ArrayAnyVariable(
+                id=variable_id,
+                name=name,
+                description=description,
+                value=segment.value,
+                selector=selector,
+            )
+        case ArrayBooleanSegment():
+            result = ArrayBooleanVariable(
+                id=variable_id,
+                name=name,
+                description=description,
+                value=segment.value,
+                selector=selector,
+            )
+        case ArrayFileSegment():
+            result = ArrayFileVariable(
+                id=variable_id,
+                name=name,
+                description=description,
+                value=segment.value,
+                selector=selector,
+            )
+        case ArrayNumberSegment():
+            result = ArrayNumberVariable(
+                id=variable_id,
+                name=name,
+                description=description,
+                value=segment.value,
+                selector=selector,
+            )
+        case ArrayObjectSegment():
+            result = ArrayObjectVariable(
+                id=variable_id,
+                name=name,
+                description=description,
+                value=segment.value,
+                selector=selector,
+            )
+        case ArrayStringSegment():
+            result = ArrayStringVariable(
+                id=variable_id,
+                name=name,
+                description=description,
+                value=segment.value,
+                selector=selector,
+            )
+        case _:
+            msg = f"not supported segment type {type(segment)}"
+            raise UnsupportedSegmentTypeError(msg)
+    return result
+
+
+def _build_scalar_variable(
+    *,
+    segment: Segment,
+    variable_id: str,
+    name: str,
+    description: str,
+    selector: list[str],
+) -> Variable:
+    match segment:
+        case BooleanSegment():
+            result: Variable = BooleanVariable(
+                id=variable_id,
+                name=name,
+                description=description,
+                value=segment.value,
+                selector=selector,
+            )
+        case FileSegment():
+            result = FileVariable(
+                id=variable_id,
+                name=name,
+                description=description,
+                value=segment.value,
+                selector=selector,
+            )
+        case FloatSegment():
+            result = FloatVariable(
+                id=variable_id,
+                name=name,
+                description=description,
+                value=segment.value,
+                selector=selector,
+            )
+        case IntegerSegment():
+            result = IntegerVariable(
+                id=variable_id,
+                name=name,
+                description=description,
+                value=segment.value,
+                selector=selector,
+            )
+        case NoneSegment():
+            result = NoneVariable(
+                id=variable_id,
+                name=name,
+                description=description,
+                selector=selector,
+            )
+        case ObjectSegment():
+            result = ObjectVariable(
+                id=variable_id,
+                name=name,
+                description=description,
+                value=segment.value,
+                selector=selector,
+            )
+        case StringSegment():
+            result = StringVariable(
+                id=variable_id,
+                name=name,
+                description=description,
+                value=segment.value,
+                selector=selector,
+            )
+        case _:
+            msg = f"not supported segment type {type(segment)}"
+            raise UnsupportedSegmentTypeError(msg)
+    return result
 
 
 def _build_non_list_segment(value: Any) -> Segment | None:
@@ -135,11 +311,7 @@ def _build_list_segment(value: list[Any]) -> Segment:
             else ArrayAnySegment(value=value)
         )
 
-    segment_class = _ARRAY_SEGMENT_FACTORY_BY_VALUE_TYPE.get(types.pop())
-    if segment_class is None:
-        msg = f"not supported value {value}"
-        raise ValueError(msg)
-    return cast(SegmentFactory, segment_class)(value=value)
+    return _build_uniform_array_segment(element_type=types.pop(), value=value)
 
 
 def _build_empty_array_segment(
@@ -147,13 +319,9 @@ def _build_empty_array_segment(
     segment_type: SegmentType,
     value: list[Any],
 ) -> Segment | None:
-    segment_class = _EMPTY_ARRAY_SEGMENT_FACTORY.get(segment_type)
-    return (
-        None
-        if segment_class is None
-        else cast(SegmentFactory, segment_class)(
-            value=value,
-        )
+    return _build_empty_array_segment_for_type(
+        segment_type=segment_type,
+        value=value,
     )
 
 
@@ -249,26 +417,25 @@ def segment_to_variable(
     variable_id: str | None = None,
     name: str | None = None,
     description: str = "",
-) -> VariableBase:
+) -> Variable:
     """Convert a runtime segment into a runtime variable for storage in the pool."""
     if isinstance(segment, VariableBase):
-        return segment
+        return _existing_variable_from_segment(segment)
     name = name or selector[-1]
     resolved_variable_id = variable_id or str(uuid4())
-
-    segment_type = type(segment)
-    if segment_type not in SEGMENT_TO_VARIABLE_MAP:
-        msg = f"not supported segment type {segment_type}"
-        raise UnsupportedSegmentTypeError(msg)
-
-    variable_class = SEGMENT_TO_VARIABLE_MAP[segment_type]
-    return cast(
-        "VariableBase",
-        variable_class(
-            id=resolved_variable_id,
+    resolved_selector = list(selector)
+    if isinstance(segment, ArraySegment):
+        return _build_array_variable(
+            segment=segment,
+            variable_id=resolved_variable_id,
             name=name,
             description=description,
-            value=segment.value,
-            selector=list(selector),
-        ),
+            selector=resolved_selector,
+        )
+    return _build_scalar_variable(
+        segment=segment,
+        variable_id=resolved_variable_id,
+        name=name,
+        description=description,
+        selector=resolved_selector,
     )
