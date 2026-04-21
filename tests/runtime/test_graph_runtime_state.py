@@ -48,7 +48,7 @@ def _remove_writable_flags(snapshot: dict[str, Any]) -> dict[str, Any]:
     return snapshot
 
 
-class TestGraphRuntimeState:
+class TestGraphRuntimeState:  # noqa: PLR0904
     def test_execution_context_defaults_to_empty_context(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
 
@@ -647,6 +647,91 @@ class TestGraphRuntimeState:
         assert restored_iteration_item.writable is True
         assert restored_plain_variable.writable is False
 
+    def test_from_snapshot_current_paused_workflow_freezes_completed_loop_node(
+        self,
+    ) -> None:
+        variable_pool = VariablePool.empty()
+        variable_pool.add(("loop-node", "counter"), 1, writable=True)
+        variable_pool.add(("iteration-node", "index"), 2, writable=True)
+        variable_pool.add(("iteration-node", "item"), "value", writable=True)
+        variable_pool.add(("plain-node", "result"), "frozen")
+
+        graph = SimpleNamespace(
+            nodes={
+                "loop-node": SimpleNamespace(
+                    id="loop-node",
+                    state=NodeState.TAKEN,
+                    node_type=BuiltinNodeTypes.LOOP,
+                    execution_type=MagicMock(),
+                    node_data=SimpleNamespace(
+                        loop_variables=[SimpleNamespace(label="counter")],
+                    ),
+                ),
+                "iteration-node": SimpleNamespace(
+                    id="iteration-node",
+                    state=NodeState.UNKNOWN,
+                    node_type=BuiltinNodeTypes.ITERATION,
+                    execution_type=MagicMock(),
+                    node_data=SimpleNamespace(),
+                ),
+                "plain-node": SimpleNamespace(
+                    id="plain-node",
+                    state=NodeState.UNKNOWN,
+                    node_type=BuiltinNodeTypes.CODE,
+                    execution_type=MagicMock(),
+                    node_data=SimpleNamespace(),
+                ),
+            },
+            edges={},
+            root_node=SimpleNamespace(
+                id="loop-node",
+                state=NodeState.TAKEN,
+                node_type=BuiltinNodeTypes.LOOP,
+                execution_type=MagicMock(),
+            ),
+            get_outgoing_edges=MagicMock(return_value=[]),
+        )
+
+        snapshot_state = GraphRuntimeState(variable_pool=variable_pool, start_at=time())
+        snapshot_execution = snapshot_state.graph_execution
+        snapshot_execution.start()
+
+        with patch.object(
+            GraphRuntimeState,
+            "_build_response_coordinator",
+            return_value=StubCoordinator(),
+            autospec=True,
+        ):
+            snapshot_state.attach_graph(cast(Any, graph))
+
+        snapshot = json.loads(snapshot_state.dumps())
+        restored = GraphRuntimeState.from_snapshot(snapshot)
+
+        restored_loop_variable = restored.variable_pool.get_variable((
+            "loop-node",
+            "counter",
+        ))
+        restored_iteration_index = restored.variable_pool.get_variable((
+            "iteration-node",
+            "index",
+        ))
+        restored_iteration_item = restored.variable_pool.get_variable((
+            "iteration-node",
+            "item",
+        ))
+        restored_plain_variable = restored.variable_pool.get_variable((
+            "plain-node",
+            "result",
+        ))
+        assert restored_loop_variable is not None
+        assert restored_iteration_index is not None
+        assert restored_iteration_item is not None
+        assert restored_plain_variable is not None
+        assert restored_loop_variable.writable is False
+        assert restored_iteration_index.writable is True
+        assert restored_iteration_item.writable is True
+        assert restored_plain_variable.writable is False
+
     def test_loads_current_aborted_snapshot_freezes_terminal_working_variables(
         self,
     ) -> None:
@@ -660,7 +745,6 @@ class TestGraphRuntimeState:
         snapshot_execution = snapshot_state.graph_execution
         snapshot_execution.start()
         snapshot_execution.abort("user requested stop")
-        snapshot = json.loads(snapshot_state.dumps())
 
         graph = SimpleNamespace(
             nodes={
@@ -698,18 +782,16 @@ class TestGraphRuntimeState:
             get_outgoing_edges=MagicMock(return_value=[]),
         )
 
-        restored = GraphRuntimeState(
-            variable_pool=VariablePool.empty(),
-            start_at=time(),
-        )
         with patch.object(
             GraphRuntimeState,
             "_build_response_coordinator",
             return_value=StubCoordinator(),
             autospec=True,
         ):
-            restored.attach_graph(cast(Any, graph))
-            restored.loads(snapshot)
+            snapshot_state.attach_graph(cast(Any, graph))
+
+        snapshot = json.loads(snapshot_state.dumps())
+        restored = GraphRuntimeState.from_snapshot(snapshot)
 
         restored_loop_variable = restored.variable_pool.get_variable((
             "loop-node",
