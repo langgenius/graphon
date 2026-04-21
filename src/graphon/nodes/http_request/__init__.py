@@ -7,7 +7,7 @@ from .entities import (
     HttpRequestNodeConfig,
     HttpRequestNodeData,
 )
-from .node import HttpRequestNode, HttpRequestNodeDependencies
+from .node import HttpRequestNode
 
 __all__ = [
     "HTTP_REQUEST_CONFIG_FILTER_KEY",
@@ -17,7 +17,6 @@ __all__ = [
     "HttpRequestNodeBody",
     "HttpRequestNodeConfig",
     "HttpRequestNodeData",
-    "HttpRequestNodeDependencies",
     "build_http_request_config",
     "resolve_http_request_config",
 ]

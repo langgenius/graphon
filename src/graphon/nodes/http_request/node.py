@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
-class HttpRequestNodeDependencies:
+class _HttpRequestNodeDependencies:
     tool_file_manager_factory: Callable[[], ToolFileManagerProtocol]
     file_manager: FileManagerProtocol
     file_reference_factory: FileReferenceFactoryProtocol
@@ -58,7 +58,7 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,
         http_request_config: HttpRequestNodeConfig,
-        dependencies: HttpRequestNodeDependencies | None = None,
+        dependencies: _HttpRequestNodeDependencies | None = None,
         http_client: HttpClientProtocol | None = None,
         tool_file_manager_factory: Callable[[], ToolFileManagerProtocol] | None = None,
         file_manager: FileManagerProtocol | None = None,
@@ -89,12 +89,12 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
     @staticmethod
     def _resolve_dependencies(
         *,
-        dependencies: HttpRequestNodeDependencies | None,
+        dependencies: _HttpRequestNodeDependencies | None,
         http_client: HttpClientProtocol | None,
         tool_file_manager_factory: Callable[[], ToolFileManagerProtocol] | None,
         file_manager: FileManagerProtocol | None,
         file_reference_factory: FileReferenceFactoryProtocol | None,
-    ) -> HttpRequestNodeDependencies:
+    ) -> _HttpRequestNodeDependencies:
         legacy_dependencies = {
             "http_client": http_client,
             "tool_file_manager_factory": tool_file_manager_factory,
@@ -125,7 +125,7 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
             )
             raise TypeError(msg)
 
-        return HttpRequestNodeDependencies(
+        return _HttpRequestNodeDependencies(
             tool_file_manager_factory=cast(
                 Callable[[], ToolFileManagerProtocol],
                 tool_file_manager_factory,
