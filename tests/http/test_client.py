@@ -14,7 +14,10 @@ from graphon.http import (
     HttpResponse,
     HttpStatusError,
     HttpxHttpClient,
+    get_default_http_client,
     get_http_client,
+    set_http_client,
+    use_http_client,
 )
 from graphon.nodes.document_extractor.entities import DocumentExtractorNodeData
 from graphon.nodes.document_extractor.node import DocumentExtractorNode
@@ -68,11 +71,55 @@ class _FileReferenceFactory:
         return File.model_validate(mapping)
 
 
+class _StubHttpClient:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    @property
+    def max_retries_exceeded_error(self) -> type[Exception]:
+        return RuntimeError
+
+    @property
+    def request_error(self) -> type[Exception]:
+        return RuntimeError
+
+    def get(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
+        return self._raise("GET", url, max_retries=max_retries, **kwargs)
+
+    def head(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
+        return self._raise("HEAD", url, max_retries=max_retries, **kwargs)
+
+    def post(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
+        return self._raise("POST", url, max_retries=max_retries, **kwargs)
+
+    def put(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
+        return self._raise("PUT", url, max_retries=max_retries, **kwargs)
+
+    def delete(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
+        return self._raise("DELETE", url, max_retries=max_retries, **kwargs)
+
+    def patch(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
+        return self._raise("PATCH", url, max_retries=max_retries, **kwargs)
+
+    def _raise(self, method: str, url: str, **kwargs: Any) -> HttpResponse:
+        msg = (
+            f"unexpected {method} request in test stub {self.name}: {url!r}, {kwargs!r}"
+        )
+        raise AssertionError(msg)
+
+
 def _build_runtime_state() -> GraphRuntimeState:
     return GraphRuntimeState(
         variable_pool=build_variable_pool(),
         start_at=time.perf_counter(),
     )
+
+
+@pytest.fixture(autouse=True)
+def _restore_default_http_client() -> Generator[None, None, None]:
+    default_http_client = get_default_http_client()
+    yield
+    set_http_client(default_http_client)
 
 
 def test_httpx_http_client_normalizes_request_kwargs(
@@ -162,54 +209,92 @@ def test_httpx_http_client_raises_request_error_without_retry_wrapping(
         HttpxHttpClient().get("https://example.com")
 
 
-def test_http_request_node_uses_default_http_client_when_not_injected() -> None:
-    node = HttpRequestNode(
-        node_id="http",
-        config=HttpRequestNodeData(
-            title="HTTP Request",
-            method="get",
-            url="https://example.com",
-            authorization=HttpRequestNodeAuthorization(type="no-auth"),
-            headers="",
-            params="",
-            body=HttpRequestNodeBody(type="none", data=[]),
-        ),
-        graph_init_params=build_graph_init_params(
-            graph_config={"nodes": [], "edges": []},
-        ),
-        graph_runtime_state=_build_runtime_state(),
-        http_request_config=build_http_request_config(),
-        tool_file_manager_factory=_ToolFileManager,
-        file_manager=_FileManager(),
-        file_reference_factory=_FileReferenceFactory(),
-    )
+def test_use_http_client_scopes_runtime_client_and_restores_default() -> None:
+    default_http_client = get_default_http_client()
+    scoped_http_client = _StubHttpClient("scoped")
 
-    assert node.http_client is get_http_client()
+    with use_http_client(scoped_http_client):
+        assert get_http_client() is scoped_http_client
+        assert get_default_http_client() is default_http_client
+
+    assert get_http_client() is default_http_client
 
 
-def test_document_extractor_node_uses_default_http_client_when_not_injected() -> None:
-    node = DocumentExtractorNode(
-        node_id="extractor",
-        config=DocumentExtractorNodeData(
-            title="Document Extractor",
-            variable_selector=["inputs", "file"],
-        ),
-        graph_init_params=build_graph_init_params(
-            graph_config={"nodes": [], "edges": []},
-        ),
-        graph_runtime_state=_build_runtime_state(),
-    )
+def test_set_http_client_updates_process_default_but_not_scoped_overrides() -> None:
+    original_http_client = get_default_http_client()
+    default_http_client = _StubHttpClient("default")
+    scoped_http_client = _StubHttpClient("scoped")
 
-    assert node.http_client is get_http_client()
+    set_http_client(default_http_client)
+
+    assert get_default_http_client() is default_http_client
+    assert get_http_client() is default_http_client
+
+    with use_http_client(scoped_http_client):
+        assert get_http_client() is scoped_http_client
+        assert get_default_http_client() is default_http_client
+
+    assert get_http_client() is default_http_client
+    set_http_client(original_http_client)
 
 
-def test_file_saver_impl_uses_default_http_client_when_not_injected() -> None:
-    file_saver = FileSaverImpl(
-        tool_file_manager=_ToolFileManager(),
-        file_reference_factory=_FileReferenceFactory(),
-    )
+def test_http_request_node_uses_runtime_http_client_when_not_injected() -> None:
+    scoped_http_client = _StubHttpClient("http-request")
 
-    assert file_saver.http_client is get_http_client()
+    with use_http_client(scoped_http_client):
+        node = HttpRequestNode(
+            node_id="http",
+            config=HttpRequestNodeData(
+                title="HTTP Request",
+                method="get",
+                url="https://example.com",
+                authorization=HttpRequestNodeAuthorization(type="no-auth"),
+                headers="",
+                params="",
+                body=HttpRequestNodeBody(type="none", data=[]),
+            ),
+            graph_init_params=build_graph_init_params(
+                graph_config={"nodes": [], "edges": []},
+            ),
+            graph_runtime_state=_build_runtime_state(),
+            http_request_config=build_http_request_config(),
+            tool_file_manager_factory=_ToolFileManager,
+            file_manager=_FileManager(),
+            file_reference_factory=_FileReferenceFactory(),
+        )
+
+    assert node.http_client is scoped_http_client
+
+
+def test_document_extractor_node_uses_runtime_http_client_when_not_injected() -> None:
+    scoped_http_client = _StubHttpClient("document-extractor")
+
+    with use_http_client(scoped_http_client):
+        node = DocumentExtractorNode(
+            node_id="extractor",
+            config=DocumentExtractorNodeData(
+                title="Document Extractor",
+                variable_selector=["inputs", "file"],
+            ),
+            graph_init_params=build_graph_init_params(
+                graph_config={"nodes": [], "edges": []},
+            ),
+            graph_runtime_state=_build_runtime_state(),
+        )
+
+    assert node.http_client is scoped_http_client
+
+
+def test_file_saver_impl_uses_runtime_http_client_when_not_injected() -> None:
+    scoped_http_client = _StubHttpClient("file-saver")
+
+    with use_http_client(scoped_http_client):
+        file_saver = FileSaverImpl(
+            tool_file_manager=_ToolFileManager(),
+            file_reference_factory=_FileReferenceFactory(),
+        )
+
+    assert file_saver.http_client is scoped_http_client
 
 
 @pytest.mark.parametrize(
