@@ -55,6 +55,7 @@ class HumanInputNode(Node[HumanInputNodeData]):
 
     _node_data: HumanInputNodeData
     _OUTPUT_FIELD_ACTION_ID = "__action_id"
+    _OUTPUT_FIELD_ACTION_VALUE = "__action_value"
     _OUTPUT_FIELD_RENDERED_CONTENT = "__rendered_content"
     _TIMEOUT_HANDLE = _TIMEOUT_ACTION_ID = "__timeout"
 
@@ -242,7 +243,10 @@ class HumanInputNode(Node[HumanInputNodeData]):
             yield StreamCompletedEvent(
                 node_run_result=NodeRunResult(
                     status=WorkflowNodeExecutionStatus.SUCCEEDED,
-                    outputs={self._OUTPUT_FIELD_ACTION_ID: ""},
+                    outputs={
+                        self._OUTPUT_FIELD_ACTION_ID: "",
+                        self._OUTPUT_FIELD_ACTION_VALUE: "",
+                    },
                     edge_source_handle=self._TIMEOUT_HANDLE,
                 ),
             )
@@ -262,6 +266,9 @@ class HumanInputNode(Node[HumanInputNodeData]):
         submitted_inputs = dict(form.submitted_data or {})
         outputs: dict[str, Any] = dict(submitted_inputs)
         outputs[self._OUTPUT_FIELD_ACTION_ID] = selected_action_id
+        outputs[self._OUTPUT_FIELD_ACTION_VALUE] = (
+            self._node_data.must_resolve_action_value(selected_action_id)
+        )
         rendered_content = self.render_form_content_with_outputs(
             form.rendered_content,
             outputs,
