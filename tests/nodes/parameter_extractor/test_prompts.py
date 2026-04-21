@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from graphon.model_runtime.entities.llm_entities import LLMMode
+from graphon.model_runtime.entities.llm_entities import LLMMode, LLMUsage
 from graphon.model_runtime.entities.message_entities import PromptMessageRole
 from graphon.nodes.llm import llm_utils
 from graphon.nodes.llm.entities import ModelConfig
@@ -181,6 +181,41 @@ def test_prepare_run_context_exposes_model_identity_in_inputs(
     assert run_context.inputs["query"] == "weather in sf"
     assert run_context.inputs["model_provider"] == "test"
     assert run_context.inputs["model_name"] == "test-model"
+
+
+def test_parameter_extractor_run_emits_concrete_model_identity_in_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    node, variable_pool = _build_parameter_extractor_node()
+    variable_pool.add(("start", "query"), "weather in sf")
+
+    monkeypatch.setattr(
+        llm_utils,
+        "resolve_completion_params_variables",
+        lambda parameters, _: parameters,
+    )
+    monkeypatch.setattr(
+        node,
+        "_fetch_llm_model_schema",
+        lambda **_: SimpleNamespace(features=[]),
+    )
+    monkeypatch.setattr(node, "_build_run_prompt", lambda **_: ([], []))
+
+    invoke_result = SimpleNamespace(
+        model="gpt-4.1-mini",
+        usage=LLMUsage.empty_usage(),
+        message=SimpleNamespace(
+            get_text_content=lambda: "{}",
+            tool_calls=[],
+        ),
+    )
+    monkeypatch.setattr(node.model_instance, "invoke_llm", lambda **_: invoke_result)
+
+    result = node._run()  # noqa: SLF001
+
+    assert result.inputs["query"] == "weather in sf"
+    assert result.inputs["model_provider"] == "test"
+    assert result.inputs["model_name"] == "gpt-4.1-mini"
 
 
 def test_parameter_extractor_accepts_dependency_bundle() -> None:

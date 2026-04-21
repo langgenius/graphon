@@ -10,6 +10,10 @@ from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from ...helpers import build_graph_init_params, build_variable_pool
 
 
+class _ModelInvokeCompletedWithConcreteModel(ModelInvokeCompletedEvent):
+    model: str
+
+
 def _build_llm_node() -> LLMNode:
     return LLMNode(
         node_id="llm",
@@ -61,10 +65,11 @@ def test_run_emits_model_identity_in_node_result_inputs(
     monkeypatch.setattr(
         "graphon.nodes.llm.node.LLMNode.invoke_llm",
         lambda **_: iter([
-            ModelInvokeCompletedEvent(
+            _ModelInvokeCompletedWithConcreteModel(
                 text="Hello back",
                 usage=LLMUsage.empty_usage(),
                 finish_reason="stop",
+                model="gpt-4.1-mini",
             ),
         ]),
     )
@@ -75,4 +80,4 @@ def test_run_emits_model_identity_in_node_result_inputs(
     )
 
     assert completed_event.node_run_result.inputs["model_provider"] == "openai"
-    assert completed_event.node_run_result.inputs["model_name"] == "gpt-4o"
+    assert completed_event.node_run_result.inputs["model_name"] == "gpt-4.1-mini"
