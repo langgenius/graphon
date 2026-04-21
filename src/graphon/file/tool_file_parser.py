@@ -16,7 +16,7 @@ class ToolFileManagerFactoryNotSetError(RuntimeError):
         )
 
 
-class ToolFileManagerFactoryRegistry:
+class _ToolFileManagerFactoryRegistry:
     """Store the active tool file manager factory behind an explicit API."""
 
     def __init__(self) -> None:
@@ -34,9 +34,6 @@ class ToolFileManagerFactoryRegistry:
     def set(self, factory: ToolFileManagerFactory) -> None:
         self._factory = factory
 
-    def clear(self) -> None:
-        self._factory = None
-
     @contextmanager
     def use(self, factory: ToolFileManagerFactory) -> Iterator[ToolFileManagerFactory]:
         previous_factory = self._factory
@@ -47,38 +44,36 @@ class ToolFileManagerFactoryRegistry:
             self._factory = previous_factory
 
 
-tool_file_manager_factory_registry = ToolFileManagerFactoryRegistry()
+_tool_file_manager_factory_registry = _ToolFileManagerFactoryRegistry()
 
 
 def get_tool_file_manager_factory() -> ToolFileManagerFactory | None:
-    return tool_file_manager_factory_registry.get()
+    return _tool_file_manager_factory_registry.get()
 
 
 def require_tool_file_manager_factory() -> ToolFileManagerFactory:
-    return tool_file_manager_factory_registry.require()
+    return _tool_file_manager_factory_registry.require()
 
 
 @contextmanager
 def use_tool_file_manager_factory(
     factory: ToolFileManagerFactory,
 ) -> Iterator[ToolFileManagerFactory]:
-    with tool_file_manager_factory_registry.use(factory) as active_factory:
+    with _tool_file_manager_factory_registry.use(factory) as active_factory:
         yield active_factory
 
 
 def set_tool_file_manager_factory(factory: ToolFileManagerFactory) -> None:
     """Compatibility wrapper around the registry's explicit setter."""
 
-    tool_file_manager_factory_registry.set(factory)
+    _tool_file_manager_factory_registry.set(factory)
 
 
 __all__ = [
     "ToolFileManagerFactory",
     "ToolFileManagerFactoryNotSetError",
-    "ToolFileManagerFactoryRegistry",
     "get_tool_file_manager_factory",
     "require_tool_file_manager_factory",
     "set_tool_file_manager_factory",
-    "tool_file_manager_factory_registry",
     "use_tool_file_manager_factory",
 ]
