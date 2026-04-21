@@ -8,7 +8,7 @@ from .client import HttpxHttpClient
 from .protocols import HttpClientProtocol
 
 
-class HttpClientRuntimeSlot:
+class _HttpClientRuntimeSlot:
     """Store the process default HTTP client plus scoped overrides."""
 
     def __init__(self, default_http_client: HttpClientProtocol | None = None) -> None:
@@ -24,10 +24,11 @@ class HttpClientRuntimeSlot:
             return http_client
         return self._default_http_client
 
-    def get_default(self) -> HttpClientProtocol:
+    @property
+    def default_http_client(self) -> HttpClientProtocol:
         return self._default_http_client
 
-    def set_default(self, http_client: HttpClientProtocol) -> None:
+    def set(self, http_client: HttpClientProtocol) -> None:
         self._default_http_client = http_client
 
     @contextmanager
@@ -39,26 +40,26 @@ class HttpClientRuntimeSlot:
             self._current_http_client.reset(token)
 
 
-http_client_runtime = HttpClientRuntimeSlot()
+_http_client_runtime = _HttpClientRuntimeSlot()
 
 
 def use_http_client(
     http_client: HttpClientProtocol,
 ) -> AbstractContextManager[HttpClientProtocol]:
     """Bind an HTTP client for the current context."""
-    return http_client_runtime.use(http_client)
+    return _http_client_runtime.use(http_client)
 
 
 def set_http_client(http_client: HttpClientProtocol) -> None:
     """Compatibility wrapper for replacing the process default client."""
-    http_client_runtime.set_default(http_client)
+    _http_client_runtime.set(http_client)
 
 
 def get_http_client() -> HttpClientProtocol:
     """Return the HTTP client visible in the current runtime context."""
-    return http_client_runtime.get()
+    return _http_client_runtime.get()
 
 
 def get_default_http_client() -> HttpClientProtocol:
     """Return the process default HTTP client."""
-    return http_client_runtime.get_default()
+    return _http_client_runtime.default_http_client
