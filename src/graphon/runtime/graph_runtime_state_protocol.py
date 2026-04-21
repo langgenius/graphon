@@ -12,11 +12,7 @@ class ReadOnlyVariablePool(Protocol):
         """Get a variable value (read-only)."""
         ...
 
-    def get_all_by_node(self, node_id: str) -> Mapping[str, object]:
-        """Get all variables for a node (read-only)."""
-        ...
-
-    def get_by_prefix(self, prefix: str) -> Mapping[str, object]:
+    def get_by_prefix(self, prefix: str, /) -> Mapping[str, object]:
         """Get all variables stored under a given node prefix (read-only)."""
         ...
 

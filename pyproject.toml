@@ -79,6 +79,7 @@ ignore-one-line-docstrings = true
 'tests/**/*.py' = [
     'S101',    # Assert statements used for pytest.
     'PLR2004', # Magic value used in test cases.
+    'PLC1901', # be more precise about assertion in tests.
 ]
 
 [tool.ty.environment]

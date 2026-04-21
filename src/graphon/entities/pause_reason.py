@@ -18,8 +18,8 @@ class HumanInputRequired(BaseModel):
     )
     form_id: str
     form_content: str
-    inputs: list[FormInput] = Field(default_factory=list)
-    actions: list[UserAction] = Field(default_factory=list)
+    inputs: list[FormInput] = Field(default_factory=list[FormInput])
+    actions: list[UserAction] = Field(default_factory=list[UserAction])
     node_id: str
     node_title: str
 

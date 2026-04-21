@@ -8,6 +8,7 @@ from graphon.entities.pause_reason import PauseReason
 from graphon.file.models import File
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.node_events.base import NodeRunResult
+from graphon.variables.segments import Segment
 from graphon.variables.variables import Variable
 
 from .base import NodeEventBase
@@ -72,6 +73,11 @@ class HumanInputFormFilledEvent(NodeEventBase):
     rendered_content: str
     action_id: str
     action_text: str
+
+    # submitted_data records the data user submitted in the form inputs.
+    # It is a mapping from FormInput.output_variable_name to
+    # their runtime values.
+    submitted_data: Mapping[str, Segment] = Field(default_factory=dict)
 
 
 class HumanInputFormTimeoutEvent(NodeEventBase):

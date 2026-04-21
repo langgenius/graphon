@@ -5,26 +5,31 @@ across runtimes. Dify-specific delivery surface and recipient translation stay
 outside `graphon`.
 """
 
+import abc
 import re
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
-from typing import Any, Self
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, NonNegativeInt, field_validator, model_validator
 
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.enums import BuiltinNodeTypes, NodeType
+from graphon.file.enums import FileTransferMethod, FileType
 from graphon.nodes.base.variable_template_parser import VariableTemplateParser
+from graphon.runtime.graph_runtime_state_protocol import ReadOnlyVariablePool
 from graphon.variables.consts import SELECTORS_LENGTH
+from graphon.variables.segments import Segment
 
-from .enums import ButtonStyle, FormInputType, PlaceholderType, TimeoutUnit
+from . import _exc as exc
+from .enums import ButtonStyle, FormInputType, TimeoutUnit, ValueSourceType
 
 _OUTPUT_VARIABLE_PATTERN = re.compile(
     r"\{\{#\$output\.(?P<field_name>[a-zA-Z_][a-zA-Z0-9_]{0,29})#\}\}",
 )
 
 
-class FormInputDefault(BaseModel):
+class StringSource(BaseModel):
     """Default configuration for form inputs."""
 
     # NOTE: Ideally, a discriminated union would be used to model
@@ -32,7 +37,9 @@ class FormInputDefault(BaseModel):
     # value when switching between `VARIABLE` and `CONSTANT` types. This
     # necessitates retaining all fields, making a discriminated union unsuitable.
 
-    type: PlaceholderType
+    # NOTE: This class is renamed from FormInputDefault.
+
+    type: ValueSourceType
 
     # The selector of default variable, used when `type` is `VARIABLE`.
     selector: Sequence[str] = Field(default_factory=tuple)
@@ -43,7 +50,7 @@ class FormInputDefault(BaseModel):
 
     @model_validator(mode="after")
     def _validate_selector(self) -> Self:
-        if self.type == PlaceholderType.CONSTANT:
+        if self.type == ValueSourceType.CONSTANT:
             return self
         if len(self.selector) < SELECTORS_LENGTH:
             msg = (
@@ -54,12 +61,140 @@ class FormInputDefault(BaseModel):
         return self
 
 
-class FormInput(BaseModel):
+class StringListSource(BaseModel):
+    type: ValueSourceType
+
+    # The selector of default variable, used when `type` is `VARIABLE`.
+    selector: Sequence[str] = Field(default_factory=tuple)
+
+    # The value of the default, used when `type` is `CONSTANT`.
+    value: list[str] = Field(default_factory=list)
+
+
+class BaseInput(abc.ABC):
+    """BaseInput is the base class for all input field definitions.
+    One input corresponds to one output variable during form submission.
+    """
+
+    output_variable_name: str
+
+    @abc.abstractmethod
+    def extract_variable_selectors(self) -> Sequence[Sequence[str]]:
+        """`extract_variable_selectors` extracts variable selectors
+        used by this input field.
+        """
+
+    @abc.abstractmethod
+    def resolve_default_value(self, pool: ReadOnlyVariablePool) -> Segment | None:
+        """`resolve_default_value` resolves the default value for form submission.
+
+        If the form input does not specify a default value, or the default value does
+        not depend on the runtime variable, this method should return `None`.
+        """
+
+
+class ParagraphInput(BaseModel, BaseInput):
     """Form input definition."""
 
-    type: FormInputType
-    output_variable_name: str
-    default: FormInputDefault | None = None
+    # NOTE: This class is renamed from FormInput.
+    type: Literal[FormInputType.PARAGRAPH] = FormInputType.PARAGRAPH
+    default: StringSource | None = None
+
+    def extract_variable_selectors(self) -> Sequence[Sequence[str]]:
+        default = self.default
+        if default is None:
+            return []
+        if default.type == ValueSourceType.CONSTANT:
+            return []
+        return [default.selector]
+
+    def resolve_default_value(self, pool: ReadOnlyVariablePool) -> Segment | None:
+        default = self.default
+        if default is None:
+            return None
+
+        if default.type == ValueSourceType.CONSTANT:
+            return None
+
+        return pool.get(default.selector)
+
+
+class SelectInput(BaseModel, BaseInput):
+    type: Literal[FormInputType.SELECT] = FormInputType.SELECT
+    option_source: StringListSource
+
+    def extract_variable_selectors(self) -> Sequence[Sequence[NodeType]]:
+        if self.option_source.type == ValueSourceType.CONSTANT:
+            return []
+        return [self.option_source.selector]
+
+    def resolve_default_value(self, pool: ReadOnlyVariablePool) -> Segment | None:
+        _ = pool
+        return None
+
+
+_ALLOWED_TRANSFER_METHOD = frozenset([
+    FileTransferMethod.LOCAL_FILE,
+    FileTransferMethod.REMOTE_URL,
+])
+
+
+class _FileInputCommon(BaseModel):
+    allowed_file_types: Sequence[FileType] = Field(default_factory=list[FileType])
+    allowed_file_extensions: Sequence[str] = Field(default_factory=list)
+    allowed_file_upload_methods: Sequence[FileTransferMethod] = Field(
+        default_factory=list[FileTransferMethod]
+    )
+
+    @field_validator("allowed_file_upload_methods", mode="after")
+    @classmethod
+    def _validate_upload_methods(
+        cls, transfer_methods: Sequence[FileTransferMethod]
+    ) -> Sequence[FileTransferMethod]:
+        validated_values: list[FileTransferMethod] = []
+        for value in transfer_methods:
+            if value not in _ALLOWED_TRANSFER_METHOD:
+                raise exc.InvalidTransferMethodError(value)
+            validated_values.append(value)
+
+        return validated_values
+
+    @model_validator(mode="after")
+    def _validate_extensions(self) -> Self:
+        if self.allowed_file_types != FileType.CUSTOM:
+            return self
+        if not self.allowed_file_extensions:
+            raise exc.ExtensionsNotSetErrorValueError
+        return self
+
+
+class FileInput(_FileInputCommon, BaseInput):
+    type: Literal[FormInputType.FILE] = FormInputType.FILE
+
+    def extract_variable_selectors(self) -> Sequence[Sequence[NodeType]]:
+        return []
+
+    def resolve_default_value(self, pool: ReadOnlyVariablePool) -> Segment | None:
+        _ = pool
+        return None
+
+
+class FileListInput(_FileInputCommon, BaseInput):
+    type: Literal[FormInputType.FILE_LIST] = FormInputType.FILE_LIST
+    number_limits: NonNegativeInt = 0
+
+    def extract_variable_selectors(self) -> Sequence[Sequence[NodeType]]:
+        return []
+
+    def resolve_default_value(self, pool: ReadOnlyVariablePool) -> Segment | None:
+        _ = pool
+        return None
+
+
+type FormInput = Annotated[
+    ParagraphInput | SelectInput | FileInput | FileListInput,
+    Field(discriminator="type"),
+]
 
 
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -94,8 +229,8 @@ class HumanInputNodeData(BaseNodeData):
 
     type: NodeType = BuiltinNodeTypes.HUMAN_INPUT
     form_content: str = ""
-    inputs: list[FormInput] = Field(default_factory=list)
-    user_actions: list[UserAction] = Field(default_factory=list)
+    inputs: list[FormInput] = Field(default_factory=list[FormInput])
+    user_actions: list[UserAction] = Field(default_factory=list[UserAction])
     timeout: int = 36
     timeout_unit: TimeoutUnit = TimeoutUnit.HOUR
 
@@ -161,14 +296,11 @@ class HumanInputNodeData(BaseNodeData):
         ])
 
         for form_input in self.inputs:
-            default_value = form_input.default
-            if default_value is None:
-                continue
-            if default_value.type == PlaceholderType.CONSTANT:
-                continue
-            default_value_key = ".".join(default_value.selector)
-            qualified_variable_mapping_key = f"{node_id}.#{default_value_key}#"
-            variable_mappings[qualified_variable_mapping_key] = default_value.selector
+            selectors = form_input.extract_variable_selectors()
+            for selector in selectors:
+                value_key = ".".join(selector)
+                qualified_variable_mapping_key = f"{node_id}.#{value_key}#"
+                variable_mappings[qualified_variable_mapping_key] = selector
 
         return variable_mappings
 
@@ -182,8 +314,8 @@ class HumanInputNodeData(BaseNodeData):
 
 class FormDefinition(BaseModel):
     form_content: str
-    inputs: list[FormInput] = Field(default_factory=list)
-    user_actions: list[UserAction] = Field(default_factory=list)
+    inputs: list[FormInput] = Field(default_factory=list[FormInput])
+    user_actions: list[UserAction] = Field(default_factory=list[UserAction])
     rendered_content: str
     expiration_time: datetime
 
