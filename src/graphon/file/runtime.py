@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
-
 from .protocols import WorkflowFileRuntimeProtocol
 
 
@@ -13,14 +10,13 @@ class WorkflowFileRuntimeNotConfiguredError(RuntimeError):
 def _not_configured_error() -> WorkflowFileRuntimeNotConfiguredError:
     msg = (
         "workflow file runtime is not configured; call "
-        "set_workflow_file_runtime(...) first or use "
-        "use_workflow_file_runtime(...) for a scoped override"
+        "set_workflow_file_runtime(...) first"
     )
     return WorkflowFileRuntimeNotConfiguredError(msg)
 
 
 class WorkflowFileRuntimeRegistry:
-    """Small helper that keeps runtime configuration explicit and scoped."""
+    """Small helper that keeps runtime configuration explicit."""
 
     def __init__(
         self,
@@ -44,18 +40,6 @@ class WorkflowFileRuntimeRegistry:
             raise _not_configured_error()
         return runtime
 
-    @contextmanager
-    def use(
-        self,
-        runtime: WorkflowFileRuntimeProtocol,
-    ) -> Iterator[WorkflowFileRuntimeProtocol]:
-        previous_runtime = self.peek()
-        self.set(runtime)
-        try:
-            yield runtime
-        finally:
-            self._runtime = previous_runtime
-
 
 _workflow_file_runtime_registry = WorkflowFileRuntimeRegistry()
 
@@ -65,15 +49,6 @@ def configure_workflow_file_runtime(
 ) -> WorkflowFileRuntimeProtocol:
     """Compatibility alias for set_workflow_file_runtime()."""
     return _workflow_file_runtime_registry.set(runtime)
-
-
-@contextmanager
-def use_workflow_file_runtime(
-    runtime: WorkflowFileRuntimeProtocol,
-) -> Iterator[WorkflowFileRuntimeProtocol]:
-    """Temporarily override the configured runtime within a scope."""
-    with _workflow_file_runtime_registry.use(runtime) as configured_runtime:
-        yield configured_runtime
 
 
 def set_workflow_file_runtime(runtime: WorkflowFileRuntimeProtocol) -> None:
