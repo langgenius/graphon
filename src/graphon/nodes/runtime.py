@@ -77,6 +77,53 @@ class HumanInputNodeRuntimeProtocol(Protocol):
     ) -> HumanInputFormStateProtocol: ...
 
 
+@runtime_checkable
+class HumanInputFormRepositoryBindableRuntimeProtocol(Protocol):
+    """Optional capability for runtimes that require explicit repository binding."""
+
+    def with_form_repository(
+        self,
+        form_repository: object,
+    ) -> HumanInputNodeRuntimeProtocol: ...
+
+
+HumanInputRuntimeLike = (
+    HumanInputNodeRuntimeProtocol | HumanInputFormRepositoryBindableRuntimeProtocol
+)
+
+
+def normalize_human_input_runtime(
+    runtime: HumanInputRuntimeLike,
+    *,
+    form_repository: object | None = None,
+) -> HumanInputNodeRuntimeProtocol:
+    """Return a runnable human-input runtime, binding a repository when needed."""
+    if form_repository is not None and isinstance(
+        runtime, HumanInputFormRepositoryBindableRuntimeProtocol
+    ):
+        bound_runtime = runtime.with_form_repository(form_repository)
+        if not isinstance(bound_runtime, HumanInputNodeRuntimeProtocol):
+            msg = "with_form_repository() must return a HumanInput runtime"
+            raise TypeError(msg)
+        return bound_runtime
+
+    if isinstance(runtime, HumanInputNodeRuntimeProtocol):
+        return runtime
+
+    if isinstance(runtime, HumanInputFormRepositoryBindableRuntimeProtocol):
+        msg = (
+            "form_repository is required when runtime only supports "
+            "with_form_repository()"
+        )
+        raise TypeError(msg)
+
+    msg = (
+        "runtime must implement HumanInputNodeRuntimeProtocol or "
+        "HumanInputFormRepositoryBindableRuntimeProtocol"
+    )
+    raise TypeError(msg)
+
+
 class HumanInputFormStateProtocol(Protocol):
     @property
     def id(self) -> str: ...

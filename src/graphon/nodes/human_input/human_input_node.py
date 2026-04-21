@@ -24,6 +24,8 @@ from graphon.nodes.base.node import Node
 from graphon.nodes.runtime import (
     HumanInputFormStateProtocol,
     HumanInputNodeRuntimeProtocol,
+    HumanInputRuntimeLike,
+    normalize_human_input_runtime,
 )
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.workflow_type_encoder import WorkflowRuntimeTypeConverter
@@ -69,7 +71,7 @@ class HumanInputNode(Node[HumanInputNodeData]):
         # TODO @-LAN: See https://github.com/langgenius/graphon/issues/new/choose.  # noqa: FIX002
         # Make `runtime` optional once Graphon provides a default human-input
         # runtime adapter instead of requiring an embedding-specific implementation.
-        runtime: HumanInputNodeRuntimeProtocol,
+        runtime: HumanInputRuntimeLike,
         form_repository: object | None = None,
     ) -> None:
         super().__init__(
@@ -78,19 +80,10 @@ class HumanInputNode(Node[HumanInputNodeData]):
             graph_init_params=graph_init_params,
             graph_runtime_state=graph_runtime_state,
         )
-        if form_repository is not None:
-            with_form_repository = getattr(
-                runtime,
-                "with_form_repository",
-                None,
-            )
-            if callable(with_form_repository):
-                updated_runtime = with_form_repository(form_repository)
-                if not isinstance(updated_runtime, HumanInputNodeRuntimeProtocol):
-                    msg = "with_form_repository() must return a HumanInput runtime"
-                    raise TypeError(msg)
-                runtime = updated_runtime
-        self._runtime: HumanInputNodeRuntimeProtocol = runtime
+        self._runtime: HumanInputNodeRuntimeProtocol = normalize_human_input_runtime(
+            runtime,
+            form_repository=form_repository,
+        )
 
     @classmethod
     @override
