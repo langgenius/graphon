@@ -43,9 +43,11 @@ class VariablePool(BaseModel):
     # Other elements of the selector are keys in the second-level dictionary.
     # To get the key, we hash the elements of the selector except the first one.
     #
-    # The `variable_dictionary` is the source of truth for the runtime value of variables.
-    # For immutable variables as system variables and environment variables, the value in
-    # variable_dictionary should be the same as values in corresponding fields below.
+    # The `variable_dictionary` is the source of truth for the runtime
+    # value of variables.
+    # For immutable variables as system variables and environment variables,
+    # the value in variable_dictionary should be the same as values in
+    # corresponding fields below.
     variable_dictionary: defaultdict[
         str,
         Annotated[dict[str, Variable], Field(default_factory=dict)],
@@ -54,9 +56,10 @@ class VariablePool(BaseModel):
         default_factory=_default_variable_dictionary,
     )
 
-    # The following fields `system_variables`, `environment_variables` and `conversation_variables`
-    # hold initial values for these variables. These fields is only used for initialization
-    # and their values may not corresponding to the actual runtime values.
+    # The following fields `system_variables`, `environment_variables`
+    # and `conversation_variables` hold initial values for these variables.
+    # These fields is only used for initialization and their values may
+    # not corresponding to the actual runtime values.
     system_variables: Sequence[Variable] = Field(default_factory=tuple, exclude=True)
     environment_variables: Sequence[Variable] = Field(
         default_factory=tuple,
