@@ -50,17 +50,19 @@ Model Runtime is divided into protocol and implementation layers:
   `ModelRuntime` for adapters that intentionally implement the full surface
   area.
 
-- The outermost layer is the factory method
+- Provider factory
 
-  It provides methods for obtaining all providers, all model lists, getting provider instances, and authenticating provider/model credentials.
+  `model_providers/model_provider_factory.py` now depends only on
+  `ModelProviderRuntime`. It handles provider discovery, provider/model schema
+  lookup, credential validation, provider icon lookup, and provider-level model
+  list projection without assuming any invocation capability.
 
-- The second layer is the provider layer
+- Model wrappers
 
-  It provides the current provider's model list, model instance obtaining, provider credential authentication, and provider configuration rule information, **allowing horizontal expansion** to support different providers.
-
-- The bottom layer is the model layer
-
-  It offers direct invocation of various model types, predefined model configuration information, getting predefined/remote model lists, model credential authentication methods. Different models provide additional special methods, like LLM's pre-computed tokens method, cost information obtaining method, etc., **allowing horizontal expansion** for different models under the same provider (within supported model types).
+  Capability wrappers such as `LargeLanguageModel`, `TextEmbeddingModel`,
+  `RerankModel`, `Speech2TextModel`, `ModerationModel`, and `TTSModel` depend
+  only on their matching capability protocol. Instantiate those wrappers
+  directly when you need invocation behavior.
 
 ## Documentation
 

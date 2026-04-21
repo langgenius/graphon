@@ -1,7 +1,7 @@
 from collections.abc import Generator, Sequence
 from decimal import Decimal
-from typing import Any, cast
-from unittest.mock import MagicMock
+from io import BytesIO
+from typing import IO, Any, cast
 
 import pytest
 
@@ -19,7 +19,17 @@ from graphon.model_runtime.entities.message_entities import (
     UserPromptMessage,
 )
 from graphon.model_runtime.entities.model_entities import AIModelEntity, ModelType
-from graphon.model_runtime.entities.provider_entities import ProviderEntity
+from graphon.model_runtime.entities.provider_entities import (
+    FieldModelSchema,
+    ModelCredentialSchema,
+    ProviderCredentialSchema,
+    ProviderEntity,
+)
+from graphon.model_runtime.entities.rerank_entities import (
+    MultimodalRerankInput,
+    RerankDocument,
+    RerankResult,
+)
 from graphon.model_runtime.entities.text_embedding_entities import (
     EmbeddingInputType,
     EmbeddingResult,
@@ -46,8 +56,23 @@ from graphon.model_runtime.protocols.llm_runtime import LLMModelRuntime
 
 
 class _ProviderRuntimeStub:
+    def __init__(
+        self,
+        *,
+        providers: Sequence[ProviderEntity] = (),
+        provider_icon: tuple[bytes, str] = (b"", ""),
+        model_schema: AIModelEntity | None = None,
+    ) -> None:
+        self._providers = tuple(providers)
+        self._provider_icon = provider_icon
+        self._model_schema = model_schema
+        self.provider_credential_validations: list[dict[str, Any]] = []
+        self.model_credential_validations: list[dict[str, Any]] = []
+        self.provider_icon_requests: list[dict[str, str]] = []
+        self.model_schema_requests: list[dict[str, Any]] = []
+
     def fetch_model_providers(self) -> tuple[ProviderEntity, ...]:
-        return ()
+        return self._providers
 
     def get_provider_icon(
         self,
@@ -56,8 +81,14 @@ class _ProviderRuntimeStub:
         icon_type: str,
         lang: str,
     ) -> tuple[bytes, str]:
-        _ = provider, icon_type, lang
-        return b"", ""
+        self.provider_icon_requests.append(
+            {
+                "provider": provider,
+                "icon_type": icon_type,
+                "lang": lang,
+            },
+        )
+        return self._provider_icon
 
     def validate_provider_credentials(
         self,
@@ -65,7 +96,12 @@ class _ProviderRuntimeStub:
         provider: str,
         credentials: dict[str, Any],
     ) -> None:
-        _ = provider, credentials
+        self.provider_credential_validations.append(
+            {
+                "provider": provider,
+                "credentials": credentials,
+            },
+        )
 
     def validate_model_credentials(
         self,
@@ -75,7 +111,14 @@ class _ProviderRuntimeStub:
         model: str,
         credentials: dict[str, Any],
     ) -> None:
-        _ = provider, model_type, model, credentials
+        self.model_credential_validations.append(
+            {
+                "provider": provider,
+                "model_type": model_type,
+                "model": model,
+                "credentials": credentials,
+            },
+        )
 
     def get_model_schema(
         self,
@@ -85,8 +128,15 @@ class _ProviderRuntimeStub:
         model: str,
         credentials: dict[str, Any],
     ) -> AIModelEntity | None:
-        _ = provider, model_type, model, credentials
-        return None
+        self.model_schema_requests.append(
+            {
+                "provider": provider,
+                "model_type": model_type,
+                "model": model,
+                "credentials": credentials,
+            },
+        )
+        return self._model_schema
 
 
 class _LLMRuntimeStub(_ProviderRuntimeStub):
@@ -234,6 +284,68 @@ class _TTSRuntimeStub(_ProviderRuntimeStub):
         return ["nova"]
 
 
+class _ModerationRuntimeStub(_ProviderRuntimeStub):
+    def invoke_moderation(
+        self,
+        *,
+        provider: str,
+        model: str,
+        credentials: dict[str, Any],
+        text: str,
+    ) -> bool:
+        _ = provider, model, credentials, text
+        return True
+
+
+class _RerankRuntimeStub(_ProviderRuntimeStub):
+    def invoke_rerank(
+        self,
+        *,
+        provider: str,
+        model: str,
+        credentials: dict[str, Any],
+        query: str,
+        docs: list[str],
+        score_threshold: float | None,
+        top_n: int | None,
+    ) -> RerankResult:
+        _ = provider, credentials, query, score_threshold, top_n
+        return RerankResult(
+            model=model,
+            docs=[RerankDocument(index=0, text=docs[0], score=0.9)],
+        )
+
+    def invoke_multimodal_rerank(
+        self,
+        *,
+        provider: str,
+        model: str,
+        credentials: dict[str, Any],
+        query: MultimodalRerankInput,
+        docs: list[MultimodalRerankInput],
+        score_threshold: float | None,
+        top_n: int | None,
+    ) -> RerankResult:
+        _ = provider, credentials, query, score_threshold, top_n
+        return RerankResult(
+            model=model,
+            docs=[RerankDocument(index=0, text=docs[0]["content"], score=0.9)],
+        )
+
+
+class _SpeechToTextRuntimeStub(_ProviderRuntimeStub):
+    def invoke_speech_to_text(
+        self,
+        *,
+        provider: str,
+        model: str,
+        credentials: dict[str, Any],
+        file: IO[bytes],
+    ) -> str:
+        _ = provider, model, credentials, file
+        return "transcript"
+
+
 @pytest.mark.parametrize(
     ("origin_model_type", "expected_model_type"),
     [
@@ -272,36 +384,76 @@ def test_model_type_to_origin_model_type_uses_model_map(
     assert model_type.to_origin_model_type() == expected_origin_model_type
 
 
-@pytest.mark.parametrize(
-    ("model_type", "expected_model_class"),
-    [
-        (ModelType.LLM, LargeLanguageModel),
-        (ModelType.TEXT_EMBEDDING, TextEmbeddingModel),
-        (ModelType.RERANK, RerankModel),
-        (ModelType.SPEECH2TEXT, Speech2TextModel),
-        (ModelType.MODERATION, ModerationModel),
-        (ModelType.TTS, TTSModel),
-    ],
-)
-def test_model_provider_factory_uses_model_class_map(
-    model_type: ModelType,
-    expected_model_class: type,
-) -> None:
+def test_model_provider_factory_accepts_provider_only_runtime_surface() -> None:
     provider = ProviderEntity(
         provider="test-provider",
         label=I18nObject(en_US="Test Provider"),
-        supported_model_types=[model_type],
+        supported_model_types=[ModelType.LLM],
         configurate_methods=[],
+        provider_credential_schema=ProviderCredentialSchema(
+            credential_form_schemas=[],
+        ),
+        model_credential_schema=ModelCredentialSchema(
+            model=FieldModelSchema(label=I18nObject(en_US="Model")),
+            credential_form_schemas=[],
+        ),
     )
-    runtime = MagicMock()
-    runtime.fetch_model_providers.return_value = [provider]
-    factory = ModelProviderFactory(model_runtime=runtime)
+    runtime = _ProviderRuntimeStub(
+        providers=[provider],
+        provider_icon=(b"icon-bytes", "svg"),
+    )
+    factory = ModelProviderFactory(runtime=runtime)
 
-    model = factory.get_model_type_instance("test-provider", model_type)
-
-    assert isinstance(model, expected_model_class)
-    assert model.provider_schema is provider
-    assert model.model_runtime is runtime
+    assert list(factory.get_providers()) == [provider]
+    assert list(factory.get_model_providers()) == [provider]
+    assert factory.get_provider_schema("test-provider") is provider
+    assert factory.get_model_provider("test-provider") is provider
+    assert (
+        factory.provider_credentials_validate(
+            provider="test-provider",
+            credentials={},
+        )
+        == {}
+    )
+    assert (
+        factory.model_credentials_validate(
+            provider="test-provider",
+            model_type=ModelType.LLM,
+            model="fake-chat",
+            credentials={},
+        )
+        == {}
+    )
+    assert (
+        factory.get_model_schema(
+            provider="test-provider",
+            model_type=ModelType.LLM,
+            model="fake-chat",
+            credentials={},
+        )
+        is None
+    )
+    assert factory.get_models(model_type=ModelType.LLM) == [
+        provider.to_simple_provider(),
+    ]
+    assert factory.get_provider_icon("test-provider", "icon", "en") == (
+        b"icon-bytes",
+        "svg",
+    )
+    assert runtime.provider_credential_validations == [
+        {
+            "provider": "test-provider",
+            "credentials": {},
+        },
+    ]
+    assert runtime.model_credential_validations == [
+        {
+            "provider": "test-provider",
+            "model_type": ModelType.LLM,
+            "model": "fake-chat",
+            "credentials": {},
+        },
+    ]
 
 
 def test_large_language_model_accepts_llm_only_runtime_surface() -> None:
@@ -374,3 +526,63 @@ def test_tts_model_accepts_tts_only_runtime_surface() -> None:
         model="voice-model",
         credentials={},
     ) == ["nova"]
+
+
+def test_moderation_model_accepts_moderation_only_runtime_surface() -> None:
+    provider = ProviderEntity(
+        provider="test-provider",
+        label=I18nObject(en_US="Test Provider"),
+        supported_model_types=[ModelType.MODERATION],
+        configurate_methods=[],
+    )
+    runtime = _ModerationRuntimeStub()
+    model = ModerationModel(provider_schema=provider, model_runtime=runtime)
+
+    assert (
+        model.invoke(
+            model="moderation-model",
+            credentials={},
+            text="hello",
+        )
+        is True
+    )
+
+
+def test_rerank_model_accepts_rerank_only_runtime_surface() -> None:
+    provider = ProviderEntity(
+        provider="test-provider",
+        label=I18nObject(en_US="Test Provider"),
+        supported_model_types=[ModelType.RERANK],
+        configurate_methods=[],
+    )
+    runtime = _RerankRuntimeStub()
+    model = RerankModel(provider_schema=provider, model_runtime=runtime)
+
+    result = model.invoke(
+        model="rerank-model",
+        credentials={},
+        query="hello",
+        docs=["doc-1"],
+    )
+
+    assert result.docs[0].text == "doc-1"
+
+
+def test_speech_to_text_model_accepts_speech_only_runtime_surface() -> None:
+    provider = ProviderEntity(
+        provider="test-provider",
+        label=I18nObject(en_US="Test Provider"),
+        supported_model_types=[ModelType.SPEECH2TEXT],
+        configurate_methods=[],
+    )
+    runtime = _SpeechToTextRuntimeStub()
+    model = Speech2TextModel(provider_schema=provider, model_runtime=runtime)
+
+    assert (
+        model.invoke(
+            model="stt-model",
+            credentials={},
+            file=BytesIO(b"audio"),
+        )
+        == "transcript"
+    )
