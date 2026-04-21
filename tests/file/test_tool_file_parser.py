@@ -1,5 +1,4 @@
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -10,7 +9,6 @@ from graphon.file.tool_file_parser import (
     get_tool_file_manager_factory,
     require_tool_file_manager_factory,
     set_tool_file_manager_factory,
-    use_tool_file_manager_factory,
 )
 
 
@@ -28,15 +26,6 @@ class _RegistryHarness:
 
     def set(self, factory: Callable[[], Any]) -> None:
         self._factory = factory
-
-    @contextmanager
-    def use(self, factory: Callable[[], Any]) -> Iterator[Callable[[], Any]]:
-        previous_factory = self._factory
-        self._factory = factory
-        try:
-            yield factory
-        finally:
-            self._factory = previous_factory
 
 
 @pytest.fixture(autouse=True)
@@ -67,37 +56,3 @@ def test_set_tool_file_manager_factory_preserves_compatibility() -> None:
 
     assert get_tool_file_manager_factory() is factory
     assert require_tool_file_manager_factory()() == "configured"
-
-
-def test_use_tool_file_manager_factory_scopes_and_restores_factory() -> None:
-    def base_factory() -> str:
-        return "base"
-
-    def scoped_factory() -> str:
-        return "scoped"
-
-    set_tool_file_manager_factory(base_factory)
-
-    with use_tool_file_manager_factory(scoped_factory) as active_factory:
-        assert active_factory is scoped_factory
-        assert require_tool_file_manager_factory()() == "scoped"
-
-    assert require_tool_file_manager_factory()() == "base"
-
-
-def test_nested_use_tool_file_manager_factory_restores_previous_scope() -> None:
-    def outer_factory() -> str:
-        return "outer"
-
-    def inner_factory() -> str:
-        return "inner"
-
-    with use_tool_file_manager_factory(outer_factory):
-        assert require_tool_file_manager_factory()() == "outer"
-
-        with use_tool_file_manager_factory(inner_factory):
-            assert require_tool_file_manager_factory()() == "inner"
-
-        assert require_tool_file_manager_factory()() == "outer"
-
-    assert get_tool_file_manager_factory() is None
