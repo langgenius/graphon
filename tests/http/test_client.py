@@ -27,7 +27,7 @@ from graphon.nodes.http_request.entities import (
     HttpRequestNodeAuthorization,
     HttpRequestNodeBody,
 )
-from graphon.nodes.llm.file_saver import FileSaverDependencies, FileSaverImpl
+from graphon.nodes.llm.file_saver import FileSaverImpl
 from graphon.nodes.llm.node import LLMNode
 from graphon.nodes.question_classifier.question_classifier_node import (
     QuestionClassifierNode,
@@ -204,11 +204,9 @@ def test_document_extractor_node_uses_default_http_client_when_not_injected() ->
 
 
 def test_file_saver_impl_uses_default_http_client_when_not_injected() -> None:
-    file_saver = FileSaverImpl(
-        dependencies=FileSaverDependencies(
-            tool_file_manager=_ToolFileManager(),
-            file_reference_factory=_FileReferenceFactory(),
-        ),
+    file_saver = FileSaverImpl.with_runtime(
+        tool_file_manager=_ToolFileManager(),
+        file_reference_factory=_FileReferenceFactory(),
     )
 
     assert file_saver.http_client is get_http_client()

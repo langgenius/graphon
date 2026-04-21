@@ -7,7 +7,7 @@ import pytest
 
 from graphon.file.models import File
 from graphon.http import HttpResponse, HttpxHttpClient, get_http_client
-from graphon.nodes.llm.file_saver import FileSaverDependencies, FileSaverImpl
+from graphon.nodes.llm.file_saver import FileSaverImpl
 
 
 class _ToolFileManager:
@@ -75,68 +75,57 @@ class _FalseyHttpClient:
         raise NotImplementedError
 
 
-def test_file_saver_impl_accepts_dependency_bundle() -> None:
+def test_file_saver_impl_with_runtime_accepts_explicit_http_client() -> None:
     http_client = HttpxHttpClient()
 
-    file_saver = FileSaverImpl(
-        dependencies=FileSaverDependencies(
-            tool_file_manager=_ToolFileManager(),
-            file_reference_factory=_FileReferenceFactory(),
-            http_client=http_client,
-        ),
+    file_saver = FileSaverImpl.with_runtime(
+        tool_file_manager=_ToolFileManager(),
+        file_reference_factory=_FileReferenceFactory(),
+        http_client=http_client,
     )
 
     assert file_saver.http_client is http_client
 
 
-def test_file_saver_impl_uses_default_http_client_for_dependency_bundle() -> None:
-    file_saver = FileSaverImpl(
-        dependencies=FileSaverDependencies(
-            tool_file_manager=_ToolFileManager(),
-            file_reference_factory=_FileReferenceFactory(),
-        ),
+def test_file_saver_impl_with_runtime_uses_default_http_client() -> None:
+    file_saver = FileSaverImpl.with_runtime(
+        tool_file_manager=_ToolFileManager(),
+        file_reference_factory=_FileReferenceFactory(),
     )
 
     assert file_saver.http_client is get_http_client()
 
 
-def test_file_saver_impl_preserves_explicit_falsey_http_client() -> None:
+def test_file_saver_impl_with_runtime_preserves_falsey_http_client() -> None:
     http_client = _FalseyHttpClient()
 
-    file_saver = FileSaverImpl(
-        dependencies=FileSaverDependencies(
-            tool_file_manager=_ToolFileManager(),
-            file_reference_factory=_FileReferenceFactory(),
-            http_client=http_client,
-        ),
+    file_saver = FileSaverImpl.with_runtime(
+        tool_file_manager=_ToolFileManager(),
+        file_reference_factory=_FileReferenceFactory(),
+        http_client=http_client,
     )
 
     assert file_saver.http_client is http_client
 
 
-def test_file_saver_impl_rejects_mixed_dependency_styles() -> None:
-    dependencies = FileSaverDependencies(
+def test_file_saver_impl_constructor_still_accepts_legacy_arguments() -> None:
+    http_client = HttpxHttpClient()
+
+    file_saver = FileSaverImpl(
         tool_file_manager=_ToolFileManager(),
         file_reference_factory=_FileReferenceFactory(),
+        http_client=http_client,
     )
+
+    assert file_saver.http_client is http_client
+
+
+def test_file_saver_impl_constructor_requires_runtime_collaborators() -> None:
     constructor = cast(Any, FileSaverImpl)
 
     with pytest.raises(
         TypeError,
-        match="Use either 'dependencies' or the legacy keyword arguments",
-    ):
-        constructor(
-            dependencies=dependencies,
-            tool_file_manager=_ToolFileManager(),
-        )
-
-
-def test_file_saver_impl_requires_complete_legacy_arguments() -> None:
-    constructor = cast(Any, FileSaverImpl)
-
-    with pytest.raises(
-        TypeError,
-        match="requires either 'dependencies=FileSaverDependencies",
+        match="missing 1 required keyword-only argument",
     ):
         constructor(
             file_reference_factory=_FileReferenceFactory(),
