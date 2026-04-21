@@ -73,7 +73,7 @@ class UserAction(BaseModel):
     #
     # The id must be a valid identifier (satisfy the _IDENTIFIER_PATTERN above.)
     id: str = Field(max_length=20)
-    title: str = Field(max_length=20)
+    title: str = Field(max_length=100)
     button_style: ButtonStyle = ButtonStyle.DEFAULT
 
     @field_validator("id")
@@ -178,6 +178,13 @@ class HumanInputNodeData(BaseNodeData):
             if action.id == action_id:
                 return action.title
         return action_id
+
+    def find_action_value(self, action_id: str) -> str:
+        """Resolve the selected action's workflow-facing value by id."""
+        for action in self.user_actions:
+            if action.id == action_id:
+                return action.title
+        return ""
 
 
 class FormDefinition(BaseModel):
