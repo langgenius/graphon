@@ -33,7 +33,7 @@ def _build_node(
         node_id="assigner",
         graph_init_params=init_params,
         graph_runtime_state=runtime_state,
-        config=VariableAssignerData(
+        data=VariableAssignerData(
             title="Variable Assigner",
             assigned_variable_selector=assigned_selector,
             write_mode=write_mode,

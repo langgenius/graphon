@@ -209,7 +209,7 @@ def _run_if_else_node(
     )
     node = IfElseNode(
         node_id="if-node",
-        config=IfElseNode.validate_node_data(data),
+        data=IfElseNode.validate_node_data(data),
         graph_init_params=build_graph_init_params(
             graph_config={"nodes": [], "edges": []},
         ),

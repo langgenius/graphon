@@ -105,7 +105,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
     def __init__(
         self,
         node_id: str,
-        config: QuestionClassifierNodeData,
+        data: QuestionClassifierNodeData,
         *,
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,
@@ -121,7 +121,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
     ) -> None:
         super().__init__(
             node_id=node_id,
-            config=config,
+            data=data,
             graph_init_params=graph_init_params,
             graph_runtime_state=graph_runtime_state,
         )

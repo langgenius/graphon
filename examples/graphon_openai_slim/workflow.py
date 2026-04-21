@@ -255,7 +255,7 @@ def build_graph(
 ) -> Graph:
     start_node = StartNode(
         node_id="start",
-        config=StartNodeData(
+        data=StartNodeData(
             title="Start",
             variables=[
                 VariableEntity(
@@ -272,7 +272,7 @@ def build_graph(
 
     llm_node = LLMNode(
         node_id="llm",
-        config=LLMNodeData(
+        data=LLMNodeData(
             title="LLM",
             model=ModelConfig(
                 provider=provider,
@@ -300,7 +300,7 @@ def build_graph(
 
     output_node = AnswerNode(
         node_id="output",
-        config=AnswerNodeData(
+        data=AnswerNodeData(
             title="Output",
             answer="{{#llm.text#}}",
         ),

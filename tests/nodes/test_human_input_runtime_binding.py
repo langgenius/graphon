@@ -144,7 +144,7 @@ def _build_human_input_node(
 ) -> HumanInputNode:
     return HumanInputNode(
         node_id="human-input-node",
-        config=HumanInputNodeData(title="Human Input"),
+        data=HumanInputNodeData(title="Human Input"),
         graph_init_params=build_graph_init_params(
             graph_config={"nodes": [], "edges": []},
         ),

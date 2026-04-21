@@ -80,7 +80,7 @@ def _build_node(*, form: _FakeForm) -> HumanInputNode:
     )
     return HumanInputNode(
         node_id="human_input_node",
-        config=node_data,
+        data=node_data,
         graph_init_params=_build_graph_init_params(),
         graph_runtime_state=GraphRuntimeState(
             variable_pool=VariablePool(),

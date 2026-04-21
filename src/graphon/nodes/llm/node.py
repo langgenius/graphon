@@ -128,7 +128,7 @@ class LLMNode(Node[LLMNodeData]):
     def __init__(
         self,
         node_id: str,
-        config: LLMNodeData,
+        data: LLMNodeData,
         *,
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,
@@ -145,7 +145,7 @@ class LLMNode(Node[LLMNodeData]):
     ) -> None:
         super().__init__(
             node_id=node_id,
-            config=config,
+            data=data,
             graph_init_params=graph_init_params,
             graph_runtime_state=graph_runtime_state,
         )
