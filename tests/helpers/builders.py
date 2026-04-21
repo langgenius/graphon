@@ -44,7 +44,7 @@ def build_variable_pool(
     conversation_variables: Sequence[Variable] = (),
     variables: Sequence[tuple[Sequence[str], Any]] = (),
 ) -> VariablePool:
-    variable_pool = VariablePool(
+    variable_pool = VariablePool.from_bootstrap(
         system_variables=system_variables,
         conversation_variables=conversation_variables,
     )
