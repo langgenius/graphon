@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import mimetypes
 import typing as tp
 
@@ -81,7 +83,24 @@ class FileSaverImpl(LLMFileSaver):
     ) -> None:
         self._tool_file_manager = tool_file_manager
         self._file_reference_factory = file_reference_factory
-        self._http_client = http_client or get_http_client()
+        self._http_client = (
+            http_client if http_client is not None else get_http_client()
+        )
+
+    @classmethod
+    def with_runtime(
+        cls,
+        *,
+        tool_file_manager: ToolFileManagerProtocol,
+        file_reference_factory: FileReferenceFactoryProtocol,
+        http_client: HttpClientProtocol | None = None,
+    ) -> FileSaverImpl:
+        """Build a file saver from the runtime collaborators it needs."""
+        return cls(
+            tool_file_manager=tool_file_manager,
+            file_reference_factory=file_reference_factory,
+            http_client=http_client,
+        )
 
     @property
     def http_client(self) -> HttpClientProtocol:
