@@ -153,6 +153,8 @@ def test_question_classifier_run_returns_custom_class_label(
     assert result.outputs["class_name"] == "Questions about refunds"
     assert result.outputs["class_label"] == "Refund desk"
     assert result.outputs["class_id"] == "refund"
+    assert result.inputs["model_provider"] == "openai"
+    assert result.inputs["model_name"] == "gpt-4o"
 
 
 def test_question_classifier_run_falls_back_to_canonical_class_label(

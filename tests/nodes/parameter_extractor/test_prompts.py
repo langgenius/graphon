@@ -1,8 +1,12 @@
 import time
+from types import SimpleNamespace
 from unittest.mock import Mock
+
+import pytest
 
 from graphon.model_runtime.entities.llm_entities import LLMMode
 from graphon.model_runtime.entities.message_entities import PromptMessageRole
+from graphon.nodes.llm import llm_utils
 from graphon.nodes.llm.entities import ModelConfig
 from graphon.nodes.parameter_extractor.entities import (
     ParameterConfig,
@@ -56,7 +60,12 @@ def _build_parameter_extractor_node() -> tuple[ParameterExtractorNode, VariableP
         ),
         graph_init_params=init_params,
         graph_runtime_state=runtime_state,
-        model_instance=Mock(),
+        model_instance=Mock(
+            provider="test",
+            model_name="test-model",
+            parameters={},
+            stop=(),
+        ),
         prompt_message_serializer=Mock(),
     )
     return node, variable_pool
@@ -128,3 +137,28 @@ def test_function_calling_prompt_template_renders_system_message() -> None:
     assert "Follow strictly instructions." in prompt_messages[0].text
     assert prompt_messages[1].role == PromptMessageRole.USER
     assert prompt_messages[1].text == "Extract the location from this request."
+
+
+def test_prepare_run_context_exposes_model_identity_in_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    node, variable_pool = _build_parameter_extractor_node()
+    variable_pool.add(("start", "query"), "weather in sf")
+
+    monkeypatch.setattr(
+        llm_utils,
+        "resolve_completion_params_variables",
+        lambda parameters, _: parameters,
+    )
+    monkeypatch.setattr(
+        node,
+        "_fetch_llm_model_schema",
+        lambda **_: SimpleNamespace(features=[]),
+    )
+    monkeypatch.setattr(node, "_build_run_prompt", lambda **_: ([], []))
+
+    run_context = node._prepare_run_context()  # noqa: SLF001
+
+    assert run_context.inputs["query"] == "weather in sf"
+    assert run_context.inputs["model_provider"] == "test"
+    assert run_context.inputs["model_name"] == "test-model"

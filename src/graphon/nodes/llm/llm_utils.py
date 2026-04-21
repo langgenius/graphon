@@ -67,6 +67,17 @@ def fetch_model_schema(*, model_instance: PreparedLLMProtocol) -> AIModelEntity:
     return model_schema
 
 
+def build_model_identity_inputs(
+    *,
+    model_instance: PreparedLLMProtocol,
+) -> dict[str, Any]:
+    """Expose the runtime-resolved model identity in node inputs."""
+    return {
+        "model_provider": model_instance.provider,
+        "model_name": model_instance.model_name,
+    }
+
+
 def fetch_files(variable_pool: VariablePool, selector: Sequence[str]) -> Sequence[File]:
     variable = variable_pool.get(selector)
     if variable is None:

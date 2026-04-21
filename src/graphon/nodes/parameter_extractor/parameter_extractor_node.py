@@ -290,6 +290,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
             "files": [f.to_dict() for f in files],
             "parameters": jsonable_encoder(node_data.parameters),
             "instruction": jsonable_encoder(node_data.instruction),
+            **llm_utils.build_model_identity_inputs(model_instance=model_instance),
         }
         process_data = {
             "model_mode": node_data.model.mode,
