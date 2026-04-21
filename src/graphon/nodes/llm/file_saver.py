@@ -1,5 +1,9 @@
+from __future__ import annotations
+
 import mimetypes
 import typing as tp
+from dataclasses import dataclass
+from typing import cast
 
 from graphon.file.constants import DEFAULT_EXTENSION, DEFAULT_MIME_TYPE
 from graphon.file.enums import (
@@ -68,20 +72,114 @@ class LLMFileSaver(tp.Protocol):
         raise NotImplementedError
 
 
+@dataclass(frozen=True, slots=True)
+class FileSaverDependencies:
+    """Runtime collaborators required by FileSaverImpl."""
+
+    tool_file_manager: ToolFileManagerProtocol
+    file_reference_factory: FileReferenceFactoryProtocol
+    http_client: HttpClientProtocol | None = None
+
+
 class FileSaverImpl(LLMFileSaver):
     _tool_file_manager: ToolFileManagerProtocol
     _file_reference_factory: FileReferenceFactoryProtocol
 
+    @tp.overload
     def __init__(
         self,
         *,
+        dependencies: FileSaverDependencies,
+        tool_file_manager: None = None,
+        file_reference_factory: None = None,
+        http_client: None = None,
+    ) -> None: ...
+
+    @tp.overload
+    def __init__(
+        self,
+        *,
+        dependencies: None = None,
         tool_file_manager: ToolFileManagerProtocol,
         file_reference_factory: FileReferenceFactoryProtocol,
         http_client: HttpClientProtocol | None = None,
+    ) -> None: ...
+
+    def __init__(
+        self,
+        *,
+        dependencies: FileSaverDependencies | None = None,
+        tool_file_manager: ToolFileManagerProtocol | None = None,
+        file_reference_factory: FileReferenceFactoryProtocol | None = None,
+        http_client: HttpClientProtocol | None = None,
     ) -> None:
-        self._tool_file_manager = tool_file_manager
-        self._file_reference_factory = file_reference_factory
-        self._http_client = http_client or get_http_client()
+        resolved_dependencies = self._resolve_dependencies(
+            dependencies=dependencies,
+            tool_file_manager=tool_file_manager,
+            file_reference_factory=file_reference_factory,
+            http_client=http_client,
+        )
+        self._tool_file_manager = resolved_dependencies.tool_file_manager
+        self._file_reference_factory = resolved_dependencies.file_reference_factory
+        self._http_client = (
+            resolved_dependencies.http_client
+            if resolved_dependencies.http_client is not None
+            else get_http_client()
+        )
+
+    @staticmethod
+    def _resolve_dependencies(
+        *,
+        dependencies: FileSaverDependencies | None,
+        tool_file_manager: ToolFileManagerProtocol | None,
+        file_reference_factory: FileReferenceFactoryProtocol | None,
+        http_client: HttpClientProtocol | None,
+    ) -> FileSaverDependencies:
+        if dependencies is not None:
+            duplicate_arguments = [
+                argument_name
+                for argument_name, argument_value in (
+                    ("tool_file_manager", tool_file_manager),
+                    ("file_reference_factory", file_reference_factory),
+                    ("http_client", http_client),
+                )
+                if argument_value is not None
+            ]
+            if duplicate_arguments:
+                duplicate_arguments_str = ", ".join(sorted(duplicate_arguments))
+                msg = (
+                    "FileSaverImpl received runtime collaborators twice. "
+                    "Use either 'dependencies' or the legacy keyword arguments, "
+                    f"not both: {duplicate_arguments_str}."
+                )
+                raise TypeError(msg)
+            return dependencies
+
+        missing_arguments = [
+            argument_name
+            for argument_name, argument_value in (
+                ("tool_file_manager", tool_file_manager),
+                ("file_reference_factory", file_reference_factory),
+            )
+            if argument_value is None
+        ]
+        if missing_arguments:
+            missing_arguments_str = ", ".join(sorted(missing_arguments))
+            msg = (
+                "FileSaverImpl requires either "
+                "'dependencies=FileSaverDependencies(...)' or the legacy "
+                f"keyword arguments: {missing_arguments_str}."
+            )
+            raise TypeError(msg)
+
+        return FileSaverDependencies(
+            tool_file_manager=cast(ToolFileManagerProtocol, tool_file_manager),
+            file_reference_factory=cast(
+                FileReferenceFactoryProtocol,
+                file_reference_factory,
+            ),
+            http_client=http_client,
+        )
 
     @property
     def http_client(self) -> HttpClientProtocol:
