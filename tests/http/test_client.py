@@ -2,6 +2,7 @@ import inspect
 import time
 from collections.abc import Callable, Generator, Mapping
 from http import HTTPStatus
+from importlib import import_module
 from typing import Any
 
 import httpx
@@ -11,6 +12,7 @@ from pytest_mock import MockerFixture
 from graphon.file.models import File
 from graphon.http import (
     HttpClientMaxRetriesExceededError,
+    HttpClientProtocol,
     HttpResponse,
     HttpStatusError,
     HttpxHttpClient,
@@ -35,6 +37,9 @@ from graphon.nodes.question_classifier.question_classifier_node import (
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
 from ..helpers import build_graph_init_params, build_variable_pool
+
+_http_request_node_module = import_module("graphon.nodes.http_request.node")
+_internal_dependencies_name = "_HttpRequestNodeDependencies"
 
 
 class _ToolFileManager:
@@ -72,6 +77,19 @@ def _build_runtime_state() -> GraphRuntimeState:
     return GraphRuntimeState(
         variable_pool=build_variable_pool(),
         start_at=time.perf_counter(),
+    )
+
+
+def _build_internal_dependencies(
+    *,
+    http_client: HttpClientProtocol | None = None,
+) -> Any:
+    dependencies_cls = getattr(_http_request_node_module, _internal_dependencies_name)
+    return dependencies_cls(
+        tool_file_manager_factory=_ToolFileManager,
+        file_manager=_FileManager(),
+        file_reference_factory=_FileReferenceFactory(),
+        http_client=http_client,
     )
 
 
@@ -185,6 +203,55 @@ def test_http_request_node_uses_default_http_client_when_not_injected() -> None:
     )
 
     assert node.http_client is get_http_client()
+
+
+def test_http_request_node_accepts_internal_dependency_bundle() -> None:
+    node = HttpRequestNode(
+        node_id="http",
+        config=HttpRequestNodeData(
+            title="HTTP Request",
+            method="get",
+            url="https://example.com",
+            authorization=HttpRequestNodeAuthorization(type="no-auth"),
+            headers="",
+            params="",
+            body=HttpRequestNodeBody(type="none", data=[]),
+        ),
+        graph_init_params=build_graph_init_params(
+            graph_config={"nodes": [], "edges": []},
+        ),
+        graph_runtime_state=_build_runtime_state(),
+        http_request_config=build_http_request_config(),
+        dependencies=_build_internal_dependencies(),
+    )
+
+    assert node.http_client is get_http_client()
+
+
+def test_http_request_node_rejects_mixed_dependency_inputs() -> None:
+    with pytest.raises(
+        TypeError,
+        match=r"accepts either dependencies=\.\.\. or legacy dependency keywords",
+    ):
+        HttpRequestNode(
+            node_id="http",
+            config=HttpRequestNodeData(
+                title="HTTP Request",
+                method="get",
+                url="https://example.com",
+                authorization=HttpRequestNodeAuthorization(type="no-auth"),
+                headers="",
+                params="",
+                body=HttpRequestNodeBody(type="none", data=[]),
+            ),
+            graph_init_params=build_graph_init_params(
+                graph_config={"nodes": [], "edges": []},
+            ),
+            graph_runtime_state=_build_runtime_state(),
+            http_request_config=build_http_request_config(),
+            dependencies=_build_internal_dependencies(),
+            file_manager=_FileManager(),
+        )
 
 
 def test_document_extractor_node_uses_default_http_client_when_not_injected() -> None:
