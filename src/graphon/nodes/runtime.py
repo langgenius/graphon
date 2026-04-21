@@ -87,13 +87,13 @@ class HumanInputFormRepositoryBindableRuntimeProtocol(Protocol):
     ) -> HumanInputNodeRuntimeProtocol: ...
 
 
-HumanInputRuntimeLike = (
+_HumanInputRuntimeLike = (
     HumanInputNodeRuntimeProtocol | HumanInputFormRepositoryBindableRuntimeProtocol
 )
 
 
-def normalize_human_input_runtime(
-    runtime: HumanInputRuntimeLike,
+def _normalize_human_input_runtime(
+    runtime: _HumanInputRuntimeLike,
     *,
     form_repository: object | None = None,
 ) -> HumanInputNodeRuntimeProtocol:

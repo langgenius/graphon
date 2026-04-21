@@ -11,10 +11,9 @@ from graphon.nodes.human_input.entities import HumanInputNodeData
 from graphon.nodes.human_input.enums import HumanInputFormStatus
 from graphon.nodes.human_input.human_input_node import HumanInputNode
 from graphon.nodes.runtime import (
+    HumanInputFormRepositoryBindableRuntimeProtocol,
     HumanInputFormStateProtocol,
     HumanInputNodeRuntimeProtocol,
-    HumanInputRuntimeLike,
-    normalize_human_input_runtime,
 )
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
@@ -138,7 +137,9 @@ class _InvalidBindableHumanInputRuntime:
 
 def _build_human_input_node(
     *,
-    runtime: HumanInputRuntimeLike,
+    runtime: (
+        HumanInputNodeRuntimeProtocol | HumanInputFormRepositoryBindableRuntimeProtocol
+    ),
     form_repository: object | None = None,
 ) -> HumanInputNode:
     return HumanInputNode(
@@ -156,46 +157,32 @@ def _build_human_input_node(
     )
 
 
-def test_normalize_human_input_runtime_returns_ready_runtime_unchanged() -> None:
-    runtime = _StubHumanInputRuntime()
+def test_human_input_node_accepts_ready_runtime_without_repository() -> None:
+    runtime = _RunnableHumanInputRuntime()
 
-    normalized_runtime = normalize_human_input_runtime(runtime)
+    node = _build_human_input_node(runtime=runtime)
 
-    assert normalized_runtime is runtime
+    list(node.run())
 
-
-def test_normalize_human_input_runtime_binds_repository_explicitly() -> None:
-    repository = object()
-    runtime = _BindableHumanInputRuntime()
-
-    normalized_runtime = normalize_human_input_runtime(
-        runtime,
-        form_repository=repository,
-    )
-
-    assert normalized_runtime is runtime.bound_runtime
-    assert runtime.bound_repositories == [repository]
+    assert runtime.get_form_calls == ["human-input-node"]
+    assert runtime.create_form_calls == ["human-input-node"]
 
 
-def test_normalize_human_input_runtime_requires_repository_for_bindable_runtime() -> (
-    None
-):
-    runtime = _BindableHumanInputRuntime()
-
+def test_human_input_node_requires_repository_for_bindable_runtime() -> None:
     with pytest.raises(
         TypeError,
         match="form_repository is required when runtime only supports",
     ):
-        normalize_human_input_runtime(runtime)
+        _build_human_input_node(runtime=_BindableHumanInputRuntime())
 
 
-def test_normalize_human_input_runtime_rejects_invalid_bound_runtime() -> None:
+def test_human_input_node_rejects_invalid_bound_runtime() -> None:
     with pytest.raises(
         TypeError,
         match="with_form_repository\\(\\) must return a HumanInput runtime",
     ):
-        normalize_human_input_runtime(
-            _InvalidBindableHumanInputRuntime(),
+        _build_human_input_node(
+            runtime=_InvalidBindableHumanInputRuntime(),
             form_repository=object(),
         )
 
