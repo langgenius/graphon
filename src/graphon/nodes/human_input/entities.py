@@ -179,12 +179,13 @@ class HumanInputNodeData(BaseNodeData):
                 return action.title
         return action_id
 
-    def find_action_value(self, action_id: str) -> str:
+    def must_resolve_action_value(self, action_id: str) -> str:
         """Resolve the selected action's workflow-facing value by id."""
         for action in self.user_actions:
             if action.id == action_id:
                 return action.title
-        return ""
+        msg = f"Invalid action: {action_id}"
+        raise AssertionError(msg)
 
 
 class FormDefinition(BaseModel):

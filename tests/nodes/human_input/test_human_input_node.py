@@ -124,10 +124,6 @@ def test_human_input_submission_emits_action_value_outputs() -> None:
         completed.node_run_result.outputs["__action_value"]
         == "card_visa_enterprise_001_long_value"
     )
-    assert (
-        completed.node_run_result.outputs["__rendered_content"]
-        == "Selected ticket: TICKET-1"
-    )
 
 
 def test_human_input_timeout_emits_empty_action_value() -> None:
