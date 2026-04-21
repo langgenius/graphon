@@ -1,17 +1,20 @@
 from .client import HttpxHttpClient
 from .protocols import HttpClientProtocol
 
-_http_client: HttpClientProtocol = HttpxHttpClient()
+_default_http_client: HttpClientProtocol = HttpxHttpClient()
 
 
 def set_http_client(http_client: HttpClientProtocol) -> None:
-    global _http_client  # noqa: PLW0603
-    _http_client = http_client
+    """Compatibility wrapper for replacing the process default client."""
+    global _default_http_client  # noqa: PLW0603
+    _default_http_client = http_client
 
 
 def get_http_client() -> HttpClientProtocol:
-    return _http_client
+    """Return the configured process default HTTP client."""
+    return _default_http_client
 
 
 def get_default_http_client() -> HttpClientProtocol:
-    return get_http_client()
+    """Return the process default HTTP client."""
+    return _default_http_client

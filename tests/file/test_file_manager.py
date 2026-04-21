@@ -1,16 +1,19 @@
 import base64
-from collections.abc import Generator
 from unittest.mock import MagicMock
 
 import pytest
 
+import graphon.file.runtime as runtime_module
 from graphon.file.enums import (
     FileTransferMethod,
     FileType,
 )
 from graphon.file.file_manager import download, to_prompt_message_content
 from graphon.file.models import File
-from graphon.file.runtime import get_workflow_file_runtime, set_workflow_file_runtime
+from graphon.file.runtime import (
+    WorkflowFileRuntimeRegistry,
+    set_workflow_file_runtime,
+)
 from graphon.model_runtime.entities.message_entities import (
     DocumentPromptMessageContent,
     ImagePromptMessageContent,
@@ -44,14 +47,19 @@ def _build_file(
 
 
 @pytest.fixture
-def workflow_file_runtime() -> Generator[MagicMock, None, None]:
-    previous_runtime = get_workflow_file_runtime()
+def workflow_file_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> MagicMock:
     runtime = MagicMock()
+    runtime_registry = WorkflowFileRuntimeRegistry()
+    runtime_registry.set(runtime)
+    monkeypatch.setattr(
+        runtime_module,
+        "_workflow_file_runtime_registry",
+        runtime_registry,
+    )
     set_workflow_file_runtime(runtime)
-    try:
-        yield runtime
-    finally:
-        set_workflow_file_runtime(previous_runtime)
+    return runtime
 
 
 @pytest.mark.parametrize(

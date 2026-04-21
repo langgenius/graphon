@@ -4,7 +4,7 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, override
+from typing import Any, cast, override
 
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import (
@@ -79,6 +79,17 @@ class _QuestionClassifierRunContext:
     rendered_classes: list[Any]
 
 
+@dataclass(frozen=True, slots=True)
+class QuestionClassifierNodeDependencies:
+    """Runtime collaborators required to execute a question-classifier node."""
+
+    model_instance: PreparedLLMProtocol
+    template_renderer: Jinja2TemplateRenderer
+    llm_file_saver: LLMFileSaver
+    memory: PromptMessageMemory | None = None
+    prompt_message_serializer: PromptMessageSerializerProtocol | None = None
+
+
 class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
     node_type = BuiltinNodeTypes.QUESTION_CLASSIFIER
     execution_type = NodeExecutionType.BRANCH
@@ -98,13 +109,14 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         *,
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,
+        dependencies: QuestionClassifierNodeDependencies | None = None,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
-        model_instance: PreparedLLMProtocol,
+        model_instance: PreparedLLMProtocol | None = None,
         http_client: HttpClientProtocol | None = None,
-        template_renderer: Jinja2TemplateRenderer,
+        template_renderer: Jinja2TemplateRenderer | None = None,
         memory: PromptMessageMemory | None = None,
-        llm_file_saver: LLMFileSaver,
+        llm_file_saver: LLMFileSaver | None = None,
         prompt_message_serializer: PromptMessageSerializerProtocol | None = None,
     ) -> None:
         super().__init__(
@@ -116,20 +128,87 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         # LLM file outputs, used for MultiModal outputs.
         self._file_outputs = []
 
-        _ = credentials_provider, model_factory, http_client
-        self._model_instance = model_instance
-        self._memory = memory
-        self._template_renderer = template_renderer
+        resolved_dependencies = self._resolve_dependencies(
+            dependencies=dependencies,
+            model_instance=model_instance,
+            template_renderer=template_renderer,
+            memory=memory,
+            llm_file_saver=llm_file_saver,
+            prompt_message_serializer=prompt_message_serializer,
+        )
 
-        self._llm_file_saver = llm_file_saver
+        _ = credentials_provider, model_factory, http_client
+        self._model_instance = resolved_dependencies.model_instance
+        self._memory = resolved_dependencies.memory
+        self._template_renderer = resolved_dependencies.template_renderer
+        self._llm_file_saver = resolved_dependencies.llm_file_saver
         self._prompt_message_serializer = (
-            prompt_message_serializer or _PassthroughPromptMessageSerializer()
+            resolved_dependencies.prompt_message_serializer
+            or _PassthroughPromptMessageSerializer()
         )
 
     @classmethod
     @override
     def version(cls) -> str:
         return "1"
+
+    @staticmethod
+    def _resolve_dependencies(
+        *,
+        dependencies: QuestionClassifierNodeDependencies | None,
+        model_instance: PreparedLLMProtocol | None,
+        template_renderer: Jinja2TemplateRenderer | None,
+        memory: PromptMessageMemory | None,
+        llm_file_saver: LLMFileSaver | None,
+        prompt_message_serializer: PromptMessageSerializerProtocol | None,
+    ) -> QuestionClassifierNodeDependencies:
+        if dependencies is not None:
+            duplicate_arguments = [
+                argument_name
+                for argument_name, argument_value in (
+                    ("model_instance", model_instance),
+                    ("template_renderer", template_renderer),
+                    ("memory", memory),
+                    ("llm_file_saver", llm_file_saver),
+                    ("prompt_message_serializer", prompt_message_serializer),
+                )
+                if argument_value is not None
+            ]
+            if duplicate_arguments:
+                duplicate_arguments_str = ", ".join(sorted(duplicate_arguments))
+                msg = (
+                    "QuestionClassifierNode received runtime collaborators twice. "
+                    "Use either 'dependencies' or the legacy keyword arguments, "
+                    f"not both: {duplicate_arguments_str}."
+                )
+                raise TypeError(msg)
+            return dependencies
+
+        missing_arguments = [
+            argument_name
+            for argument_name, argument_value in (
+                ("model_instance", model_instance),
+                ("template_renderer", template_renderer),
+                ("llm_file_saver", llm_file_saver),
+            )
+            if argument_value is None
+        ]
+        if missing_arguments:
+            missing_arguments_str = ", ".join(sorted(missing_arguments))
+            msg = (
+                "QuestionClassifierNode requires either "
+                "'dependencies' or the legacy keyword arguments: "
+                f"{missing_arguments_str}."
+            )
+            raise TypeError(msg)
+
+        return QuestionClassifierNodeDependencies(
+            model_instance=cast(PreparedLLMProtocol, model_instance),
+            template_renderer=cast(Jinja2TemplateRenderer, template_renderer),
+            llm_file_saver=cast(LLMFileSaver, llm_file_saver),
+            memory=memory,
+            prompt_message_serializer=prompt_message_serializer,
+        )
 
     @staticmethod
     def _default_class_label(index: int) -> str:
@@ -363,10 +442,6 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
             },
             llm_usage=usage,
         )
-
-    @property
-    def model_instance(self) -> PreparedLLMProtocol:
-        return self._model_instance
 
     @classmethod
     @override
