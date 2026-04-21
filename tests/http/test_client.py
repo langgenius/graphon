@@ -19,7 +19,6 @@ from graphon.http import (
     get_default_http_client,
     get_http_client,
     set_http_client,
-    use_http_client,
 )
 from graphon.nodes.document_extractor.entities import DocumentExtractorNodeData
 from graphon.nodes.document_extractor.node import DocumentExtractorNode
@@ -230,33 +229,13 @@ def test_httpx_http_client_raises_request_error_without_retry_wrapping(
         HttpxHttpClient().get("https://example.com")
 
 
-def test_use_http_client_scopes_runtime_client_and_restores_default() -> None:
-    default_http_client = get_default_http_client()
-    scoped_http_client = _StubHttpClient("scoped")
-
-    with use_http_client(scoped_http_client):
-        assert get_http_client() is scoped_http_client
-        assert get_default_http_client() is default_http_client
-
-    assert get_http_client() is default_http_client
-
-
-def test_set_http_client_updates_process_default_but_not_scoped_overrides() -> None:
-    original_http_client = get_default_http_client()
+def test_set_http_client_updates_process_default() -> None:
     default_http_client = _StubHttpClient("default")
-    scoped_http_client = _StubHttpClient("scoped")
 
     set_http_client(default_http_client)
 
     assert get_default_http_client() is default_http_client
     assert get_http_client() is default_http_client
-
-    with use_http_client(scoped_http_client):
-        assert get_http_client() is scoped_http_client
-        assert get_default_http_client() is default_http_client
-
-    assert get_http_client() is default_http_client
-    set_http_client(original_http_client)
 
 
 def test_http_request_node_accepts_internal_dependency_bundle() -> None:
@@ -308,32 +287,32 @@ def test_http_request_node_rejects_mixed_dependency_inputs() -> None:
         )
 
 
-def test_http_request_node_uses_runtime_http_client_when_not_injected() -> None:
-    scoped_http_client = _StubHttpClient("http-request")
+def test_http_request_node_uses_configured_default_http_client() -> None:
+    default_http_client = _StubHttpClient("http-request")
+    set_http_client(default_http_client)
 
-    with use_http_client(scoped_http_client):
-        node = HttpRequestNode(
-            node_id="http",
-            config=HttpRequestNodeData(
-                title="HTTP Request",
-                method="get",
-                url="https://example.com",
-                authorization=HttpRequestNodeAuthorization(type="no-auth"),
-                headers="",
-                params="",
-                body=HttpRequestNodeBody(type="none", data=[]),
-            ),
-            graph_init_params=build_graph_init_params(
-                graph_config={"nodes": [], "edges": []},
-            ),
-            graph_runtime_state=_build_runtime_state(),
-            http_request_config=build_http_request_config(),
-            tool_file_manager_factory=_ToolFileManager,
-            file_manager=_FileManager(),
-            file_reference_factory=_FileReferenceFactory(),
-        )
+    node = HttpRequestNode(
+        node_id="http",
+        config=HttpRequestNodeData(
+            title="HTTP Request",
+            method="get",
+            url="https://example.com",
+            authorization=HttpRequestNodeAuthorization(type="no-auth"),
+            headers="",
+            params="",
+            body=HttpRequestNodeBody(type="none", data=[]),
+        ),
+        graph_init_params=build_graph_init_params(
+            graph_config={"nodes": [], "edges": []},
+        ),
+        graph_runtime_state=_build_runtime_state(),
+        http_request_config=build_http_request_config(),
+        tool_file_manager_factory=_ToolFileManager,
+        file_manager=_FileManager(),
+        file_reference_factory=_FileReferenceFactory(),
+    )
 
-    assert node.http_client is scoped_http_client
+    assert node.http_client is default_http_client
 
 
 def test_document_extractor_node_uses_default_http_client_when_not_injected() -> None:
@@ -352,23 +331,23 @@ def test_document_extractor_node_uses_default_http_client_when_not_injected() ->
     assert node.http_client is get_http_client()
 
 
-def test_document_extractor_node_uses_runtime_http_client_when_not_injected() -> None:
-    scoped_http_client = _StubHttpClient("document-extractor")
+def test_document_extractor_node_uses_configured_default_http_client() -> None:
+    default_http_client = _StubHttpClient("document-extractor")
+    set_http_client(default_http_client)
 
-    with use_http_client(scoped_http_client):
-        node = DocumentExtractorNode(
-            node_id="extractor",
-            config=DocumentExtractorNodeData(
-                title="Document Extractor",
-                variable_selector=["inputs", "file"],
-            ),
-            graph_init_params=build_graph_init_params(
-                graph_config={"nodes": [], "edges": []},
-            ),
-            graph_runtime_state=_build_runtime_state(),
-        )
+    node = DocumentExtractorNode(
+        node_id="extractor",
+        config=DocumentExtractorNodeData(
+            title="Document Extractor",
+            variable_selector=["inputs", "file"],
+        ),
+        graph_init_params=build_graph_init_params(
+            graph_config={"nodes": [], "edges": []},
+        ),
+        graph_runtime_state=_build_runtime_state(),
+    )
 
-    assert node.http_client is scoped_http_client
+    assert node.http_client is default_http_client
 
 
 def test_file_saver_impl_uses_default_http_client_when_not_injected() -> None:
@@ -380,16 +359,16 @@ def test_file_saver_impl_uses_default_http_client_when_not_injected() -> None:
     assert file_saver.http_client is get_http_client()
 
 
-def test_file_saver_impl_uses_runtime_http_client_when_not_injected() -> None:
-    scoped_http_client = _StubHttpClient("file-saver")
+def test_file_saver_impl_uses_configured_default_http_client() -> None:
+    default_http_client = _StubHttpClient("file-saver")
+    set_http_client(default_http_client)
 
-    with use_http_client(scoped_http_client):
-        file_saver = FileSaverImpl(
-            tool_file_manager=_ToolFileManager(),
-            file_reference_factory=_FileReferenceFactory(),
-        )
+    file_saver = FileSaverImpl(
+        tool_file_manager=_ToolFileManager(),
+        file_reference_factory=_FileReferenceFactory(),
+    )
 
-    assert file_saver.http_client is scoped_http_client
+    assert file_saver.http_client is default_http_client
 
 
 @pytest.mark.parametrize(

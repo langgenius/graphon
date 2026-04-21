@@ -5,7 +5,6 @@ from .runtime import (
     get_default_http_client,
     get_http_client,
     set_http_client,
-    use_http_client,
 )
 
 __all__ = [
@@ -19,5 +18,4 @@ __all__ = [
     "get_default_http_client",
     "get_http_client",
     "set_http_client",
-    "use_http_client",
 ]
