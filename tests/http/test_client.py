@@ -190,6 +190,107 @@ def test_http_response_raise_for_status_uses_library_error() -> None:
         response.raise_for_status()
 
 
+def test_http_response_text_prefers_charset_from_content_type(
+    mocker: MockerFixture,
+) -> None:
+    detected_mock = mocker.patch("graphon.http.response.charset_normalizer.from_bytes")
+    response = HttpResponse(
+        status_code=HTTPStatus.OK,
+        headers={"Content-Type": "application/json; charset=utf-8"},
+        content=b"\xe4\xb8\xad\xe6\x96\x87",
+    )
+
+    assert response.text == "\u4e2d\u6587"
+    detected_mock.assert_not_called()
+
+
+def test_http_response_text_prefers_fallback_text_over_detection(
+    mocker: MockerFixture,
+) -> None:
+    class _DetectedEncoding:
+        encoding = "latin-1"
+
+    class _DetectedMatches:
+        def best(self) -> _DetectedEncoding:
+            return _DetectedEncoding()
+
+    detected_mock = mocker.patch(
+        "graphon.http.response.charset_normalizer.from_bytes",
+        return_value=_DetectedMatches(),
+    )
+    response = HttpResponse(
+        status_code=HTTPStatus.OK,
+        content=b"\xe4\xb8\xad\xe6\x96\x87",
+        fallback_text="\u4e2d\u6587",
+    )
+
+    assert response.text == "\u4e2d\u6587"
+    detected_mock.assert_not_called()
+
+
+def test_http_response_from_httpx_preserves_httpx_text_without_charset_header(
+    mocker: MockerFixture,
+) -> None:
+    detected_mock = mocker.patch("graphon.http.response.charset_normalizer.from_bytes")
+    request = httpx.Request("GET", "https://example.com")
+    raw_response = httpx.Response(
+        HTTPStatus.OK,
+        request=request,
+        content="日本語の本文です".encode("shift_jis"),
+    )
+
+    response = HttpResponse.from_httpx(raw_response)
+
+    assert response.text == raw_response.text
+    detected_mock.assert_not_called()
+
+
+def test_http_response_from_httpx_preserves_custom_default_encoding(
+    mocker: MockerFixture,
+) -> None:
+    detected_mock = mocker.patch("graphon.http.response.charset_normalizer.from_bytes")
+    request = httpx.Request("GET", "https://example.com")
+    raw_response = httpx.Response(
+        HTTPStatus.OK,
+        request=request,
+        content="Привет".encode("cp1251"),
+        default_encoding="cp1251",
+    )
+
+    response = HttpResponse.from_httpx(raw_response)
+
+    assert response.text == raw_response.text
+    detected_mock.assert_not_called()
+
+
+def test_http_response_text_ignores_charset_fragments_inside_quoted_parameters(
+    mocker: MockerFixture,
+) -> None:
+    detected_mock = mocker.patch("graphon.http.response.charset_normalizer.from_bytes")
+    response = HttpResponse(
+        status_code=HTTPStatus.OK,
+        headers={"Content-Type": 'text/plain; foo="a; charset=latin-1"; charset=utf-8'},
+        content=b"\xe4\xb8\xad\xe6\x96\x87",
+    )
+
+    assert response.text == "\u4e2d\u6587"
+    detected_mock.assert_not_called()
+
+
+def test_http_response_text_uses_declared_charset_with_replacement(
+    mocker: MockerFixture,
+) -> None:
+    detected_mock = mocker.patch("graphon.http.response.charset_normalizer.from_bytes")
+    response = HttpResponse(
+        status_code=HTTPStatus.OK,
+        headers={"Content-Type": "text/plain; charset=utf-8"},
+        content=b"\xffabc",
+    )
+
+    assert response.text == "\ufffdabc"
+    detected_mock.assert_not_called()
+
+
 def test_httpx_http_client_raises_max_retries_exceeded_after_last_retry(
     mocker: MockerFixture,
 ) -> None:
