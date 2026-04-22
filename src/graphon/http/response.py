@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import email.message
 from collections.abc import Iterator, Mapping
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
@@ -87,8 +88,8 @@ class HttpResponse:
         charset = self._extract_charset_from_content_type()
         if charset:
             try:
-                self._cached_text = self.content.decode(charset)
-            except (UnicodeDecodeError, TypeError, LookupError):
+                self._cached_text = self.content.decode(charset, errors="replace")
+            except (TypeError, LookupError):
                 pass
             else:
                 return self._cached_text
@@ -114,12 +115,9 @@ class HttpResponse:
         if not content_type:
             return None
 
-        for param in content_type.split(";")[1:]:
-            key, sep, value = param.partition("=")
-            if sep and key.strip().lower() == "charset":
-                charset = value.strip().strip("\"'")
-                return charset or None
-        return None
+        message = email.message.Message()
+        message["content-type"] = content_type
+        return message.get_content_charset(failobj=None)
 
     def raise_for_status(self) -> None:
         if not self.is_success:
