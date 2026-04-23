@@ -1912,7 +1912,7 @@ wheels = [
 
 [[package]]
 name = "transformers"
-version = "5.5.4"
+version = "5.6.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
@@ -1925,9 +1925,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a5/1e/1e244ab2ab50a863e6b52cc55761910567fa532b69a6740f6e99c5fdbd98/transformers-5.5.4.tar.gz", hash = "sha256:2e67cadba81fc7608cc07c4dd54f524820bc3d95b1cabd0ef3db7733c4f8b82e", size = 8227649, upload-time = "2026-04-13T16:55:55.181Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d7/d2/fa03adfb3e2774fd436be0eb725b9c3cbf6f214e11cbeebcdffb073062e7/transformers-5.6.1.tar.gz", hash = "sha256:178dd446d12a29583deed4b27fd229ecb3751100853deee09ff151a5ff9032c6", size = 8311684, upload-time = "2026-04-23T08:20:48.635Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/29/fb/162a66789c65e5afa3b051309240c26bf37fbc8fea285b4546ae747995a2/transformers-5.5.4-py3-none-any.whl", hash = "sha256:0bd6281b82966fe5a7a16f553ea517a9db1dee6284d7cb224dfd88fc0dd1c167", size = 10236696, upload-time = "2026-04-13T16:55:51.497Z" },
+    { url = "https://files.pythonhosted.org/packages/38/de/345a4dd872d1d118d1e37c95d7252d8fe1cbe8b5139d10283884448d2672/transformers-5.6.1-py3-none-any.whl", hash = "sha256:f41b9dbe5fcaaad577d4004dcfa14303e372429772b81c21dbf2443aa8ee61e9", size = 10364805, upload-time = "2026-04-23T08:20:44.621Z" },
 ]
 
 [[package]]
