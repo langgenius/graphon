@@ -1,9 +1,9 @@
 import contextlib
 import json
 import logging
-from collections.abc import Callable, Generator, Mapping, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, override
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, assert_never, override
 
 from graphon.entities.graph_config import NodeConfigDictAdapter
 from graphon.entities.graph_init_params import GraphInitParams
@@ -36,7 +36,6 @@ from graphon.nodes.base.usage_tracking_mixin import LLMUsageTrackingMixin
 from graphon.nodes.loop.entities import (
     LoopCompletedReason,
     LoopNodeData,
-    LoopVariableData,
 )
 from graphon.utils.condition.entities import Condition
 from graphon.utils.condition.processor import ConditionProcessor
@@ -53,11 +52,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _DEFAULT_CHILD_ABORT_REASON = "child graph aborted"
-_JSON_ARRAY_LOOP_TYPES = frozenset((
-    SegmentType.ARRAY_NUMBER,
-    SegmentType.ARRAY_OBJECT,
-    SegmentType.ARRAY_STRING,
-))
 
 
 class _IterationState(TypedDict, total=False):
@@ -209,29 +203,22 @@ class LoopNode(LLMUsageTrackingMixin, Node[LoopNodeData]):
         if not self.node_data.loop_variables:
             return loop_variable_selectors
 
-        value_processor: dict[
-            Literal["constant", "variable"],
-            Callable[[LoopVariableData], Segment | None],
-        ] = {
-            "constant": lambda var: self._get_segment_for_constant(
-                var_type=var.var_type,
-                original_value=var.value,
-            ),
-            "variable": lambda var: (
-                self.graph_runtime_state.variable_pool.get(var.value)
-                if isinstance(var.value, list)
-                else None
-            ),
-        }
         for loop_variable in self.node_data.loop_variables:
-            if loop_variable.value_type not in value_processor:
-                msg = (
-                    f"Invalid value type '{loop_variable.value_type}' "
-                    f"for loop variable {loop_variable.label}"
-                )
-                raise ValueError(msg)
+            match loop_variable.value_type:
+                case "constant":
+                    processed_segment = self._get_segment_for_constant(
+                        var_type=loop_variable.var_type,
+                        original_value=loop_variable.value,
+                    )
+                case "variable":
+                    processed_segment = (
+                        self.graph_runtime_state.variable_pool.get(loop_variable.value)
+                        if isinstance(loop_variable.value, list)
+                        else None
+                    )
+                case _:
+                    assert_never(loop_variable.value_type)
 
-            processed_segment = value_processor[loop_variable.value_type](loop_variable)
             if not processed_segment:
                 msg = f"Invalid value for loop variable {loop_variable.label}"
                 raise ValueError(msg)
@@ -618,19 +605,39 @@ class LoopNode(LLMUsageTrackingMixin, Node[LoopNodeData]):
         var_type: SegmentType,
         original_value: Any,
     ) -> Any:
-        if not var_type.is_array_type() or var_type == SegmentType.ARRAY_BOOLEAN:
-            return original_value
-        if var_type in _JSON_ARRAY_LOOP_TYPES:
-            if original_value and isinstance(original_value, str):
-                return json.loads(original_value)
-            logger.warning(
-                "unexpected value for LoopNode, value_type=%s, value=%s",
-                original_value,
-                var_type,
-            )
-            return []
-        msg = "this statement should be unreachable."
-        raise AssertionError(msg)
+        match var_type:
+            case (
+                SegmentType.NUMBER
+                | SegmentType.INTEGER
+                | SegmentType.FLOAT
+                | SegmentType.STRING
+                | SegmentType.OBJECT
+                | SegmentType.SECRET
+                | SegmentType.FILE
+                | SegmentType.BOOLEAN
+                | SegmentType.NONE
+                | SegmentType.GROUP
+                | SegmentType.ARRAY_BOOLEAN
+            ):
+                return original_value
+            case (
+                SegmentType.ARRAY_NUMBER
+                | SegmentType.ARRAY_OBJECT
+                | SegmentType.ARRAY_STRING
+            ):
+                if original_value and isinstance(original_value, str):
+                    return json.loads(original_value)
+                logger.warning(
+                    "unexpected value for LoopNode, value_type=%s, value=%s",
+                    original_value,
+                    var_type,
+                )
+                return []
+            case SegmentType.ARRAY_ANY | SegmentType.ARRAY_FILE:
+                msg = "this statement should be unreachable."
+                raise AssertionError(msg)
+            case _:
+                assert_never(var_type)
 
     def _create_graph_engine(self, root_node_id: str) -> Any:
         # Create GraphInitParams for child graph execution.

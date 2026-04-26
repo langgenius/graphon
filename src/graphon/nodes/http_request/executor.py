@@ -4,7 +4,7 @@ import secrets
 import string
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from typing import Any, Literal
+from typing import Any, Literal, assert_never
 from urllib.parse import ParseResult, urlencode, urlparse
 
 from json_repair import repair_json
@@ -203,7 +203,8 @@ class Executor:
         if body is None:
             return
 
-        match body.type:
+        body_type = body.type
+        match body_type:
             case "none":
                 self._init_empty_body(body.data)
             case "raw-text":
@@ -216,6 +217,8 @@ class Executor:
                 self._init_urlencoded_body(body.data)
             case "form-data":
                 self._init_form_data_body(body.data)
+            case _:
+                assert_never(body_type)
 
     @staticmethod
     def _require_single_body_item(

@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, assert_never
 
 from graphon.variables.types import SegmentType
 
@@ -87,6 +87,8 @@ def is_operation_supported(
             # Only array variable can be appended or extended
             # Only array variable can have elements removed
             return variable_type.is_array_type()
+        case _:
+            assert_never(operation)
 
 
 def is_variable_input_supported(*, operation: Operation) -> bool:

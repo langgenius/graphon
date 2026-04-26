@@ -6,7 +6,7 @@ import logging
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, cast, overload, override
+from typing import Any, assert_never, cast, overload, override
 
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import (
@@ -77,10 +77,6 @@ logger = logging.getLogger(__name__)
 
 _JSON_OPEN_TOKENS = frozenset(("{", "["))
 _JSON_CLOSE_TOKENS = frozenset(("}", "]"))
-_EMPTY_STRING_SEGMENT_TYPES = frozenset((
-    SegmentType.STRING,
-    SegmentType.SECRET,
-))
 _EMPTY_STRING_PARAMETER_TYPES = frozenset(("string", "select"))
 _TRANSFORM_RESULT_UNSET = object()
 _VALUE_TRANSFORMER_NAMES: dict[SegmentType, str] = {
@@ -891,16 +887,34 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
 
     @staticmethod
     def _build_default_parameter_value(parameter_type: SegmentType) -> Any:
-        if parameter_type.is_array_type():
-            return build_segment_with_type(segment_type=parameter_type, value=[])
-        if parameter_type in _EMPTY_STRING_SEGMENT_TYPES:
-            return ""
-        if parameter_type == SegmentType.NUMBER:
-            return 0
-        if parameter_type == SegmentType.BOOLEAN:
-            return False
-        msg = "this statement should be unreachable."
-        raise AssertionError(msg)
+        match parameter_type:
+            case (
+                SegmentType.ARRAY_ANY
+                | SegmentType.ARRAY_STRING
+                | SegmentType.ARRAY_NUMBER
+                | SegmentType.ARRAY_OBJECT
+                | SegmentType.ARRAY_FILE
+                | SegmentType.ARRAY_BOOLEAN
+            ):
+                return build_segment_with_type(segment_type=parameter_type, value=[])
+            case SegmentType.STRING | SegmentType.SECRET:
+                return ""
+            case SegmentType.NUMBER:
+                return 0
+            case SegmentType.BOOLEAN:
+                return False
+            case (
+                SegmentType.INTEGER
+                | SegmentType.FLOAT
+                | SegmentType.OBJECT
+                | SegmentType.FILE
+                | SegmentType.NONE
+                | SegmentType.GROUP
+            ):
+                msg = "this statement should be unreachable."
+                raise AssertionError(msg)
+            case _:
+                assert_never(parameter_type)
 
     def _extract_complete_json_response(self, result: str) -> dict | None:
         """Extract complete json response."""

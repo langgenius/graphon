@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, assert_never
 
 from graphon.file.models import File
 
@@ -166,31 +166,33 @@ class SegmentType(StrEnum):
         Returns:
             True if the value matches the type under the given validation strategy
 
-        Raises:
-            AssertionError: If an unsupported `SegmentType` reaches this method.
-
         """
-        if self.is_array_type():
-            result = self._validate_array(value, array_validation)
-        else:
-            match self:
-                case SegmentType.GROUP:
-                    result = _is_group_value_valid(value)
-                case SegmentType.BOOLEAN:
-                    result = isinstance(value, bool)
-                case SegmentType.NUMBER | SegmentType.INTEGER | SegmentType.FLOAT:
-                    result = isinstance(value, (int, float))
-                case SegmentType.STRING | SegmentType.SECRET:
-                    result = isinstance(value, str)
-                case SegmentType.OBJECT:
-                    result = isinstance(value, dict)
-                case SegmentType.FILE:
-                    result = isinstance(value, File)
-                case SegmentType.NONE:
-                    result = value is None
-                case _:
-                    msg = "this statement should be unreachable."
-                    raise AssertionError(msg)
+        match self:
+            case (
+                SegmentType.ARRAY_ANY
+                | SegmentType.ARRAY_STRING
+                | SegmentType.ARRAY_NUMBER
+                | SegmentType.ARRAY_OBJECT
+                | SegmentType.ARRAY_FILE
+                | SegmentType.ARRAY_BOOLEAN
+            ):
+                result = self._validate_array(value, array_validation)
+            case SegmentType.GROUP:
+                result = _is_group_value_valid(value)
+            case SegmentType.BOOLEAN:
+                result = isinstance(value, bool)
+            case SegmentType.NUMBER | SegmentType.INTEGER | SegmentType.FLOAT:
+                result = isinstance(value, (int, float))
+            case SegmentType.STRING | SegmentType.SECRET:
+                result = isinstance(value, str)
+            case SegmentType.OBJECT:
+                result = isinstance(value, dict)
+            case SegmentType.FILE:
+                result = isinstance(value, File)
+            case SegmentType.NONE:
+                result = value is None
+            case _:
+                assert_never(self)
         return result
 
     @staticmethod

@@ -7,7 +7,7 @@ from collections.abc import Generator, Mapping, Sequence
 from datetime import UTC, datetime
 from functools import singledispatchmethod
 from types import MappingProxyType
-from typing import Any, ClassVar, get_args, get_origin
+from typing import Any, ClassVar, assert_never, get_args, get_origin
 from uuid import uuid4
 
 from graphon.entities.base_node_data import BaseNodeData, RetryConfig
@@ -749,7 +749,8 @@ class Node[NodeDataT: BaseNodeData](
         result: NodeRunResult,
     ) -> GraphNodeEventBase:
         finished_at = datetime.now(UTC).replace(tzinfo=None)
-        match result.status:
+        status = result.status
+        match status:
             case WorkflowNodeExecutionStatus.FAILED:
                 return NodeRunFailedEvent(
                     id=self.execution_id,
@@ -769,9 +770,18 @@ class Node[NodeDataT: BaseNodeData](
                     finished_at=finished_at,
                     node_run_result=result,
                 )
-            case _:
-                msg = f"result status {result.status} not supported"
+            case (
+                WorkflowNodeExecutionStatus.PENDING
+                | WorkflowNodeExecutionStatus.RUNNING
+                | WorkflowNodeExecutionStatus.EXCEPTION
+                | WorkflowNodeExecutionStatus.STOPPED
+                | WorkflowNodeExecutionStatus.PAUSED
+                | WorkflowNodeExecutionStatus.RETRY
+            ):
+                msg = f"result status {status} not supported"
                 raise ValueError(msg)
+            case _:
+                assert_never(status)
 
     @singledispatchmethod
     def _dispatch(self, event: NodeEventBase) -> GraphNodeEventBase:
@@ -795,7 +805,8 @@ class Node[NodeDataT: BaseNodeData](
         event: StreamCompletedEvent,
     ) -> NodeRunSucceededEvent | NodeRunFailedEvent:
         finished_at = datetime.now(UTC).replace(tzinfo=None)
-        match event.node_run_result.status:
+        status = event.node_run_result.status
+        match status:
             case WorkflowNodeExecutionStatus.SUCCEEDED:
                 return NodeRunSucceededEvent(
                     id=self.execution_id,
@@ -815,12 +826,18 @@ class Node[NodeDataT: BaseNodeData](
                     node_run_result=event.node_run_result,
                     error=event.node_run_result.error,
                 )
-            case _:
-                msg = (
-                    f"Node {self._node_id} does not support status "
-                    f"{event.node_run_result.status}"
-                )
+            case (
+                WorkflowNodeExecutionStatus.PENDING
+                | WorkflowNodeExecutionStatus.RUNNING
+                | WorkflowNodeExecutionStatus.EXCEPTION
+                | WorkflowNodeExecutionStatus.STOPPED
+                | WorkflowNodeExecutionStatus.PAUSED
+                | WorkflowNodeExecutionStatus.RETRY
+            ):
+                msg = f"Node {self._node_id} does not support status {status}"
                 raise NotImplementedError(msg)
+            case _:
+                assert_never(status)
 
     @_dispatch.register
     def _(self, event: VariableUpdatedEvent) -> NodeRunVariableUpdatedEvent:

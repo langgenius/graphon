@@ -8,7 +8,7 @@ outside `graphon`.
 import re
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
-from typing import Any, Self
+from typing import Any, Self, assert_never
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -124,12 +124,13 @@ class HumanInputNodeData(BaseNodeData):
         return user_actions
 
     def expiration_time(self, start_time: datetime) -> datetime:
-        if self.timeout_unit == TimeoutUnit.HOUR:
-            return start_time + timedelta(hours=self.timeout)
-        if self.timeout_unit == TimeoutUnit.DAY:
-            return start_time + timedelta(days=self.timeout)
-        msg = "unknown timeout unit."
-        raise AssertionError(msg)
+        match self.timeout_unit:
+            case TimeoutUnit.HOUR:
+                return start_time + timedelta(hours=self.timeout)
+            case TimeoutUnit.DAY:
+                return start_time + timedelta(days=self.timeout)
+            case _:
+                assert_never(self.timeout_unit)
 
     def outputs_field_names(self) -> Sequence[str]:
         return [

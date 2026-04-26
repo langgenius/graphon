@@ -4,7 +4,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextlib import suppress
 from datetime import UTC, datetime
 from threading import Lock
-from typing import TYPE_CHECKING, Any, Literal, NewType, override
+from typing import TYPE_CHECKING, Any, Literal, NewType, assert_never, override
 
 from typing_extensions import TypeIs
 
@@ -371,7 +371,8 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
             )
             return "reraise"
 
-        match self.node_data.error_handle_mode:
+        error_handle_mode = self.node_data.error_handle_mode
+        match error_handle_mode:
             case ErrorHandleMode.TERMINATED:
                 for pending_future in future_to_index:
                     if pending_future != future:
@@ -383,6 +384,8 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
             ):
                 outputs[index] = None
                 return "handled"
+            case _:
+                assert_never(error_handle_mode)
 
     def _merge_parallel_iteration_usage_if_needed(
         self,
@@ -812,7 +815,8 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
         error: str,
         outputs: list[object],
     ) -> tuple[GraphNodeEventBase | None, bool]:
-        match self.node_data.error_handle_mode:
+        error_handle_mode = self.node_data.error_handle_mode
+        match error_handle_mode:
             case ErrorHandleMode.TERMINATED:
                 raise IterationNodeError(error)
             case ErrorHandleMode.CONTINUE_ON_ERROR:
@@ -820,6 +824,8 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
                 return None, True
             case ErrorHandleMode.REMOVE_ABNORMAL_OUTPUT:
                 return None, True
+            case _:
+                assert_never(error_handle_mode)
 
     def _create_graph_engine(self, index: int, item: object) -> Any:
         # Create GraphInitParams for child graph execution.

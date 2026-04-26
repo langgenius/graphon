@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Callable, Mapping
+from typing import assert_never
 
 from graphon.model_runtime.entities.message_entities import (
     AudioPromptMessageContent,
@@ -140,7 +141,8 @@ def _download_file_content(file: File, /) -> bytes:
 
 
 def _get_encoded_string(f: File, /) -> str:
-    match f.transfer_method:
+    transfer_method = f.transfer_method
+    match transfer_method:
         case FileTransferMethod.REMOTE_URL:
             if f.remote_url is None:
                 msg = "Missing file remote_url"
@@ -157,6 +159,8 @@ def _get_encoded_string(f: File, /) -> str:
             data = _download_file_content(f)
         case FileTransferMethod.DATASOURCE_FILE:
             data = _download_file_content(f)
+        case _:
+            assert_never(transfer_method)
 
     return base64.b64encode(data).decode("utf-8")
 

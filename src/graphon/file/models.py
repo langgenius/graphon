@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import json
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, assert_never
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -190,7 +190,8 @@ class File(BaseModel):
 
     @model_validator(mode="after")
     def validate_after(self) -> File:
-        match self.transfer_method:
+        transfer_method = self.transfer_method
+        match transfer_method:
             case FileTransferMethod.REMOTE_URL:
                 if not self.remote_url:
                     msg = "Missing file url"
@@ -213,6 +214,8 @@ class File(BaseModel):
                 if not self.reference:
                     msg = "Missing file reference"
                     raise ValueError(msg)
+            case _:
+                assert_never(transfer_method)
         return self
 
     @property

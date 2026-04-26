@@ -2,7 +2,7 @@
 
 import logging
 import time
-from typing import final
+from typing import assert_never, final
 
 from graphon.enums import (
     ErrorStrategy as ErrorStrategyEnum,
@@ -88,6 +88,8 @@ class ErrorHandler:
                 return self._handle_fail_branch(event)
             case ErrorStrategyEnum.DEFAULT_VALUE:
                 return self._handle_default_value(event)
+            case _:
+                assert_never(strategy)
 
     def _handle_abort(self, event: NodeRunFailedEvent) -> None:
         """Handle error by aborting execution.

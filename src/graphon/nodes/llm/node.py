@@ -8,7 +8,7 @@ import re
 import time
 from collections.abc import Generator, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, override
+from typing import Any, Literal, assert_never, override
 
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import (
@@ -1796,9 +1796,11 @@ def _combine_message_content_with_role(
             return AssistantPromptMessage(content=contents)
         case PromptMessageRole.SYSTEM:
             return SystemPromptMessage(content=contents)
-        case _:
+        case PromptMessageRole.TOOL:
             msg = f"Role {role} is not supported"
             raise NotImplementedError(msg)
+        case _:
+            assert_never(role)
 
 
 def _render_jinja2_message(

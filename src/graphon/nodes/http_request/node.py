@@ -4,7 +4,7 @@ import logging
 import mimetypes
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, cast, override
+from typing import Any, assert_never, cast, override
 
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
@@ -292,7 +292,8 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
     ) -> list[VariableSelector]:
         if node_data.body is None or node_data.body.type == "none":
             return []
-        match node_data.body.type:
+        body_type = node_data.body.type
+        match body_type:
             case "binary":
                 selectors = cls._extract_binary_body_selectors(node_data.body.data)
             case "json" | "raw-text":
@@ -302,7 +303,7 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
             case "form-data":
                 selectors = cls._extract_form_data_body_selectors(node_data.body.data)
             case _:
-                selectors = []
+                assert_never(body_type)
         return selectors
 
     @staticmethod

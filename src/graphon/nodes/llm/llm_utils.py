@@ -4,7 +4,7 @@ import json
 import logging
 import re
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, assert_never
 
 from graphon.file import file_manager
 from graphon.file.enums import FileType
@@ -475,9 +475,11 @@ def combine_message_content_with_role(
             return AssistantPromptMessage(content=contents)
         case PromptMessageRole.SYSTEM:
             return SystemPromptMessage(content=contents)
-        case _:
+        case PromptMessageRole.TOOL:
             msg = f"Role {role} is not supported"
             raise NotImplementedError(msg)
+        case _:
+            assert_never(role)
 
 
 def calculate_rest_token(

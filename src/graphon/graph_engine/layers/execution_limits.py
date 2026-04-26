@@ -10,7 +10,7 @@ When limits are exceeded, the layer automatically aborts execution.
 import logging
 import time
 from enum import StrEnum
-from typing import final, override
+from typing import assert_never, final, override
 
 from graphon.graph_engine.entities.commands import AbortCommand, CommandType
 from graphon.graph_engine.layers.base import GraphEngineLayer
@@ -170,5 +170,4 @@ class ExecutionLimitsLayer(GraphEngineLayer):
                     f"{elapsed_time:.2f}s > {self.max_time}s"
                 )
             case _:
-                msg = f"Unsupported limit type: {limit_type}"
-                raise ValueError(msg)
+                assert_never(limit_type)
