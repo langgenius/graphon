@@ -31,6 +31,7 @@ class ToolNodeRuntimeProtocol(Protocol):
         node_id: str,
         node_data: ToolNodeData,
         variable_pool: VariablePool | None,
+        node_execution_id: str | None = None,
     ) -> ToolRuntimeHandle: ...
 
     def get_runtime_parameters(

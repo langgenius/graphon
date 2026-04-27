@@ -121,10 +121,10 @@ class ToolNode(Node[ToolNodeData]):
                 or self.node_data.tool_node_version is not None
             ):
                 variable_pool = self.graph_runtime_state.variable_pool
-            tool_runtime = self._runtime.get_runtime(
-                node_id=self._node_id,
-                node_data=self.node_data,
+            node_execution_id = self.ensure_execution_id()
+            tool_runtime = self._get_tool_runtime(
                 variable_pool=variable_pool,
+                node_execution_id=node_execution_id,
             )
         except ToolNodeError as e:
             yield StreamCompletedEvent(
@@ -249,6 +249,19 @@ class ToolNode(Node[ToolNodeData]):
             result[parameter_name] = parameter_value
 
         return result
+
+    def _get_tool_runtime(
+        self,
+        *,
+        variable_pool: VariablePool | None,
+        node_execution_id: str,
+    ) -> ToolRuntimeHandle:
+        return self._runtime.get_runtime(
+            node_id=self._node_id,
+            node_data=self.node_data,
+            variable_pool=variable_pool,
+            node_execution_id=node_execution_id,
+        )
 
     def _transform_message(
         self,
