@@ -386,6 +386,7 @@ class EventHandler:
             self._graph_runtime_state.variable_pool.add(
                 (node_id, variable_name),
                 variable_value,
+                writable=False,
             )
 
     def _update_response_outputs(self, outputs: Mapping[str, object]) -> None:

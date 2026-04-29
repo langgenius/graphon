@@ -841,8 +841,8 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
         )
 
         # append iteration variable (item, index) to variable pool
-        variable_pool_copy.add([self._node_id, "index"], index)
-        variable_pool_copy.add([self._node_id, "item"], item)
+        variable_pool_copy.add([self._node_id, "index"], index, writable=True)
+        variable_pool_copy.add([self._node_id, "item"], item, writable=True)
         root_node_id = self.node_data.start_node_id
         if root_node_id is None:
             msg = f"field start_node_id in iteration {self._node_id} not found"

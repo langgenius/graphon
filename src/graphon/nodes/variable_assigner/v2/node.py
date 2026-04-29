@@ -16,7 +16,10 @@ from graphon.node_events.node import (
 )
 from graphon.nodes.base.node import Node
 from graphon.nodes.variable_assigner.common import helpers as common_helpers
-from graphon.nodes.variable_assigner.common.exc import VariableOperatorNodeError
+from graphon.nodes.variable_assigner.common.exc import (
+    ReadOnlyVariableError,
+    VariableOperatorNodeError,
+)
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.variables.consts import SELECTORS_LENGTH
 from graphon.variables.types import SegmentType
@@ -211,6 +214,8 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
         variable = working_variable_pool.get(item.variable_selector)
         if not isinstance(variable, VariableBase):
             raise VariableNotFoundError(variable_selector=item.variable_selector)
+        if not variable.writable:
+            raise ReadOnlyVariableError(variable_selector=item.variable_selector)
         self._validate_item_support(variable=variable, item=item)
         input_value = self._resolve_item_input_value(
             variable=variable,

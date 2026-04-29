@@ -147,6 +147,13 @@ CI currently validates pull request titles, runs `make check` including
 3.13. Python 3.14 is currently excluded because `unstructured` does not yet
 support it.
 
+## Variable Mutability
+
+Graphon variables are readable by default, but only variables marked writable may
+be mutated by `VariableAssigner`. Built-in bootstrap conversation variables and
+container working variables are writable; ordinary node outputs remain read-only
+unless a caller explicitly creates them as writable.
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).

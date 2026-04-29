@@ -142,6 +142,16 @@ def _existing_variable_from_segment(segment: VariableBase) -> Variable:
     raise UnsupportedSegmentTypeError(msg)
 
 
+def _apply_writable_override(
+    variable: Variable,
+    *,
+    writable: bool | None,
+) -> Variable:
+    if writable is None or variable.writable == writable:
+        return variable
+    return variable.model_copy(update={"writable": writable})
+
+
 def _build_array_variable(
     *,
     segment: Segment,
@@ -149,6 +159,7 @@ def _build_array_variable(
     name: str,
     description: str,
     selector: list[str],
+    writable: bool,
 ) -> Variable:
     match segment:
         case ArrayAnySegment():
@@ -158,6 +169,7 @@ def _build_array_variable(
                 description=description,
                 value=segment.value,
                 selector=selector,
+                writable=writable,
             )
         case ArrayBooleanSegment():
             result = ArrayBooleanVariable(
@@ -166,6 +178,7 @@ def _build_array_variable(
                 description=description,
                 value=segment.value,
                 selector=selector,
+                writable=writable,
             )
         case ArrayFileSegment():
             result = ArrayFileVariable(
@@ -174,6 +187,7 @@ def _build_array_variable(
                 description=description,
                 value=segment.value,
                 selector=selector,
+                writable=writable,
             )
         case ArrayNumberSegment():
             result = ArrayNumberVariable(
@@ -182,6 +196,7 @@ def _build_array_variable(
                 description=description,
                 value=segment.value,
                 selector=selector,
+                writable=writable,
             )
         case ArrayObjectSegment():
             result = ArrayObjectVariable(
@@ -190,6 +205,7 @@ def _build_array_variable(
                 description=description,
                 value=segment.value,
                 selector=selector,
+                writable=writable,
             )
         case ArrayStringSegment():
             result = ArrayStringVariable(
@@ -198,6 +214,7 @@ def _build_array_variable(
                 description=description,
                 value=segment.value,
                 selector=selector,
+                writable=writable,
             )
         case _:
             msg = f"not supported segment type {type(segment)}"
@@ -212,6 +229,7 @@ def _build_scalar_variable(
     name: str,
     description: str,
     selector: list[str],
+    writable: bool,
 ) -> Variable:
     match segment:
         case BooleanSegment():
@@ -221,6 +239,7 @@ def _build_scalar_variable(
                 description=description,
                 value=segment.value,
                 selector=selector,
+                writable=writable,
             )
         case FileSegment():
             result = FileVariable(
@@ -229,6 +248,7 @@ def _build_scalar_variable(
                 description=description,
                 value=segment.value,
                 selector=selector,
+                writable=writable,
             )
         case FloatSegment():
             result = FloatVariable(
@@ -237,6 +257,7 @@ def _build_scalar_variable(
                 description=description,
                 value=segment.value,
                 selector=selector,
+                writable=writable,
             )
         case IntegerSegment():
             result = IntegerVariable(
@@ -245,6 +266,7 @@ def _build_scalar_variable(
                 description=description,
                 value=segment.value,
                 selector=selector,
+                writable=writable,
             )
         case NoneSegment():
             result = NoneVariable(
@@ -252,6 +274,7 @@ def _build_scalar_variable(
                 name=name,
                 description=description,
                 selector=selector,
+                writable=writable,
             )
         case ObjectSegment():
             result = ObjectVariable(
@@ -260,6 +283,7 @@ def _build_scalar_variable(
                 description=description,
                 value=segment.value,
                 selector=selector,
+                writable=writable,
             )
         case StringSegment():
             result = StringVariable(
@@ -268,6 +292,7 @@ def _build_scalar_variable(
                 description=description,
                 value=segment.value,
                 selector=selector,
+                writable=writable,
             )
         case _:
             msg = f"not supported segment type {type(segment)}"
@@ -417,13 +442,18 @@ def segment_to_variable(
     variable_id: str | None = None,
     name: str | None = None,
     description: str = "",
+    writable: bool | None = None,
 ) -> Variable:
     """Convert a runtime segment into a runtime variable for storage in the pool."""
     if isinstance(segment, VariableBase):
-        return _existing_variable_from_segment(segment)
+        return _apply_writable_override(
+            _existing_variable_from_segment(segment),
+            writable=writable,
+        )
     name = name or selector[-1]
     resolved_variable_id = variable_id or str(uuid4())
     resolved_selector = list(selector)
+    resolved_writable = False if writable is None else writable
     if isinstance(segment, ArraySegment):
         return _build_array_variable(
             segment=segment,
@@ -431,6 +461,7 @@ def segment_to_variable(
             name=name,
             description=description,
             selector=resolved_selector,
+            writable=resolved_writable,
         )
     return _build_scalar_variable(
         segment=segment,
@@ -438,4 +469,5 @@ def segment_to_variable(
         name=name,
         description=description,
         selector=resolved_selector,
+        writable=resolved_writable,
     )

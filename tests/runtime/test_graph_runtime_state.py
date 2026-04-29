@@ -1,9 +1,12 @@
 import json
 from time import time
+from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from graphon.enums import BuiltinNodeTypes, NodeState
 from graphon.graph_engine.domain.graph_execution import GraphExecution
 from graphon.graph_engine.ready_queue.in_memory import InMemoryReadyQueue
 from graphon.model_runtime.entities.llm_entities import LLMUsage
@@ -27,7 +30,25 @@ class StubCoordinator:
         self.state = payload["state"]
 
 
-class TestGraphRuntimeState:
+def _remove_writable_flags(snapshot: dict[str, Any]) -> dict[str, Any]:
+    variable_pool = snapshot.get("variable_pool")
+    if not isinstance(variable_pool, dict):
+        return snapshot
+
+    variable_dictionary = variable_pool.get("variable_dictionary")
+    if not isinstance(variable_dictionary, dict):
+        return snapshot
+
+    for node_variables in variable_dictionary.values():
+        if not isinstance(node_variables, dict):
+            continue
+        for variable_payload in node_variables.values():
+            if isinstance(variable_payload, dict):
+                variable_payload.pop("writable", None)
+    return snapshot
+
+
+class TestGraphRuntimeState:  # noqa: PLR0904
     def test_execution_context_defaults_to_empty_context(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
 
@@ -328,3 +349,471 @@ class TestGraphRuntimeState:
         ))
         assert restored_value is not None
         assert restored_value.value == "after"
+
+    def test_legacy_snapshot_restore_keeps_conversation_variables_writable(
+        self,
+    ) -> None:
+        variable_pool = VariablePool.from_bootstrap(
+            conversation_variables=[
+                StringVariable(name="session_name", value="before"),
+            ],
+        )
+        state = GraphRuntimeState(variable_pool=variable_pool, start_at=time())
+        legacy_snapshot = _remove_writable_flags(json.loads(state.dumps()))
+
+        restored = GraphRuntimeState.from_snapshot(legacy_snapshot)
+
+        restored_variable = restored.variable_pool.get_variable((
+            CONVERSATION_VARIABLE_NODE_ID,
+            "session_name",
+        ))
+        assert restored_variable is not None
+        assert restored_variable.writable is True
+
+    def test_attach_graph_recovers_legacy_loop_and_iteration_working_mutability(
+        self,
+    ) -> None:
+        variable_pool = VariablePool.empty()
+        variable_pool.add(("loop-node", "counter"), 1, writable=True)
+        variable_pool.add(("iteration-node", "index"), 2, writable=True)
+        variable_pool.add(("iteration-node", "item"), "value", writable=True)
+        variable_pool.add(("plain-node", "result"), "frozen")
+
+        state = GraphRuntimeState(variable_pool=variable_pool, start_at=time())
+        legacy_snapshot = _remove_writable_flags(json.loads(state.dumps()))
+        restored = GraphRuntimeState.from_snapshot(legacy_snapshot)
+
+        loop_variable = restored.variable_pool.get_variable(("loop-node", "counter"))
+        iteration_index = restored.variable_pool.get_variable((
+            "iteration-node",
+            "index",
+        ))
+        iteration_item = restored.variable_pool.get_variable((
+            "iteration-node",
+            "item",
+        ))
+        plain_variable = restored.variable_pool.get_variable(("plain-node", "result"))
+        assert loop_variable is not None
+        assert iteration_index is not None
+        assert iteration_item is not None
+        assert plain_variable is not None
+        assert loop_variable.writable is False
+        assert iteration_index.writable is False
+        assert iteration_item.writable is False
+        assert plain_variable.writable is False
+
+        graph = SimpleNamespace(
+            nodes={
+                "loop-node": SimpleNamespace(
+                    id="loop-node",
+                    state=NodeState.UNKNOWN,
+                    node_type=BuiltinNodeTypes.LOOP,
+                    execution_type=MagicMock(),
+                    node_data=SimpleNamespace(
+                        loop_variables=[SimpleNamespace(label="counter")],
+                    ),
+                ),
+                "iteration-node": SimpleNamespace(
+                    id="iteration-node",
+                    state=NodeState.UNKNOWN,
+                    node_type=BuiltinNodeTypes.ITERATION,
+                    execution_type=MagicMock(),
+                    node_data=SimpleNamespace(),
+                ),
+                "plain-node": SimpleNamespace(
+                    id="plain-node",
+                    state=NodeState.UNKNOWN,
+                    node_type=BuiltinNodeTypes.CODE,
+                    execution_type=MagicMock(),
+                    node_data=SimpleNamespace(),
+                ),
+            },
+            edges={},
+            root_node=SimpleNamespace(
+                id="loop-node",
+                state=NodeState.UNKNOWN,
+                node_type=BuiltinNodeTypes.LOOP,
+                execution_type=MagicMock(),
+            ),
+            get_outgoing_edges=MagicMock(return_value=[]),
+        )
+
+        with patch.object(
+            GraphRuntimeState,
+            "_build_response_coordinator",
+            return_value=StubCoordinator(),
+            autospec=True,
+        ):
+            restored.attach_graph(cast(Any, graph))
+
+        restored_loop_variable = restored.variable_pool.get_variable((
+            "loop-node",
+            "counter",
+        ))
+        restored_iteration_index = restored.variable_pool.get_variable((
+            "iteration-node",
+            "index",
+        ))
+        restored_iteration_item = restored.variable_pool.get_variable((
+            "iteration-node",
+            "item",
+        ))
+        restored_plain_variable = restored.variable_pool.get_variable((
+            "plain-node",
+            "result",
+        ))
+        assert restored_loop_variable is not None
+        assert restored_iteration_index is not None
+        assert restored_iteration_item is not None
+        assert restored_plain_variable is not None
+        assert restored_loop_variable.writable is True
+        assert restored_iteration_index.writable is True
+        assert restored_iteration_item.writable is True
+        assert restored_plain_variable.writable is False
+
+    def test_loads_completed_loop_snapshot_keeps_outputs_read_only(self) -> None:
+        variable_pool = VariablePool.empty()
+        variable_pool.add(("loop-node", "counter"), 1, writable=True)
+        variable_pool.add(("iteration-node", "index"), 2, writable=True)
+        variable_pool.add(("plain-node", "result"), "frozen")
+
+        snapshot_state = GraphRuntimeState(variable_pool=variable_pool, start_at=time())
+        snapshot_execution = snapshot_state.graph_execution
+        snapshot_execution.start()
+        snapshot_execution.complete()
+        legacy_snapshot = _remove_writable_flags(json.loads(snapshot_state.dumps()))
+
+        graph = SimpleNamespace(
+            nodes={
+                "loop-node": SimpleNamespace(
+                    id="loop-node",
+                    state=NodeState.UNKNOWN,
+                    node_type=BuiltinNodeTypes.LOOP,
+                    execution_type=MagicMock(),
+                    node_data=SimpleNamespace(
+                        loop_variables=[SimpleNamespace(label="counter")],
+                    ),
+                ),
+                "iteration-node": SimpleNamespace(
+                    id="iteration-node",
+                    state=NodeState.UNKNOWN,
+                    node_type=BuiltinNodeTypes.ITERATION,
+                    execution_type=MagicMock(),
+                    node_data=SimpleNamespace(),
+                ),
+                "plain-node": SimpleNamespace(
+                    id="plain-node",
+                    state=NodeState.UNKNOWN,
+                    node_type=BuiltinNodeTypes.CODE,
+                    execution_type=MagicMock(),
+                    node_data=SimpleNamespace(),
+                ),
+            },
+            edges={},
+            root_node=SimpleNamespace(
+                id="loop-node",
+                state=NodeState.UNKNOWN,
+                node_type=BuiltinNodeTypes.LOOP,
+                execution_type=MagicMock(),
+            ),
+            get_outgoing_edges=MagicMock(return_value=[]),
+        )
+
+        restored = GraphRuntimeState(
+            variable_pool=VariablePool.empty(),
+            start_at=time(),
+        )
+        with patch.object(
+            GraphRuntimeState,
+            "_build_response_coordinator",
+            return_value=StubCoordinator(),
+            autospec=True,
+        ):
+            restored.attach_graph(cast(Any, graph))
+            restored.loads(legacy_snapshot)
+
+        restored_loop_variable = restored.variable_pool.get_variable((
+            "loop-node",
+            "counter",
+        ))
+        restored_iteration_index = restored.variable_pool.get_variable((
+            "iteration-node",
+            "index",
+        ))
+        restored_plain_variable = restored.variable_pool.get_variable((
+            "plain-node",
+            "result",
+        ))
+        assert restored_loop_variable is not None
+        assert restored_iteration_index is not None
+        assert restored_plain_variable is not None
+        assert restored_loop_variable.writable is False
+        assert restored_iteration_index.writable is False
+        assert restored_plain_variable.writable is False
+
+    def test_attach_graph_keeps_completed_loop_outputs_read_only_in_paused_workflow(
+        self,
+    ) -> None:
+        variable_pool = VariablePool.empty()
+        variable_pool.add(("loop-node", "counter"), 1, writable=False)
+        variable_pool.add(("iteration-node", "index"), 2, writable=True)
+        variable_pool.add(("iteration-node", "item"), "value", writable=True)
+        variable_pool.add(("plain-node", "result"), "frozen")
+
+        snapshot_state = GraphRuntimeState(variable_pool=variable_pool, start_at=time())
+        snapshot_execution = snapshot_state.graph_execution
+        snapshot_execution.start()
+        legacy_snapshot = json.loads(snapshot_state.dumps())
+        legacy_snapshot["graph_state"] = {
+            "nodes": {
+                "loop-node": NodeState.TAKEN.value,
+                "iteration-node": NodeState.UNKNOWN.value,
+                "plain-node": NodeState.UNKNOWN.value,
+            },
+            "edges": {},
+        }
+        legacy_snapshot = _remove_writable_flags(legacy_snapshot)
+
+        restored = GraphRuntimeState.from_snapshot(legacy_snapshot)
+
+        graph = SimpleNamespace(
+            nodes={
+                "loop-node": SimpleNamespace(
+                    id="loop-node",
+                    state=NodeState.UNKNOWN,
+                    node_type=BuiltinNodeTypes.LOOP,
+                    execution_type=MagicMock(),
+                    node_data=SimpleNamespace(
+                        loop_variables=[SimpleNamespace(label="counter")],
+                    ),
+                ),
+                "iteration-node": SimpleNamespace(
+                    id="iteration-node",
+                    state=NodeState.UNKNOWN,
+                    node_type=BuiltinNodeTypes.ITERATION,
+                    execution_type=MagicMock(),
+                    node_data=SimpleNamespace(),
+                ),
+                "plain-node": SimpleNamespace(
+                    id="plain-node",
+                    state=NodeState.UNKNOWN,
+                    node_type=BuiltinNodeTypes.CODE,
+                    execution_type=MagicMock(),
+                    node_data=SimpleNamespace(),
+                ),
+            },
+            edges={},
+            root_node=SimpleNamespace(
+                id="loop-node",
+                state=NodeState.UNKNOWN,
+                node_type=BuiltinNodeTypes.LOOP,
+                execution_type=MagicMock(),
+            ),
+            get_outgoing_edges=MagicMock(return_value=[]),
+        )
+
+        with patch.object(
+            GraphRuntimeState,
+            "_build_response_coordinator",
+            return_value=StubCoordinator(),
+            autospec=True,
+        ):
+            restored.attach_graph(cast(Any, graph))
+
+        restored_loop_variable = restored.variable_pool.get_variable((
+            "loop-node",
+            "counter",
+        ))
+        restored_iteration_index = restored.variable_pool.get_variable((
+            "iteration-node",
+            "index",
+        ))
+        restored_iteration_item = restored.variable_pool.get_variable((
+            "iteration-node",
+            "item",
+        ))
+        restored_plain_variable = restored.variable_pool.get_variable((
+            "plain-node",
+            "result",
+        ))
+        assert restored_loop_variable is not None
+        assert restored_iteration_index is not None
+        assert restored_iteration_item is not None
+        assert restored_plain_variable is not None
+        assert graph.nodes["loop-node"].state == NodeState.TAKEN
+        assert graph.nodes["iteration-node"].state == NodeState.UNKNOWN
+        assert restored_loop_variable.writable is False
+        assert restored_iteration_index.writable is True
+        assert restored_iteration_item.writable is True
+        assert restored_plain_variable.writable is False
+
+    def test_from_snapshot_current_paused_workflow_freezes_completed_loop_node(
+        self,
+    ) -> None:
+        variable_pool = VariablePool.empty()
+        variable_pool.add(("loop-node", "counter"), 1, writable=True)
+        variable_pool.add(("iteration-node", "index"), 2, writable=True)
+        variable_pool.add(("iteration-node", "item"), "value", writable=True)
+        variable_pool.add(("plain-node", "result"), "frozen")
+
+        graph = SimpleNamespace(
+            nodes={
+                "loop-node": SimpleNamespace(
+                    id="loop-node",
+                    state=NodeState.TAKEN,
+                    node_type=BuiltinNodeTypes.LOOP,
+                    execution_type=MagicMock(),
+                    node_data=SimpleNamespace(
+                        loop_variables=[SimpleNamespace(label="counter")],
+                    ),
+                ),
+                "iteration-node": SimpleNamespace(
+                    id="iteration-node",
+                    state=NodeState.UNKNOWN,
+                    node_type=BuiltinNodeTypes.ITERATION,
+                    execution_type=MagicMock(),
+                    node_data=SimpleNamespace(),
+                ),
+                "plain-node": SimpleNamespace(
+                    id="plain-node",
+                    state=NodeState.UNKNOWN,
+                    node_type=BuiltinNodeTypes.CODE,
+                    execution_type=MagicMock(),
+                    node_data=SimpleNamespace(),
+                ),
+            },
+            edges={},
+            root_node=SimpleNamespace(
+                id="loop-node",
+                state=NodeState.TAKEN,
+                node_type=BuiltinNodeTypes.LOOP,
+                execution_type=MagicMock(),
+            ),
+            get_outgoing_edges=MagicMock(return_value=[]),
+        )
+
+        snapshot_state = GraphRuntimeState(variable_pool=variable_pool, start_at=time())
+        snapshot_execution = snapshot_state.graph_execution
+        snapshot_execution.start()
+
+        with patch.object(
+            GraphRuntimeState,
+            "_build_response_coordinator",
+            return_value=StubCoordinator(),
+            autospec=True,
+        ):
+            snapshot_state.attach_graph(cast(Any, graph))
+
+        snapshot = json.loads(snapshot_state.dumps())
+        restored = GraphRuntimeState.from_snapshot(snapshot)
+
+        restored_loop_variable = restored.variable_pool.get_variable((
+            "loop-node",
+            "counter",
+        ))
+        restored_iteration_index = restored.variable_pool.get_variable((
+            "iteration-node",
+            "index",
+        ))
+        restored_iteration_item = restored.variable_pool.get_variable((
+            "iteration-node",
+            "item",
+        ))
+        restored_plain_variable = restored.variable_pool.get_variable((
+            "plain-node",
+            "result",
+        ))
+        assert restored_loop_variable is not None
+        assert restored_iteration_index is not None
+        assert restored_iteration_item is not None
+        assert restored_plain_variable is not None
+        assert restored_loop_variable.writable is False
+        assert restored_iteration_index.writable is True
+        assert restored_iteration_item.writable is True
+        assert restored_plain_variable.writable is False
+
+    def test_loads_current_aborted_snapshot_freezes_terminal_working_variables(
+        self,
+    ) -> None:
+        variable_pool = VariablePool.empty()
+        variable_pool.add(("loop-node", "counter"), 1, writable=True)
+        variable_pool.add(("iteration-node", "index"), 2, writable=True)
+        variable_pool.add(("iteration-node", "item"), "value", writable=True)
+        variable_pool.add(("plain-node", "result"), "frozen")
+
+        snapshot_state = GraphRuntimeState(variable_pool=variable_pool, start_at=time())
+        snapshot_execution = snapshot_state.graph_execution
+        snapshot_execution.start()
+        snapshot_execution.abort("user requested stop")
+
+        graph = SimpleNamespace(
+            nodes={
+                "loop-node": SimpleNamespace(
+                    id="loop-node",
+                    state=NodeState.UNKNOWN,
+                    node_type=BuiltinNodeTypes.LOOP,
+                    execution_type=MagicMock(),
+                    node_data=SimpleNamespace(
+                        loop_variables=[SimpleNamespace(label="counter")],
+                    ),
+                ),
+                "iteration-node": SimpleNamespace(
+                    id="iteration-node",
+                    state=NodeState.UNKNOWN,
+                    node_type=BuiltinNodeTypes.ITERATION,
+                    execution_type=MagicMock(),
+                    node_data=SimpleNamespace(),
+                ),
+                "plain-node": SimpleNamespace(
+                    id="plain-node",
+                    state=NodeState.UNKNOWN,
+                    node_type=BuiltinNodeTypes.CODE,
+                    execution_type=MagicMock(),
+                    node_data=SimpleNamespace(),
+                ),
+            },
+            edges={},
+            root_node=SimpleNamespace(
+                id="loop-node",
+                state=NodeState.UNKNOWN,
+                node_type=BuiltinNodeTypes.LOOP,
+                execution_type=MagicMock(),
+            ),
+            get_outgoing_edges=MagicMock(return_value=[]),
+        )
+
+        with patch.object(
+            GraphRuntimeState,
+            "_build_response_coordinator",
+            return_value=StubCoordinator(),
+            autospec=True,
+        ):
+            snapshot_state.attach_graph(cast(Any, graph))
+
+        snapshot = json.loads(snapshot_state.dumps())
+        restored = GraphRuntimeState.from_snapshot(snapshot)
+
+        restored_loop_variable = restored.variable_pool.get_variable((
+            "loop-node",
+            "counter",
+        ))
+        restored_iteration_index = restored.variable_pool.get_variable((
+            "iteration-node",
+            "index",
+        ))
+        restored_iteration_item = restored.variable_pool.get_variable((
+            "iteration-node",
+            "item",
+        ))
+        restored_plain_variable = restored.variable_pool.get_variable((
+            "plain-node",
+            "result",
+        ))
+        assert restored_loop_variable is not None
+        assert restored_iteration_index is not None
+        assert restored_iteration_item is not None
+        assert restored_plain_variable is not None
+        assert restored_loop_variable.writable is False
+        assert restored_iteration_index.writable is False
+        assert restored_iteration_item.writable is False
+        assert restored_plain_variable.writable is False

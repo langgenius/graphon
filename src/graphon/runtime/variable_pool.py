@@ -103,14 +103,17 @@ class VariablePool(BaseModel):
         pool._ingest_legacy_variables(
             system_variables,
             node_id=pool._SYSTEM_VARIABLE_NODE_ID,
+            writable=False,
         )
         pool._ingest_legacy_variables(
             environment_variables,
             node_id=pool._ENVIRONMENT_VARIABLE_NODE_ID,
+            writable=False,
         )
         pool._ingest_legacy_variables(
             conversation_variables,
             node_id=pool._CONVERSATION_VARIABLE_NODE_ID,
+            writable=True,
         )
         pool._ingest_legacy_rag_variables(rag_pipeline_variables)
         return pool
@@ -139,13 +142,16 @@ class VariablePool(BaseModel):
         variables: Sequence[Variable],
         *,
         node_id: str,
+        writable: bool,
     ) -> None:
         for variable in variables:
             selector = [node_id, variable.name]
             normalized_variable = variable
             if list(variable.selector) != selector:
                 normalized_variable = variable.model_copy(update={"selector": selector})
-            self.add(normalized_variable.selector, normalized_variable)
+            self.add(
+                normalized_variable.selector, normalized_variable, writable=writable
+            )
 
     def _ingest_legacy_rag_variables(
         self,
@@ -163,7 +169,14 @@ class VariablePool(BaseModel):
         for node_id, value in values_by_node_id.items():
             self.add((self._RAG_PIPELINE_VARIABLE_NODE_ID, node_id), value)
 
-    def add(self, selector: Sequence[str], value: Any, /) -> None:
+    def add(
+        self,
+        selector: Sequence[str],
+        value: Any,
+        /,
+        *,
+        writable: bool | None = None,
+    ) -> None:
         """Add a variable to the variable pool.
 
         This method accepts a selector path and a value, converting the value
@@ -191,15 +204,49 @@ class VariablePool(BaseModel):
             )
             raise ValueError(msg)
 
+        resolved_writable = self._resolve_writable_for_add(selector, writable)
+
         match value:
             case Segment():
-                variable = segment_to_variable(segment=value, selector=selector)
+                variable = segment_to_variable(
+                    segment=value,
+                    selector=selector,
+                    writable=resolved_writable,
+                )
             case _:
                 segment = build_segment(value)
-                variable = segment_to_variable(segment=segment, selector=selector)
+                variable = segment_to_variable(
+                    segment=segment,
+                    selector=selector,
+                    writable=resolved_writable,
+                )
 
         node_id, name = self._selector_to_keys(selector)
         self.variable_dictionary[node_id][name] = variable
+
+    def _resolve_writable_for_add(
+        self,
+        selector: Sequence[str],
+        writable: bool | None,
+    ) -> bool | None:
+        if writable is not None:
+            return writable
+
+        existing_variable = self.get_variable(selector)
+        if existing_variable is None:
+            return None
+        return existing_variable.writable
+
+    def set_writable(self, selector: Sequence[str], /, *, writable: bool) -> None:
+        """Update the stored writable flag for an existing top-level variable."""
+        variable = self.get_variable(selector)
+        if variable is None or variable.writable is writable:
+            return
+
+        node_id, name = self._selector_to_keys(selector)
+        self.variable_dictionary[node_id][name] = variable.model_copy(
+            update={"writable": writable},
+        )
 
     @classmethod
     def _selector_to_keys(cls, selector: Sequence[str]) -> tuple[str, str]:

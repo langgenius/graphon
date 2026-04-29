@@ -15,7 +15,10 @@ from graphon.node_events.node import (
 )
 from graphon.nodes.base.node import Node
 from graphon.nodes.variable_assigner.common import helpers as common_helpers
-from graphon.nodes.variable_assigner.common.exc import VariableOperatorNodeError
+from graphon.nodes.variable_assigner.common.exc import (
+    ReadOnlyVariableError,
+    VariableOperatorNodeError,
+)
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.variables.types import SegmentType
 from graphon.variables.variables import (
@@ -89,6 +92,45 @@ class VariableAssignerNode(Node[VariableAssignerData]):
 
     @override
     def _run(self) -> Generator[NodeEventBase, None, None]:
+        try:
+            assigned_variable_selector, updated_variable, income_value = (
+                self._build_updated_variable()
+            )
+
+            updated_variables = [
+                common_helpers.variable_to_processed_data(
+                    assigned_variable_selector,
+                    updated_variable,
+                ),
+            ]
+            yield VariableUpdatedEvent(variable=updated_variable)
+            yield StreamCompletedEvent(
+                node_run_result=NodeRunResult(
+                    status=WorkflowNodeExecutionStatus.SUCCEEDED,
+                    inputs={
+                        "value": income_value.to_object(),
+                    },
+                    # NOTE(QuantumGhost): although only one variable is updated in
+                    # `v1.VariableAssignerNode`, we still set `output_variables` as a
+                    # list to keep the output schema compatible with
+                    # `v2.VariableAssignerNode`.
+                    process_data=common_helpers.set_updated_variables(
+                        {},
+                        updated_variables,
+                    ),
+                    outputs={},
+                ),
+            )
+        except VariableOperatorNodeError as e:
+            yield StreamCompletedEvent(
+                node_run_result=NodeRunResult(
+                    status=WorkflowNodeExecutionStatus.FAILED,
+                    inputs={},
+                    error=str(e),
+                ),
+            )
+
+    def _build_updated_variable(self) -> tuple[Sequence[str], Any, Any]:
         assigned_variable_selector = self.node_data.assigned_variable_selector
         # Should be String, Number, Object, ArrayString, ArrayNumber, ArrayObject
         original_variable = self.graph_runtime_state.variable_pool.get_variable(
@@ -97,6 +139,10 @@ class VariableAssignerNode(Node[VariableAssignerData]):
         if original_variable is None:
             msg = "assigned variable not found"
             raise VariableOperatorNodeError(msg)
+        if not original_variable.writable:
+            raise ReadOnlyVariableError(
+                variable_selector=assigned_variable_selector,
+            )
 
         write_mode = self.node_data.write_mode
         match write_mode:
@@ -143,27 +189,4 @@ class VariableAssignerNode(Node[VariableAssignerData]):
             case _:
                 assert_never(write_mode)
 
-        updated_variables = [
-            common_helpers.variable_to_processed_data(
-                assigned_variable_selector,
-                updated_variable,
-            ),
-        ]
-        yield VariableUpdatedEvent(variable=updated_variable)
-        yield StreamCompletedEvent(
-            node_run_result=NodeRunResult(
-                status=WorkflowNodeExecutionStatus.SUCCEEDED,
-                inputs={
-                    "value": income_value.to_object(),
-                },
-                # NOTE(QuantumGhost): although only one variable is updated in
-                # `v1.VariableAssignerNode`, we still set `output_variables` as a
-                # list to keep the output schema compatible with
-                # `v2.VariableAssignerNode`.
-                process_data=common_helpers.set_updated_variables(
-                    {},
-                    updated_variables,
-                ),
-                outputs={},
-            ),
-        )
+        return assigned_variable_selector, updated_variable, income_value

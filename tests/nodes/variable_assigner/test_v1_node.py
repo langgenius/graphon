@@ -1,7 +1,11 @@
 import time
 from collections.abc import Sequence
 
-from graphon.graph_events.node import NodeRunSucceededEvent, NodeRunVariableUpdatedEvent
+from graphon.graph_events.node import (
+    NodeRunFailedEvent,
+    NodeRunSucceededEvent,
+    NodeRunVariableUpdatedEvent,
+)
 from graphon.nodes.variable_assigner.common import helpers as common_helpers
 from graphon.nodes.variable_assigner.v1.node import VariableAssignerNode
 from graphon.nodes.variable_assigner.v1.node_data import VariableAssignerData, WriteMode
@@ -152,3 +156,42 @@ def test_clear_array() -> None:
     assert updated_variables[0].new_value == []
     assert updated_event.variable.value == []
     assert succeeded_event.node_run_result.inputs == {"value": []}
+
+
+def test_overwrite_read_only_variable_fails() -> None:
+    assigned_variable = StringVariable(
+        name="target",
+        value="the first value",
+        selector=["node_id", "target"],
+    )
+    input_variable = StringVariable(
+        name="source",
+        value="the second value",
+    )
+
+    variable_pool = build_variable_pool(
+        variables=[
+            (("node_id", assigned_variable.name), assigned_variable),
+            (("inputs", input_variable.name), input_variable),
+        ],
+    )
+    node = _build_node(
+        variable_pool=variable_pool,
+        assigned_selector=("node_id", assigned_variable.name),
+        write_mode=WriteMode.OVER_WRITE,
+        input_selector=("inputs", input_variable.name),
+    )
+
+    events = list(node.run())
+
+    failed_event = next(
+        event for event in events if isinstance(event, NodeRunFailedEvent)
+    )
+    target_variable = variable_pool.get_variable(["node_id", assigned_variable.name])
+    assert not any(isinstance(event, NodeRunVariableUpdatedEvent) for event in events)
+    assert target_variable is not None
+    assert target_variable.value == "the first value"
+    assert (
+        failed_event.node_run_result.error
+        == "Variable ['node_id', 'target'] is read-only"
+    )

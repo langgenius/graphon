@@ -50,6 +50,10 @@ class VariableBase(Segment):
     name: str
     description: str = Field(default="", description="Description of the variable.")
     selector: Sequence[str] = Field(default_factory=list)
+    writable: bool = Field(
+        default=False,
+        description="Whether graph nodes may mutate this variable in place.",
+    )
 
 
 class StringVariable(StringSegment, VariableBase):

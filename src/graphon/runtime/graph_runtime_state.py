@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from pydantic import BaseModel, Field
 from pydantic_core import to_jsonable_python
 
-from graphon.enums import NodeExecutionType, NodeState, NodeType
+from graphon.enums import BuiltinNodeTypes, NodeExecutionType, NodeState, NodeType
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.runtime.variable_pool import VariablePool
 
@@ -263,6 +263,7 @@ class _GraphRuntimeStateSnapshot:
     deferred_nodes: tuple[str, ...]
     graph_node_states: dict[str, NodeState]
     graph_edge_states: dict[str, NodeState]
+    container_variable_writability: dict[str, dict[str, bool]]
 
 
 @dataclass(slots=True)
@@ -461,6 +462,12 @@ class _GraphRuntimeBindings:
             raise ValueError(msg)
 
         self.graph = graph
+        suspension_state.apply_pending_graph_state(graph)
+        _reconcile_graph_known_legacy_writable_variables(
+            variable_pool=self._runtime_state.variable_pool,
+            graph=graph,
+            graph_execution=self.graph_execution,
+        )
 
         if self.response_coordinator is None:
             self.response_coordinator = self._runtime_state.create_response_coordinator(
@@ -475,8 +482,6 @@ class _GraphRuntimeBindings:
                 suspension_state.pending_response_coordinator_dump,
             )
             suspension_state.pending_response_coordinator_dump = None
-
-        suspension_state.apply_pending_graph_state(graph)
 
     def configure(
         self,
@@ -784,6 +789,12 @@ class GraphRuntimeState:  # noqa: PLR0904
         snapshot["graph_state"] = self._suspension_state.snapshot_graph_state(
             self._bindings.graph,
         )
+        snapshot["container_variable_writability"] = (
+            _snapshot_container_variable_writability(
+                graph=self._bindings.graph,
+                graph_execution=self._bindings.graph_execution,
+            )
+        )
 
         if (
             self._bindings.response_coordinator is not None
@@ -920,7 +931,9 @@ class GraphRuntimeState:  # noqa: PLR0904
         variable_pool_payload = payload.get("variable_pool")
         has_variable_pool = variable_pool_payload is not None
         variable_pool = (
-            VariablePool.model_validate(variable_pool_payload)
+            VariablePool.model_validate(
+                _migrate_legacy_variable_pool_payload(variable_pool_payload),
+            )
             if has_variable_pool
             else VariablePool()
         )
@@ -928,6 +941,9 @@ class GraphRuntimeState:  # noqa: PLR0904
         graph_state_payload = payload.get("graph_state", {}) or {}
         graph_node_states = _coerce_graph_state_map(graph_state_payload, "nodes")
         graph_edge_states = _coerce_graph_state_map(graph_state_payload, "edges")
+        container_variable_writability = _coerce_container_variable_writability(
+            payload.get("container_variable_writability", {}),
+        )
 
         return _GraphRuntimeStateSnapshot(
             start_at=start_at,
@@ -944,10 +960,15 @@ class GraphRuntimeState:  # noqa: PLR0904
             deferred_nodes=tuple(map(str, payload.get("deferred_nodes", []))),
             graph_node_states=graph_node_states,
             graph_edge_states=graph_edge_states,
+            container_variable_writability=container_variable_writability,
         )
 
     def _apply_snapshot(self, snapshot: _GraphRuntimeStateSnapshot) -> None:
         self._execution_data.apply_snapshot(snapshot)
+        _apply_container_variable_writability(
+            variable_pool=self.variable_pool,
+            policy=snapshot.container_variable_writability,
+        )
         self._bindings.restore_ready_queue(snapshot.ready_queue_dump)
         self._bindings.restore_graph_execution(
             snapshot.graph_execution_dump,
@@ -959,6 +980,12 @@ class GraphRuntimeState:  # noqa: PLR0904
         )
         self._suspension_state.apply_snapshot(snapshot)
         self._suspension_state.apply_pending_graph_state(self._bindings.graph)
+        if self._bindings.graph is not None:
+            _reconcile_graph_known_legacy_writable_variables(
+                variable_pool=self.variable_pool,
+                graph=self._bindings.graph,
+                graph_execution=self._bindings.graph_execution,
+            )
 
 
 def _coerce_graph_state_map(payload: Any, key: str) -> dict[str, NodeState]:
@@ -976,3 +1003,144 @@ def _coerce_graph_state_map(payload: Any, key: str) -> dict[str, NodeState]:
         except ValueError:
             continue
     return result
+
+
+def _coerce_container_variable_writability(payload: Any) -> dict[str, dict[str, bool]]:
+    if not isinstance(payload, Mapping):
+        return {}
+
+    result: dict[str, dict[str, bool]] = {}
+    for node_id, raw_variables in payload.items():
+        if not isinstance(node_id, str) or not isinstance(raw_variables, Mapping):
+            continue
+        variable_policy = {
+            variable_name: writable
+            for variable_name, writable in raw_variables.items()
+            if isinstance(variable_name, str) and isinstance(writable, bool)
+        }
+        if variable_policy:
+            result[node_id] = variable_policy
+    return result
+
+
+def _migrate_legacy_variable_pool_payload(payload: Any) -> Any:
+    if not isinstance(payload, Mapping):
+        return payload
+
+    migrated_payload = deepcopy(payload)
+    variable_dictionary = migrated_payload.get("variable_dictionary")
+    if not isinstance(variable_dictionary, dict):
+        return migrated_payload
+
+    conversation_variables = variable_dictionary.get("conversation")
+    if not isinstance(conversation_variables, dict):
+        return migrated_payload
+
+    for variable_payload in conversation_variables.values():
+        if isinstance(variable_payload, dict):
+            variable_payload.setdefault("writable", True)
+
+    return migrated_payload
+
+
+def _reconcile_graph_known_legacy_writable_variables(
+    *,
+    variable_pool: VariablePool,
+    graph: GraphProtocol | Graph | None,
+    graph_execution: GraphExecutionProtocol | None,
+) -> None:
+    if graph is None or not isinstance(graph.nodes, Mapping):
+        return
+
+    for mapped_node_id, node in graph.nodes.items():
+        node_id = (
+            mapped_node_id
+            if isinstance(mapped_node_id, str)
+            else getattr(
+                node,
+                "id",
+                None,
+            )
+        )
+        if not isinstance(node_id, str):
+            continue
+
+        for variable_name, writable in _container_variable_writability_for_node(
+            node=node,
+            graph_execution=graph_execution,
+        ).items():
+            variable_pool.set_writable((node_id, variable_name), writable=writable)
+
+
+def _apply_container_variable_writability(
+    *,
+    variable_pool: VariablePool,
+    policy: Mapping[str, Mapping[str, bool]],
+) -> None:
+    for node_id, variable_policy in policy.items():
+        for variable_name, writable in variable_policy.items():
+            variable_pool.set_writable((node_id, variable_name), writable=writable)
+
+
+def _snapshot_container_variable_writability(
+    *,
+    graph: GraphProtocol | Graph | None,
+    graph_execution: GraphExecutionProtocol | None,
+) -> dict[str, dict[str, bool]]:
+    if graph is None or not isinstance(graph.nodes, Mapping):
+        return {}
+
+    policy: dict[str, dict[str, bool]] = {}
+    for mapped_node_id, node in graph.nodes.items():
+        node_id = (
+            mapped_node_id
+            if isinstance(mapped_node_id, str)
+            else getattr(node, "id", None)
+        )
+        if not isinstance(node_id, str):
+            continue
+
+        node_policy = _container_variable_writability_for_node(
+            node=node,
+            graph_execution=graph_execution,
+        )
+        if node_policy:
+            policy[node_id] = node_policy
+    return policy
+
+
+def _container_variable_writability_for_node(
+    *,
+    node: Any,
+    graph_execution: GraphExecutionProtocol | None,
+) -> dict[str, bool]:
+    writable = _container_node_should_be_writable(
+        node=node,
+        graph_execution=graph_execution,
+    )
+
+    if getattr(node, "node_type", None) == BuiltinNodeTypes.LOOP:
+        node_data = getattr(node, "node_data", None)
+        loop_variables = getattr(node_data, "loop_variables", ()) or ()
+        return {
+            label: writable
+            for loop_variable in loop_variables
+            if isinstance((label := getattr(loop_variable, "label", None)), str)
+        }
+
+    if getattr(node, "node_type", None) == BuiltinNodeTypes.ITERATION:
+        return {"index": writable, "item": writable}
+
+    return {}
+
+
+def _container_node_should_be_writable(
+    *,
+    node: Any,
+    graph_execution: GraphExecutionProtocol | None,
+) -> bool:
+    if graph_execution is not None and (
+        graph_execution.completed or graph_execution.aborted
+    ):
+        return False
+    return getattr(node, "state", NodeState.UNKNOWN) == NodeState.UNKNOWN
