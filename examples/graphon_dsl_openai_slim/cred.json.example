@@ -1,0 +1,13 @@
+{
+  "model_credentials": [
+    {
+      "vendor": "openai",
+      "values": {
+        "openai_api_key": "<your-api-key>",
+        "openai_api_base": "",
+        "openai_organization": "",
+        "api_protocol": "responses"
+      }
+    }
+  ]
+}

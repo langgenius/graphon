@@ -1,0 +1,39 @@
+kind: graph
+dependencies:
+- type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/openai:0.3.8@592c8252795b5f75807de2d609a03196ed02596b409f7642b4a07548c7ff57ef
+graph:
+  nodes:
+  - id: start
+    data:
+      type: start
+      title: Start
+      variables: []
+  - id: llm
+    data:
+      type: llm
+      title: OpenAI
+      model:
+        provider: langgenius/openai/openai
+        name: gpt-5.4
+        mode: chat
+        completion_params: {}
+      prompt_template:
+      - role: user
+        text: "{{#sys.query#}}"
+      context:
+        enabled: false
+        variable_selector: []
+      vision:
+        enabled: false
+  - id: answer
+    data:
+      type: answer
+      title: Answer
+      answer: "{{#llm.text#}}"
+  edges:
+  - source: start
+    target: llm
+  - source: llm
+    target: answer
