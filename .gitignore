@@ -9,7 +9,10 @@ dist/
 
 # Environments
 .venv
-examples/*/.env
+.env
 
-# Ruff stuff:
+# Ruff
 .ruff_cache/
+
+# Plugin Daemon Slim
+.slim
