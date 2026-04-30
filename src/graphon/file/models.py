@@ -16,6 +16,10 @@ from .enums import FileTransferMethod, FileType
 _FILE_REFERENCE_PREFIX = "dify-file-ref:"
 
 
+class _FileConstructorConflictError(ValueError):
+    """Raised when multiple constructor inputs disagree on file identity."""
+
+
 def sign_tool_file(
     *,
     tool_file_id: str,
@@ -113,7 +117,7 @@ class File(BaseModel):
         *,
         file_id: str | None = None,
         tenant_id: str | None = None,
-        file_type: FileType,
+        file_type: FileType | None = None,
         transfer_method: FileTransferMethod,
         remote_url: str | None = None,
         reference: str | None = None,
@@ -129,18 +133,39 @@ class File(BaseModel):
         tool_file_id: str | None = None,
         upload_file_id: str | None = None,
         datasource_file_id: str | None = None,
+        **legacy_kwargs: Any,
     ) -> None:
+        legacy_id = legacy_kwargs.pop("id", None)
+        legacy_type = legacy_kwargs.pop("type", None)
+        if legacy_kwargs:
+            unexpected_keys = ", ".join(sorted(legacy_kwargs))
+            msg = f"Unexpected keyword arguments: {unexpected_keys}"
+            raise TypeError(msg)
+
         legacy_record_id = (
             related_id or tool_file_id or upload_file_id or datasource_file_id
         )
+        if legacy_id is not None and file_id is not None and legacy_id != file_id:
+            msg = "Conflicting file identifiers"
+            raise _FileConstructorConflictError(msg)
+        if (
+            legacy_type is not None
+            and file_type is not None
+            and legacy_type != file_type
+        ):
+            msg = "Conflicting file types"
+            raise _FileConstructorConflictError(msg)
+
         normalized_reference = reference
         if normalized_reference is None and legacy_record_id is not None:
             normalized_reference = str(legacy_record_id)
         _, parsed_storage_key = _parse_reference(normalized_reference)
+        normalized_file_id = file_id if file_id is not None else legacy_id
+        normalized_file_type = file_type if file_type is not None else legacy_type
 
         super().__init__(
-            id=file_id,
-            type=file_type,
+            id=normalized_file_id,
+            type=normalized_file_type,
             transfer_method=transfer_method,
             remote_url=remote_url,
             reference=normalized_reference,
