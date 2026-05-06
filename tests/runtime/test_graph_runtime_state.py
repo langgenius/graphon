@@ -14,6 +14,72 @@ from graphon.variables.variables import StringVariable
 
 CONVERSATION_VARIABLE_NODE_ID = "conversation"
 
+_HISTORICAL_FILE_SNAPSHOT_JSON_FROM_749751D_PARENT = (
+    """{
+  "version": "1.0",
+  "start_at": 123.0,
+  "total_tokens": 0,
+  "node_run_steps": 0,
+  "llm_usage": {
+    "prompt_tokens": 0,
+    "prompt_unit_price": "0.0",
+    "prompt_price_unit": "0.0",
+    "prompt_price": "0.0",
+    "completion_tokens": 0,
+    "completion_unit_price": "0.0",
+    "completion_price_unit": "0.0",
+    "completion_price": "0.0",
+    "total_tokens": 0,
+    "total_price": "0.0",
+    "currency": "USD",
+    "latency": 0.0,
+    "time_to_first_token": null,
+    "time_to_generate": null
+  },
+  "outputs": {},
+  "variable_pool": {
+    "variable_dictionary": {
+      "node1": {
+        "attachment": {
+          "value_type": "file",
+          "value": {
+            "dify_model_identity": "__dify__file__",
+            "id": "message-file-id",
+            "type": "document",
+            "transfer_method": "local_file",
+            "remote_url": null,
+            "reference": "upload-file-id",
+            "filename": "report.pdf",
+            "extension": ".pdf",
+            "mime_type": "application/pdf",
+            "size": 128
+          },
+          "id": "0759bf04-6fe1-4871-82b0-bc59ce96d43a",
+          "name": "attachment",
+          "description": "",
+          "selector": [
+            "node1",
+            "attachment"
+          ]
+        }
+      }
+    }
+  },
+  "ready_queue": "{\\"type\\":\\"InMemoryReadyQueue\\",\\"version\\":\\"1.0\\","""
+    """\\"items\\":[]}",
+  "graph_execution": "{\\"type\\":\\"GraphExecution\\",\\"version\\":\\"1.0\\","""
+    """\\"workflow_id\\":\\"\\",\\"started\\":false,\\"completed\\":false,"""
+    """\\"aborted\\":false,\\"paused\\":false,\\"pause_reasons\\":[],"""
+    """\\"error\\":null,\\"exceptions_count\\":0,\\"node_executions\\":[]}",
+  "paused_nodes": [],
+  "deferred_nodes": [],
+  "graph_state": {
+    "nodes": {},
+    "edges": {}
+  }
+}"""
+)
+
 
 class StubCoordinator:
     def __init__(self) -> None:
@@ -328,3 +394,14 @@ class TestGraphRuntimeState:
         ))
         assert restored_value is not None
         assert restored_value.value == "after"
+
+    def test_snapshot_restore_preserves_file_variable_id(self) -> None:
+        restored = GraphRuntimeState.from_snapshot(
+            _HISTORICAL_FILE_SNAPSHOT_JSON_FROM_749751D_PARENT,
+        )
+
+        restored_segment = restored.variable_pool.get(("node1", "attachment"))
+        assert restored_segment is not None
+        assert restored_segment.value.id == "message-file-id"
+        assert restored_segment.value.type == "document"
+        assert restored_segment.value.reference == "upload-file-id"

@@ -5,9 +5,22 @@ from graphon.file.enums import (
     FileTransferMethod,
     FileType,
 )
-from graphon.file.models import File
+from graphon.file.models import File, _FileConstructorConflictError
 
 from ..helpers import build_file_reference
+
+_HISTORICAL_FILE_JSON_FROM_749751D_PARENT = """{
+  "dify_model_identity": "__dify__file__",
+  "id": "message-file-id",
+  "type": "document",
+  "transfer_method": "local_file",
+  "remote_url": null,
+  "reference": "upload-file-id",
+  "filename": "report.pdf",
+  "extension": ".pdf",
+  "mime_type": "application/pdf",
+  "size": 128
+}"""
 
 
 def _build_local_file(*, reference: str, storage_key: str | None = None) -> File:
@@ -80,3 +93,24 @@ def test_file_related_id_setter_updates_reference_alias() -> None:
 
     assert file.reference == "replacement-upload-id"
     assert file.related_id == "replacement-upload-id"
+
+
+def test_file_model_validate_accepts_historical_payload_from_749751d_parent() -> None:
+    restored = File.model_validate_json(_HISTORICAL_FILE_JSON_FROM_749751D_PARENT)
+
+    assert restored.id == "message-file-id"
+    assert restored.type == FileType.DOCUMENT
+    assert restored.reference == "upload-file-id"
+
+
+def test_file_constructor_rejects_conflicting_identity_kwargs() -> None:
+    with pytest.raises(
+        _FileConstructorConflictError, match="Conflicting file identifiers"
+    ):
+        File(
+            id="message-file-id",
+            file_id="other-file-id",
+            type=FileType.DOCUMENT,
+            transfer_method=FileTransferMethod.LOCAL_FILE,
+            reference="upload-file-id",
+        )
