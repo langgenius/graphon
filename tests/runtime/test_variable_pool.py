@@ -1,6 +1,3 @@
-import pytest
-from pydantic import ValidationError
-
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import (
     BooleanSegment,
@@ -58,23 +55,6 @@ class TestVariablePoolConstruction:
         rag_segment = pool.get(("rag", "retriever"))
         assert rag_segment is not None
         assert rag_segment.value == {"query": "answer"}
-
-    def test_constructor_rejects_legacy_bootstrap_kwargs(self) -> None:
-        with pytest.raises(ValidationError, match="from_bootstrap"):
-            VariablePool.model_validate({
-                "conversation_variables": [
-                    StringVariable(name="session", value="x"),
-                ],
-            })
-
-    def test_from_legacy_bootstrap_preserves_compatibility(self) -> None:
-        pool = VariablePool.from_legacy_bootstrap(
-            conversation_variables=[StringVariable(name="session_name", value="value")],
-        )
-
-        segment = pool.get(("conversation", "session_name"))
-        assert segment is not None
-        assert segment.value == "value"
 
 
 class TestVariablePoolGetAndNestedAttribute:

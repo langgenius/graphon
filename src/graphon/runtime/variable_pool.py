@@ -72,8 +72,7 @@ class VariablePool(BaseModel):
         joined_keys = ", ".join(legacy_keys)
         msg = (
             "VariablePool() no longer accepts legacy bootstrap inputs "
-            f"({joined_keys}); use VariablePool.from_bootstrap(...) or "
-            "VariablePool.from_legacy_bootstrap(...)."
+            f"({joined_keys}); use VariablePool.from_bootstrap(...)."
         )
         raise ValueError(msg)
 
@@ -114,25 +113,6 @@ class VariablePool(BaseModel):
         )
         pool._ingest_legacy_rag_variables(rag_pipeline_variables)
         return pool
-
-    @classmethod
-    def from_legacy_bootstrap(
-        cls,
-        *,
-        system_variables: Sequence[Variable] = (),
-        environment_variables: Sequence[Variable] = (),
-        conversation_variables: Sequence[Variable] = (),
-        rag_pipeline_variables: Sequence[RAGPipelineVariableInput] = (),
-        user_inputs: Mapping[str, Any] | None = None,
-    ) -> Self:
-        """Compatibility entrypoint for older constructor-style bootstrap call sites."""
-        return cls.from_bootstrap(
-            system_variables=system_variables,
-            environment_variables=environment_variables,
-            conversation_variables=conversation_variables,
-            rag_pipeline_variables=rag_pipeline_variables,
-            user_inputs=user_inputs,
-        )
 
     def _ingest_legacy_variables(
         self,
