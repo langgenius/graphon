@@ -13,13 +13,14 @@ from pathlib import Path
 from typing import IO, Any
 
 from graphon.model_runtime.entities.model_entities import AIModelEntity
-from graphon.model_runtime.slim.config import (
+from graphon.model_runtime.utils.encoders import jsonable_encoder
+
+from .config import (
     SlimConfig,
     SlimLocalSettings,
     SlimProviderBinding,
 )
-from graphon.model_runtime.slim.package_loader import SlimPackageLoader
-from graphon.model_runtime.utils.encoders import jsonable_encoder
+from .package_loader import SlimPackageLoader
 
 logger = logging.getLogger(__name__)
 

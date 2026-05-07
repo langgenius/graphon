@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import os
 import shutil
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -32,7 +31,6 @@ class SlimConfig:
     local: SlimLocalSettings
     download_timeout_seconds: float = 60.0
     marketplace_download_limit_bytes: int = 15 * 1024 * 1024
-    extra_env: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.bindings:
@@ -66,21 +64,3 @@ class SlimConfig:
             )
             for binding in self.bindings
         ]
-
-    def build_env(self) -> dict[str, str]:
-        env = dict(os.environ)
-        env["SLIM_MODE"] = "local"
-        env["SLIM_FOLDER"] = str(self.local.folder)
-        env["SLIM_PYTHON_PATH"] = self.local.python_path
-        env["SLIM_PYTHON_ENV_INIT_TIMEOUT"] = str(self.local.python_env_init_timeout)
-        env["SLIM_MAX_EXECUTION_TIMEOUT"] = str(self.local.max_execution_timeout)
-        env["SLIM_MARKETPLACE_URL"] = self.local.marketplace_url
-        if self.local.uv_path:
-            env["SLIM_UV_PATH"] = self.local.uv_path
-        if self.local.pip_mirror_url:
-            env["SLIM_PIP_MIRROR_URL"] = self.local.pip_mirror_url
-        if self.local.pip_extra_args:
-            env["SLIM_PIP_EXTRA_ARGS"] = self.local.pip_extra_args
-
-        env.update(self.extra_env)
-        return env

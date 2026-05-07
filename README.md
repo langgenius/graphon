@@ -12,7 +12,7 @@ protocols, and a runnable end-to-end example.
 - Graph parsing, validation, and fluent graph building
 - Shared runtime state, variable pool, and workflow execution domain models
 - Built-in node implementations for common workflow patterns
-- Pluggable model runtime interfaces, including a local `SlimRuntime`
+- DSL import support with Slim-backed LLM nodes
 - HTTP, file, tool, and human-input integration protocols
 - Extensible engine layers and external command channels
 
@@ -48,15 +48,15 @@ make test
 local validation entrypoint: it formats, applies lint fixes, runs `ty check`,
 and then runs `pytest`.
 
-## Run the Example Workflow
+## Run the Example Workflows
 
-The repository includes a minimal runnable example at
-[`examples/graphon_openai_slim`](examples/graphon_openai_slim).
+The repository includes minimal runnable Slim LLM examples at
+[`examples/slim_llm`](examples/slim_llm).
 
-It builds and executes this workflow:
+Both versions execute this workflow:
 
 ```text
-start -> llm -> output
+start -> llm -> answer
 ```
 
 To run it:
@@ -64,25 +64,28 @@ To run it:
 ```bash
 make dev
 source .venv/bin/activate
-cd examples/graphon_openai_slim
-cp .env.example .env
-python3 workflow.py "Explain Graphon in one short sentence."
+cd examples/slim_llm
+cp credentials.example.json credentials.json
+python3 dsl.py "Reply with only the word Graphon."
+python3 code.py "Reply with only the word Graphon."
 ```
 
-Before running the example, fill in the required values in `.env`.
+Before running the example, fill in the required values in `credentials.json`.
 
 The example currently expects:
 
-- an `OPENAI_API_KEY`
-- a `SLIM_PLUGIN_ID`
-- a local `dify-plugin-daemon-slim` setup or equivalent Slim runtime
+- OpenAI-compatible model credentials in `model_credentials`
+- `slim.mode` set to either `local` or `remote`
+- `dify-plugin-daemon-slim` in `PATH`, `SLIM_BINARY_PATH`, or a local `slim`
+  binary in the example directory
+- for remote mode, `daemon_addr` and `daemon_key`
 
-For the exact environment variables and runtime notes, see
-[examples/graphon_openai_slim/README.md](examples/graphon_openai_slim/README.md).
+For the exact credential shape and runtime notes, see
+[examples/slim_llm/README.md](examples/slim_llm/README.md).
 
 ## How Graphon Fits Together
 
-At a high level, Graphon usage looks like this:
+At a high level, direct Graphon usage looks like this:
 
 1. Build or load a graph and instantiate nodes into a `Graph`.
 2. Prepare `GraphRuntimeState` and seed the `VariablePool`.
@@ -90,25 +93,24 @@ At a high level, Graphon usage looks like this:
 4. Run `GraphEngine` and consume emitted graph events.
 5. Read final outputs from runtime state.
 
-The bundled example follows exactly that path. The execution loop is centered
-around `GraphEngine.run()`:
+For Dify DSL documents, use `graphon.dsl.loads()` to build the engine from the
+workflow YAML and credentials. The resulting engine uses the DSL Slim adapter
+for LLM nodes:
 
 ```python
-engine = GraphEngine(
-    workflow_id="example-start-llm-output",
-    graph=graph,
-    graph_runtime_state=graph_runtime_state,
-    command_channel=InMemoryChannel(),
+engine = loads(
+    dsl,
+    credentials=credentials,
+    workflow_id="example-dsl-openai-slim",
+    start_inputs={"query": query},
 )
 
-for event in engine.run():
-    ...
+events = list(engine.run())
 ```
 
-See
-[examples/graphon_openai_slim/workflow.py](examples/graphon_openai_slim/workflow.py)
-for the full example, including `SlimRuntime`, `SlimPreparedLLM`, graph
-construction, input seeding, and streamed output handling.
+See [examples/slim_llm/dsl.py](examples/slim_llm/dsl.py) for the DSL import
+version and [examples/slim_llm/code.py](examples/slim_llm/code.py) for the
+Python graph construction version.
 
 ## Project Layout
 
@@ -117,7 +119,9 @@ construction, input seeding, and streamed output handling.
   layers
 - `src/graphon/runtime`: runtime state, read-only wrappers, and variable pool
 - `src/graphon/nodes`: built-in workflow node implementations
-- `src/graphon/model_runtime`: provider/model abstractions and Slim runtime
+- `src/graphon/model_runtime`: provider/model abstractions and shared model
+  entities
+- `src/graphon/dsl`: DSL import support, including Slim-backed runtime adapters
 - `src/graphon/graph_events`: event models emitted during execution
 - `src/graphon/http`: HTTP client abstractions and default implementation
 - `src/graphon/file`: workflow file models and file runtime helpers
@@ -128,8 +132,8 @@ construction, input seeding, and streamed output handling.
 ## Internal Docs
 
 - [CONTRIBUTING.md](CONTRIBUTING.md): contributor workflow, CI, commit/PR rules
-- [examples/graphon_openai_slim/README.md](examples/graphon_openai_slim/README.md):
-  runnable example setup
+- [examples/slim_llm/README.md](examples/slim_llm/README.md):
+  runnable Slim LLM example setup
 - [src/graphon/model_runtime/README.md](src/graphon/model_runtime/README.md):
   model runtime overview
 - [src/graphon/graph_engine/layers/README.md](src/graphon/graph_engine/layers/README.md):
