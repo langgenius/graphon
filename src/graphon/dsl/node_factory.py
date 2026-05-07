@@ -328,6 +328,9 @@ class SlimDslNodeFactory:
         slim = self.credentials.slim
         self.slim_client_config = SlimClientConfig(
             folder=_resolve_plugin_folder(self.credentials),
+            mode=slim.mode,
+            daemon_addr=slim.daemon_addr,
+            daemon_key=slim.daemon_key,
             python_path=slim.python_path,
             uv_path=slim.uv_path,
             python_env_init_timeout=slim.python_env_init_timeout,
@@ -335,6 +338,7 @@ class SlimDslNodeFactory:
             pip_mirror_url=slim.pip_mirror_url,
             pip_extra_args=slim.pip_extra_args,
             marketplace_url=slim.marketplace_url,
+            ignore_uv_lock=slim.ignore_uv_lock,
         )
 
     def create_node(self, node_config: NodeConfigDict) -> Node:  # noqa: PLR0911

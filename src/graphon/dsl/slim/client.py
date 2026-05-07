@@ -13,6 +13,12 @@ from pathlib import Path
 from typing import IO, Any
 
 from graphon.model_runtime.entities.model_entities import AIModelEntity
+from graphon.model_runtime.slim.config import (
+    SlimConfig,
+    SlimLocalSettings,
+    SlimProviderBinding,
+)
+from graphon.model_runtime.slim.package_loader import SlimPackageLoader
 from graphon.model_runtime.utils.encoders import jsonable_encoder
 
 logger = logging.getLogger(__name__)
@@ -48,6 +54,9 @@ type SlimEvent = SlimMessageEvent | SlimChunkEvent | SlimDoneEvent
 @dataclass(slots=True, frozen=True)
 class SlimClientConfig:
     folder: Path
+    mode: str = "local"
+    daemon_addr: str = ""
+    daemon_key: str = ""
     python_path: str = "python3"
     uv_path: str = ""
     python_env_init_timeout: int = 120
@@ -55,6 +64,7 @@ class SlimClientConfig:
     pip_mirror_url: str = ""
     pip_extra_args: str = ""
     marketplace_url: str = "https://marketplace.dify.ai"
+    ignore_uv_lock: bool = False
 
     def __post_init__(self) -> None:
         python_path = self.python_path
@@ -62,23 +72,30 @@ class SlimClientConfig:
             python_path = sys.executable
 
         object.__setattr__(self, "folder", self.folder.expanduser().resolve())
+        object.__setattr__(self, "mode", self.mode or "local")
         object.__setattr__(self, "python_path", python_path)
         object.__setattr__(self, "uv_path", self.uv_path or (shutil.which("uv") or ""))
 
     def build_env(self) -> dict[str, str]:
         env = dict(os.environ)
-        env["SLIM_MODE"] = "local"
-        env["SLIM_FOLDER"] = str(self.folder)
-        env["SLIM_PYTHON_PATH"] = self.python_path
-        env["SLIM_PYTHON_ENV_INIT_TIMEOUT"] = str(self.python_env_init_timeout)
-        env["SLIM_MAX_EXECUTION_TIMEOUT"] = str(self.max_execution_timeout)
-        env["SLIM_MARKETPLACE_URL"] = self.marketplace_url
-        if self.uv_path:
-            env["SLIM_UV_PATH"] = self.uv_path
-        if self.pip_mirror_url:
-            env["SLIM_PIP_MIRROR_URL"] = self.pip_mirror_url
-        if self.pip_extra_args:
-            env["SLIM_PIP_EXTRA_ARGS"] = self.pip_extra_args
+        env["SLIM_MODE"] = self.mode
+        if self.mode == "remote":
+            env["SLIM_DAEMON_ADDR"] = self.daemon_addr
+            env["SLIM_DAEMON_KEY"] = self.daemon_key
+        else:
+            env["SLIM_FOLDER"] = str(self.folder)
+            env["SLIM_PYTHON_PATH"] = self.python_path
+            env["SLIM_PYTHON_ENV_INIT_TIMEOUT"] = str(self.python_env_init_timeout)
+            env["SLIM_MAX_EXECUTION_TIMEOUT"] = str(self.max_execution_timeout)
+            env["SLIM_MARKETPLACE_URL"] = self.marketplace_url
+            if self.uv_path:
+                env["SLIM_UV_PATH"] = self.uv_path
+            if self.pip_mirror_url:
+                env["SLIM_PIP_MIRROR_URL"] = self.pip_mirror_url
+            if self.pip_extra_args:
+                env["SLIM_PIP_EXTRA_ARGS"] = self.pip_extra_args
+            if self.ignore_uv_lock:
+                env["SLIM_IGNORE_UV_LOCK"] = "true"
 
         return env
 
@@ -159,7 +176,11 @@ class SlimClient:
                         event.message,
                     )
                 case SlimChunkEvent():
-                    yield event.data
+                    yield (
+                        _unwrap_remote_daemon_payload(event.data)
+                        if self.config.mode == "remote"
+                        else event.data
+                    )
                 case SlimDoneEvent():
                     return
 
@@ -206,7 +227,12 @@ class SlimClient:
         if not isinstance(raw_schema, Mapping):
             msg = f"Unexpected model schema payload: {raw_schema!r}"
             raise SlimClientError(msg)
-        return AIModelEntity.model_validate(raw_schema)
+        return _convert_ai_model_entity(
+            raw_schema,
+            config=self.config,
+            plugin_id=plugin_id,
+            provider=provider,
+        )
 
     def extract(
         self,
@@ -283,6 +309,53 @@ def cached_slim_plugin_root(
 ) -> Path | None:
     candidate = slim_plugin_cache_path(folder=config.folder, plugin_id=plugin_id)
     return candidate if candidate.exists() else None
+
+
+def _unwrap_remote_daemon_payload(payload: Any) -> Any:
+    if not isinstance(payload, Mapping) or "code" not in payload:
+        return payload
+
+    code = payload.get("code")
+    if code != 0:
+        msg = str(payload.get("message") or "Slim daemon returned an error.")
+        raise SlimClientError(msg)
+    return payload.get("data")
+
+
+def _convert_ai_model_entity(
+    raw_schema: Mapping[str, Any],
+    *,
+    config: SlimClientConfig,
+    plugin_id: str,
+    provider: str,
+) -> AIModelEntity:
+    try:
+        loader = SlimPackageLoader(
+            SlimConfig(
+                bindings=[
+                    SlimProviderBinding(plugin_id=plugin_id, provider=provider),
+                ],
+                local=SlimLocalSettings(
+                    folder=config.folder,
+                    python_path=config.python_path,
+                    uv_path=config.uv_path,
+                    python_env_init_timeout=config.python_env_init_timeout,
+                    max_execution_timeout=config.max_execution_timeout,
+                    pip_mirror_url=config.pip_mirror_url,
+                    pip_extra_args=config.pip_extra_args,
+                    marketplace_url=config.marketplace_url,
+                ),
+            )
+        )
+        converted = loader.convert_model_entity(dict(raw_schema))
+    except Exception as error:
+        msg = f"Failed to convert Slim model schema: {error}"
+        raise SlimClientError(msg) from error
+
+    if converted is None:
+        msg = f"Unsupported Slim model schema: {raw_schema!r}"
+        raise SlimClientError(msg)
+    return converted
 
 
 def _iter_slim_events(stdout: Iterable[str]) -> Generator[SlimEvent, None, None]:

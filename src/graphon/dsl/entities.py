@@ -67,9 +67,12 @@ class DslToolCredential(BaseModel):
 class DslSlimSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    mode: str = "local"
     plugin_folder: str | None = None
     plugin_root: str | None = None
     plugin_roots: Mapping[str, str] = Field(default_factory=dict)
+    daemon_addr: str = ""
+    daemon_key: str = ""
     python_path: str = "python3"
     uv_path: str = ""
     python_env_init_timeout: int = 120
@@ -77,6 +80,7 @@ class DslSlimSettings(BaseModel):
     pip_mirror_url: str = ""
     pip_extra_args: str = ""
     marketplace_url: str = "https://marketplace.dify.ai"
+    ignore_uv_lock: bool = False
 
 
 class DslCredentials(BaseModel):
