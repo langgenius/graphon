@@ -1,6 +1,6 @@
 [project]
 name = 'graphon'
-version = "0.3.0"
+version = "0.3.1"
 description = 'Graph execution engine for agentic AI workflows.'
 readme = 'README.md'
 license = 'Apache-2.0'
