@@ -88,7 +88,13 @@ class _CollectedLLMResult:
 
 
 class DslSlimPreparedLLM(PreparedLLMProtocol):
-    """DSL LLM adapter backed directly by dify-plugin-daemon-slim."""
+    """DSL LLM adapter backed directly by dify-plugin-daemon-slim.
+
+    Slim actions are scoped by ``plugin_id`` first; ``provider`` is the
+    plugin-internal provider name carried in the action payload, not a globally
+    unique provider identifier. The runtime identity is therefore the pair
+    ``(plugin_id, provider)``.
+    """
 
     @override
     def __init__(
@@ -103,6 +109,10 @@ class DslSlimPreparedLLM(PreparedLLMProtocol):
         stop: Sequence[str] | None = None,
     ) -> None:
         self._plugin_id = plugin_id
+        # Keep this as the plugin-local provider name. The Slim daemon receives
+        # plugin_id out of band (for example, via "-id") and uses this payload
+        # value to dispatch within that plugin. This is intentionally not the
+        # full DSL provider path, so different plugins may reuse the same slug.
         self._provider = provider
         self._model_name = model_name
         self._credentials = dict(credentials)
