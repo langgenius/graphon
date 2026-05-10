@@ -55,6 +55,7 @@ _SUPPORTED_DEFAULT_FACTORY_NODES = frozenset((
     BuiltinNodeTypes.ANSWER,
     BuiltinNodeTypes.IF_ELSE,
     BuiltinNodeTypes.TEMPLATE_TRANSFORM,
+    BuiltinNodeTypes.CODE,
     BuiltinNodeTypes.LLM,
     BuiltinNodeTypes.TOOL,
 ))

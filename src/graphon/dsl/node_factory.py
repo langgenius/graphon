@@ -17,6 +17,9 @@ from graphon.model_runtime.entities.llm_entities import LLMMode
 from graphon.model_runtime.entities.message_entities import PromptMessage
 from graphon.nodes.answer.answer_node import AnswerNode
 from graphon.nodes.base.node import Node
+from graphon.nodes.code.code_node import CodeNode
+from graphon.nodes.code.entities import CodeNodeData
+from graphon.nodes.code.limits import CodeNodeLimits
 from graphon.nodes.end.end_node import EndNode
 from graphon.nodes.if_else.if_else_node import IfElseNode
 from graphon.nodes.llm import LLMNode, LLMNodeData
@@ -30,7 +33,9 @@ from graphon.nodes.tool.tool_node import ToolNode
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.template_rendering import Jinja2TemplateRenderer, TemplateRenderError
 
+from .code_runtime import SlimCodeExecutor
 from .entities import (
+    DslCodeSettings,
     DslCredentials,
     DslDependency,
     DslModelCredential,
@@ -309,6 +314,19 @@ def _resolve_plugin_folder(credentials: DslCredentials) -> Path:
     return Path(_DEFAULT_SLIM_PLUGIN_FOLDER)
 
 
+def _code_limits(settings: DslCodeSettings) -> CodeNodeLimits:
+    return CodeNodeLimits(
+        max_string_length=settings.max_string_length,
+        max_number=settings.max_number,
+        min_number=settings.min_number,
+        max_precision=settings.max_precision,
+        max_depth=settings.max_depth,
+        max_number_array_length=settings.max_number_array_length,
+        max_string_array_length=settings.max_string_array_length,
+        max_object_array_length=settings.max_object_array_length,
+    )
+
+
 def _node_data_payload(data: BaseNodeData | Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(data, BaseNodeData):
         return data.model_dump(mode="python")
@@ -341,7 +359,7 @@ class SlimDslNodeFactory:
             ignore_uv_lock=slim.ignore_uv_lock,
         )
 
-    def create_node(self, node_config: NodeConfigDict) -> Node:  # noqa: PLR0911
+    def create_node(self, node_config: NodeConfigDict) -> Node:  # noqa: C901, PLR0911
         node_id = str(node_config["id"])
         data = node_config["data"]
         data_payload = _node_data_payload(data)
@@ -383,6 +401,15 @@ class SlimDslNodeFactory:
                     graph_init_params=self.graph_init_params,
                     graph_runtime_state=self.graph_runtime_state,
                     jinja2_template_renderer=_DefaultJinja2TemplateRenderer(),
+                )
+            case BuiltinNodeTypes.CODE:
+                return CodeNode(
+                    node_id=node_id,
+                    data=CodeNodeData.model_validate(data_payload),
+                    graph_init_params=self.graph_init_params,
+                    graph_runtime_state=self.graph_runtime_state,
+                    code_executor=SlimCodeExecutor(self.credentials.code),
+                    code_limits=_code_limits(self.credentials.code),
                 )
             case BuiltinNodeTypes.LLM:
                 return self._create_llm_node(node_id=node_id, data=data_payload)
@@ -505,20 +532,20 @@ class SlimDslNodeFactory:
                 code="node.tool_missing_provider",
                 details={"node_type": BuiltinNodeTypes.TOOL},
             )
-        dependency = next(
-            dependency
-            for dependency in plugin_dependencies
-            if dependency.plugin_unique_identifier == plugin_id
+        tool_credential = resolve_dsl_tool_credential(
+            credentials=self.credentials.tool_credentials,
+            plugin_id=plugin_id,
+            provider_id=node_data.provider_id,
+            provider=provider,
+            tool_name=node_data.tool_name,
         )
 
         return SlimToolNodeRuntime(
             config=self.slim_client_config,
-            tool_credential=resolve_dsl_tool_credential(
-                credentials=self.credentials.tool_credentials,
-                plugin_id=plugin_id,
-                provider_id=node_data.provider_id,
-                provider=provider,
-                tool_name=node_data.tool_name,
-            ),
-            dependencies=[dependency],
+            plugin_id=plugin_id,
+            provider=provider,
+            provider_id=node_data.provider_id,
+            tool_name=node_data.tool_name,
+            credentials=tool_credential.values,
+            credential_type=tool_credential.credential_type,
         )
