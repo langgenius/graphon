@@ -21,7 +21,7 @@ from graphon.model_runtime.protocols.tts_runtime import TTSModelRuntime
 from graphon.nodes.code.code_node import WorkflowCodeExecutor
 from graphon.nodes.llm.protocols import CredentialsProvider, ModelFactory
 from graphon.nodes.llm.runtime_protocols import (
-    PreparedLLMProtocol,
+    LLMProtocol,
     PromptMessageSerializerProtocol,
     RetrieverAttachmentLoaderProtocol,
 )
@@ -54,12 +54,12 @@ from graphon.protocols import (
     HumanInputNodeRuntimeProtocol as PublicHumanInputNodeRuntimeProtocol,
 )
 from graphon.protocols import LLMModelRuntime as PublicLLMModelRuntime
+from graphon.protocols import LLMProtocol as PublicLLMProtocol
 from graphon.protocols import ModelFactory as PublicModelFactory
 from graphon.protocols import ModelProviderRuntime as PublicModelProviderRuntime
 from graphon.protocols import ModelRuntime as PublicModelRuntime
 from graphon.protocols import ModerationModelRuntime as PublicModerationModelRuntime
 from graphon.protocols import NodeFactory as PublicNodeFactory
-from graphon.protocols import PreparedLLMProtocol as PublicPreparedLLMProtocol
 from graphon.protocols import PromptMessageMemory as PublicPromptMessageMemory
 from graphon.protocols import (
     PromptMessageSerializerProtocol as PublicPromptMessageSerializerProtocol,
@@ -111,7 +111,7 @@ def test_public_protocol_exports_match_canonical_definitions() -> None:
     assert PublicWorkflowCodeExecutor is WorkflowCodeExecutor
     assert PublicCredentialsProvider is CredentialsProvider
     assert PublicModelFactory is ModelFactory
-    assert PublicPreparedLLMProtocol is PreparedLLMProtocol
+    assert PublicLLMProtocol is LLMProtocol
     assert PublicPromptMessageSerializerProtocol is PromptMessageSerializerProtocol
     assert PublicRetrieverAttachmentLoaderProtocol is RetrieverAttachmentLoaderProtocol
     assert PublicFileManagerProtocol is FileManagerProtocol
@@ -136,12 +136,12 @@ def test_public_protocol_package_exports_are_stable() -> None:
         "HumanInputFormStateProtocol",
         "HumanInputNodeRuntimeProtocol",
         "LLMModelRuntime",
+        "LLMProtocol",
         "ModelFactory",
         "ModelProviderRuntime",
         "ModelRuntime",
         "ModerationModelRuntime",
         "NodeFactory",
-        "PreparedLLMProtocol",
         "PromptMessageMemory",
         "PromptMessageSerializerProtocol",
         "ReadOnlyGraphRuntimeState",

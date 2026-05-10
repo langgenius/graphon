@@ -112,6 +112,12 @@ See [examples/slim_llm/dsl.py](examples/slim_llm/dsl.py) for the DSL import
 version and [examples/slim_llm/code.py](examples/slim_llm/code.py) for the
 Python graph construction version.
 
+For direct Python graph construction, use `graphon.dsl.slim.SlimLLM` as the
+standard Slim-backed LLM runtime. Integrations that need to replace model
+execution, routing, credential injection, or token counting can implement
+`graphon.protocols.LLMProtocol`. A higher-level model factory/resolver layer is
+planned as a separate follow-up.
+
 ## Project Layout
 
 - `src/graphon/graph`: graph structures, parsing, validation, and builders

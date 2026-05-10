@@ -56,7 +56,7 @@ from graphon.nodes.base.entities import VariableSelector
 from graphon.nodes.base.node import Node
 from graphon.nodes.base.variable_template_parser import VariableTemplateParser
 from graphon.nodes.llm.runtime_protocols import (
-    PreparedLLMProtocol,
+    LLMProtocol,
     PromptMessageSerializerProtocol,
     RetrieverAttachmentLoaderProtocol,
 )
@@ -103,7 +103,7 @@ class _CollectedRunContext:
 class _PreparedRunPrompt:
     prompt_messages: Sequence[PromptMessage] = field(default_factory=tuple)
     stop: Sequence[str] | None = None
-    model_instance: PreparedLLMProtocol | None = None
+    model_instance: LLMProtocol | None = None
 
 
 class LLMNode(Node[LLMNodeData]):
@@ -120,7 +120,7 @@ class LLMNode(Node[LLMNodeData]):
     _retriever_attachment_loader: RetrieverAttachmentLoaderProtocol | None
     _prompt_message_serializer: PromptMessageSerializerProtocol
     _jinja2_template_renderer: Jinja2TemplateRenderer | None
-    _model_instance: PreparedLLMProtocol
+    _model_instance: LLMProtocol
     _memory: PromptMessageMemory | None
     _default_query_selector: tuple[str, ...] | None
 
@@ -134,7 +134,7 @@ class LLMNode(Node[LLMNodeData]):
         graph_runtime_state: GraphRuntimeState,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
-        model_instance: PreparedLLMProtocol,
+        model_instance: LLMProtocol,
         http_client: HttpClientProtocol | None = None,
         memory: PromptMessageMemory | None = None,
         llm_file_saver: LLMFileSaver,
@@ -280,7 +280,7 @@ class LLMNode(Node[LLMNodeData]):
     def _require_model_instance(
         *,
         prepared_prompt: _PreparedRunPrompt,
-    ) -> PreparedLLMProtocol:
+    ) -> LLMProtocol:
         if prepared_prompt.model_instance is None:
             msg = "model instance was not prepared"
             raise AssertionError(msg)
@@ -306,7 +306,7 @@ class LLMNode(Node[LLMNodeData]):
                 file.model_dump() for file in collected_context.context_files
             ]
 
-    def _prepare_model_instance(self) -> PreparedLLMProtocol:
+    def _prepare_model_instance(self) -> LLMProtocol:
         model_instance = self._model_instance
         model_instance.parameters = llm_utils.resolve_completion_params_variables(
             model_instance.parameters,
@@ -474,7 +474,7 @@ class LLMNode(Node[LLMNodeData]):
     @staticmethod
     def invoke_llm(
         *,
-        model_instance: PreparedLLMProtocol,
+        model_instance: LLMProtocol,
         prompt_messages: Sequence[PromptMessage],
         stop: Sequence[str] | None = None,
         structured_output_enabled: bool,
@@ -529,7 +529,7 @@ class LLMNode(Node[LLMNodeData]):
         file_saver: LLMFileSaver,
         file_outputs: list[File],
         node_id: str,
-        model_instance: PreparedLLMProtocol | Any,
+        model_instance: LLMProtocol,
         reasoning_format: Literal["separated", "tagged"] = "tagged",
         request_start_time: float | None = None,
     ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
@@ -582,7 +582,7 @@ class LLMNode(Node[LLMNodeData]):
         file_saver: LLMFileSaver,
         file_outputs: list[File],
         node_id: str,
-        model_instance: PreparedLLMProtocol | Any,
+        model_instance: LLMProtocol,
         reasoning_format: Literal["separated", "tagged"] = "tagged",
         request_start_time: float | None = None,
     ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
@@ -1013,7 +1013,7 @@ class LLMNode(Node[LLMNodeData]):
         sys_files: Sequence[File],
         context: str = "",
         memory: PromptMessageMemory | None = None,
-        model_instance: PreparedLLMProtocol,
+        model_instance: LLMProtocol,
         prompt_template: Sequence[LLMNodeChatModelMessage]
         | LLMNodeCompletionModelPromptTemplate,
         stop: Sequence[str] | None = None,
@@ -1070,7 +1070,7 @@ class LLMNode(Node[LLMNodeData]):
         sys_query: str | None,
         context: str,
         memory: PromptMessageMemory | None,
-        model_instance: PreparedLLMProtocol,
+        model_instance: LLMProtocol,
         prompt_template: Sequence[LLMNodeChatModelMessage]
         | LLMNodeCompletionModelPromptTemplate,
         memory_config: MemoryConfig | None,
@@ -1116,7 +1116,7 @@ class LLMNode(Node[LLMNodeData]):
         context: str,
         memory: PromptMessageMemory | None,
         memory_config: MemoryConfig | None,
-        model_instance: PreparedLLMProtocol,
+        model_instance: LLMProtocol,
         vision_detail: ImagePromptMessageContent.DETAIL,
         variable_pool: VariablePool,
         jinja2_variables: Sequence[VariableSelector],
@@ -1165,7 +1165,7 @@ class LLMNode(Node[LLMNodeData]):
         sys_query: str | None,
         context: str,
         memory: PromptMessageMemory | None,
-        model_instance: PreparedLLMProtocol,
+        model_instance: LLMProtocol,
         prompt_template: LLMNodeCompletionModelPromptTemplate,
         memory_config: MemoryConfig | None,
         variable_pool: VariablePool,
@@ -1780,7 +1780,7 @@ class LLMNode(Node[LLMNodeData]):
         return self.node_data.retry_config.retry_enabled
 
     @property
-    def model_instance(self) -> PreparedLLMProtocol:
+    def model_instance(self) -> LLMProtocol:
         return self._model_instance
 
 
@@ -1830,7 +1830,7 @@ def _render_jinja2_message(
 def _calculate_rest_token(
     *,
     prompt_messages: list[PromptMessage],
-    model_instance: PreparedLLMProtocol,
+    model_instance: LLMProtocol,
 ) -> int:
     rest_tokens = 2000
     runtime_model_schema = llm_utils.fetch_model_schema(model_instance=model_instance)
@@ -1864,7 +1864,7 @@ def _handle_memory_chat_mode(
     *,
     memory: PromptMessageMemory | None,
     memory_config: MemoryConfig | None,
-    model_instance: PreparedLLMProtocol,
+    model_instance: LLMProtocol,
 ) -> Sequence[PromptMessage]:
     memory_messages: Sequence[PromptMessage] = []
     # Get messages from memory for chat model
@@ -1886,7 +1886,7 @@ def _handle_memory_completion_mode(
     *,
     memory: PromptMessageMemory | None,
     memory_config: MemoryConfig | None,
-    model_instance: PreparedLLMProtocol,
+    model_instance: LLMProtocol,
 ) -> str:
     memory_text = ""
     # Get history text from memory for completion model

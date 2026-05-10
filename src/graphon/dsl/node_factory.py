@@ -36,7 +36,7 @@ from .entities import (
     DslModelCredential,
 )
 from .errors import DslError
-from .slim import DslSlimPreparedLLM, SlimClientConfig
+from .slim import SlimClientConfig, SlimLLM
 from .tool_runtime import SlimToolNodeRuntime, resolve_dsl_tool_credential
 
 _OPENAI_CREDENTIAL_ALIASES = ("openai_api_key", "OPENAI_API_KEY", "api_key")
@@ -452,7 +452,7 @@ class SlimDslNodeFactory:
             plugin_id=plugin_id,
         )
         try:
-            prepared_llm = DslSlimPreparedLLM(
+            model_instance = SlimLLM(
                 config=self.slim_client_config,
                 plugin_id=plugin_id,
                 provider=vendor,
@@ -472,7 +472,7 @@ class SlimDslNodeFactory:
             data=LLMNodeData.model_validate(normalized_data),
             graph_init_params=self.graph_init_params,
             graph_runtime_state=self.graph_runtime_state,
-            model_instance=prepared_llm,
+            model_instance=model_instance,
             llm_file_saver=_TextOnlyFileSaver(),
             prompt_message_serializer=_PassthroughPromptMessageSerializer(),
             default_query_selector=("sys", "query"),
