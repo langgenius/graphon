@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from pydantic import BaseModel, Field
 from pydantic_core import to_jsonable_python
@@ -186,7 +186,7 @@ class NodeProtocol(Protocol):
     id: str
     state: NodeState
     execution_type: NodeExecutionType
-    node_type: NodeType
+    node_type: ClassVar[NodeType]
 
     def blocks_variable_output(
         self,
