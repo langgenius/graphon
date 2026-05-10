@@ -83,12 +83,32 @@ class DslSlimSettings(BaseModel):
     ignore_uv_lock: bool = False
 
 
+class DslCodeSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    execution_endpoint: str | None = None
+    execution_api_key: str | None = None
+    ssl_verify: bool = True
+    connect_timeout: float = 10.0
+    read_timeout: float = 60.0
+    write_timeout: float = 10.0
+    max_string_length: int = 400_000
+    max_number: int | float = 9_223_372_036_854_775_807
+    min_number: int | float = -9_223_372_036_854_775_807
+    max_precision: int = 20
+    max_depth: int = 5
+    max_number_array_length: int = 1_000
+    max_string_array_length: int = 30
+    max_object_array_length: int = 30
+
+
 class DslCredentials(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model_credentials: list[DslModelCredential] = Field(default_factory=list)
     tool_credentials: list[DslToolCredential] = Field(default_factory=list)
     slim: DslSlimSettings = Field(default_factory=DslSlimSettings)
+    code: DslCodeSettings = Field(default_factory=DslCodeSettings)
 
 
 class DslImportPlan(BaseModel):

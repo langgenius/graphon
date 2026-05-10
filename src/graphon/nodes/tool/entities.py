@@ -1,5 +1,5 @@
 from enum import StrEnum, auto
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, field_validator
 from pydantic_core.core_schema import ValidationInfo
@@ -7,7 +7,7 @@ from pydantic_core.core_schema import ValidationInfo
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.enums import BuiltinNodeTypes, NodeType
 
-_SUPPORTED_TOOL_CONFIGURATION_VALUE_TYPES = (str, int, float, bool)
+_SUPPORTED_TOOL_CONFIGURATION_VALUE_TYPES = (str, int, float, bool, dict)
 _SUPPORTED_TOOL_INPUT_CONSTANT_VALUE_TYPES = (str, int, float, bool, dict, list)
 _SUPPORTED_TOOL_CONFIGURATION_VALUE_TYPE_NAMES = ", ".join(
     value_type.__name__ for value_type in _SUPPORTED_TOOL_CONFIGURATION_VALUE_TYPES
@@ -27,6 +27,14 @@ class ToolProviderType(StrEnum):
     APP = auto()
     DATASET_RETRIEVAL = "dataset-retrieval"
     MCP = auto()
+
+
+class ToolInputType(StrEnum):
+    """Binding modes for persisted tool input values."""
+
+    MIXED = auto()
+    VARIABLE = auto()
+    CONSTANT = auto()
 
 
 class ToolEntity(BaseModel):
@@ -56,7 +64,7 @@ class ToolEntity(BaseModel):
 
         for key, config_value in configurations.items():
             match config_value:
-                case str() | int() | float() | bool():
+                case str() | int() | float() | bool() | dict():
                     pass
                 case _:
                     msg = (
@@ -75,7 +83,7 @@ class ToolNodeData(BaseNodeData, ToolEntity):
         """Persisted tool input value and its binding mode."""
 
         value: list[str] | str | int | float | bool | dict[str, Any] | list[Any] | None
-        type: Literal["mixed", "variable", "constant"]
+        type: ToolInputType
 
         @field_validator("type", mode="before")
         @classmethod
@@ -83,7 +91,7 @@ class ToolNodeData(BaseNodeData, ToolEntity):
             cls,
             value: Any,
             validation_info: ValidationInfo,
-        ) -> Literal["mixed", "variable", "constant"]:
+        ) -> Any:
             typ = value
             value = validation_info.data.get("value")
 
@@ -91,14 +99,14 @@ class ToolNodeData(BaseNodeData, ToolEntity):
                 return typ
 
             match typ:
-                case "mixed":
+                case ToolInputType.MIXED:
                     match value:
                         case str():
                             pass
                         case _:
                             msg = "value must be a string"
                             raise ValueError(msg)
-                case "variable":
+                case ToolInputType.VARIABLE:
                     match value:
                         case list() if all(isinstance(val, str) for val in value):
                             pass
@@ -108,7 +116,7 @@ class ToolNodeData(BaseNodeData, ToolEntity):
                         case _:
                             msg = "value must be a list"
                             raise ValueError(msg)
-                case "constant":
+                case ToolInputType.CONSTANT:
                     match value:
                         case str() | int() | float() | bool() | dict() | list():
                             pass

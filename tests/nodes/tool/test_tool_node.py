@@ -1,5 +1,6 @@
 from collections.abc import Generator, Mapping
 from time import time
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
 
@@ -111,10 +112,9 @@ class _RuntimeWithoutExecutionId:
 class _StubToolFileManagerFactory:
     def __init__(self) -> None:
         self.get_file_generator_by_tool_file_id = MagicMock(return_value=(None, None))
-
-    def create_file_by_raw(self, **_: object) -> object:
-        msg = "not used in this test"
-        raise AssertionError(msg)
+        self.create_file_by_raw: MagicMock = MagicMock(
+            side_effect=AssertionError("not used in this test"),
+        )
 
 
 def _build_tool_node() -> tuple[
@@ -278,6 +278,109 @@ def test_transform_message_dispatches_image_link_with_handler_map() -> None:
             "transfer_method": FileTransferMethod.TOOL_FILE,
             "url": "https://example.com/image.png",
         },
+    )
+
+
+def test_transform_message_saves_raw_blob_message_as_tool_file() -> None:
+    node, runtime, tool_file_manager_factory = _build_tool_node()
+    built_file = File(
+        file_type=FileType.CUSTOM,
+        transfer_method=FileTransferMethod.TOOL_FILE,
+        reference="tool-file-raw",
+    )
+    tool_file_manager_factory.create_file_by_raw.side_effect = None
+    tool_file_manager_factory.create_file_by_raw.return_value = SimpleNamespace(
+        id="tool-file-raw",
+    )
+    runtime.build_file_reference.return_value = built_file
+
+    events = list(
+        node.transform_message(
+            messages=_message_stream(
+                ToolRuntimeMessage(
+                    type=ToolRuntimeMessage.MessageType.BLOB,
+                    message=ToolRuntimeMessage.BlobMessage(blob=b"raw bytes"),
+                    meta={
+                        "mime_type": "application/octet-stream",
+                        "filename": "result.bin",
+                    },
+                ),
+            ),
+            tool_info={},
+            parameters_for_log={},
+            node_id="node-1",
+            tool_runtime=ToolRuntimeHandle(raw=object()),
+        ),
+    )
+
+    completed_event = events[-1]
+    assert isinstance(completed_event, StreamCompletedEvent)
+    assert completed_event.node_run_result.outputs["files"].value == [built_file]
+    tool_file_manager_factory.create_file_by_raw.assert_called_once_with(
+        file_binary=b"raw bytes",
+        mimetype="application/octet-stream",
+        filename="result.bin",
+    )
+    runtime.build_file_reference.assert_called_once_with(
+        mapping={
+            "tool_file_id": "tool-file-raw",
+            "transfer_method": FileTransferMethod.TOOL_FILE,
+        },
+    )
+
+
+def test_transform_message_merges_blob_chunks_before_saving_file() -> None:
+    node, runtime, tool_file_manager_factory = _build_tool_node()
+    built_file = File(
+        file_type=FileType.CUSTOM,
+        transfer_method=FileTransferMethod.TOOL_FILE,
+        reference="tool-file-chunked",
+    )
+    tool_file_manager_factory.create_file_by_raw.side_effect = None
+    tool_file_manager_factory.create_file_by_raw.return_value = SimpleNamespace(
+        id="tool-file-chunked",
+    )
+    runtime.build_file_reference.return_value = built_file
+
+    events = list(
+        node.transform_message(
+            messages=_message_stream(
+                ToolRuntimeMessage(
+                    type=ToolRuntimeMessage.MessageType.BLOB_CHUNK,
+                    message=ToolRuntimeMessage.BlobChunkMessage(
+                        id="blob-1",
+                        sequence=0,
+                        total_length=9,
+                        blob=b"raw ",
+                        end=False,
+                    ),
+                ),
+                ToolRuntimeMessage(
+                    type=ToolRuntimeMessage.MessageType.BLOB_CHUNK,
+                    message=ToolRuntimeMessage.BlobChunkMessage(
+                        id="blob-1",
+                        sequence=1,
+                        total_length=9,
+                        blob=b"bytes",
+                        end=True,
+                    ),
+                    meta={"mimetype": "application/octet-stream"},
+                ),
+            ),
+            tool_info={},
+            parameters_for_log={},
+            node_id="node-1",
+            tool_runtime=ToolRuntimeHandle(raw=object()),
+        ),
+    )
+
+    completed_event = events[-1]
+    assert isinstance(completed_event, StreamCompletedEvent)
+    assert completed_event.node_run_result.outputs["files"].value == [built_file]
+    tool_file_manager_factory.create_file_by_raw.assert_called_once_with(
+        file_binary=b"raw bytes",
+        mimetype="application/octet-stream",
+        filename=None,
     )
 
 
