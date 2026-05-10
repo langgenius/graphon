@@ -262,6 +262,9 @@ class _SlimToolParameterResolver:
                 return variable.value
             case None:
                 return value if value is not None else _MISSING
+            case _:
+                msg = f"Unsupported tool input type: {input_type}"
+                raise ToolNodeError(msg)
 
 
 @dataclass(slots=True)
