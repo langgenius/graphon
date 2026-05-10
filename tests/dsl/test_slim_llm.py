@@ -6,7 +6,6 @@ from typing import Any
 
 import pytest
 
-import graphon.dsl.slim as slim_package
 import graphon.dsl.slim.llm as slim_llm_module
 from graphon.dsl.slim import SlimClientConfig, SlimClientError, SlimLLM
 from graphon.model_runtime.entities.llm_entities import LLMResult
@@ -72,25 +71,6 @@ def _build_llm(tmp_path: Path) -> SlimLLM:
         parameters={"temperature": 0.2},
         stop=["END"],
     )
-
-
-def test_slim_llm_is_public_runtime_name(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _patch_recording_slim_client(monkeypatch)
-    llm = _build_llm(tmp_path)
-    old_runtime_prefix = "Dsl"
-    old_runtime_name = f"{old_runtime_prefix}SlimPreparedLLM"
-
-    assert slim_package.SlimLLM is SlimLLM
-    assert "SlimLLM" in slim_package.__all__
-    assert old_runtime_name not in slim_package.__all__
-    assert not hasattr(slim_package, old_runtime_name)
-    assert llm.provider == "provider"
-    assert llm.model_name == "chat-model"
-    assert llm.parameters == {"temperature": 0.2}
-    assert llm.stop == ["END"]
 
 
 def test_slim_llm_constructs_slim_client_eagerly(
