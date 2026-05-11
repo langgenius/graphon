@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import base64
+import json
+import mimetypes
 from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, cast
 
+from graphon.file.enums import FileTransferMethod, FileType
 from graphon.file.models import File
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.nodes.runtime import ToolNodeRuntimeProtocol
@@ -35,25 +38,45 @@ class SlimToolParameterForm(StrEnum):
 
 class SlimToolParameterType(StrEnum):
     STRING = "string"
+    TEXT_INPUT = "text-input"
     NUMBER = "number"
     BOOLEAN = "boolean"
+    SELECT = "select"
+    SECRET_INPUT = "secret-input"  # noqa: S105
+    FILE = "file"
     ARRAY = "array"
     FILES = "files"
+    SYSTEM_FILES = "system-files"
     CHECKBOX = "checkbox"
     OBJECT = "object"
+    ANY = "any"
+    DYNAMIC_SELECT = "dynamic-select"
     MODEL_SELECTOR = "model-selector"
     APP_SELECTOR = "app-selector"
+    TOOLS_SELECTOR = "array[tools]"
 
 
 _ARRAY_PARAMETER_TYPES = frozenset((
     SlimToolParameterType.ARRAY,
     SlimToolParameterType.FILES,
-    SlimToolParameterType.CHECKBOX,
+    SlimToolParameterType.SYSTEM_FILES,
+))
+_FILE_LIST_PARAMETER_TYPES = frozenset((
+    SlimToolParameterType.FILES,
+    SlimToolParameterType.SYSTEM_FILES,
 ))
 _OBJECT_PARAMETER_TYPES = frozenset((
     SlimToolParameterType.OBJECT,
     SlimToolParameterType.MODEL_SELECTOR,
     SlimToolParameterType.APP_SELECTOR,
+))
+_STRING_PARAMETER_TYPES = frozenset((
+    SlimToolParameterType.STRING,
+    SlimToolParameterType.TEXT_INPUT,
+    SlimToolParameterType.SELECT,
+    SlimToolParameterType.SECRET_INPUT,
+    SlimToolParameterType.DYNAMIC_SELECT,
+    SlimToolParameterType.CHECKBOX,
 ))
 
 type SlimActionInvoker = Callable[
@@ -352,9 +375,12 @@ class SlimToolNodeRuntime(ToolNodeRuntimeProtocol):
             "tool": prepared.tool_name,
             "credentials": dict(prepared.credentials),
             "credential_type": prepared.credential_type,
-            "tool_parameters": _merge_invocation_parameters(
-                llm_parameters=tool_parameters,
-                form_values=prepared.form_values,
+            "tool_parameters": _prepare_invocation_parameters(
+                parameters=prepared.parameters,
+                values=_merge_invocation_parameters(
+                    llm_parameters=tool_parameters,
+                    form_values=prepared.form_values,
+                ),
             ),
         }
         for payload in self._actions.invoke(
@@ -375,9 +401,7 @@ class SlimToolNodeRuntime(ToolNodeRuntimeProtocol):
         return LLMUsage.empty_usage()
 
     def build_file_reference(self, *, mapping: Mapping[str, Any]) -> File:
-        _ = mapping
-        msg = "Slim DSL tool runtime does not support file tool messages yet."
-        raise ToolNodeError(msg)
+        return _file_reference_from_mapping(mapping)
 
     def _load_tool_parameters(
         self,
@@ -434,9 +458,115 @@ def _merge_invocation_parameters(
     llm_parameters: Mapping[str, Any],
     form_values: Mapping[str, Any],
 ) -> dict[str, Any]:
-    merged = dict(llm_parameters)
-    merged.update(form_values)
+    merged = dict(form_values)
+    merged.update(llm_parameters)
     return merged
+
+
+def _prepare_invocation_parameters(
+    *,
+    parameters: Sequence[_SlimToolParameter],
+    values: Mapping[str, Any],
+) -> dict[str, Any]:
+    parameters_by_name = {parameter.name: parameter for parameter in parameters}
+    prepared: dict[str, Any] = {}
+    for name, value in values.items():
+        parameter = parameters_by_name.get(name)
+        resolved_value = value
+        if parameter is not None:
+            resolved_value = _cast_tool_parameter_value(
+                parameter=parameter,
+                value=value,
+            )
+        prepared[name] = _to_slim_jsonable_value(resolved_value)
+    return prepared
+
+
+def _to_slim_jsonable_value(value: Any) -> Any:
+    if isinstance(value, File):
+        return value.to_plugin_parameter()
+    if isinstance(value, Mapping):
+        return {
+            str(key): _to_slim_jsonable_value(inner) for key, inner in value.items()
+        }
+    if isinstance(value, list | tuple):
+        return [_to_slim_jsonable_value(inner) for inner in value]
+    return value
+
+
+def _file_reference_from_mapping(mapping: Mapping[str, Any]) -> File:
+    transfer_method = _file_transfer_method(
+        mapping.get("transfer_method", FileTransferMethod.TOOL_FILE),
+    )
+    file_type = _file_type(mapping.get("type", FileType.CUSTOM))
+    filename = _optional_str(mapping.get("filename"))
+    mime_type = _optional_str(mapping.get("mime_type"))
+    extension = _optional_str(mapping.get("extension"))
+    if extension is None and mime_type is not None:
+        extension = mimetypes.guess_extension(mime_type)
+    size = _int_or_default(mapping.get("size"), -1)
+
+    if transfer_method == FileTransferMethod.REMOTE_URL:
+        remote_url = _optional_str(mapping.get("remote_url") or mapping.get("url"))
+        if not remote_url:
+            msg = "Remote file reference is missing url."
+            raise ToolNodeError(msg)
+        return File(
+            file_type=file_type,
+            transfer_method=transfer_method,
+            remote_url=remote_url,
+            filename=filename,
+            extension=extension,
+            mime_type=mime_type,
+            size=size,
+        )
+
+    reference = _optional_str(
+        mapping.get("reference")
+        or mapping.get("tool_file_id")
+        or mapping.get("related_id"),
+    )
+    if not reference:
+        msg = "Tool file reference is missing tool_file_id."
+        raise ToolNodeError(msg)
+
+    return File(
+        file_type=file_type,
+        transfer_method=transfer_method,
+        reference=reference,
+        remote_url=_optional_str(mapping.get("url")),
+        filename=filename,
+        extension=extension,
+        mime_type=mime_type,
+        size=size,
+    )
+
+
+def _file_transfer_method(value: Any) -> FileTransferMethod:
+    try:
+        return FileTransferMethod(value)
+    except (TypeError, ValueError):
+        return FileTransferMethod.TOOL_FILE
+
+
+def _file_type(value: Any) -> FileType:
+    try:
+        return FileType(value)
+    except (TypeError, ValueError):
+        return FileType.CUSTOM
+
+
+def _optional_str(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _int_or_default(value: Any, default: int) -> int:
+    if isinstance(value, int):
+        return value
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def resolve_dsl_tool_credential(
@@ -665,6 +795,8 @@ def _empty_parameter_value(parameter_type: SlimToolParameterType) -> Any:
         return False
     if parameter_type in _ARRAY_PARAMETER_TYPES:
         return []
+    if parameter_type == SlimToolParameterType.TOOLS_SELECTOR:
+        return []
     if parameter_type in _OBJECT_PARAMETER_TYPES:
         return {}
     return ""
@@ -675,43 +807,112 @@ def _cast_tool_parameter_value(
     parameter: _SlimToolParameter,
     value: Any,
 ) -> Any:
-    match parameter.type:
-        case SlimToolParameterType.NUMBER:
-            return _cast_number(value)
-        case SlimToolParameterType.BOOLEAN:
-            return _cast_bool(value)
-        case (
-            SlimToolParameterType.ARRAY
-            | SlimToolParameterType.FILES
-            | SlimToolParameterType.CHECKBOX
-        ):
-            return value if isinstance(value, list) else []
-        case (
-            SlimToolParameterType.OBJECT
-            | SlimToolParameterType.MODEL_SELECTOR
-            | SlimToolParameterType.APP_SELECTOR
-        ):
-            return value if isinstance(value, Mapping) else {}
-        case _:
-            return value
+    caster = _TOOL_PARAMETER_VALUE_CASTERS.get(parameter.type)
+    return caster(value) if caster is not None else value
+
+
+def _cast_string(value: Any) -> str:
+    return "" if value is None else value if isinstance(value, str) else str(value)
 
 
 def _cast_number(value: Any) -> Any:
     if value is None or isinstance(value, int | float):
         return value
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return value
-    return int(number) if number.is_integer() else number
+    if isinstance(value, str) and value:
+        try:
+            return float(value) if "." in value else int(value)
+        except ValueError as error:
+            msg = f"Tool parameter value {value!r} is not a valid number."
+            raise ToolNodeError(msg) from error
+    return None
 
 
 def _cast_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
-        return value.strip().lower() in {"true", "1", "yes", "on"}
+        match value.strip().lower():
+            case "true" | "yes" | "y" | "1" | "on":
+                return True
+            case "false" | "no" | "n" | "0" | "off":
+                return False
+            case _:
+                return bool(value)
     return bool(value)
+
+
+def _cast_file_parameter(value: Any) -> Any:
+    if isinstance(value, list):
+        if len(value) != 1:
+            msg = "File tool parameter accepts exactly one file."
+            raise ToolNodeError(msg)
+        return value[0]
+    return value
+
+
+def _cast_file_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else [value]
+
+
+def _cast_array(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return [value]
+        if isinstance(parsed, list):
+            return parsed
+    return [value]
+
+
+def _cast_object(value: Any) -> Mapping[str, Any]:
+    if isinstance(value, Mapping):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, Mapping) else {}
+    return {}
+
+
+def _cast_selector(value: Any) -> Mapping[str, Any]:
+    if isinstance(value, Mapping):
+        return value
+    msg = "Selector tool parameter must be a mapping."
+    raise ToolNodeError(msg)
+
+
+def _cast_tools_selector(value: Any) -> Any:
+    if value and not isinstance(value, list):
+        msg = "Tools selector tool parameter must be a list."
+        raise ToolNodeError(msg)
+    return value
+
+
+def _cast_any(value: Any) -> Any:
+    if value is None or isinstance(value, str | dict | list | int | float | bool):
+        return value
+    msg = "Any tool parameter must be a string, mapping, list, number, boolean or null."
+    raise ToolNodeError(msg)
+
+
+_TOOL_PARAMETER_VALUE_CASTERS: dict[SlimToolParameterType, Callable[[Any], Any]] = {
+    **dict.fromkeys(_STRING_PARAMETER_TYPES, _cast_string),
+    SlimToolParameterType.NUMBER: _cast_number,
+    SlimToolParameterType.BOOLEAN: _cast_bool,
+    SlimToolParameterType.FILE: _cast_file_parameter,
+    SlimToolParameterType.ARRAY: _cast_array,
+    **dict.fromkeys(_FILE_LIST_PARAMETER_TYPES, _cast_file_list),
+    SlimToolParameterType.TOOLS_SELECTOR: _cast_tools_selector,
+    SlimToolParameterType.OBJECT: _cast_object,
+    SlimToolParameterType.MODEL_SELECTOR: _cast_selector,
+    SlimToolParameterType.APP_SELECTOR: _cast_selector,
+    SlimToolParameterType.ANY: _cast_any,
+}
 
 
 def tool_runtime_message_from_payload(
@@ -775,7 +976,13 @@ def _tool_message_payload(
 def _message_meta(payload: object) -> dict[str, Any] | None:
     if not isinstance(payload, Mapping):
         return None
-    return {str(key): value for key, value in payload.items()}
+    meta = {str(key): value for key, value in payload.items()}
+    file_payload = meta.get("file")
+    if isinstance(file_payload, Mapping):
+        meta["file"] = _file_reference_from_mapping(
+            cast("Mapping[str, Any]", file_payload),
+        )
+    return meta
 
 
 def _text_message(payload: object) -> ToolRuntimeMessage.TextMessage:

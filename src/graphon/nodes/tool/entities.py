@@ -37,6 +37,40 @@ class ToolInputType(StrEnum):
     CONSTANT = auto()
 
 
+class ToolNodeOutputKey(StrEnum):
+    """Stable output keys emitted by tool nodes."""
+
+    TEXT = auto()
+    FILES = auto()
+    JSON = auto()
+
+
+class ToolMessageMetaKey(StrEnum):
+    """Metadata keys understood by graph-owned tool message handling."""
+
+    FILE = auto()
+    TOOL_FILE_ID = "tool_file_id"
+    MIME_TYPE = "mime_type"
+    MIMETYPE = auto()
+    FILENAME = auto()
+
+
+class ToolFileReferenceKey(StrEnum):
+    """Keys passed to the host tool-file reference builder."""
+
+    REFERENCE = auto()
+    TOOL_FILE_ID = "tool_file_id"
+    RELATED_ID = "related_id"
+    TYPE = auto()
+    TRANSFER_METHOD = "transfer_method"
+    URL = auto()
+    REMOTE_URL = "remote_url"
+    MIME_TYPE = "mime_type"
+    FILENAME = auto()
+    EXTENSION = auto()
+    SIZE = auto()
+
+
 class ToolEntity(BaseModel):
     provider_id: str
     provider_type: ToolProviderType

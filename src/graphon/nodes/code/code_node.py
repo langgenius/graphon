@@ -12,7 +12,7 @@ from graphon.nodes.base.node import Node
 from graphon.nodes.code.entities import CodeLanguage, CodeNodeData
 from graphon.nodes.code.limits import CodeNodeLimits
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
-from graphon.variables.segments import ArrayFileSegment
+from graphon.variables.segments import ArrayFileSegment, FileSegment
 from graphon.variables.types import SegmentType
 
 from .exc import (
@@ -149,7 +149,9 @@ class CodeNode(Node[CodeNodeData]):
             variable = self.graph_runtime_state.variable_pool.get(
                 variable_selector.value_selector,
             )
-            if isinstance(variable, ArrayFileSegment):
+            if isinstance(variable, FileSegment):
+                variables[variable_name] = variable.value.to_dict()
+            elif isinstance(variable, ArrayFileSegment):
                 variables[variable_name] = (
                     [v.to_dict() for v in variable.value] if variable.value else None
                 )

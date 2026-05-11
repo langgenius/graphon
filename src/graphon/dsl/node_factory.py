@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import importlib
+import mimetypes
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.entities.graph_config import NodeConfigDict
 from graphon.enums import BuiltinNodeTypes
-from graphon.file.enums import FileType
+from graphon.file.enums import FileTransferMethod, FileType
+from graphon.file.file_factory import get_file_type_by_mime_type
 from graphon.file.models import File
 from graphon.model_runtime.entities.llm_entities import LLMMode
 from graphon.model_runtime.entities.message_entities import PromptMessage
@@ -112,24 +115,84 @@ class _TextOnlyFileSaver:
         raise RuntimeError(msg)
 
 
-class _UnsupportedToolFileManager:
+@dataclass(frozen=True, slots=True)
+class _DslToolFileRecord:
+    id: str
+    blob: bytes
+    mimetype: str
+    name: str
+    extension: str
+
+    @property
+    def mime_type(self) -> str:
+        return self.mimetype
+
+    @property
+    def filename(self) -> str:
+        return self.name
+
+    @property
+    def size(self) -> int:
+        return len(self.blob)
+
+
+class _DslToolFileManager:
+    def __init__(self) -> None:
+        self._records: dict[str, _DslToolFileRecord] = {}
+
     def create_file_by_raw(
         self,
         *,
         file_binary: bytes,
         mimetype: str,
         filename: str | None = None,
-    ) -> object:
-        _ = file_binary, mimetype, filename
-        msg = "DSL import default Slim tool runtime does not support tool files yet."
-        raise RuntimeError(msg)
+    ) -> _DslToolFileRecord:
+        extension = mimetypes.guess_extension(mimetype) or ".bin"
+        record_id = uuid4().hex
+        name = _tool_file_name(
+            filename=filename,
+            fallback=f"{record_id}{extension}",
+            extension=extension,
+        )
+        record = _DslToolFileRecord(
+            id=record_id,
+            blob=file_binary,
+            mimetype=mimetype,
+            name=name,
+            extension=extension,
+        )
+        self._records[record_id] = record
+        return record
 
     def get_file_generator_by_tool_file_id(
         self,
         tool_file_id: str,
-    ) -> tuple[None, None]:
-        _ = tool_file_id
-        return None, None
+    ) -> tuple[Generator[bytes, None, None] | None, File | None]:
+        record = self._records.get(tool_file_id)
+        if record is None:
+            return None, None
+
+        def stream() -> Generator[bytes, None, None]:
+            yield record.blob
+
+        file = File(
+            file_type=get_file_type_by_mime_type(record.mimetype),
+            transfer_method=FileTransferMethod.TOOL_FILE,
+            reference=record.id,
+            filename=record.name,
+            extension=record.extension,
+            mime_type=record.mimetype,
+            size=record.size,
+        )
+        return stream(), file
+
+
+def _tool_file_name(*, filename: str | None, fallback: str, extension: str) -> str:
+    if not filename:
+        return fallback
+    if "." in filename.rsplit("/", maxsplit=1)[-1]:
+        return filename
+    return f"{filename}{extension}"
 
 
 class _DefaultJinja2TemplateRenderer(Jinja2TemplateRenderer):
@@ -431,7 +494,7 @@ class SlimDslNodeFactory:
                     data=tool_data,
                     graph_init_params=self.graph_init_params,
                     graph_runtime_state=self.graph_runtime_state,
-                    tool_file_manager_factory=_UnsupportedToolFileManager(),
+                    tool_file_manager_factory=_DslToolFileManager(),
                     runtime=runtime,
                 )
             case _:

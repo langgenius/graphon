@@ -15,6 +15,9 @@ from graphon.dsl.tool_runtime import (
     SlimToolParameterType,
 )
 from graphon.enums import BuiltinNodeTypes
+from graphon.file import helpers as file_helpers
+from graphon.file.enums import FileTransferMethod, FileType
+from graphon.file.models import File
 from graphon.nodes.tool.entities import ToolInputType, ToolNodeData, ToolProviderType
 from graphon.nodes.tool_runtime_entities import ToolRuntimeMessage
 from tests.helpers.builders import build_variable_pool
@@ -119,8 +122,9 @@ def test_slim_tool_runtime_uses_runtime_parameters_and_dify_merge_order() -> Non
     assert invoke_data["provider"] == "search"
     assert invoke_data["tool"] == "web_search"
     assert invoke_data["credentials"] == {"token": "secret"}
+    assert invoke_data["credential_type"] == "api-key"
     assert invoke_data["tool_parameters"] == {
-        "region": "q=Graphon",
+        "region": "explicit",
         "limit": 3,
         "query": "override",
     }
@@ -162,6 +166,131 @@ def test_tool_declaration_reads_static_parameters_from_slim_extract_payload() ->
     assert declaration.parameters[0].required is True
 
 
+def test_slim_tool_runtime_casts_parameters_and_serializes_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str | SlimToolAction, dict[str, Any]]] = []
+
+    def fake_resolve_file_url(_file: File, *, for_external: bool = True) -> str:
+        _ = for_external
+        return "https://files.example.test/report.pdf"
+
+    monkeypatch.setattr(file_helpers, "resolve_file_url", fake_resolve_file_url)
+
+    def invoker(
+        plugin_id: str,
+        action: str | SlimToolAction,
+        data: Mapping[str, Any],
+    ) -> Iterable[Mapping[str, Any]]:
+        calls.append((plugin_id, action, dict(data)))
+        if action == SlimToolAction.GET_TOOL_RUNTIME_PARAMETERS:
+            return [
+                {
+                    "parameters": [
+                        {
+                            "name": "document",
+                            "form": SlimToolParameterForm.LLM,
+                            "type": "file",
+                        },
+                        {
+                            "name": "tags",
+                            "form": SlimToolParameterForm.LLM,
+                            "type": SlimToolParameterType.ARRAY,
+                        },
+                        {
+                            "name": "checks",
+                            "form": SlimToolParameterForm.FORM,
+                            "type": SlimToolParameterType.CHECKBOX,
+                        },
+                        {
+                            "name": "config",
+                            "form": SlimToolParameterForm.FORM,
+                            "type": SlimToolParameterType.OBJECT,
+                        },
+                        {
+                            "name": "choice",
+                            "form": SlimToolParameterForm.FORM,
+                            "type": "select",
+                        },
+                        {
+                            "name": "flag",
+                            "form": SlimToolParameterForm.FORM,
+                            "type": SlimToolParameterType.BOOLEAN,
+                        },
+                    ],
+                }
+            ]
+        return [{"type": ToolRuntimeMessage.MessageType.TEXT, "message": "ok"}]
+
+    node_data = ToolNodeData.model_validate({
+        **_node_data().model_dump(mode="python"),
+        "tool_configurations": {
+            "config": {"type": ToolInputType.CONSTANT, "value": '{"top_k": 3}'},
+            "choice": {"type": ToolInputType.CONSTANT, "value": 7},
+            "flag": {"type": ToolInputType.CONSTANT, "value": "false"},
+            "checks": {"type": ToolInputType.CONSTANT, "value": ["one", "two"]},
+        },
+        "tool_parameters": {
+            "document": {
+                "type": ToolInputType.VARIABLE,
+                "value": ["start", "document"],
+            },
+            "tags": {"type": ToolInputType.CONSTANT, "value": '["alpha", "beta"]'},
+        },
+    })
+    runtime = SlimToolNodeRuntime(
+        config=SlimClientConfig(folder=Path(".slim")),
+        plugin_id="langgenius/search:0.1.0@abc",
+        provider="search",
+        provider_id="langgenius/search/search",
+        tool_name="web_search",
+        credentials={},
+        action_invoker=invoker,
+    )
+    file = File(
+        file_type=FileType.DOCUMENT,
+        transfer_method=FileTransferMethod.LOCAL_FILE,
+        reference="upload-file-id",
+        filename="report.pdf",
+        extension=".pdf",
+        mime_type="application/pdf",
+        size=128,
+    )
+    variable_pool = build_variable_pool(variables=[(["start", "document"], file)])
+    handle = runtime.get_runtime(
+        node_id="tool",
+        node_data=node_data,
+        variable_pool=variable_pool,
+    )
+
+    list(
+        runtime.invoke(
+            tool_runtime=handle,
+            tool_parameters={"document": [file], "tags": '["alpha", "beta"]'},
+            workflow_call_depth=0,
+            provider_name="search",
+        )
+    )
+
+    invoke_data = calls[-1][2]
+    assert invoke_data["tool_parameters"] == {
+        "config": {"top_k": 3},
+        "choice": "7",
+        "flag": False,
+        "checks": "['one', 'two']",
+        "document": {
+            "dify_model_identity": "__dify__file__",
+            "mime_type": "application/pdf",
+            "filename": "report.pdf",
+            "extension": ".pdf",
+            "size": 128,
+            "type": FileType.DOCUMENT,
+            "url": "https://files.example.test/report.pdf",
+        },
+        "tags": ["alpha", "beta"],
+    }
+
+
 def test_tool_message_conversion_covers_daemon_wrappers_and_blob_chunks() -> None:
     text = tool_runtime.tool_runtime_message_from_payload({
         "code": 0,
@@ -180,6 +309,19 @@ def test_tool_message_conversion_covers_daemon_wrappers_and_blob_chunks() -> Non
             "end": False,
         },
     })
+    file_message = tool_runtime.tool_runtime_message_from_payload({
+        "type": ToolRuntimeMessage.MessageType.FILE,
+        "message": {},
+        "meta": {
+            "file": {
+                "tool_file_id": "tool-file-id",
+                "type": FileType.DOCUMENT,
+                "transfer_method": FileTransferMethod.TOOL_FILE,
+                "filename": "report.pdf",
+                "mime_type": "application/pdf",
+            },
+        },
+    })
 
     assert text.type == ToolRuntimeMessage.MessageType.IMAGE_LINK
     assert isinstance(text.message, ToolRuntimeMessage.TextMessage)
@@ -187,6 +329,9 @@ def test_tool_message_conversion_covers_daemon_wrappers_and_blob_chunks() -> Non
     assert chunk.type == ToolRuntimeMessage.MessageType.BLOB_CHUNK
     assert isinstance(chunk.message, ToolRuntimeMessage.BlobChunkMessage)
     assert chunk.message.blob == b"ab"
+    assert isinstance(file_message.meta, dict)
+    assert isinstance(file_message.meta["file"], File)
+    assert file_message.meta["file"].reference == "tool-file-id"
 
 
 def test_tool_message_conversion_rejects_daemon_error() -> None:
@@ -195,3 +340,37 @@ def test_tool_message_conversion_rejects_daemon_error() -> None:
             "code": 1,
             "message": "bad credentials",
         })
+
+
+def test_slim_tool_runtime_builds_tool_and_remote_file_references() -> None:
+    runtime = SlimToolNodeRuntime(
+        config=SlimClientConfig(folder=Path(".slim")),
+        plugin_id="langgenius/search:0.1.0@abc",
+        provider="search",
+        provider_id="langgenius/search/search",
+        tool_name="web_search",
+        credentials={},
+        action_invoker=lambda *_: [],
+    )
+
+    tool_file = runtime.build_file_reference(
+        mapping={
+            "tool_file_id": "tool-file-id",
+            "type": FileType.DOCUMENT,
+            "transfer_method": FileTransferMethod.TOOL_FILE,
+            "filename": "report.pdf",
+            "mime_type": "application/pdf",
+        },
+    )
+    remote_file = runtime.build_file_reference(
+        mapping={
+            "url": "https://example.test/report.pdf",
+            "type": FileType.DOCUMENT,
+            "transfer_method": FileTransferMethod.REMOTE_URL,
+        },
+    )
+
+    assert tool_file.reference == "tool-file-id"
+    assert tool_file.filename == "report.pdf"
+    assert tool_file.mime_type == "application/pdf"
+    assert remote_file.remote_url == "https://example.test/report.pdf"

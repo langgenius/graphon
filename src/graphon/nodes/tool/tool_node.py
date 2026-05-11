@@ -1,6 +1,8 @@
+import mimetypes
 from collections.abc import Generator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, override
+from urllib.parse import urlsplit
 
 from typing_extensions import TypeIs
 
@@ -35,7 +37,13 @@ from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import ArrayFileSegment
 
-from .entities import ToolInputType, ToolNodeData
+from .entities import (
+    ToolFileReferenceKey,
+    ToolInputType,
+    ToolMessageMetaKey,
+    ToolNodeData,
+    ToolNodeOutputKey,
+)
 from .exc import ToolFileError, ToolNodeError, ToolParameterError
 
 _TEMPLATE_TOOL_INPUT_TYPES = frozenset((
@@ -57,6 +65,7 @@ class _ToolMessageState:
 class _BlobChunkState:
     total_length: int
     bytes_written: int = 0
+    next_sequence: int = 0
     data: bytearray = field(init=False)
 
     def __post_init__(self) -> None:
@@ -65,6 +74,47 @@ class _BlobChunkState:
 
 def _is_variable_selector(value: object) -> TypeIs[list[str]]:
     return isinstance(value, list) and all(isinstance(part, str) for part in value)
+
+
+def _meta_text(meta: Mapping[str, Any] | None, *keys: ToolMessageMetaKey) -> str | None:
+    if meta is None:
+        return None
+    for key in keys:
+        value = meta.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _linked_file_mime_type(
+    *,
+    url: str,
+    meta: Mapping[str, Any] | None,
+    tool_file: File | None,
+) -> str:
+    if tool_file is not None and tool_file.mime_type:
+        return tool_file.mime_type
+    return (
+        _meta_text(meta, ToolMessageMetaKey.MIME_TYPE, ToolMessageMetaKey.MIMETYPE)
+        or mimetypes.guess_type(urlsplit(url).path)[0]
+        or "application/octet-stream"
+    )
+
+
+def _blob_file_metadata(meta: Mapping[str, Any] | None) -> tuple[str, str | None]:
+    mime_type = (
+        _meta_text(meta, ToolMessageMetaKey.MIME_TYPE, ToolMessageMetaKey.MIMETYPE)
+        or "application/octet-stream"
+    )
+    filename = _meta_text(meta, ToolMessageMetaKey.FILENAME)
+    return mime_type, filename
+
+
+def _file_transfer_method(value: Any) -> FileTransferMethod:
+    try:
+        return FileTransferMethod(value)
+    except (TypeError, ValueError):
+        return FileTransferMethod.TOOL_FILE
 
 
 class ToolNode(Node[ToolNodeData]):
@@ -307,9 +357,9 @@ class ToolNode(Node[ToolNodeData]):
             node_run_result=NodeRunResult(
                 status=WorkflowNodeExecutionStatus.SUCCEEDED,
                 outputs={
-                    "text": state.text,
-                    "files": ArrayFileSegment(value=state.files),
-                    "json": self._normalize_json_output(state),
+                    ToolNodeOutputKey.TEXT: state.text,
+                    ToolNodeOutputKey.FILES: ArrayFileSegment(value=state.files),
+                    ToolNodeOutputKey.JSON: self._normalize_json_output(state),
                     **state.variables,
                 },
                 metadata=metadata,
@@ -464,12 +514,16 @@ class ToolNode(Node[ToolNodeData]):
             raise ToolNodeError(msg)
         return payload
 
-    def _resolve_tool_file(self, tool_file_id: str, *, missing_message: str) -> File:
+    def _find_tool_file(self, tool_file_id: str) -> File | None:
         _stream, tool_file = (
             self._tool_file_manager_factory.get_file_generator_by_tool_file_id(
                 tool_file_id,
             )
         )
+        return tool_file
+
+    def _resolve_tool_file(self, tool_file_id: str, *, missing_message: str) -> File:
+        tool_file = self._find_tool_file(tool_file_id)
         if not tool_file:
             raise ToolFileError(missing_message)
         return tool_file
@@ -487,27 +541,45 @@ class ToolNode(Node[ToolNodeData]):
         tool_file_id: str | None = None
         if meta:
             transfer_method = meta.get(
-                "transfer_method",
+                ToolFileReferenceKey.TRANSFER_METHOD,
                 FileTransferMethod.TOOL_FILE,
             )
-            tool_file_id = meta.get("tool_file_id")
-        if not isinstance(tool_file_id, str) or not tool_file_id:
-            msg = "tool message is missing tool_file_id metadata"
-            raise ToolFileError(msg)
+            tool_file_id = meta.get(ToolMessageMetaKey.TOOL_FILE_ID)
 
-        tool_file = self._resolve_tool_file(
-            tool_file_id,
-            missing_message=f"tool file {tool_file_id} not found",
-        )
-        if tool_file.mime_type is None:
-            msg = f"tool file {tool_file_id} is missing mime type"
-            raise ToolFileError(msg)
+        if not isinstance(tool_file_id, str) or not tool_file_id:
+            mime_type = _linked_file_mime_type(url=url, meta=meta, tool_file=None)
+            file_mapping: dict[str, Any] = {
+                ToolFileReferenceKey.TYPE: get_file_type_by_mime_type(mime_type),
+                ToolFileReferenceKey.TRANSFER_METHOD: FileTransferMethod.REMOTE_URL,
+                ToolFileReferenceKey.URL: url,
+                ToolFileReferenceKey.REMOTE_URL: url,
+                ToolFileReferenceKey.MIME_TYPE: mime_type,
+            }
+            state.files.append(self._runtime.build_file_reference(mapping=file_mapping))
+            yield from ()
+            return
+
+        tool_file = self._find_tool_file(tool_file_id)
+        mime_type = _linked_file_mime_type(url=url, meta=meta, tool_file=tool_file)
+        transfer_method = _file_transfer_method(transfer_method)
 
         file_mapping: dict[str, Any] = {
-            "tool_file_id": tool_file_id,
-            "type": get_file_type_by_mime_type(tool_file.mime_type),
-            "transfer_method": transfer_method,
-            "url": url,
+            ToolFileReferenceKey.TOOL_FILE_ID: tool_file_id,
+            ToolFileReferenceKey.RELATED_ID: tool_file_id,
+            ToolFileReferenceKey.TYPE: get_file_type_by_mime_type(mime_type),
+            ToolFileReferenceKey.TRANSFER_METHOD: transfer_method,
+            ToolFileReferenceKey.URL: url,
+            ToolFileReferenceKey.MIME_TYPE: mime_type,
+            ToolFileReferenceKey.FILENAME: (
+                tool_file.filename
+                if tool_file is not None
+                else _meta_text(meta, ToolMessageMetaKey.FILENAME)
+            ),
+            ToolFileReferenceKey.EXTENSION: (
+                (tool_file.extension if tool_file is not None else None)
+                or mimetypes.guess_extension(mime_type)
+            ),
+            ToolFileReferenceKey.SIZE: tool_file.size if tool_file is not None else -1,
         }
         state.files.append(self._runtime.build_file_reference(mapping=file_mapping))
         yield from ()
@@ -520,18 +592,28 @@ class ToolNode(Node[ToolNodeData]):
         state: _ToolMessageState,
         **_: Any,
     ) -> Generator[NodeEventBase, None, None]:
-        tool_file_id = (meta or {}).get("tool_file_id")
-        if isinstance(tool_file_id, str) and tool_file_id:
-            self._resolve_tool_file(
-                tool_file_id,
-                missing_message=f"tool file {tool_file_id} not exists",
-            )
-        else:
+        mime_type, filename = _blob_file_metadata(meta)
+        tool_file_id = (meta or {}).get(ToolMessageMetaKey.TOOL_FILE_ID)
+        if not isinstance(tool_file_id, str) or not tool_file_id:
             tool_file_id = self._save_blob_as_tool_file(payload=payload, meta=meta)
+        tool_file = self._find_tool_file(tool_file_id)
+        if tool_file is not None:
+            mime_type = tool_file.mime_type or mime_type
+            filename = tool_file.filename or filename
+        extension = (
+            tool_file.extension if tool_file is not None else None
+        ) or mimetypes.guess_extension(mime_type)
+        size = tool_file.size if tool_file is not None else len(payload.blob)
 
         blob_file_mapping: dict[str, Any] = {
-            "tool_file_id": tool_file_id,
-            "transfer_method": FileTransferMethod.TOOL_FILE,
+            ToolFileReferenceKey.TOOL_FILE_ID: tool_file_id,
+            ToolFileReferenceKey.RELATED_ID: tool_file_id,
+            ToolFileReferenceKey.TYPE: get_file_type_by_mime_type(mime_type),
+            ToolFileReferenceKey.TRANSFER_METHOD: FileTransferMethod.TOOL_FILE,
+            ToolFileReferenceKey.MIME_TYPE: mime_type,
+            ToolFileReferenceKey.FILENAME: filename,
+            ToolFileReferenceKey.EXTENSION: extension,
+            ToolFileReferenceKey.SIZE: size,
         }
         state.files.append(
             self._runtime.build_file_reference(mapping=blob_file_mapping),
@@ -544,14 +626,7 @@ class ToolNode(Node[ToolNodeData]):
         payload: ToolRuntimeMessage.BlobMessage,
         meta: Mapping[str, Any] | None,
     ) -> str:
-        metadata = dict(meta or {})
-        mimetype = str(
-            metadata.get("mime_type")
-            or metadata.get("mimetype")
-            or "application/octet-stream",
-        )
-        raw_filename = metadata.get("filename")
-        filename = raw_filename if isinstance(raw_filename, str) else None
+        mimetype, filename = _blob_file_metadata(meta)
         try:
             tool_file = self._tool_file_manager_factory.create_file_by_raw(
                 file_binary=payload.blob,
@@ -589,6 +664,12 @@ class ToolNode(Node[ToolNodeData]):
         elif chunk_state.total_length != payload.total_length:
             msg = f"tool blob chunk {payload.id} changed total_length"
             raise ToolFileError(msg)
+        if payload.sequence != chunk_state.next_sequence:
+            msg = (
+                f"tool blob chunk {payload.id} expected sequence "
+                f"{chunk_state.next_sequence}, got {payload.sequence}"
+            )
+            raise ToolFileError(msg)
 
         next_offset = chunk_state.bytes_written + len(payload.blob)
         if next_offset > chunk_state.total_length:
@@ -596,8 +677,12 @@ class ToolNode(Node[ToolNodeData]):
             raise ToolFileError(msg)
         chunk_state.data[chunk_state.bytes_written : next_offset] = payload.blob
         chunk_state.bytes_written = next_offset
+        chunk_state.next_sequence += 1
 
         if payload.end:
+            if chunk_state.bytes_written != chunk_state.total_length:
+                msg = f"tool blob chunk {payload.id} ended before declared total_length"
+                raise ToolFileError(msg)
             del state.blob_chunks[payload.id]
             yield from self._handle_blob_message(
                 payload=ToolRuntimeMessage.BlobMessage(
@@ -643,7 +728,7 @@ class ToolNode(Node[ToolNodeData]):
         node_id: str,
         **_: Any,
     ) -> Generator[NodeEventBase, None, None]:
-        file_obj = (meta or {}).get("file")
+        file_obj = (meta or {}).get(ToolMessageMetaKey.FILE)
         if isinstance(file_obj, File):
             state.files.append(file_obj)
             stream_text = f"File: {payload.text}\n"
@@ -694,11 +779,11 @@ class ToolNode(Node[ToolNodeData]):
         **_: Any,
     ) -> Generator[NodeEventBase, None, None]:
         del payload
-        if "file" not in meta:
+        if ToolMessageMetaKey.FILE not in meta:
             msg = "File message is missing 'file' key in meta"
             raise ToolNodeError(msg)
 
-        file_obj = meta["file"]
+        file_obj = meta[ToolMessageMetaKey.FILE]
         if not isinstance(file_obj, File):
             msg = f"Expected File object but got {type(file_obj).__name__}"
             raise ToolNodeError(msg)

@@ -13,7 +13,7 @@ from graphon.graph_events.node import NodeRunFailedEvent, NodeRunSucceededEvent
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.node_events.node import StreamChunkEvent, StreamCompletedEvent
 from graphon.nodes.tool.entities import ToolNodeData, ToolProviderType
-from graphon.nodes.tool.exc import ToolNodeError
+from graphon.nodes.tool.exc import ToolFileError, ToolNodeError
 from graphon.nodes.tool.tool_node import ToolNode
 from graphon.nodes.tool_runtime_entities import (
     ToolRuntimeHandle,
@@ -274,9 +274,54 @@ def test_transform_message_dispatches_image_link_with_handler_map() -> None:
     runtime.build_file_reference.assert_called_once_with(
         mapping={
             "tool_file_id": "tool-file-1",
+            "related_id": "tool-file-1",
             "type": FileType.IMAGE,
             "transfer_method": FileTransferMethod.TOOL_FILE,
             "url": "https://example.com/image.png",
+            "mime_type": "image/png",
+            "filename": None,
+            "extension": ".png",
+            "size": -1,
+        },
+    )
+
+
+def test_transform_message_accepts_remote_image_without_tool_file_id() -> None:
+    node, runtime, _tool_file_manager_factory = _build_tool_node()
+    built_file = File(
+        file_type=FileType.IMAGE,
+        transfer_method=FileTransferMethod.REMOTE_URL,
+        remote_url="https://example.com/image.png",
+    )
+    runtime.build_file_reference.return_value = built_file
+
+    events = list(
+        node.transform_message(
+            messages=_message_stream(
+                ToolRuntimeMessage(
+                    type=ToolRuntimeMessage.MessageType.IMAGE,
+                    message=ToolRuntimeMessage.TextMessage(
+                        text="https://example.com/image.png",
+                    ),
+                ),
+            ),
+            tool_info={},
+            parameters_for_log={},
+            node_id="node-1",
+            tool_runtime=ToolRuntimeHandle(raw=object()),
+        ),
+    )
+
+    completed_event = events[-1]
+    assert isinstance(completed_event, StreamCompletedEvent)
+    assert completed_event.node_run_result.outputs["files"].value == [built_file]
+    runtime.build_file_reference.assert_called_once_with(
+        mapping={
+            "type": FileType.IMAGE,
+            "transfer_method": FileTransferMethod.REMOTE_URL,
+            "url": "https://example.com/image.png",
+            "remote_url": "https://example.com/image.png",
+            "mime_type": "image/png",
         },
     )
 
@@ -324,7 +369,13 @@ def test_transform_message_saves_raw_blob_message_as_tool_file() -> None:
     runtime.build_file_reference.assert_called_once_with(
         mapping={
             "tool_file_id": "tool-file-raw",
+            "related_id": "tool-file-raw",
+            "type": FileType.CUSTOM,
             "transfer_method": FileTransferMethod.TOOL_FILE,
+            "mime_type": "application/octet-stream",
+            "filename": "result.bin",
+            "extension": ".bin",
+            "size": 9,
         },
     )
 
@@ -382,6 +433,32 @@ def test_transform_message_merges_blob_chunks_before_saving_file() -> None:
         mimetype="application/octet-stream",
         filename=None,
     )
+
+
+def test_transform_message_rejects_out_of_order_blob_chunks() -> None:
+    node, _runtime, _tool_file_manager_factory = _build_tool_node()
+
+    with pytest.raises(ToolFileError, match="expected sequence 0, got 1"):
+        list(
+            node.transform_message(
+                messages=_message_stream(
+                    ToolRuntimeMessage(
+                        type=ToolRuntimeMessage.MessageType.BLOB_CHUNK,
+                        message=ToolRuntimeMessage.BlobChunkMessage(
+                            id="blob-1",
+                            sequence=1,
+                            total_length=3,
+                            blob=b"abc",
+                            end=True,
+                        ),
+                    ),
+                ),
+                tool_info={},
+                parameters_for_log={},
+                node_id="node-1",
+                tool_runtime=ToolRuntimeHandle(raw=object()),
+            ),
+        )
 
 
 def test_transform_message_rejects_non_file_payload_in_file_message() -> None:
