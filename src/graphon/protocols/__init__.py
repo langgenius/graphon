@@ -17,7 +17,7 @@ from graphon.model_runtime.protocols.text_embedding_runtime import (
     TextEmbeddingModelRuntime,
 )
 from graphon.model_runtime.protocols.tts_runtime import TTSModelRuntime
-from graphon.nodes.code.code_node import WorkflowCodeExecutor
+from graphon.nodes.code.code_node import CodeExecutorProtocol
 from graphon.nodes.llm.protocols import CredentialsProvider, ModelFactory
 from graphon.nodes.llm.runtime_protocols import (
     PreparedLLMProtocol,
@@ -41,6 +41,7 @@ from graphon.runtime.graph_runtime_state_protocol import (
 from graphon.variable_loader import VariableLoader
 
 __all__ = [
+    "CodeExecutorProtocol",
     "CredentialsProvider",
     "FileManagerProtocol",
     "FileReferenceFactoryProtocol",
@@ -68,6 +69,5 @@ __all__ = [
     "ToolFileManagerProtocol",
     "ToolNodeRuntimeProtocol",
     "VariableLoader",
-    "WorkflowCodeExecutor",
     "WorkflowFileRuntimeProtocol",
 ]

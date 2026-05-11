@@ -80,7 +80,7 @@ class ToolNode(Node[ToolNodeData]):
         *,
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,
-        tool_file_manager_factory: ToolFileManagerProtocol,
+        tool_file_manager: ToolFileManagerProtocol,
         # TODO @-LAN: See https://github.com/langgenius/graphon/issues/new/choose.  # noqa: FIX002
         # Make `runtime` optional once Graphon provides a default tool runtime
         # adapter at the workflow boundary.
@@ -92,18 +92,8 @@ class ToolNode(Node[ToolNodeData]):
             graph_init_params=graph_init_params,
             graph_runtime_state=graph_runtime_state,
         )
-        self._tool_file_manager_factory = tool_file_manager_factory
+        self._tool_file_manager = tool_file_manager
         self._runtime = runtime
-
-    def init_tool_runtime(
-        self,
-        *,
-        runtime: ToolNodeRuntimeProtocol,
-        tool_file_manager_factory: ToolFileManagerProtocol,
-    ) -> None:
-        """Hydrate tool-runtime collaborators for callers bypassing `__init__`."""
-        self._runtime = runtime
-        self._tool_file_manager_factory = tool_file_manager_factory
 
     @classmethod
     @override
@@ -465,10 +455,8 @@ class ToolNode(Node[ToolNodeData]):
         return payload
 
     def _resolve_tool_file(self, tool_file_id: str, *, missing_message: str) -> File:
-        _stream, tool_file = (
-            self._tool_file_manager_factory.get_file_generator_by_tool_file_id(
-                tool_file_id,
-            )
+        _stream, tool_file = self._tool_file_manager.get_file_generator_by_tool_file_id(
+            tool_file_id,
         )
         if not tool_file:
             raise ToolFileError(missing_message)
@@ -553,7 +541,7 @@ class ToolNode(Node[ToolNodeData]):
         raw_filename = metadata.get("filename")
         filename = raw_filename if isinstance(raw_filename, str) else None
         try:
-            tool_file = self._tool_file_manager_factory.create_file_by_raw(
+            tool_file = self._tool_file_manager.create_file_by_raw(
                 file_binary=payload.blob,
                 mimetype=mimetype,
                 filename=filename,

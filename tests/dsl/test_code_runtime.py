@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from graphon.dsl.code_runtime import SlimCodeExecutionError, SlimCodeExecutor
+from graphon.dsl.code_runtime import SandboxCodeExecutionError, SandboxCodeExecutor
 from graphon.dsl.entities import DslCodeSettings
 from graphon.nodes.code.entities import CodeLanguage
 
@@ -19,7 +19,7 @@ class _Response:
         return self._payload
 
 
-def test_slim_code_executor_posts_dify_sandbox_payload(
+def test_sandbox_code_executor_posts_dify_sandbox_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
@@ -40,7 +40,7 @@ def test_slim_code_executor_posts_dify_sandbox_payload(
 
     monkeypatch.setattr("graphon.dsl.code_runtime.httpx.post", fake_post)
 
-    executor = SlimCodeExecutor(
+    executor = SandboxCodeExecutor(
         DslCodeSettings(
             execution_endpoint="http://sandbox:8194/",
             execution_api_key="secret",
@@ -61,7 +61,7 @@ def test_slim_code_executor_posts_dify_sandbox_payload(
     assert "main(**inputs_obj)" in captured["json"]["code"]
 
 
-def test_slim_code_executor_reports_sandbox_runtime_error(
+def test_sandbox_code_executor_reports_sandbox_runtime_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_post(_url: str, **_: Any) -> _Response:
@@ -72,8 +72,8 @@ def test_slim_code_executor_reports_sandbox_runtime_error(
 
     monkeypatch.setattr("graphon.dsl.code_runtime.httpx.post", fake_post)
 
-    executor = SlimCodeExecutor(DslCodeSettings(execution_endpoint="http://sandbox"))
-    with pytest.raises(SlimCodeExecutionError, match="boom"):
+    executor = SandboxCodeExecutor(DslCodeSettings(execution_endpoint="http://sandbox"))
+    with pytest.raises(SandboxCodeExecutionError, match="boom"):
         executor.execute(
             language=CodeLanguage.JAVASCRIPT, code="function main() {}", inputs={}
         )

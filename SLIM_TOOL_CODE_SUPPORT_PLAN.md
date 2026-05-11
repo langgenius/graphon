@@ -18,7 +18,7 @@ Code/tool 节点优先做到 Dify workflow happy path，而不是一次性覆盖
 
 ## Code 节点方向
 
-Code 节点继续使用 Dify sandbox 兼容协议，不在 Graphon 进程内直接执行用户代码。当前 `SlimCodeExecutor` 已经对齐 Python/JavaScript runner、base64 输入、`<<RESULT>>` 输出解析、科学计数字符串回转数字和 sandbox 错误处理，后续应把这条线做稳。
+Code 节点继续使用 Dify sandbox 兼容协议，不在 Graphon 进程内直接执行用户代码。当前 `SandboxCodeExecutor` 已经对齐 Python/JavaScript runner、base64 输入、`<<RESULT>>` 输出解析、科学计数字符串回转数字和 sandbox 错误处理，后续应把这条线做稳。
 
 优先级应放在三件事上：
 

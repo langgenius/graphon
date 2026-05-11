@@ -22,7 +22,7 @@ from .exc import (
 )
 
 
-class WorkflowCodeExecutor(Protocol):
+class CodeExecutorProtocol(Protocol):
     def execute(
         self,
         *,
@@ -86,7 +86,7 @@ class CodeNode(Node[CodeNodeData]):
         *,
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,
-        code_executor: WorkflowCodeExecutor,
+        code_executor: CodeExecutorProtocol,
         code_limits: CodeNodeLimits,
     ) -> None:
         super().__init__(
@@ -95,7 +95,7 @@ class CodeNode(Node[CodeNodeData]):
             graph_init_params=graph_init_params,
             graph_runtime_state=graph_runtime_state,
         )
-        self._code_executor: WorkflowCodeExecutor = code_executor
+        self._code_executor: CodeExecutorProtocol = code_executor
         self._limits = code_limits
 
     @property

@@ -23,7 +23,7 @@ _DEFAULT_CODE_EXECUTION_API_KEY = "dify-sandbox"
 _SCIENTIFIC_NOTATION = re.compile(r"^-?\d+\.?\d*e[+-]\d+$", re.IGNORECASE)
 
 
-class SlimCodeExecutionError(RuntimeError):
+class SandboxCodeExecutionError(RuntimeError):
     """Raised when the DSL code executor cannot complete sandbox execution."""
 
 
@@ -71,29 +71,29 @@ class _DifySandboxClient:
                 "please check if the sandbox service is running. "
                 f"( Error: {error} )"
             )
-            raise SlimCodeExecutionError(msg) from error
+            raise SandboxCodeExecutionError(msg) from error
 
     @staticmethod
     def _stdout_from_response(response: httpx.Response) -> str:
         if response.status_code == HTTPStatus.SERVICE_UNAVAILABLE:
             msg = "Code execution service is unavailable"
-            raise SlimCodeExecutionError(msg)
+            raise SandboxCodeExecutionError(msg)
         if response.status_code != HTTPStatus.OK:
             msg = (
                 f"Failed to execute code, got status code {response.status_code}, "
                 "please check if the sandbox service is running"
             )
-            raise SlimCodeExecutionError(msg)
+            raise SandboxCodeExecutionError(msg)
 
         try:
             response_data = response.json()
         except Exception as error:
             msg = "Failed to parse response"
-            raise SlimCodeExecutionError(msg) from error
+            raise SandboxCodeExecutionError(msg) from error
 
         if not isinstance(response_data, Mapping):
             msg = "Code execution response must be a JSON object."
-            raise SlimCodeExecutionError(msg)
+            raise SandboxCodeExecutionError(msg)
 
         response_code = response_data.get("code")
         if response_code != 0:
@@ -101,16 +101,16 @@ class _DifySandboxClient:
                 f"Got error code: {response_code}. "
                 f"Got error msg: {response_data.get('message')}"
             )
-            raise SlimCodeExecutionError(msg)
+            raise SandboxCodeExecutionError(msg)
 
         data_payload = response_data.get("data")
         if not isinstance(data_payload, Mapping):
             msg = "Code execution response data must be a JSON object."
-            raise SlimCodeExecutionError(msg)
+            raise SandboxCodeExecutionError(msg)
 
         runtime_error = data_payload.get("error")
         if runtime_error:
-            raise SlimCodeExecutionError(str(runtime_error))
+            raise SandboxCodeExecutionError(str(runtime_error))
 
         stdout = data_payload.get("stdout")
         return stdout if isinstance(stdout, str) else ""
@@ -132,7 +132,7 @@ class _TemplateTransformer:
     def runner(cls, *, code: str, inputs_payload: str) -> str:
         _ = code, inputs_payload
         msg = f"{cls.__name__} does not implement a sandbox runner."
-        raise SlimCodeExecutionError(msg)
+        raise SandboxCodeExecutionError(msg)
 
     @classmethod
     def preload(cls) -> str:
@@ -196,7 +196,7 @@ class _UnsupportedJinja2TemplateTransformer(_TemplateTransformer):
     def build_program(cls, *, code: str, inputs: Mapping[str, Any]) -> _SandboxProgram:
         _ = code, inputs
         msg = "Jinja2 code execution is not supported by Graphon code nodes."
-        raise SlimCodeExecutionError(msg)
+        raise SandboxCodeExecutionError(msg)
 
 
 _TRANSFORMERS: Mapping[CodeLanguage, type[_TemplateTransformer]] = {
@@ -206,7 +206,7 @@ _TRANSFORMERS: Mapping[CodeLanguage, type[_TemplateTransformer]] = {
 }
 
 
-class SlimCodeExecutor:
+class SandboxCodeExecutor:
     """Dify sandbox-compatible code executor used by DSL-imported code nodes."""
 
     def __init__(self, settings: DslCodeSettings | None = None) -> None:
@@ -226,7 +226,7 @@ class SlimCodeExecutor:
         return transformer.parse_result(stdout)
 
     def is_execution_error(self, error: Exception) -> bool:
-        return isinstance(error, SlimCodeExecutionError)
+        return isinstance(error, SandboxCodeExecutionError)
 
 
 def _transformer_for(language: CodeLanguage) -> type[_TemplateTransformer]:
@@ -234,7 +234,7 @@ def _transformer_for(language: CodeLanguage) -> type[_TemplateTransformer]:
         return _TRANSFORMERS[language]
     except KeyError:
         msg = f"Unsupported language {language}"
-        raise SlimCodeExecutionError(msg) from None
+        raise SandboxCodeExecutionError(msg) from None
 
 
 def _sandbox_run_url(settings: DslCodeSettings) -> str:
@@ -261,20 +261,20 @@ def _parse_json_object_result(response: str) -> Mapping[str, Any]:
             "Failed to parse result: no result tag found in response. "
             f"Response: {response[:200]}..."
         )
-        raise SlimCodeExecutionError(msg)
+        raise SandboxCodeExecutionError(msg)
 
     try:
         result = json.loads(match.group(1))
     except json.JSONDecodeError as error:
         msg = f"Failed to parse JSON response: {error}."
-        raise SlimCodeExecutionError(msg) from error
+        raise SandboxCodeExecutionError(msg) from error
 
     if not isinstance(result, dict):
         msg = f"Result must be a dict, got {type(result).__name__}"
-        raise SlimCodeExecutionError(msg)
+        raise SandboxCodeExecutionError(msg)
     if not all(isinstance(key, str) for key in result):
         msg = "Result keys must be strings"
-        raise SlimCodeExecutionError(msg)
+        raise SandboxCodeExecutionError(msg)
 
     return _post_process_result(result)
 
@@ -295,5 +295,5 @@ def _post_process_result(result: dict[Any, Any]) -> dict[Any, Any]:
     converted = convert(result)
     if not isinstance(converted, dict):
         msg = "Post-processed code result must remain a dict."
-        raise SlimCodeExecutionError(msg)
+        raise SandboxCodeExecutionError(msg)
     return converted

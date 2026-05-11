@@ -33,7 +33,7 @@ from graphon.nodes.tool.tool_node import ToolNode
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.template_rendering import Jinja2TemplateRenderer, TemplateRenderError
 
-from .code_runtime import SlimCodeExecutor
+from .code_runtime import SandboxCodeExecutor
 from .entities import (
     DslCodeSettings,
     DslCredentials,
@@ -408,7 +408,7 @@ class SlimDslNodeFactory:
                     data=CodeNodeData.model_validate(data_payload),
                     graph_init_params=self.graph_init_params,
                     graph_runtime_state=self.graph_runtime_state,
-                    code_executor=SlimCodeExecutor(self.credentials.code),
+                    code_executor=SandboxCodeExecutor(self.credentials.code),
                     code_limits=_code_limits(self.credentials.code),
                 )
             case BuiltinNodeTypes.LLM:
@@ -431,7 +431,7 @@ class SlimDslNodeFactory:
                     data=tool_data,
                     graph_init_params=self.graph_init_params,
                     graph_runtime_state=self.graph_runtime_state,
-                    tool_file_manager_factory=_UnsupportedToolFileManager(),
+                    tool_file_manager=_UnsupportedToolFileManager(),
                     runtime=runtime,
                 )
             case _:

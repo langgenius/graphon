@@ -1,4 +1,4 @@
-from .code_runtime import SlimCodeExecutionError, SlimCodeExecutor
+from .code_runtime import SandboxCodeExecutionError, SandboxCodeExecutor
 from .entities import (
     DslCodeSettings,
     DslDependency,
@@ -22,10 +22,10 @@ __all__ = [
     "DslKind",
     "LoadStatus",
     "PluginDependencyType",
+    "SandboxCodeExecutionError",
+    "SandboxCodeExecutor",
     "SlimClient",
     "SlimClientError",
-    "SlimCodeExecutionError",
-    "SlimCodeExecutor",
     "SlimDslNodeFactory",
     "inspect",
     "loads",
