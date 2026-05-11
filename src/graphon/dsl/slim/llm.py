@@ -33,7 +33,7 @@ from graphon.model_runtime.model_providers.base.large_language_model import (
     merge_tool_call_deltas,
 )
 from graphon.model_runtime.utils.encoders import jsonable_encoder
-from graphon.nodes.llm.runtime_protocols import PreparedLLMProtocol
+from graphon.nodes.llm.runtime_protocols import LLMProtocol
 
 _ACTION_GET_LLM_NUM_TOKENS = "get_llm_num_tokens"
 _ACTION_INVOKE_LLM = "invoke_llm"
@@ -87,8 +87,8 @@ class _CollectedLLMResult:
     system_fingerprint: str | None = None
 
 
-class DslSlimPreparedLLM(PreparedLLMProtocol):
-    """DSL LLM adapter backed directly by dify-plugin-daemon-slim.
+class SlimLLM(LLMProtocol):
+    """Standard Slim-backed LLM runtime.
 
     Slim actions are scoped by ``plugin_id`` first; ``provider`` is the
     plugin-internal provider name carried in the action payload, not a globally

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from graphon.nodes.llm.runtime_protocols import PreparedLLMProtocol
+from graphon.nodes.llm.runtime_protocols import LLMProtocol
 
 
 class CredentialsProvider(Protocol):
@@ -20,6 +20,6 @@ class ModelFactory(Protocol):
         self,
         provider_name: str,
         model_name: str,
-    ) -> PreparedLLMProtocol:
+    ) -> LLMProtocol:
         """Create a prepared LLM runtime that is ready for graph execution."""
         ...

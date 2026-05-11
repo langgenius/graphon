@@ -10,16 +10,16 @@ from .client import (
     resolve_slim_binary_path,
     slim_plugin_cache_path,
 )
-from .llm import DslSlimPreparedLLM, SlimStructuredOutputParseError
+from .llm import SlimLLM, SlimStructuredOutputParseError
 
 __all__ = [
-    "DslSlimPreparedLLM",
     "SlimChunkEvent",
     "SlimClient",
     "SlimClientConfig",
     "SlimClientError",
     "SlimDoneEvent",
     "SlimEvent",
+    "SlimLLM",
     "SlimMessageEvent",
     "SlimStructuredOutputParseError",
     "cached_slim_plugin_root",

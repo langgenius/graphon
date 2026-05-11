@@ -38,6 +38,11 @@ python3 code.py
 python3 code.py "Reply with only the word Graphon."
 ```
 
+The Python construction example uses `graphon.dsl.slim.SlimLLM` as the standard
+Slim-backed LLM runtime. Configure it with the Slim client settings, plugin ID,
+provider, model name, and credentials. Optional completion parameters can be
+supplied by the Python construction when needed.
+
 For local mode, keep `slim.mode` as `local`. Put `dify-plugin-daemon-slim` in
 `PATH`, set `SLIM_BINARY_PATH`, or place a `slim` binary in this directory.
 

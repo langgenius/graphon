@@ -18,8 +18,8 @@ from graphon.model_runtime.entities.message_entities import (
 from graphon.model_runtime.entities.model_entities import AIModelEntity
 
 
-class PreparedLLMProtocol(Protocol):
-    """A graph-facing LLM runtime with provider-specific setup already applied."""
+class LLMProtocol(Protocol):
+    """A graph-facing LLM runtime adapter for node execution."""
 
     @property
     def provider(self) -> str: ...

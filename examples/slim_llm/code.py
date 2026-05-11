@@ -19,7 +19,7 @@ from examples.slim_llm.settings import (
     slim_client_config,
     use_local_slim_binary,
 )
-from graphon.dsl.slim import DslSlimPreparedLLM
+from graphon.dsl.slim import SlimLLM
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.file.enums import FileType
 from graphon.file.models import File
@@ -91,7 +91,7 @@ def run(query: str) -> str:
     graph = build_graph(
         graph_init=graph_init,
         graph_state=graph_state,
-        llm=DslSlimPreparedLLM(
+        llm=SlimLLM(
             config=slim_client_config(credentials),
             plugin_id=OPENAI_PLUGIN_ID,
             provider=OPENAI_PROVIDER,
@@ -119,7 +119,7 @@ def build_graph(
     *,
     graph_init: GraphInitParams,
     graph_state: GraphRuntimeState,
-    llm: DslSlimPreparedLLM,
+    llm: SlimLLM,
 ) -> Graph:
     start = StartNode(
         node_id="start",

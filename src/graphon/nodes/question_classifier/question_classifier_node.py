@@ -4,7 +4,7 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, cast, override
+from typing import Any, override
 
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import (
@@ -39,7 +39,7 @@ from graphon.nodes.llm.entities import (
 from graphon.nodes.llm.file_saver import LLMFileSaver
 from graphon.nodes.llm.node import LLMNode
 from graphon.nodes.llm.runtime_protocols import (
-    PreparedLLMProtocol,
+    LLMProtocol,
     PromptMessageSerializerProtocol,
 )
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
@@ -73,7 +73,7 @@ class _PassthroughPromptMessageSerializer:
 @dataclass(frozen=True)
 class _QuestionClassifierRunContext:
     inputs: dict[str, Any]
-    model_instance: PreparedLLMProtocol
+    model_instance: LLMProtocol
     prompt_messages: Sequence[PromptMessage]
     stop: Sequence[str] | None
     rendered_classes: list[Any]
@@ -83,7 +83,7 @@ class _QuestionClassifierRunContext:
 class QuestionClassifierNodeDependencies:
     """Runtime collaborators required to execute a question-classifier node."""
 
-    model_instance: PreparedLLMProtocol
+    model_instance: LLMProtocol
     template_renderer: Jinja2TemplateRenderer
     llm_file_saver: LLMFileSaver
     memory: PromptMessageMemory | None = None
@@ -97,7 +97,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
     _file_outputs: list[File]
     _llm_file_saver: LLMFileSaver
     _prompt_message_serializer: PromptMessageSerializerProtocol
-    _model_instance: PreparedLLMProtocol
+    _model_instance: LLMProtocol
     _memory: PromptMessageMemory | None
     _template_renderer: Jinja2TemplateRenderer
 
@@ -112,7 +112,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         dependencies: QuestionClassifierNodeDependencies | None = None,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
-        model_instance: PreparedLLMProtocol | None = None,
+        model_instance: LLMProtocol | None = None,
         http_client: HttpClientProtocol | None = None,
         template_renderer: Jinja2TemplateRenderer | None = None,
         memory: PromptMessageMemory | None = None,
@@ -156,7 +156,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
     def _resolve_dependencies(
         *,
         dependencies: QuestionClassifierNodeDependencies | None,
-        model_instance: PreparedLLMProtocol | None,
+        model_instance: LLMProtocol | None,
         template_renderer: Jinja2TemplateRenderer | None,
         memory: PromptMessageMemory | None,
         llm_file_saver: LLMFileSaver | None,
@@ -184,16 +184,20 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
                 raise TypeError(msg)
             return dependencies
 
-        missing_arguments = [
-            argument_name
-            for argument_name, argument_value in (
-                ("model_instance", model_instance),
-                ("template_renderer", template_renderer),
-                ("llm_file_saver", llm_file_saver),
-            )
-            if argument_value is None
-        ]
-        if missing_arguments:
+        if (
+            model_instance is None
+            or template_renderer is None
+            or llm_file_saver is None
+        ):
+            missing_arguments = [
+                argument_name
+                for argument_name, argument_value in (
+                    ("model_instance", model_instance),
+                    ("template_renderer", template_renderer),
+                    ("llm_file_saver", llm_file_saver),
+                )
+                if argument_value is None
+            ]
             missing_arguments_str = ", ".join(sorted(missing_arguments))
             msg = (
                 "QuestionClassifierNode requires either "
@@ -203,9 +207,9 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
             raise TypeError(msg)
 
         return QuestionClassifierNodeDependencies(
-            model_instance=cast(PreparedLLMProtocol, model_instance),
-            template_renderer=cast(Jinja2TemplateRenderer, template_renderer),
-            llm_file_saver=cast(LLMFileSaver, llm_file_saver),
+            model_instance=model_instance,
+            template_renderer=template_renderer,
+            llm_file_saver=llm_file_saver,
             memory=memory,
             prompt_message_serializer=prompt_message_serializer,
         )
@@ -293,7 +297,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
             rendered_classes=rendered_classes,
         )
 
-    def _prepare_model_instance(self, *, variable_pool: Any) -> PreparedLLMProtocol:
+    def _prepare_model_instance(self, *, variable_pool: Any) -> LLMProtocol:
         model_instance = self._model_instance
         model_instance.parameters = llm_utils.resolve_completion_params_variables(
             model_instance.parameters,
@@ -305,7 +309,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         self,
         *,
         query: str,
-        model_instance: PreparedLLMProtocol,
+        model_instance: LLMProtocol,
         files: Sequence[Any],
     ) -> tuple[Sequence[PromptMessage], Sequence[str] | None]:
         rest_token = self._calculate_rest_token(
@@ -487,7 +491,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         self,
         node_data: QuestionClassifierNodeData,
         query: str,
-        model_instance: PreparedLLMProtocol,
+        model_instance: LLMProtocol,
         context: str | None,
     ) -> int:
         model_schema = llm_utils.fetch_model_schema(model_instance=model_instance)
