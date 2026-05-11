@@ -694,6 +694,7 @@ def _cast_tool_parameter_value(
             return value if isinstance(value, Mapping) else {}
         case _:
             return value
+    return value
 
 
 def _cast_number(value: Any) -> Any:
