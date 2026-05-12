@@ -1,3 +1,9 @@
+from .agent import (
+    AgentRuntimeMessage,
+    SlimActionInvoker,
+    SlimAgentStrategyClient,
+    SlimAgentStrategyError,
+)
 from .client import (
     SlimChunkEvent,
     SlimClient,
@@ -13,6 +19,10 @@ from .client import (
 from .llm import SlimLLM, SlimStructuredOutputParseError
 
 __all__ = [
+    "AgentRuntimeMessage",
+    "SlimActionInvoker",
+    "SlimAgentStrategyClient",
+    "SlimAgentStrategyError",
     "SlimChunkEvent",
     "SlimClient",
     "SlimClientConfig",

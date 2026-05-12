@@ -15,6 +15,8 @@ from graphon.file.enums import FileType
 from graphon.file.models import File
 from graphon.model_runtime.entities.llm_entities import LLMMode
 from graphon.model_runtime.entities.message_entities import PromptMessage
+from graphon.nodes.agent.agent_node import AgentNode
+from graphon.nodes.agent.entities import AgentNodeData
 from graphon.nodes.answer.answer_node import AnswerNode
 from graphon.nodes.base.node import Node
 from graphon.nodes.code.code_node import CodeNode
@@ -33,6 +35,8 @@ from graphon.nodes.tool.tool_node import ToolNode
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.template_rendering import Jinja2TemplateRenderer, TemplateRenderError
 
+from ._provider import canonical_vendor
+from .agent_runtime import SlimAgentNodeRuntime
 from .code_runtime import SandboxCodeExecutor
 from .entities import (
     DslCodeSettings,
@@ -157,13 +161,6 @@ def _render_simple_jinja_template(
         return str(variables.get(match.group(1), ""))
 
     return _SIMPLE_JINJA_VARIABLE.sub(replace, template)
-
-
-def _canonical_vendor(provider: str | None) -> str | None:
-    if not provider:
-        return None
-    parts = [part for part in provider.split("/") if part]
-    return parts[-1] if parts else provider
 
 
 def _plugin_prefix(provider: str | None) -> str | None:
@@ -434,6 +431,15 @@ class SlimDslNodeFactory:
                     tool_file_manager=_UnsupportedToolFileManager(),
                     runtime=runtime,
                 )
+            case BuiltinNodeTypes.AGENT:
+                agent_data = AgentNodeData.model_validate(data_payload)
+                return AgentNode(
+                    node_id=node_id,
+                    data=agent_data,
+                    graph_init_params=self.graph_init_params,
+                    graph_runtime_state=self.graph_runtime_state,
+                    runtime=SlimAgentNodeRuntime(config=self.slim_client_config),
+                )
             case _:
                 msg = f"Unsupported DSL node type: {node_type}"
                 raise _dsl_error(
@@ -447,7 +453,7 @@ class SlimDslNodeFactory:
         normalized_data = dict(data)
         model = dict(normalized_data.get("model") or {})
         raw_provider = str(model.get("provider") or "")
-        vendor = _canonical_vendor(raw_provider)
+        vendor = canonical_vendor(raw_provider)
         if not vendor:
             msg = "LLM node is missing model provider."
             raise _dsl_error(
@@ -522,7 +528,7 @@ class SlimDslNodeFactory:
                 code="dependency.missing_plugin",
                 details={"node_type": BuiltinNodeTypes.TOOL},
             )
-        provider = _canonical_vendor(node_data.provider_id) or _canonical_vendor(
+        provider = canonical_vendor(node_data.provider_id) or canonical_vendor(
             node_data.provider_name,
         )
         if provider is None:

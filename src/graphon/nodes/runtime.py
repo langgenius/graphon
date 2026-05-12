@@ -13,6 +13,7 @@ from graphon.nodes.tool_runtime_entities import (
 )
 
 if TYPE_CHECKING:
+    from graphon.nodes.agent.entities import AgentNodeData
     from graphon.nodes.human_input.entities import HumanInputNodeData
     from graphon.nodes.human_input.enums import HumanInputFormStatus
     from graphon.nodes.tool.entities import ToolNodeData
@@ -62,6 +63,17 @@ class ToolNodeRuntimeProtocol(Protocol):
 
     @abstractmethod
     def build_file_reference(self, *, mapping: Mapping[str, Any]) -> Any: ...
+
+
+class AgentNodeRuntimeProtocol(Protocol):
+    def invoke(
+        self,
+        *,
+        node_id: str,
+        node_data: AgentNodeData,
+        agent_strategy_params: Mapping[str, Any],
+        variable_pool: VariablePool | None,
+    ) -> Generator[ToolRuntimeMessage, None, None]: ...
 
 
 @runtime_checkable
