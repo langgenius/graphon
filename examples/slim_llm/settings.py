@@ -14,8 +14,8 @@ CREDENTIALS_EXAMPLE_FILE = HERE / "credentials.example.json"
 LOCAL_SLIM_BINARY = HERE / "slim"
 
 OPENAI_PLUGIN_ID = (
-    "langgenius/openai:0.3.8@"
-    "592c8252795b5f75807de2d609a03196ed02596b409f7642b4a07548c7ff57ef"
+    "langgenius/openai:0.4.0@"
+    "beafb5a726eda839a1839f61a0456ae7e068c98624c53f59b07be9a71fbf72da"
 )
 OPENAI_PROVIDER = "openai"
 OPENAI_MODEL = "gpt-4o-mini"
