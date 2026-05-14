@@ -130,6 +130,7 @@ def loads(
     workflow_id = workflow_id if workflow_id is not None else str(uuid4())
     variable_pool = _build_variable_pool(
         root_node_id=root_id,
+        run_context=run_context or {},
         start_inputs=start_inputs or {},
     )
     graph_init_params = GraphInitParams(
@@ -690,9 +691,13 @@ def _select_root_node_id(graph_config: Mapping[str, Any]) -> str:
 def _build_variable_pool(
     *,
     root_node_id: str,
+    run_context: Mapping[str, Any],
     start_inputs: Mapping[str, Any],
 ) -> VariablePool:
     variable_pool = VariablePool()
+    for key, value in run_context.items():
+        if isinstance(value, str | int | float | bool) or value is None:
+            variable_pool.add(("sys", str(key)), value)
     for key, value in start_inputs.items():
         # `loads()` keeps one simple input mapping while Dify separates start
         # node inputs from advanced-chat system variables like sys.query.
