@@ -159,7 +159,11 @@ class _Python3TemplateTransformer(_TemplateTransformer):
                 "import json",
                 "from base64 import b64decode",
                 "",
-                f"inputs_obj = json.loads(b64decode('{inputs_payload}').decode('utf-8'))",
+                (
+                    "inputs_obj = json.loads("
+                    f"b64decode('{inputs_payload}').decode('utf-8')"
+                    ")"
+                ),
                 "output_obj = main(**inputs_obj)",
                 "output_json = json.dumps(output_obj, indent=4)",
                 f"result = f'''{_RESULT_TAG}{{output_json}}{_RESULT_TAG}'''",
