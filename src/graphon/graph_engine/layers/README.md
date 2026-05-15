@@ -34,6 +34,15 @@ engine.run()
 `engine.layer()` binds the read-only runtime state before execution, so
 `graph_runtime_state` is always available inside layer hooks.
 
+## Layers vs Event Filters
+
+Layers are execution-time hooks. They can observe events, inspect read-only
+runtime state, and send engine commands.
+
+Event filters are output-time transforms. They consume events from
+`GraphEngine.run()` and emit events for callers. Use filters for redaction,
+metadata enrichment, response stream ordering, and provider-facing event shapes.
+
 ## Custom Layers
 
 ```python
