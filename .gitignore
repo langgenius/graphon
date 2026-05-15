@@ -16,6 +16,7 @@ dist/
 
 # Plugin Daemon Slim
 .slim
+
 # Unit test / coverage reports
 htmlcov/
 .tox/
@@ -30,3 +31,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+
+# IDE configs
+.idea/
+.vscode/
