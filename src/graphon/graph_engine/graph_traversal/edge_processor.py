@@ -6,11 +6,12 @@ from typing import final
 from graphon.enums import NodeExecutionType
 from graphon.graph.edge import Edge
 from graphon.graph.graph import Graph
-from graphon.graph_events.node import NodeRunStreamChunkEvent
-from graphon.runtime.graph_runtime_state import ResponseStreamCoordinatorProtocol
+from graphon.graph_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTakenEvent
 
 from ..graph_state_manager import GraphStateManager
 from .skip_propagator import SkipPropagator
+
+type GraphTraversalEvent = GraphEdgeTakenEvent | GraphEdgeSkippedEvent
 
 
 @final
@@ -26,7 +27,6 @@ class EdgeProcessor:
         self,
         graph: Graph,
         state_manager: GraphStateManager,
-        response_coordinator: ResponseStreamCoordinatorProtocol,
         skip_propagator: SkipPropagator,
     ) -> None:
         """Initialize the edge processor.
@@ -34,20 +34,18 @@ class EdgeProcessor:
         Args:
             graph: The workflow graph
             state_manager: Unified state manager
-            response_coordinator: Response stream coordinator
             skip_propagator: Propagator for skip states
 
         """
         self._graph = graph
         self._state_manager = state_manager
-        self._response_coordinator = response_coordinator
         self._skip_propagator = skip_propagator
 
     def process_node_success(
         self,
         node_id: str,
         selected_handle: str | None = None,
-    ) -> tuple[Sequence[str], Sequence[NodeRunStreamChunkEvent]]:
+    ) -> tuple[Sequence[str], Sequence[GraphTraversalEvent]]:
         """Process edges after a node succeeds.
 
         Args:
@@ -56,7 +54,7 @@ class EdgeProcessor:
 
         Returns:
             Tuple of (list of downstream node IDs that are now ready,
-            list of streaming events)
+            list of traversal events)
 
         """
         node = self._graph.nodes[node_id]
@@ -68,7 +66,7 @@ class EdgeProcessor:
     def _process_non_branch_node_edges(
         self,
         node_id: str,
-    ) -> tuple[Sequence[str], Sequence[NodeRunStreamChunkEvent]]:
+    ) -> tuple[Sequence[str], Sequence[GraphTraversalEvent]]:
         """Process edges for non-branch nodes (mark all as TAKEN).
 
         Args:
@@ -76,25 +74,25 @@ class EdgeProcessor:
 
         Returns:
             Tuple of (list of downstream nodes ready for execution,
-            list of streaming events)
+            list of traversal events)
 
         """
         ready_nodes: list[str] = []
-        all_streaming_events: list[NodeRunStreamChunkEvent] = []
+        traversal_events: list[GraphTraversalEvent] = []
         outgoing_edges = self._graph.get_outgoing_edges(node_id)
 
         for edge in outgoing_edges:
             nodes, events = self._process_taken_edge(edge)
             ready_nodes.extend(nodes)
-            all_streaming_events.extend(events)
+            traversal_events.extend(events)
 
-        return ready_nodes, all_streaming_events
+        return ready_nodes, traversal_events
 
     def _process_branch_node_edges(
         self,
         node_id: str,
         selected_handle: str | None,
-    ) -> tuple[Sequence[str], Sequence[NodeRunStreamChunkEvent]]:
+    ) -> tuple[Sequence[str], Sequence[GraphTraversalEvent]]:
         """Process edges for branch nodes.
 
         Args:
@@ -103,7 +101,7 @@ class EdgeProcessor:
 
         Returns:
             Tuple of (list of downstream nodes ready for execution,
-            list of streaming events)
+            list of traversal events)
 
         Raises:
             ValueError: If no edge was selected
@@ -114,7 +112,7 @@ class EdgeProcessor:
             raise ValueError(msg)
 
         ready_nodes: list[str] = []
-        all_streaming_events: list[NodeRunStreamChunkEvent] = []
+        traversal_events: list[GraphTraversalEvent] = []
 
         # Categorize edges
         selected_edges, unselected_edges = self._state_manager.categorize_branch_edges(
@@ -124,20 +122,20 @@ class EdgeProcessor:
 
         # Process unselected edges first (mark as skipped)
         for edge in unselected_edges:
-            self._process_skipped_edge(edge)
+            traversal_events.extend(self._process_skipped_edge(edge))
 
         # Process selected edges
         for edge in selected_edges:
             nodes, events = self._process_taken_edge(edge)
             ready_nodes.extend(nodes)
-            all_streaming_events.extend(events)
+            traversal_events.extend(events)
 
-        return ready_nodes, all_streaming_events
+        return ready_nodes, traversal_events
 
     def _process_taken_edge(
         self,
         edge: Edge,
-    ) -> tuple[Sequence[str], Sequence[NodeRunStreamChunkEvent]]:
+    ) -> tuple[Sequence[str], Sequence[GraphEdgeTakenEvent]]:
         """Mark edge as taken and check downstream node.
 
         Args:
@@ -146,37 +144,45 @@ class EdgeProcessor:
         Returns:
             Tuple of (
                 list containing downstream node ID if it's ready,
-                list of streaming events
+                list of traversal events
             )
 
         """
         # Mark edge as taken
         self._state_manager.mark_edge_taken(edge.id)
 
-        # Notify response coordinator and get streaming events
-        streaming_events = self._response_coordinator.on_edge_taken(edge.id)
-
         # Check if downstream node is ready
         ready_nodes: list[str] = []
         if self._state_manager.is_node_ready(edge.head):
             ready_nodes.append(edge.head)
 
-        return ready_nodes, streaming_events
+        return ready_nodes, [self._build_taken_event(edge)]
 
-    def _process_skipped_edge(self, edge: Edge) -> None:
+    def _process_skipped_edge(self, edge: Edge) -> list[GraphEdgeSkippedEvent]:
         """Mark edge as skipped.
 
         Args:
             edge: The edge to skip
 
+        Returns:
+            Traversal event for the skipped edge.
+
         """
         self._state_manager.mark_edge_skipped(edge.id)
+        return [
+            GraphEdgeSkippedEvent(
+                edge_id=edge.id,
+                source_node_id=edge.tail,
+                target_node_id=edge.head,
+                source_handle=edge.source_handle,
+            )
+        ]
 
     def handle_branch_completion(
         self,
         node_id: str,
         selected_handle: str | None,
-    ) -> tuple[Sequence[str], Sequence[NodeRunStreamChunkEvent]]:
+    ) -> tuple[Sequence[str], Sequence[GraphTraversalEvent]]:
         """Handle completion of a branch node.
 
         Args:
@@ -185,7 +191,7 @@ class EdgeProcessor:
 
         Returns:
             Tuple of (list of downstream nodes ready for execution,
-            list of streaming events)
+            list of traversal events)
 
         Raises:
             ValueError: If no branch was selected
@@ -202,10 +208,21 @@ class EdgeProcessor:
         )
 
         # Skip all unselected paths
-        self._skip_propagator.skip_branch_paths(unselected_edges)
+        skipped_events = self._skip_propagator.skip_branch_paths(unselected_edges)
 
         # Process selected edges and get ready nodes and streaming events
-        return self.process_node_success(node_id, selected_handle)
+        selected_edges, _ = self._state_manager.categorize_branch_edges(
+            node_id,
+            selected_handle,
+        )
+        ready_nodes: list[str] = []
+        traversal_events: list[GraphTraversalEvent] = [*skipped_events]
+        for edge in selected_edges:
+            nodes, events = self._process_taken_edge(edge)
+            ready_nodes.extend(nodes)
+            traversal_events.extend(events)
+
+        return ready_nodes, traversal_events
 
     def validate_branch_selection(self, node_id: str, selected_handle: str) -> bool:
         """Validate that a branch selection is valid.
@@ -221,3 +238,12 @@ class EdgeProcessor:
         outgoing_edges = self._graph.get_outgoing_edges(node_id)
         valid_handles = {edge.source_handle for edge in outgoing_edges}
         return selected_handle in valid_handles
+
+    @staticmethod
+    def _build_taken_event(edge: Edge) -> GraphEdgeTakenEvent:
+        return GraphEdgeTakenEvent(
+            edge_id=edge.id,
+            source_node_id=edge.tail,
+            target_node_id=edge.head,
+            source_handle=edge.source_handle,
+        )

@@ -124,7 +124,6 @@ class GraphEngine:
         self._edge_processor = EdgeProcessor(
             graph=self._graph,
             state_manager=self._state_manager,
-            response_coordinator=self._response_coordinator,
             skip_propagator=self._skip_propagator,
         )
 
