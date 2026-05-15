@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,7 +62,12 @@ def iter_events(
     )
 
 
-def run(query: str, *, response_stream_filter: bool = True) -> EventFilterExampleResult:
+def run(
+    query: str,
+    *,
+    response_stream_filter: bool = True,
+    on_stream_chunk: Callable[[str], None] | None = None,
+) -> EventFilterExampleResult:
     engine = build_engine(query)
     chunks: list[str] = []
     edge_taken_count = 0
@@ -74,6 +79,8 @@ def run(query: str, *, response_stream_filter: bool = True) -> EventFilterExampl
     ):
         if isinstance(event, NodeRunStreamChunkEvent):
             chunks.append(event.chunk)
+            if on_stream_chunk is not None:
+                on_stream_chunk(event.chunk)
         elif isinstance(event, GraphEdgeTakenEvent):
             edge_taken_count += 1
         elif isinstance(event, GraphRunSucceededEvent):
@@ -109,15 +116,33 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    result = run(args.query, response_stream_filter=not args.raw)
     mode = "raw" if args.raw else "response-stream-filter"
+    saw_stream = False
 
     sys.stdout.write(f"mode: {mode}\n")
+    sys.stdout.write("stream_text:\n")
+    sys.stdout.flush()
+
+    def write_stream_chunk(chunk: str) -> None:
+        nonlocal saw_stream
+        saw_stream = True
+        sys.stdout.write(chunk)
+        sys.stdout.flush()
+
+    result = run(
+        args.query,
+        response_stream_filter=not args.raw,
+        on_stream_chunk=write_stream_chunk,
+    )
+
+    if saw_stream:
+        if not result.stream_text.endswith("\n"):
+            sys.stdout.write("\n")
+    else:
+        sys.stdout.write("(no stream chunks)\n")
+
     sys.stdout.write(f"stream_chunk_count: {result.stream_chunk_count}\n")
     sys.stdout.write(f"edge_taken_count: {result.edge_taken_count}\n")
-    if result.stream_text:
-        sys.stdout.write("stream_text:\n")
-        sys.stdout.write(f"{result.stream_text}\n")
     sys.stdout.write("final_answer:\n")
     sys.stdout.write(f"{result.answer}\n")
     return 0

@@ -39,9 +39,10 @@ python3 event_filters.py "Reply with only the word Graphon."
 python3 event_filters.py --raw "Reply with only the word Graphon."
 ```
 
-The default command applies `ResponseStreamFilter` to `GraphEngine.run()`.
-`--raw` consumes the engine events directly, which is useful for comparing the
-canonical graph events against the opt-in filtered stream.
+The default command applies `ResponseStreamFilter` to `GraphEngine.run()` and
+prints stream chunks as they are emitted. `--raw` consumes the engine events
+directly, which is useful for comparing the canonical graph events against the
+opt-in filtered stream.
 
 ## Code Construction
 
