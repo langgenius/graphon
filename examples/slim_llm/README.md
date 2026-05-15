@@ -9,9 +9,8 @@ start -> llm -> answer
 ## Files
 
 - `graph.yml`: the DSL graph
-- `dsl.py`: imports `graph.yml` with `graphon.dsl.loads()`
+- `dsl.py`: imports `graph.yml` and streams response events with `ResponseStreamFilter`
 - `code.py`: builds the graph with Python code
-- `event_filters.py`: runs the DSL graph through `ResponseStreamFilter`
 - `settings.py`: shared credentials and Slim setup
 - `credentials.example.json`: credentials template
 - `credentials.json`: your local credentials
@@ -32,17 +31,9 @@ python3 dsl.py
 python3 dsl.py "Reply with only the word Graphon."
 ```
 
-## Event Filter Verification
-
-```bash
-python3 event_filters.py "Reply with only the word Graphon."
-python3 event_filters.py --raw "Reply with only the word Graphon."
-```
-
-The default command applies `ResponseStreamFilter` to `GraphEngine.run()` and
-prints stream chunks as they are emitted. `--raw` consumes the engine events
-directly, which is useful for comparing the canonical graph events against the
-opt-in filtered stream.
+`dsl.py` applies `ResponseStreamFilter` to `GraphEngine.run()` and prints stream
+chunks as they are emitted, then prints the final answer from the terminal graph
+event.
 
 ## Code Construction
 
