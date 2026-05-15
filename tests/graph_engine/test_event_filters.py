@@ -1,7 +1,7 @@
 from collections.abc import Iterable
 from typing import Any, cast
 
-from graphon.graph_engine.filters import (
+from graphon.filters import (
     GraphEventFilter,
     GraphEventFilterContext,
     filter_graph_events,

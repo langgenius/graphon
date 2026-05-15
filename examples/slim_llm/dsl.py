@@ -15,7 +15,7 @@ from examples.slim_llm.settings import (
     use_local_slim_binary,
 )
 from graphon.dsl import loads
-from graphon.graph_engine import (
+from graphon.filters import (
     GraphEventFilterContext,
     ResponseStreamFilter,
     filter_graph_events,

@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from typing import Any, ClassVar, cast
 
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType, NodeState, NodeType
-from graphon.graph_engine.filters import GraphEventFilterContext, ResponseStreamFilter
+from graphon.filters import GraphEventFilterContext, ResponseStreamFilter
 from graphon.graph_events.graph import GraphRunStartedEvent
 from graphon.graph_events.node import NodeRunStartedEvent, NodeRunStreamChunkEvent
 from graphon.graph_events.traversal import GraphEdgeTakenEvent
