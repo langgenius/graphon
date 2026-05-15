@@ -402,6 +402,11 @@ class GraphEngine:
 
     # Public property accessors for attributes that need external access
     @property
+    def graph(self) -> Graph:
+        """Get the graph bound to this engine."""
+        return self._graph
+
+    @property
     def graph_runtime_state(self) -> GraphRuntimeState:
         """Get the graph runtime state."""
         return self._graph_runtime_state
