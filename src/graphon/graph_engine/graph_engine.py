@@ -13,7 +13,6 @@ from typing import final
 
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.entities.workflow_start_reason import WorkflowStartReason
-from graphon.enums import NodeExecutionType
 from graphon.graph.graph import Graph
 from graphon.graph_events.base import (
     GraphEngineEvent,
@@ -100,10 +99,6 @@ class GraphEngine:
         # Unified state manager handles all node state transitions and queue operations
         self._state_manager = GraphStateManager(self._graph, self._ready_queue)
 
-        # === Response Coordination ===
-        # Coordinates response streaming from response nodes
-        self._response_coordinator = self._graph_runtime_state.response_coordinator
-
         # === Event Management ===
         # Event manager handles both collection and emission of events
         self._event_manager = EventManager()
@@ -175,7 +170,6 @@ class GraphEngine:
             graph=self._graph,
             graph_runtime_state=self._graph_runtime_state,
             graph_execution=self._graph_execution,
-            response_coordinator=self._response_coordinator,
             event_collector=self._event_manager,
             edge_processor=self._edge_processor,
             state_manager=self._state_manager,
@@ -360,11 +354,6 @@ class GraphEngine:
 
         # Start worker pool (it calculates initial workers internally)
         self._worker_pool.start()
-
-        # Register response nodes
-        for node in self._graph.nodes.values():
-            if node.execution_type == NodeExecutionType.RESPONSE:
-                self._response_coordinator.register(node.id)
 
         if not resume:
             # Enqueue root node

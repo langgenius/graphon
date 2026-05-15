@@ -36,7 +36,6 @@ from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.runtime.graph_runtime_state import (
     GraphExecutionProtocol,
     GraphRuntimeState,
-    ResponseStreamCoordinatorProtocol,
 )
 
 from ..error_handler import ErrorHandler
@@ -60,7 +59,6 @@ class EventHandler:
         graph: Graph,
         graph_runtime_state: GraphRuntimeState,
         graph_execution: GraphExecutionProtocol,
-        response_coordinator: ResponseStreamCoordinatorProtocol,
         event_collector: EventManager,
         edge_processor: EdgeProcessor,
         state_manager: GraphStateManager,
@@ -72,7 +70,6 @@ class EventHandler:
             graph: The workflow graph
             graph_runtime_state: Runtime state with variable pool
             graph_execution: Graph execution aggregate
-            response_coordinator: Response stream coordinator
             event_collector: Event manager for collecting events
             edge_processor: Edge processor for edge traversal
             state_manager: Unified state manager
@@ -82,7 +79,6 @@ class EventHandler:
         self._graph = graph
         self._graph_runtime_state = graph_runtime_state
         self._graph_execution = graph_execution
-        self._response_coordinator = response_coordinator
         self._event_collector = event_collector
         self._edge_processor = edge_processor
         self._state_manager = state_manager
@@ -144,9 +140,6 @@ class EventHandler:
         node_execution.mark_started(event.id)
         self._graph_runtime_state.increment_node_run_steps()
 
-        # Track in response coordinator for stream ordering
-        self._response_coordinator.track_node_execution(event.node_id, event.id)
-
         # Collect the event only for the first attempt; retries remain silent
         if is_initial_attempt:
             self._event_collector.collect(event)
@@ -159,12 +152,7 @@ class EventHandler:
             event: The stream chunk event
 
         """
-        # Process with response coordinator
-        streaming_events = list(self._response_coordinator.intercept_event(event))
-
-        # Collect all events
-        for stream_event in streaming_events:
-            self._event_collector.collect(stream_event)
+        self._event_collector.collect(event)
 
     @_dispatch.register
     def _(self, event: NodeRunVariableUpdatedEvent) -> None:
@@ -201,27 +189,20 @@ class EventHandler:
         # Store outputs in variable pool
         self._store_node_outputs(event.node_id, event.node_run_result.outputs)
 
-        # Forward to response coordinator and emit streaming events
-        streaming_events = self._response_coordinator.intercept_event(event)
-        for stream_event in streaming_events:
-            self._event_collector.collect(stream_event)
-
         # Process edges and get ready nodes
         node = self._graph.nodes[event.node_id]
         if node.execution_type == NodeExecutionType.BRANCH:
-            ready_nodes, edge_streaming_events = (
-                self._edge_processor.handle_branch_completion(
-                    event.node_id,
-                    event.node_run_result.edge_source_handle,
-                )
+            ready_nodes, edge_events = self._edge_processor.handle_branch_completion(
+                event.node_id,
+                event.node_run_result.edge_source_handle,
             )
         else:
-            ready_nodes, edge_streaming_events = (
-                self._edge_processor.process_node_success(event.node_id)
+            ready_nodes, edge_events = self._edge_processor.process_node_success(
+                event.node_id
             )
 
-        # Collect streaming events from edge processing
-        for edge_event in edge_streaming_events:
+        # Collect traversal events from edge processing
+        for edge_event in edge_events:
             self._event_collector.collect(edge_event)
 
         # Enqueue ready nodes
@@ -304,21 +285,19 @@ class EventHandler:
         node = self._graph.nodes[event.node_id]
 
         if node.error_strategy == ErrorStrategy.DEFAULT_VALUE:
-            ready_nodes, edge_streaming_events = (
-                self._edge_processor.process_node_success(event.node_id)
+            ready_nodes, edge_events = self._edge_processor.process_node_success(
+                event.node_id
             )
         elif node.error_strategy == ErrorStrategy.FAIL_BRANCH:
-            ready_nodes, edge_streaming_events = (
-                self._edge_processor.handle_branch_completion(
-                    event.node_id,
-                    event.node_run_result.edge_source_handle,
-                )
+            ready_nodes, edge_events = self._edge_processor.handle_branch_completion(
+                event.node_id,
+                event.node_run_result.edge_source_handle,
             )
         else:
             msg = f"Unsupported error strategy: {node.error_strategy}"
             raise NotImplementedError(msg)
 
-        for edge_event in edge_streaming_events:
+        for edge_event in edge_events:
             self._event_collector.collect(edge_event)
 
         for node_id in ready_nodes:
