@@ -66,26 +66,23 @@ def main() -> int:
     parser.add_argument("query", nargs="?", default=DEFAULT_QUERY)
     args = parser.parse_args()
 
-    sys.stdout.write("stream_text:\n")
-    sys.stdout.flush()
-
     saw_stream = False
+    last_chunk = ""
 
     def write_stream_chunk(chunk: str) -> None:
-        nonlocal saw_stream
+        nonlocal last_chunk, saw_stream
         saw_stream = True
+        last_chunk = chunk
         sys.stdout.write(chunk)
         sys.stdout.flush()
 
     answer = run(args.query, on_stream_chunk=write_stream_chunk)
     if saw_stream:
-        if not answer.endswith("\n"):
+        if not last_chunk.endswith("\n"):
             sys.stdout.write("\n")
     else:
-        sys.stdout.write("(no stream chunks)\n")
+        sys.stdout.write(f"{answer}\n")
 
-    sys.stdout.write("final_answer:\n")
-    sys.stdout.write(f"{answer}\n")
     return 0
 
 
