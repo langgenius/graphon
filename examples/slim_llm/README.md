@@ -31,9 +31,6 @@ python3 dsl.py
 python3 dsl.py "Reply with only the word Graphon."
 ```
 
-`dsl.py` applies `ResponseStreamFilter` to `GraphEngine.run()` and writes the
-response text to stdout as stream chunks are emitted.
-
 ## Code Construction
 
 ```bash

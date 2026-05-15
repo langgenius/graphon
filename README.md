@@ -108,31 +108,6 @@ engine = loads(
 events = list(engine.run())
 ```
 
-### Event Filters
-
-`GraphEngine.run()` emits canonical graph events. Output shaping can be applied
-explicitly with `GraphEventFilter` instances:
-
-```python
-from graphon.graph_engine import (
-    GraphEventFilterContext,
-    ResponseStreamFilter,
-    filter_graph_events,
-)
-
-events = filter_graph_events(
-    engine.run(),
-    context=GraphEventFilterContext.from_engine(engine),
-    filters=[ResponseStreamFilter()],
-)
-
-for event in events:
-    handle(event)
-```
-
-`ResponseStreamFilter` is opt-in. Workflows that do not need response streaming
-can consume `engine.run()` directly.
-
 See [examples/slim_llm/dsl.py](examples/slim_llm/dsl.py) for the DSL import
 version and [examples/slim_llm/code.py](examples/slim_llm/code.py) for the
 Python graph construction version.
