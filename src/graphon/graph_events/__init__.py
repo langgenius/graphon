@@ -49,9 +49,15 @@ from .node import (
     NodeRunVariableUpdatedEvent,
     is_node_result_event,
 )
+from .traversal import (
+    GraphEdgeSkippedEvent,
+    GraphEdgeTakenEvent,
+)
 
 __all__ = [
     "BaseGraphEvent",
+    "GraphEdgeSkippedEvent",
+    "GraphEdgeTakenEvent",
     "GraphEngineEvent",
     "GraphNodeEventBase",
     "GraphRunAbortedEvent",
