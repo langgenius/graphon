@@ -16,7 +16,7 @@ graph:
       title: OpenAI
       model:
         provider: langgenius/openai/openai
-        name: gpt-5.4
+        name: gpt-4o-mini
         mode: chat
         completion_params: {}
       prompt_template:

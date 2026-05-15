@@ -18,7 +18,7 @@ OPENAI_PLUGIN_ID = (
     "592c8252795b5f75807de2d609a03196ed02596b409f7642b4a07548c7ff57ef"
 )
 OPENAI_PROVIDER = "openai"
-OPENAI_MODEL = "gpt-5.4"
+OPENAI_MODEL = "gpt-4o-mini"
 DEFAULT_QUERY = "Reply with only the word Graphon."
 
 
