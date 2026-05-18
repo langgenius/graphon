@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import abstractmethod
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
@@ -34,18 +35,22 @@ class GraphEventFilter(Protocol):
     """Event-to-event transform used outside GraphEngine execution."""
 
     @property
+    @abstractmethod
     def filter_id(self) -> str:
         """Stable identifier for diagnostics and external state storage."""
         raise NotImplementedError
 
+    @abstractmethod
     def initialize(self, context: GraphEventFilterContext) -> None:
         """Bind run-scoped context before events are processed."""
         raise NotImplementedError
 
+    @abstractmethod
     def on_event(self, event: GraphEngineEvent) -> Iterable[GraphEngineEvent]:
         """Transform one input event into zero or more output events."""
         raise NotImplementedError
 
+    @abstractmethod
     def flush(self) -> Iterable[GraphEngineEvent]:
         """Emit buffered events after the upstream source is exhausted."""
         raise NotImplementedError
@@ -54,10 +59,12 @@ class GraphEventFilter(Protocol):
 class ResumableGraphEventFilter(GraphEventFilter, Protocol):
     """Optional filter protocol for output-layer resume state."""
 
+    @abstractmethod
     def dumps(self) -> str:
         """Serialize this filter's private state."""
         raise NotImplementedError
 
+    @abstractmethod
     def loads(self, data: str) -> None:
         """Restore this filter's private state."""
         raise NotImplementedError

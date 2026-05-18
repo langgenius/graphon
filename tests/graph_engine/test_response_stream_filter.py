@@ -57,10 +57,6 @@ class _TestEdge(EdgeProtocol):
 
 
 class _TestGraph(GraphProtocol):
-    nodes: dict[str, _TestNode]
-    edges: dict[str, _TestEdge]
-    root_node: _TestNode
-
     def __init__(
         self,
         *,
@@ -68,9 +64,21 @@ class _TestGraph(GraphProtocol):
         edges: dict[str, _TestEdge],
         root_node_id: str,
     ) -> None:
-        self.nodes = nodes
-        self.edges = edges
-        self.root_node = nodes[root_node_id]
+        self._nodes = nodes
+        self._edges = edges
+        self._root_node = nodes[root_node_id]
+
+    @property
+    def nodes(self) -> dict[str, _TestNode]:
+        return self._nodes
+
+    @property
+    def edges(self) -> dict[str, _TestEdge]:
+        return self._edges
+
+    @property
+    def root_node(self) -> _TestNode:
+        return self._root_node
 
     def get_outgoing_edges(self, node_id: str) -> Sequence[_TestEdge]:
         return [edge for edge in self.edges.values() if edge.tail == node_id]
