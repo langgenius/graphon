@@ -7,7 +7,6 @@ from base64 import b64encode
 from collections.abc import Mapping
 from dataclasses import dataclass
 from http import HTTPStatus
-from textwrap import dedent
 from typing import Any, ClassVar
 
 import httpx
@@ -153,19 +152,24 @@ class _Python3TemplateTransformer(_TemplateTransformer):
 
     @classmethod
     def runner(cls, *, code: str, inputs_payload: str) -> str:
-        return dedent(
-            f"""
-            {code}
-
-            import json
-            from base64 import b64decode
-
-            inputs_obj = json.loads(b64decode('{inputs_payload}').decode('utf-8'))
-            output_obj = main(**inputs_obj)
-            output_json = json.dumps(output_obj, indent=4)
-            result = f'''{_RESULT_TAG}{{output_json}}{_RESULT_TAG}'''
-            print(result)
-            """,
+        return "\n".join(
+            [
+                code.rstrip(),
+                "",
+                "import json",
+                "from base64 import b64decode",
+                "",
+                (
+                    "inputs_obj = json.loads("
+                    f"b64decode('{inputs_payload}').decode('utf-8')"
+                    ")"
+                ),
+                "output_obj = main(**inputs_obj)",
+                "output_json = json.dumps(output_obj, indent=4)",
+                f"result = f'''{_RESULT_TAG}{{output_json}}{_RESULT_TAG}'''",
+                "print(result)",
+                "",
+            ],
         )
 
 
@@ -174,18 +178,19 @@ class _JavaScriptTemplateTransformer(_TemplateTransformer):
 
     @classmethod
     def runner(cls, *, code: str, inputs_payload: str) -> str:
-        return dedent(
-            f"""
-            {code}
-
-            var inputs_obj = JSON.parse(
-                Buffer.from('{inputs_payload}', 'base64').toString('utf-8')
-            )
-            var output_obj = main(inputs_obj)
-            var output_json = JSON.stringify(output_obj)
-            var result = `{_RESULT_TAG}${{output_json}}{_RESULT_TAG}`
-            console.log(result)
-            """,
+        return "\n".join(
+            [
+                code.rstrip(),
+                "",
+                "var inputs_obj = JSON.parse(",
+                f"    Buffer.from('{inputs_payload}', 'base64').toString('utf-8')",
+                ")",
+                "var output_obj = main(inputs_obj)",
+                "var output_json = JSON.stringify(output_obj)",
+                f"var result = `{_RESULT_TAG}${{output_json}}{_RESULT_TAG}`",
+                "console.log(result)",
+                "",
+            ],
         )
 
 
