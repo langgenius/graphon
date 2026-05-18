@@ -51,9 +51,6 @@ build-backend = 'uv_build'
 [tool.uv]
 default-groups = ['dev']
 
-[tool.uv.build-backend]
-source-exclude = ['src/**/*_type_contract.py']
-
 [tool.ruff]
 fix = true
 preview = true
