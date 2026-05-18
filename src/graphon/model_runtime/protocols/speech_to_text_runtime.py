@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import abstractmethod
 from typing import IO, Any, Protocol, runtime_checkable
 
 from graphon.model_runtime.protocols.provider_runtime import ModelProviderRuntime
@@ -9,6 +10,7 @@ from graphon.model_runtime.protocols.provider_runtime import ModelProviderRuntim
 class SpeechToTextModelRuntime(ModelProviderRuntime, Protocol):
     """Runtime surface required by speech-to-text model wrappers."""
 
+    @abstractmethod
     def invoke_speech_to_text(
         self,
         *,

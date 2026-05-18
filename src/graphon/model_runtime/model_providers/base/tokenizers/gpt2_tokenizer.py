@@ -1,4 +1,5 @@
 import logging
+from abc import abstractmethod
 from collections.abc import Sequence
 from pathlib import Path
 from threading import Lock
@@ -8,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class _TokenizerProtocol(Protocol):
+    @abstractmethod
     def encode(self, text: str) -> Sequence[int]: ...
 
 

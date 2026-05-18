@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
@@ -34,6 +35,7 @@ class GraphValidationError(ValueError):
 class GraphValidationRule(Protocol):
     """Protocol that individual validation rules must satisfy."""
 
+    @abstractmethod
     def validate(self, graph: Graph) -> Sequence[GraphValidationIssue]:
         """Validate the provided graph and return any discovered issues."""
         ...

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import mimetypes
 import typing as tp
+from abc import abstractmethod
 
 from graphon.file.constants import DEFAULT_EXTENSION, DEFAULT_MIME_TYPE
 from graphon.file.enums import (
@@ -21,6 +22,7 @@ class LLMFileSaver(tp.Protocol):
     LLM.
     """
 
+    @abstractmethod
     def save_binary_string(
         self,
         data: bytes,
@@ -58,6 +60,7 @@ class LLMFileSaver(tp.Protocol):
         """
         raise NotImplementedError
 
+    @abstractmethod
     def save_remote_url(self, url: str, file_type: FileType) -> File:
         """save_remote_url saves the file from a remote url returned by LLM.
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import abstractmethod
 from typing import Any, Protocol, runtime_checkable
 
 from graphon.model_runtime.entities.rerank_entities import (
@@ -13,6 +14,7 @@ from graphon.model_runtime.protocols.provider_runtime import ModelProviderRuntim
 class RerankModelRuntime(ModelProviderRuntime, Protocol):
     """Runtime surface required by rerank model wrappers."""
 
+    @abstractmethod
     def invoke_rerank(
         self,
         *,
@@ -25,6 +27,7 @@ class RerankModelRuntime(ModelProviderRuntime, Protocol):
         top_n: int | None,
     ) -> RerankResult: ...
 
+    @abstractmethod
     def invoke_multimodal_rerank(
         self,
         *,

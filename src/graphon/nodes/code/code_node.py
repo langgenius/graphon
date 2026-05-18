@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import abstractmethod
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from textwrap import dedent
@@ -23,6 +24,7 @@ from .exc import (
 
 
 class CodeExecutorProtocol(Protocol):
+    @abstractmethod
     def execute(
         self,
         *,
@@ -31,6 +33,7 @@ class CodeExecutorProtocol(Protocol):
         inputs: Mapping[str, Any],
     ) -> Mapping[str, Any]: ...
 
+    @abstractmethod
     def is_execution_error(self, error: Exception) -> bool: ...
 
 

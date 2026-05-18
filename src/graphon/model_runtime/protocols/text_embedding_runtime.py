@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import abstractmethod
 from typing import Any, Protocol, runtime_checkable
 
 from graphon.model_runtime.entities.text_embedding_entities import (
@@ -13,6 +14,7 @@ from graphon.model_runtime.protocols.provider_runtime import ModelProviderRuntim
 class TextEmbeddingModelRuntime(ModelProviderRuntime, Protocol):
     """Runtime surface required by text and multimodal embedding wrappers."""
 
+    @abstractmethod
     def invoke_text_embedding(
         self,
         *,
@@ -23,6 +25,7 @@ class TextEmbeddingModelRuntime(ModelProviderRuntime, Protocol):
         input_type: EmbeddingInputType,
     ) -> EmbeddingResult: ...
 
+    @abstractmethod
     def invoke_multimodal_embedding(
         self,
         *,
@@ -33,6 +36,7 @@ class TextEmbeddingModelRuntime(ModelProviderRuntime, Protocol):
         input_type: EmbeddingInputType,
     ) -> EmbeddingResult: ...
 
+    @abstractmethod
     def get_text_embedding_num_tokens(
         self,
         *,

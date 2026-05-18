@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import abstractmethod
 from collections.abc import Mapping
 from enum import StrEnum, auto
 from typing import Any, Protocol
@@ -125,4 +126,5 @@ class DslImportPlan(BaseModel):
 
 
 class TypedNodeFactory(Protocol):
+    @abstractmethod
     def create_node(self, node_config: NodeConfigDict) -> Any: ...

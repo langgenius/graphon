@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import abstractmethod
 from collections.abc import Iterable
 from typing import Any, Protocol, runtime_checkable
 
@@ -10,6 +11,7 @@ from graphon.model_runtime.protocols.provider_runtime import ModelProviderRuntim
 class TTSModelRuntime(ModelProviderRuntime, Protocol):
     """Runtime surface required by text-to-speech model wrappers."""
 
+    @abstractmethod
     def invoke_tts(
         self,
         *,
@@ -20,6 +22,7 @@ class TTSModelRuntime(ModelProviderRuntime, Protocol):
         voice: str,
     ) -> Iterable[bytes]: ...
 
+    @abstractmethod
     def get_tts_model_voices(
         self,
         *,

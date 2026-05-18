@@ -6,6 +6,7 @@ Each instance uses a unique key for its command queue.
 """
 
 import json
+from abc import abstractmethod
 from contextlib import AbstractContextManager
 from typing import Any, Protocol, final
 
@@ -27,18 +28,32 @@ _COMMAND_MODEL_BY_TYPE: dict[CommandType, type[GraphEngineCommand]] = {
 class RedisPipelineProtocol(Protocol):
     """Minimal Redis pipeline contract used by the command channel."""
 
+    @abstractmethod
     def lrange(self, name: str, start: int, end: int) -> Any: ...
+
+    @abstractmethod
     def delete(self, *names: str) -> Any: ...
+
+    @abstractmethod
     def execute(self) -> list[Any]: ...
+
+    @abstractmethod
     def rpush(self, name: str, *values: str) -> Any: ...
+
+    @abstractmethod
     def expire(self, name: str, time: int) -> Any: ...
+
+    @abstractmethod
     def set(self, name: str, value: str, ex: int | None = None) -> Any: ...
+
+    @abstractmethod
     def get(self, name: str) -> Any: ...
 
 
 class RedisClientProtocol(Protocol):
     """Redis client contract required by the command channel."""
 
+    @abstractmethod
     def pipeline(self) -> AbstractContextManager[RedisPipelineProtocol]: ...
 
 

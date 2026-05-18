@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+from abc import abstractmethod
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from copy import deepcopy
@@ -25,32 +26,39 @@ if TYPE_CHECKING:
 class ReadyQueueProtocol(Protocol):
     """Structural interface required from ready queue implementations."""
 
+    @abstractmethod
     def put(self, item: str) -> None:
         """Enqueue the identifier of a node that is ready to run."""
         ...
 
+    @abstractmethod
     def get(self, timeout: float | None = None) -> str:
         """Return the next node identifier,
         blocking until available or timeout expires.
         """
         ...
 
+    @abstractmethod
     def task_done(self) -> None:
         """Signal that the most recently dequeued node has completed processing."""
         ...
 
+    @abstractmethod
     def empty(self) -> bool:
         """Return True when the queue contains no pending nodes."""
         ...
 
+    @abstractmethod
     def qsize(self) -> int:
         """Approximate the number of pending nodes awaiting execution."""
         ...
 
+    @abstractmethod
     def dumps(self) -> str:
         """Serialize the queue contents for persistence."""
         ...
 
+    @abstractmethod
     def loads(self, data: str) -> None:
         """Restore the queue contents from a serialized payload."""
         ...
@@ -63,18 +71,22 @@ class NodeExecutionProtocol(Protocol):
     retry_count: int
     execution_id: str | None
 
+    @abstractmethod
     def mark_started(self, execution_id: str) -> None:
         """Mark the node execution as started."""
         ...
 
+    @abstractmethod
     def mark_taken(self) -> None:
         """Mark the node execution as successfully completed."""
         ...
 
+    @abstractmethod
     def mark_failed(self, error: str) -> None:
         """Mark the node execution as failed with an error."""
         ...
 
+    @abstractmethod
     def increment_retry(self) -> None:
         """Increment the retry counter for the node execution."""
         ...
@@ -98,52 +110,64 @@ class GraphExecutionProtocol(Protocol):
     pause_reasons: list[PauseReason]
 
     @property
+    @abstractmethod
     def node_executions(self) -> Mapping[str, NodeExecutionProtocol]:
         """Return the persisted node execution state keyed by node id."""
         ...
 
+    @abstractmethod
     def start(self) -> None:
         """Transition execution into the running state."""
         ...
 
+    @abstractmethod
     def complete(self) -> None:
         """Mark execution as successfully completed."""
         ...
 
+    @abstractmethod
     def abort(self, reason: str) -> None:
         """Abort execution in response to an external stop request."""
         ...
 
+    @abstractmethod
     def pause(self, reason: PauseReason) -> None:
         """Pause execution with a recorded reason."""
         ...
 
+    @abstractmethod
     def fail(self, error: Exception) -> None:
         """Record an unrecoverable error and end execution."""
         ...
 
+    @abstractmethod
     def record_node_failure(self) -> None:
         """Increment the count of node failures observed during execution."""
         ...
 
+    @abstractmethod
     def get_or_create_node_execution(self, node_id: str) -> NodeExecutionProtocol:
         """Return the execution entity for a node, creating it when needed."""
         ...
 
     @property
+    @abstractmethod
     def is_paused(self) -> bool:
         """Return whether the execution is currently paused."""
         ...
 
     @property
+    @abstractmethod
     def has_error(self) -> bool:
         """Return whether the execution has recorded an error."""
         ...
 
+    @abstractmethod
     def dumps(self) -> str:
         """Serialize execution state into a JSON payload."""
         ...
 
+    @abstractmethod
     def loads(self, data: str) -> None:
         """Restore execution state from a previously serialized payload."""
         ...
@@ -152,18 +176,22 @@ class GraphExecutionProtocol(Protocol):
 class ResponseStreamCoordinatorProtocol(Protocol):
     """Structural interface for response stream coordinator."""
 
+    @abstractmethod
     def register(self, response_node_id: str) -> None:
         """Register a response node so its outputs can be streamed."""
         ...
 
+    @abstractmethod
     def track_node_execution(self, node_id: str, execution_id: str) -> None:
         """Track the current execution id for a node."""
         ...
 
+    @abstractmethod
     def on_edge_taken(self, edge_id: str) -> Sequence[NodeRunStreamChunkEvent]:
         """Update pending response sessions after an edge is taken."""
         ...
 
+    @abstractmethod
     def intercept_event(
         self,
         event: NodeRunStreamChunkEvent | NodeRunSucceededEvent,
@@ -171,10 +199,12 @@ class ResponseStreamCoordinatorProtocol(Protocol):
         """Translate node events into streamed response events."""
         ...
 
+    @abstractmethod
     def loads(self, data: str) -> None:
         """Restore coordinator state from a serialized payload."""
         ...
 
+    @abstractmethod
     def dumps(self) -> str:
         """Serialize coordinator state for persistence."""
         ...
@@ -188,6 +218,7 @@ class NodeProtocol(Protocol):
     execution_type: NodeExecutionType
     node_type: ClassVar[NodeType]
 
+    @abstractmethod
     def blocks_variable_output(
         self,
         variable_selectors: set[tuple[str, ...]],
@@ -207,14 +238,24 @@ class GraphProtocol(Protocol):
     to the runtime state.
     """
 
-    nodes: Mapping[str, NodeProtocol]
-    edges: Mapping[str, EdgeProtocol]
-    root_node: NodeProtocol
+    @property
+    @abstractmethod
+    def nodes(self) -> Mapping[str, NodeProtocol]: ...
 
+    @property
+    @abstractmethod
+    def edges(self) -> Mapping[str, EdgeProtocol]: ...
+
+    @property
+    @abstractmethod
+    def root_node(self) -> NodeProtocol: ...
+
+    @abstractmethod
     def get_outgoing_edges(self, node_id: str) -> Sequence[EdgeProtocol]: ...
 
 
 class ChildGraphEngineBuilderProtocol(Protocol):
+    @abstractmethod
     def build_child_engine(
         self,
         *,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import abstractmethod
 from typing import Any, Protocol, runtime_checkable
 
 from graphon.model_runtime.protocols.provider_runtime import ModelProviderRuntime
@@ -9,6 +10,7 @@ from graphon.model_runtime.protocols.provider_runtime import ModelProviderRuntim
 class ModerationModelRuntime(ModelProviderRuntime, Protocol):
     """Runtime surface required by moderation model wrappers."""
 
+    @abstractmethod
     def invoke_moderation(
         self,
         *,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import abstractmethod
 from collections.abc import Generator, Sequence
 from typing import Any, Literal, Protocol, overload, runtime_checkable
 
@@ -49,6 +50,7 @@ class LLMModelRuntime(ModelProviderRuntime, Protocol):
         stream: Literal[True],
     ) -> Generator[LLMResultChunk, None, None]: ...
 
+    @abstractmethod
     def invoke_llm(
         self,
         *,
@@ -90,6 +92,7 @@ class LLMModelRuntime(ModelProviderRuntime, Protocol):
         stream: Literal[True],
     ) -> Generator[LLMResultChunkWithStructuredOutput, None, None]: ...
 
+    @abstractmethod
     def invoke_llm_with_structured_output(
         self,
         *,
@@ -106,6 +109,7 @@ class LLMModelRuntime(ModelProviderRuntime, Protocol):
         | Generator[LLMResultChunkWithStructuredOutput, None, None]
     ): ...
 
+    @abstractmethod
     def get_llm_num_tokens(
         self,
         *,

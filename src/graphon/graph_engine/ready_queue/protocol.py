@@ -4,6 +4,7 @@ This protocol defines the interface for managing the queue of nodes ready
 for execution, supporting both in-memory and persistent storage scenarios.
 """
 
+from abc import abstractmethod
 from collections.abc import Sequence
 from typing import Protocol
 
@@ -35,6 +36,7 @@ class ReadyQueue(Protocol):
     that can be serialized for state storage.
     """
 
+    @abstractmethod
     def put(self, item: str) -> None:
         """Add a node ID to the ready queue.
 
@@ -44,6 +46,7 @@ class ReadyQueue(Protocol):
         """
         ...
 
+    @abstractmethod
     def get(self, timeout: float | None = None) -> str:
         """Retrieve and remove a node ID from the queue.
 
@@ -56,6 +59,7 @@ class ReadyQueue(Protocol):
         """
         ...
 
+    @abstractmethod
     def task_done(self) -> None:
         """Indicate that a previously retrieved task is complete.
 
@@ -64,6 +68,7 @@ class ReadyQueue(Protocol):
         """
         ...
 
+    @abstractmethod
     def empty(self) -> bool:
         """Check if the queue is empty.
 
@@ -73,6 +78,7 @@ class ReadyQueue(Protocol):
         """
         ...
 
+    @abstractmethod
     def qsize(self) -> int:
         """Get the approximate size of the queue.
 
@@ -82,6 +88,7 @@ class ReadyQueue(Protocol):
         """
         ...
 
+    @abstractmethod
     def dumps(self) -> str:
         """Serialize the queue state to a JSON string for storage.
 
@@ -92,6 +99,7 @@ class ReadyQueue(Protocol):
         """
         ...
 
+    @abstractmethod
     def loads(self, data: str) -> None:
         """Restore the queue state from a JSON string.
 

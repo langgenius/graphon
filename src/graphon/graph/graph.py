@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from abc import abstractmethod
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol, final
@@ -27,6 +28,7 @@ class NodeFactory(Protocol):
     allowing for different node creation strategies while maintaining type safety.
     """
 
+    @abstractmethod
     def create_node(self, node_config: NodeConfigDict) -> Node:
         """Create a Node instance from node configuration data.
 

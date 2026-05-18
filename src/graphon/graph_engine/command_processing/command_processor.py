@@ -1,6 +1,7 @@
 """Main command processor for handling external commands."""
 
 import logging
+from abc import abstractmethod
 from collections.abc import Callable
 from typing import Protocol, final
 
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 class CommandHandler[CommandT: GraphEngineCommand](Protocol):
     """Protocol for command handlers."""
 
+    @abstractmethod
     def handle(
         self,
         command: CommandT,
