@@ -31,6 +31,15 @@ class ModelInvokeCompletedEvent(NodeEventBase):
     structured_output: dict | None = None
 
 
+class ModelPollingProgressEvent(NodeEventBase):
+    attempt: int = Field(..., ge=0, description="polling check attempt count")
+    last_checked_at: datetime = Field(..., description="last polling check time")
+    next_check_at: datetime | None = Field(
+        default=None,
+        description="next polling check time",
+    )
+
+
 class RunRetryEvent(NodeEventBase):
     error: str = Field(..., description="error")
     retry_index: int = Field(..., description="Retry attempt number")

@@ -7,6 +7,8 @@ from typing import Any, Literal, Protocol, overload
 from graphon.file.models import File
 from graphon.model_runtime.entities.llm_entities import (
     LLMMode,
+    LLMPollingConfig,
+    LLMPollingResponse,
     LLMResult,
     LLMResultChunk,
     LLMResultChunkWithStructuredOutput,
@@ -119,6 +121,44 @@ class LLMProtocol(Protocol):
 
     @abstractmethod
     def is_structured_output_parse_error(self, error: Exception) -> bool: ...
+
+
+class PreparedLLMProtocol(LLMProtocol, Protocol):
+    """Prepared graph-facing LLM adapter."""
+
+
+class LLMPollingCapableProtocol(LLMProtocol, Protocol):
+    """Optional capability for graph-facing LLM adapters that support polling."""
+
+    @property
+    @abstractmethod
+    def supports_polling(self) -> bool: ...
+
+    @property
+    @abstractmethod
+    def polling_config(self) -> LLMPollingConfig: ...
+
+    @abstractmethod
+    def start_llm_polling(
+        self,
+        *,
+        prompt_messages: Sequence[PromptMessage],
+        model_parameters: Mapping[str, Any],
+        tools: Sequence[PromptMessageTool] | None,
+        stop: Sequence[str] | None,
+        json_schema: Mapping[str, Any] | None,
+        workflow_run_id: str | None,
+        node_id: str,
+    ) -> LLMPollingResponse: ...
+
+    @abstractmethod
+    def check_llm_polling(
+        self,
+        *,
+        plugin_state: Mapping[str, Any],
+        workflow_run_id: str | None,
+        node_id: str,
+    ) -> LLMPollingResponse: ...
 
 
 class PromptMessageSerializerProtocol(Protocol):

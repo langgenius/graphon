@@ -8,7 +8,8 @@ import re
 import time
 from collections.abc import Generator, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, assert_never, override
+from datetime import UTC, datetime, timedelta
+from typing import Any, Literal, assert_never, cast, override
 
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import (
@@ -21,6 +22,9 @@ from graphon.file.enums import FileType
 from graphon.file.models import File
 from graphon.http import HttpClientProtocol
 from graphon.model_runtime.entities.llm_entities import (
+    LLMPollingConfig,
+    LLMPollingResponse,
+    LLMPollingStatus,
     LLMResult,
     LLMResultChunk,
     LLMResultChunkWithStructuredOutput,
@@ -48,6 +52,7 @@ from graphon.node_events.base import (
 )
 from graphon.node_events.node import (
     ModelInvokeCompletedEvent,
+    ModelPollingProgressEvent,
     RunRetrieverResourceEvent,
     StreamChunkEvent,
     StreamCompletedEvent,
@@ -56,6 +61,7 @@ from graphon.nodes.base.entities import VariableSelector
 from graphon.nodes.base.node import Node
 from graphon.nodes.base.variable_template_parser import VariableTemplateParser
 from graphon.nodes.llm.runtime_protocols import (
+    LLMPollingCapableProtocol,
     LLMProtocol,
     PromptMessageSerializerProtocol,
     RetrieverAttachmentLoaderProtocol,
@@ -340,16 +346,9 @@ class LLMNode(Node[LLMNodeData]):
         model_provider: Any,
         model_name: str,
     ) -> Generator[NodeEventBase, None, None]:
-        generator = LLMNode.invoke_llm(
-            model_instance=self._model_instance,
+        generator = self._invoke_llm_for_run(
             prompt_messages=prompt_messages,
             stop=stop,
-            structured_output_enabled=self.node_data.structured_output_enabled,
-            structured_output=self.node_data.structured_output,
-            file_saver=self._llm_file_saver,
-            file_outputs=self._file_outputs,
-            node_id=self._node_id,
-            reasoning_format=self.node_data.reasoning_format,
         )
         usage = LLMUsage.empty_usage()
         finish_reason = None
@@ -358,7 +357,7 @@ class LLMNode(Node[LLMNodeData]):
         structured_output: LLMStructuredOutput | None = None
 
         for event in generator:
-            if isinstance(event, StreamChunkEvent):
+            if isinstance(event, StreamChunkEvent | ModelPollingProgressEvent):
                 yield event
                 continue
 
@@ -418,6 +417,234 @@ class LLMNode(Node[LLMNodeData]):
                 llm_usage=usage,
             ),
         )
+
+    def _invoke_llm_for_run(
+        self,
+        *,
+        prompt_messages: Sequence[PromptMessage],
+        stop: Sequence[str] | None,
+    ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
+        polling_model = self._polling_model_instance()
+        if polling_model is None:
+            return LLMNode.invoke_llm(
+                model_instance=self._model_instance,
+                prompt_messages=prompt_messages,
+                stop=stop,
+                structured_output_enabled=self.node_data.structured_output_enabled,
+                structured_output=self.node_data.structured_output,
+                file_saver=self._llm_file_saver,
+                file_outputs=self._file_outputs,
+                node_id=self._node_id,
+                reasoning_format=self.node_data.reasoning_format,
+            )
+
+        return self._invoke_llm_with_polling(
+            polling_model=polling_model,
+            prompt_messages=prompt_messages,
+            stop=stop,
+        )
+
+    def _polling_model_instance(self) -> LLMPollingCapableProtocol | None:
+        if getattr(self._model_instance, "supports_polling", False) is not True:
+            return None
+
+        start_polling = getattr(self._model_instance, "start_llm_polling", None)
+        check_polling = getattr(self._model_instance, "check_llm_polling", None)
+        if not callable(start_polling) or not callable(check_polling):
+            return None
+        return cast(LLMPollingCapableProtocol, self._model_instance)
+
+    def _invoke_llm_with_polling(
+        self,
+        *,
+        polling_model: LLMPollingCapableProtocol,
+        prompt_messages: Sequence[PromptMessage],
+        stop: Sequence[str] | None,
+    ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
+        config = self._polling_config(polling_model)
+        model_parameters = dict(polling_model.parameters)
+        json_schema = (
+            LLMNode.fetch_structured_output_schema(
+                structured_output=self.node_data.structured_output or {},
+            )
+            if self.node_data.structured_output_enabled
+            else None
+        )
+        workflow_run_id = self._resolve_workflow_run_id()
+
+        request_start_time = time.perf_counter()
+        self._raise_if_polling_aborted()
+        response = self._normalize_polling_response(
+            polling_model.start_llm_polling(
+                prompt_messages=prompt_messages,
+                model_parameters=model_parameters,
+                tools=None,
+                stop=stop,
+                json_schema=json_schema,
+                workflow_run_id=workflow_run_id,
+                node_id=self._node_id,
+            ),
+        )
+
+        deadline = request_start_time + config.max_wait_seconds
+        max_attempts = config.max_attempts
+        attempts = 0
+
+        while True:
+            self._raise_if_polling_aborted()
+            deadline = self._updated_polling_deadline(
+                deadline=deadline,
+                response=response,
+            )
+            max_attempts = self._updated_polling_max_attempts(
+                max_attempts=max_attempts,
+                response=response,
+                config=config,
+            )
+
+            match response.status:
+                case LLMPollingStatus.SUCCEEDED:
+                    if response.result is None:
+                        msg = "LLM polling succeeded without a result"
+                        raise LLMNodeError(msg)
+                    yield from LLMNode.handle_invoke_result(
+                        invoke_result=response.result,
+                        file_saver=self._llm_file_saver,
+                        file_outputs=self._file_outputs,
+                        node_id=self._node_id,
+                        model_instance=self._model_instance,
+                        reasoning_format=self.node_data.reasoning_format,
+                        request_start_time=request_start_time,
+                    )
+                    return
+                case LLMPollingStatus.FAILED:
+                    if not response.error:
+                        msg = "LLM polling failed without an error"
+                        raise LLMNodeError(msg)
+                    raise LLMNodeError(response.error)
+                case LLMPollingStatus.RUNNING:
+                    plugin_state = response.plugin_state
+                    if plugin_state is None:
+                        msg = "LLM polling is running without plugin_state"
+                        raise LLMNodeError(msg)
+                    if attempts >= max_attempts:
+                        msg = "LLM polling exceeded max attempts"
+                        raise LLMNodeError(msg)
+
+                    delay = self._polling_delay(response=response, config=config)
+                    yield self._build_polling_progress_event(
+                        attempt=attempts,
+                        delay_seconds=delay,
+                    )
+                    self._sleep_until_next_polling_check(
+                        delay_seconds=delay,
+                        deadline=deadline,
+                        config=config,
+                    )
+                    attempts += 1
+                    response = self._normalize_polling_response(
+                        polling_model.check_llm_polling(
+                            plugin_state=plugin_state,
+                            workflow_run_id=workflow_run_id,
+                            node_id=self._node_id,
+                        ),
+                    )
+
+    @staticmethod
+    def _polling_config(
+        polling_model: LLMPollingCapableProtocol,
+    ) -> LLMPollingConfig:
+        raw_config = getattr(polling_model, "polling_config", None)
+        if isinstance(raw_config, LLMPollingConfig):
+            return raw_config
+        if raw_config is None:
+            return LLMPollingConfig()
+        return LLMPollingConfig.model_validate(raw_config)
+
+    @staticmethod
+    def _normalize_polling_response(response: object) -> LLMPollingResponse:
+        if isinstance(response, LLMPollingResponse):
+            return response
+        return LLMPollingResponse.model_validate(response)
+
+    def _resolve_workflow_run_id(self) -> str | None:
+        segment = self.graph_runtime_state.variable_pool.get(("sys", "workflow_run_id"))
+        if segment is None:
+            return None
+        value = segment.text
+        return value or None
+
+    @staticmethod
+    def _updated_polling_deadline(
+        *,
+        deadline: float,
+        response: LLMPollingResponse,
+    ) -> float:
+        if response.expires_after_seconds is None:
+            return deadline
+        return min(deadline, time.perf_counter() + response.expires_after_seconds)
+
+    @staticmethod
+    def _updated_polling_max_attempts(
+        *,
+        max_attempts: int,
+        response: LLMPollingResponse,
+        config: LLMPollingConfig,
+    ) -> int:
+        if response.max_attempts is None:
+            return max_attempts
+        return max(1, min(max_attempts, config.max_attempts, response.max_attempts))
+
+    @staticmethod
+    def _polling_delay(
+        *,
+        response: LLMPollingResponse,
+        config: LLMPollingConfig,
+    ) -> float:
+        delay = response.next_check_after_seconds
+        if delay is None:
+            delay = config.min_check_interval_seconds
+        return min(
+            max(delay, config.min_check_interval_seconds),
+            config.max_check_interval_seconds,
+        )
+
+    @staticmethod
+    def _build_polling_progress_event(
+        *,
+        attempt: int,
+        delay_seconds: float,
+    ) -> ModelPollingProgressEvent:
+        checked_at = datetime.now(UTC).replace(tzinfo=None)
+        return ModelPollingProgressEvent(
+            attempt=attempt,
+            last_checked_at=checked_at,
+            next_check_at=checked_at + timedelta(seconds=delay_seconds),
+        )
+
+    def _sleep_until_next_polling_check(
+        self,
+        *,
+        delay_seconds: float,
+        deadline: float,
+        config: LLMPollingConfig,
+    ) -> None:
+        end_at = min(time.perf_counter() + delay_seconds, deadline)
+        while True:
+            self._raise_if_polling_aborted()
+            remaining = end_at - time.perf_counter()
+            if remaining <= 0:
+                break
+            time.sleep(min(remaining, config.wake_interval_seconds))
+
+        if time.perf_counter() >= deadline:
+            msg = "LLM polling timed out"
+            raise LLMNodeError(msg)
+
+    def _raise_if_polling_aborted(self) -> None:
+        if self.graph_runtime_state.graph_execution.aborted:
+            msg = "workflow execution was aborted"
+            raise LLMNodeError(msg)
 
     def _extract_clean_text(self, text: str) -> str:
         if self.node_data.reasoning_format == "tagged":

@@ -1,16 +1,94 @@
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from typing import Any, Never, cast
 from unittest.mock import MagicMock
 
 import pytest
 
-from graphon.model_runtime.entities.llm_entities import LLMUsage
-from graphon.node_events.node import ModelInvokeCompletedEvent, StreamCompletedEvent
+from graphon.enums import WorkflowNodeExecutionStatus
+from graphon.graph_events.node import NodeRunModelPollingProgressEvent
+from graphon.model_runtime.entities.llm_entities import (
+    LLMPollingConfig,
+    LLMPollingResponse,
+    LLMPollingStatus,
+    LLMResult,
+    LLMUsage,
+)
+from graphon.model_runtime.entities.message_entities import AssistantPromptMessage
+from graphon.node_events.node import (
+    ModelInvokeCompletedEvent,
+    ModelPollingProgressEvent,
+    StreamCompletedEvent,
+)
 from graphon.nodes.llm import LLMNode, LLMNodeData
+from graphon.nodes.llm.runtime_protocols import LLMProtocol
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
 from ...helpers import build_graph_init_params, build_variable_pool
 
 
-def _build_llm_node() -> LLMNode:
+class _PollingLLM:
+    provider = "openai"
+    model_name = "gpt-4o"
+    stop = ()
+    supports_polling = True
+
+    def __init__(self, responses: list[LLMPollingResponse]) -> None:
+        self.parameters = {}
+        self.polling_config = LLMPollingConfig(
+            min_check_interval_seconds=0,
+            max_check_interval_seconds=0.01,
+            max_wait_seconds=1,
+            max_attempts=3,
+            wake_interval_seconds=0.001,
+        )
+        self._responses = responses
+        self.start_calls: list[dict[str, Any]] = []
+        self.check_calls: list[dict[str, Any]] = []
+
+    def start_llm_polling(self, **kwargs: Any) -> LLMPollingResponse:
+        self.start_calls.append(kwargs)
+        return self._responses.pop(0)
+
+    def check_llm_polling(self, **kwargs: Any) -> LLMPollingResponse:
+        self.check_calls.append(kwargs)
+        return self._responses.pop(0)
+
+    def invoke_llm(self, **_: Any) -> Never:
+        msg = "streaming invoke should not be used"
+        raise AssertionError(msg)
+
+    def invoke_llm_with_structured_output(self, **_: Any) -> Never:
+        msg = "structured streaming invoke should not be used"
+        raise AssertionError(msg)
+
+    def is_structured_output_parse_error(self, _error: Exception) -> bool:
+        return False
+
+
+def _llm_result(text: str = "final answer") -> LLMResult:
+    return LLMResult(
+        model="gpt-4o",
+        prompt_messages=[],
+        message=AssistantPromptMessage(content=text),
+        usage=LLMUsage.empty_usage(),
+    )
+
+
+def _build_llm_node(
+    *,
+    model_instance: object | None = None,
+    variables: Sequence[tuple[Sequence[str], Any]] = (),
+) -> LLMNode:
+    prepared_model = model_instance
+    if prepared_model is None:
+        prepared_model = MagicMock(
+            provider="openai",
+            model_name="gpt-4o",
+            parameters={},
+            stop=(),
+        )
+
     return LLMNode(
         node_id="llm",
         data=LLMNodeData.model_validate({
@@ -33,17 +111,25 @@ def _build_llm_node() -> LLMNode:
             graph_config={"nodes": [], "edges": []}
         ),
         graph_runtime_state=GraphRuntimeState(
-            variable_pool=build_variable_pool(),
+            variable_pool=build_variable_pool(variables=variables),
             start_at=0.0,
         ),
-        model_instance=MagicMock(
-            provider="openai",
-            model_name="gpt-4o",
-            parameters={},
-            stop=(),
-        ),
+        model_instance=cast(LLMProtocol, prepared_model),
         llm_file_saver=MagicMock(),
-        prompt_message_serializer=MagicMock(),
+        prompt_message_serializer=MagicMock(
+            serialize=MagicMock(return_value=[]),
+        ),
+    )
+
+
+def _stub_simple_prompt(monkeypatch: pytest.MonkeyPatch, node: LLMNode) -> None:
+    monkeypatch.setattr(node, "_fetch_inputs", lambda **_: {})
+    monkeypatch.setattr(node, "_fetch_jinja_inputs", lambda **_: {})
+    monkeypatch.setattr(node, "_collect_run_context", lambda **_: iter(()))
+    monkeypatch.setattr(
+        LLMNode,
+        "fetch_prompt_messages",
+        staticmethod(lambda **_: ([], None)),
     )
 
 
@@ -52,12 +138,7 @@ def test_run_emits_model_identity_in_node_result_inputs(
 ) -> None:
     node = _build_llm_node()
 
-    monkeypatch.setattr(node, "_fetch_inputs", lambda **_: {})
-    monkeypatch.setattr(node, "_fetch_jinja_inputs", lambda **_: {})
-    monkeypatch.setattr(node, "_collect_run_context", lambda **_: iter(()))
-    monkeypatch.setattr(
-        LLMNode, "fetch_prompt_messages", staticmethod(lambda **_: ([], None))
-    )
+    _stub_simple_prompt(monkeypatch, node)
     monkeypatch.setattr(
         "graphon.nodes.llm.node.LLMNode.invoke_llm",
         lambda **_: iter([
@@ -76,3 +157,175 @@ def test_run_emits_model_identity_in_node_result_inputs(
 
     assert completed_event.node_run_result.inputs["model_provider"] == "openai"
     assert completed_event.node_run_result.inputs["model_name"] == "gpt-4o"
+
+
+def test_polling_llm_start_can_succeed_immediately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _PollingLLM([
+        LLMPollingResponse(
+            status=LLMPollingStatus.SUCCEEDED,
+            result=_llm_result("done"),
+        ),
+    ])
+    node = _build_llm_node(
+        model_instance=model,
+        variables=[(("sys", "workflow_run_id"), "wr-1")],
+    )
+    _stub_simple_prompt(monkeypatch, node)
+
+    events = list(node._run())
+
+    completed_event = next(
+        event for event in events if isinstance(event, StreamCompletedEvent)
+    )
+    assert (
+        completed_event.node_run_result.status == WorkflowNodeExecutionStatus.SUCCEEDED
+    )
+    assert completed_event.node_run_result.outputs["text"] == "done"
+    assert model.start_calls[0]["workflow_run_id"] == "wr-1"
+    assert model.start_calls[0]["node_id"] == "llm"
+    assert model.check_calls == []
+
+
+def test_polling_llm_checks_until_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    model = _PollingLLM([
+        LLMPollingResponse(
+            status=LLMPollingStatus.RUNNING,
+            plugin_state={"job_id": "job-1"},
+            next_check_after_seconds=0,
+        ),
+        LLMPollingResponse(
+            status=LLMPollingStatus.RUNNING,
+            plugin_state={"job_id": "job-1", "cursor": "2"},
+            next_check_after_seconds=0,
+        ),
+        LLMPollingResponse(
+            status=LLMPollingStatus.SUCCEEDED,
+            result=_llm_result("checked"),
+        ),
+    ])
+    node = _build_llm_node(model_instance=model)
+    _stub_simple_prompt(monkeypatch, node)
+
+    events = list(node._run())
+
+    progress_events = [
+        event for event in events if isinstance(event, ModelPollingProgressEvent)
+    ]
+    completed_event = next(
+        event for event in events if isinstance(event, StreamCompletedEvent)
+    )
+    assert [event.attempt for event in progress_events] == [0, 1]
+    assert model.check_calls[0]["plugin_state"] == {"job_id": "job-1"}
+    assert model.check_calls[1]["plugin_state"] == {
+        "job_id": "job-1",
+        "cursor": "2",
+    }
+    assert completed_event.node_run_result.outputs["text"] == "checked"
+
+
+@pytest.mark.parametrize(
+    ("response", "message"),
+    [
+        (
+            LLMPollingResponse(status=LLMPollingStatus.RUNNING),
+            "plugin_state",
+        ),
+        (
+            LLMPollingResponse(status=LLMPollingStatus.SUCCEEDED),
+            "without a result",
+        ),
+        (
+            LLMPollingResponse(status=LLMPollingStatus.FAILED),
+            "without an error",
+        ),
+    ],
+)
+def test_polling_llm_rejects_invalid_terminal_or_running_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+    response: LLMPollingResponse,
+    message: str,
+) -> None:
+    node = _build_llm_node(model_instance=_PollingLLM([response]))
+    _stub_simple_prompt(monkeypatch, node)
+
+    events = list(node._run())
+
+    completed_event = next(
+        event for event in events if isinstance(event, StreamCompletedEvent)
+    )
+    assert completed_event.node_run_result.status == WorkflowNodeExecutionStatus.FAILED
+    assert message in completed_event.node_run_result.error
+
+
+def test_polling_llm_fails_when_max_attempts_are_exceeded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _PollingLLM([
+        LLMPollingResponse(
+            status=LLMPollingStatus.RUNNING,
+            plugin_state={"job_id": "job-1"},
+            next_check_after_seconds=0,
+            max_attempts=1,
+        ),
+        LLMPollingResponse(
+            status=LLMPollingStatus.RUNNING,
+            plugin_state={"job_id": "job-1"},
+            next_check_after_seconds=0,
+        ),
+    ])
+    node = _build_llm_node(model_instance=model)
+    _stub_simple_prompt(monkeypatch, node)
+
+    events = list(node._run())
+
+    completed_event = next(
+        event for event in events if isinstance(event, StreamCompletedEvent)
+    )
+    assert model.check_calls == [
+        {
+            "plugin_state": {"job_id": "job-1"},
+            "workflow_run_id": None,
+            "node_id": "llm",
+        },
+    ]
+    assert completed_event.node_run_result.status == WorkflowNodeExecutionStatus.FAILED
+    assert "exceeded max attempts" in completed_event.node_run_result.error
+
+
+def test_polling_llm_respects_existing_abort_before_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _PollingLLM([
+        LLMPollingResponse(
+            status=LLMPollingStatus.SUCCEEDED,
+            result=_llm_result(),
+        ),
+    ])
+    node = _build_llm_node(model_instance=model)
+    node.graph_runtime_state.graph_execution.abort("stop")
+    _stub_simple_prompt(monkeypatch, node)
+
+    events = list(node._run())
+
+    completed_event = next(
+        event for event in events if isinstance(event, StreamCompletedEvent)
+    )
+    assert model.start_calls == []
+    assert completed_event.node_run_result.status == WorkflowNodeExecutionStatus.FAILED
+    assert "aborted" in completed_event.node_run_result.error
+
+
+def test_polling_progress_event_dispatches_to_graph_event() -> None:
+    node = _build_llm_node()
+    progress_event = ModelPollingProgressEvent(
+        attempt=2,
+        last_checked_at=datetime(2026, 5, 19, tzinfo=UTC).replace(tzinfo=None),
+        next_check_at=None,
+    )
+
+    graph_event = node._dispatch(progress_event)
+
+    assert isinstance(graph_event, NodeRunModelPollingProgressEvent)
+    assert graph_event.attempt == 2

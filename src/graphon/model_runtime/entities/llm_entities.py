@@ -213,6 +213,40 @@ class LLMResultWithStructuredOutput(LLMResult, LLMStructuredOutput):
     """Model class for llm result with structured output."""
 
 
+class LLMPollingStatus(StrEnum):
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class LLMPollingResponse(BaseModel):
+    status: LLMPollingStatus
+    plugin_state: Mapping[str, Any] | None = None
+    result: LLMResult | LLMResultWithStructuredOutput | None = None
+    error: str | None = None
+    next_check_after_seconds: float | None = None
+    expires_after_seconds: float | None = None
+    max_attempts: int | None = None
+
+
+class LLMPollingConfig(BaseModel):
+    min_check_interval_seconds: float = Field(default=1.0, ge=0)
+    max_check_interval_seconds: float = Field(default=30.0, gt=0)
+    max_wait_seconds: float = Field(default=7200.0, gt=0)
+    max_attempts: int = Field(default=240, ge=1)
+    wake_interval_seconds: float = Field(default=1.0, gt=0)
+
+    @model_validator(mode="after")
+    def _validate_intervals(self) -> LLMPollingConfig:
+        if self.max_check_interval_seconds < self.min_check_interval_seconds:
+            msg = (
+                "max_check_interval_seconds must be greater than or equal to "
+                "min_check_interval_seconds"
+            )
+            raise ValueError(msg)
+        return self
+
+
 class LLMResultChunkDelta(BaseModel):
     """Model class for llm result chunk delta."""
 
