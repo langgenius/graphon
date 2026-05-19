@@ -219,41 +219,33 @@ class LLMPollingStatus(StrEnum):
     FAILED = "failed"
 
 
-class LLMPollingResponse(BaseModel):
+class LLMPollingResult(BaseModel):
     status: LLMPollingStatus
     plugin_state: dict[str, Any] | None = None
     result: LLMResult | LLMResultWithStructuredOutput | None = None
     error: str | None = None
-    next_check_after_seconds: int | None = None
-    expires_after_seconds: int | None = None
-    max_attempts: int | None = None
+    next_check_after_seconds: float | None = Field(default=None, gt=0)
+    expires_after_seconds: float | None = Field(default=None, gt=0)
+    max_attempts: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
-    def _validate_status_payload(self) -> LLMPollingResponse:
+    def _validate_status_payload(self) -> LLMPollingResult:
         if self.status == LLMPollingStatus.RUNNING and self.plugin_state is None:
             msg = "plugin_state is required when polling status is running."
             raise ValueError(msg)
         if self.status == LLMPollingStatus.SUCCEEDED and self.result is None:
             msg = "result is required when polling status is succeeded."
             raise ValueError(msg)
-        if self.status == LLMPollingStatus.FAILED and not self.error:
-            msg = "error is required when polling status is failed."
-            raise ValueError(msg)
-
-        for field_name in (
-            "next_check_after_seconds",
-            "expires_after_seconds",
-            "max_attempts",
-        ):
-            value = getattr(self, field_name)
-            if value is not None and value <= 0:
-                msg = f"{field_name} must be greater than 0."
+        if self.status == LLMPollingStatus.FAILED:
+            if self.error is None or not self.error.strip():
+                msg = "error is required when polling status is failed."
                 raise ValueError(msg)
+            self.error = self.error.strip()
         return self
 
 
 class LLMPollingConfig(BaseModel):
-    min_check_interval_seconds: float = Field(default=1.0, ge=0)
+    min_check_interval_seconds: float = Field(default=1.0, gt=0)
     max_check_interval_seconds: float = Field(default=30.0, gt=0)
     max_wait_seconds: float = Field(default=7200.0, gt=0)
     max_attempts: int = Field(default=240, ge=1)

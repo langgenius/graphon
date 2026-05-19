@@ -8,7 +8,7 @@ from graphon.file.models import File
 from graphon.model_runtime.entities.llm_entities import (
     LLMMode,
     LLMPollingConfig,
-    LLMPollingResponse,
+    LLMPollingResult,
     LLMResult,
     LLMResultChunk,
     LLMResultChunkWithStructuredOutput,
@@ -149,7 +149,7 @@ class LLMPollingCapableProtocol(LLMProtocol, Protocol):
         json_schema: Mapping[str, Any] | None,
         workflow_run_id: str,
         node_id: str,
-    ) -> LLMPollingResponse: ...
+    ) -> LLMPollingResult: ...
 
     @abstractmethod
     def check_llm_polling(
@@ -158,7 +158,7 @@ class LLMPollingCapableProtocol(LLMProtocol, Protocol):
         plugin_state: Mapping[str, Any],
         workflow_run_id: str,
         node_id: str,
-    ) -> LLMPollingResponse: ...
+    ) -> LLMPollingResult: ...
 
 
 class PromptMessageSerializerProtocol(Protocol):

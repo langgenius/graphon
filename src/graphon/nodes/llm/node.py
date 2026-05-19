@@ -23,7 +23,7 @@ from graphon.file.models import File
 from graphon.http import HttpClientProtocol
 from graphon.model_runtime.entities.llm_entities import (
     LLMPollingConfig,
-    LLMPollingResponse,
+    LLMPollingResult,
     LLMPollingStatus,
     LLMResult,
     LLMResultChunk,
@@ -450,12 +450,15 @@ class LLMNode(Node[LLMNodeData]):
         if not callable(start_polling) or not callable(check_polling):
             return None
 
-        supports_polling = getattr(self._model_instance, "supports_polling", None)
-        if supports_polling is not True and (
-            supports_polling is not None or not self._model_schema_supports_polling()
-        ):
+        if not self._model_instance_supports_polling():
             return None
         return cast(LLMPollingCapableProtocol, self._model_instance)
+
+    def _model_instance_supports_polling(self) -> bool:
+        supports_polling = getattr(self._model_instance, "supports_polling", None)
+        if supports_polling is None:
+            return self._model_schema_supports_polling()
+        return supports_polling is True
 
     def _model_schema_supports_polling(self) -> bool:
         try:
@@ -487,7 +490,7 @@ class LLMNode(Node[LLMNodeData]):
         self._raise_if_polling_aborted()
         workflow_run_id = self._resolve_required_workflow_run_id()
         request_start_time = time.perf_counter()
-        response = self._normalize_polling_response(
+        polling_result = self._normalize_polling_result(
             polling_model.start_llm_polling(
                 prompt_messages=prompt_messages,
                 model_parameters=model_parameters,
@@ -507,21 +510,22 @@ class LLMNode(Node[LLMNodeData]):
             self._raise_if_polling_aborted()
             deadline = self._updated_polling_deadline(
                 deadline=deadline,
-                response=response,
+                polling_result=polling_result,
             )
             max_attempts = self._updated_polling_max_attempts(
                 max_attempts=max_attempts,
-                response=response,
+                polling_result=polling_result,
                 config=config,
             )
+            self._raise_if_polling_deadline_exceeded(deadline)
 
-            match response.status:
+            match polling_result.status:
                 case LLMPollingStatus.SUCCEEDED:
-                    if response.result is None:
+                    if polling_result.result is None:
                         msg = "LLM polling succeeded without a result"
                         raise LLMNodeError(msg)
                     yield from LLMNode.handle_invoke_result(
-                        invoke_result=response.result,
+                        invoke_result=polling_result.result,
                         file_saver=self._llm_file_saver,
                         file_outputs=self._file_outputs,
                         node_id=self._node_id,
@@ -531,12 +535,12 @@ class LLMNode(Node[LLMNodeData]):
                     )
                     return
                 case LLMPollingStatus.FAILED:
-                    if not response.error:
+                    if not polling_result.error:
                         msg = "LLM polling failed without an error"
                         raise LLMNodeError(msg)
-                    raise LLMNodeError(response.error)
+                    raise LLMNodeError(polling_result.error)
                 case LLMPollingStatus.RUNNING:
-                    plugin_state = response.plugin_state
+                    plugin_state = polling_result.plugin_state
                     if plugin_state is None:
                         msg = "LLM polling is running without plugin_state"
                         raise LLMNodeError(msg)
@@ -544,10 +548,14 @@ class LLMNode(Node[LLMNodeData]):
                         msg = "LLM polling exceeded max attempts"
                         raise LLMNodeError(msg)
 
-                    delay = self._polling_delay(response=response, config=config)
+                    delay = self._polling_delay(
+                        polling_result=polling_result,
+                        config=config,
+                    )
                     yield self._build_polling_progress_event(
                         attempt=attempts,
                         delay_seconds=delay,
+                        deadline=deadline,
                     )
                     self._sleep_until_next_polling_check(
                         delay_seconds=delay,
@@ -555,7 +563,7 @@ class LLMNode(Node[LLMNodeData]):
                         config=config,
                     )
                     attempts += 1
-                    response = self._normalize_polling_response(
+                    polling_result = self._normalize_polling_result(
                         polling_model.check_llm_polling(
                             plugin_state=plugin_state,
                             workflow_run_id=workflow_run_id,
@@ -575,10 +583,10 @@ class LLMNode(Node[LLMNodeData]):
         return LLMPollingConfig.model_validate(raw_config)
 
     @staticmethod
-    def _normalize_polling_response(response: object) -> LLMPollingResponse:
-        if isinstance(response, LLMPollingResponse):
-            return response
-        return LLMPollingResponse.model_validate(response)
+    def _normalize_polling_result(result: object) -> LLMPollingResult:
+        if isinstance(result, LLMPollingResult):
+            return result
+        return LLMPollingResult.model_validate(result)
 
     def _resolve_required_workflow_run_id(self) -> str:
         segment = self.graph_runtime_state.variable_pool.get(("sys", "workflow_run_id"))
@@ -594,30 +602,33 @@ class LLMNode(Node[LLMNodeData]):
     def _updated_polling_deadline(
         *,
         deadline: float,
-        response: LLMPollingResponse,
+        polling_result: LLMPollingResult,
     ) -> float:
-        if response.expires_after_seconds is None:
+        if polling_result.expires_after_seconds is None:
             return deadline
-        return min(deadline, time.perf_counter() + response.expires_after_seconds)
+        return min(deadline, time.perf_counter() + polling_result.expires_after_seconds)
 
     @staticmethod
     def _updated_polling_max_attempts(
         *,
         max_attempts: int,
-        response: LLMPollingResponse,
+        polling_result: LLMPollingResult,
         config: LLMPollingConfig,
     ) -> int:
-        if response.max_attempts is None:
+        if polling_result.max_attempts is None:
             return max_attempts
-        return max(1, min(max_attempts, config.max_attempts, response.max_attempts))
+        return max(
+            1,
+            min(max_attempts, config.max_attempts, polling_result.max_attempts),
+        )
 
     @staticmethod
     def _polling_delay(
         *,
-        response: LLMPollingResponse,
+        polling_result: LLMPollingResult,
         config: LLMPollingConfig,
     ) -> float:
-        delay = response.next_check_after_seconds
+        delay = polling_result.next_check_after_seconds
         if delay is None:
             delay = config.min_check_interval_seconds
         return min(
@@ -630,12 +641,19 @@ class LLMNode(Node[LLMNodeData]):
         *,
         attempt: int,
         delay_seconds: float,
+        deadline: float,
     ) -> ModelPollingProgressEvent:
         checked_at = datetime.now(UTC).replace(tzinfo=None)
+        remaining_seconds = deadline - time.perf_counter()
+        next_check_at = (
+            checked_at + timedelta(seconds=delay_seconds)
+            if remaining_seconds > delay_seconds
+            else None
+        )
         return ModelPollingProgressEvent(
             attempt=attempt,
             last_checked_at=checked_at,
-            next_check_at=checked_at + timedelta(seconds=delay_seconds),
+            next_check_at=next_check_at,
         )
 
     def _sleep_until_next_polling_check(
@@ -653,6 +671,12 @@ class LLMNode(Node[LLMNodeData]):
                 break
             time.sleep(min(remaining, config.wake_interval_seconds))
 
+        if time.perf_counter() >= deadline:
+            msg = "LLM polling timed out"
+            raise LLMNodeError(msg)
+
+    @staticmethod
+    def _raise_if_polling_deadline_exceeded(deadline: float) -> None:
         if time.perf_counter() >= deadline:
             msg = "LLM polling timed out"
             raise LLMNodeError(msg)

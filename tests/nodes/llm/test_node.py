@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, Never, cast
 from unittest.mock import MagicMock
@@ -10,7 +10,7 @@ from graphon.enums import WorkflowNodeExecutionStatus
 from graphon.graph_events.node import NodeRunModelPollingProgressEvent
 from graphon.model_runtime.entities.llm_entities import (
     LLMPollingConfig,
-    LLMPollingResponse,
+    LLMPollingResult,
     LLMPollingStatus,
     LLMResult,
     LLMUsage,
@@ -38,7 +38,7 @@ class _PollingLLM:
     def __init__(self, responses: Sequence[object]) -> None:
         self.parameters = {}
         self.polling_config = LLMPollingConfig(
-            min_check_interval_seconds=0,
+            min_check_interval_seconds=0.001,
             max_check_interval_seconds=0.01,
             max_wait_seconds=1,
             max_attempts=3,
@@ -73,6 +73,10 @@ class _SchemaPollingLLM(_PollingLLM):
 
     def get_model_schema(self) -> SimpleNamespace:
         return SimpleNamespace(features=[ModelFeature.POLLING])
+
+
+def _dynamic_supports_polling(*_: object) -> bool:
+    return True
 
 
 def _llm_result(text: str = "final answer") -> LLMResult:
@@ -179,7 +183,7 @@ def test_polling_llm_start_can_succeed_immediately(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model = _PollingLLM([
-        LLMPollingResponse(
+        LLMPollingResult(
             status=LLMPollingStatus.SUCCEEDED,
             result=_llm_result("done"),
         ),
@@ -206,17 +210,17 @@ def test_polling_llm_start_can_succeed_immediately(
 
 def test_polling_llm_checks_until_success(monkeypatch: pytest.MonkeyPatch) -> None:
     model = _PollingLLM([
-        LLMPollingResponse(
+        LLMPollingResult(
             status=LLMPollingStatus.RUNNING,
             plugin_state={"job_id": "job-1"},
             next_check_after_seconds=1,
         ),
-        LLMPollingResponse(
+        LLMPollingResult(
             status=LLMPollingStatus.RUNNING,
             plugin_state={"job_id": "job-1", "cursor": "2"},
             next_check_after_seconds=1,
         ),
-        LLMPollingResponse(
+        LLMPollingResult(
             status=LLMPollingStatus.SUCCEEDED,
             result=_llm_result("checked"),
         ),
@@ -242,7 +246,7 @@ def test_polling_llm_checks_until_success(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.mark.parametrize(
-    ("response", "message"),
+    ("payload", "message"),
     [
         (
             {"status": "running"},
@@ -260,10 +264,10 @@ def test_polling_llm_checks_until_success(monkeypatch: pytest.MonkeyPatch) -> No
 )
 def test_polling_llm_rejects_invalid_terminal_or_running_payloads(
     monkeypatch: pytest.MonkeyPatch,
-    response: object,
+    payload: object,
     message: str,
 ) -> None:
-    node = _build_llm_node(model_instance=_PollingLLM([response]))
+    node = _build_llm_node(model_instance=_PollingLLM([payload]))
     _stub_simple_prompt(monkeypatch, node)
 
     events = list(node._run())
@@ -279,13 +283,13 @@ def test_polling_llm_fails_when_max_attempts_are_exceeded(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model = _PollingLLM([
-        LLMPollingResponse(
+        LLMPollingResult(
             status=LLMPollingStatus.RUNNING,
             plugin_state={"job_id": "job-1"},
             next_check_after_seconds=1,
             max_attempts=1,
         ),
-        LLMPollingResponse(
+        LLMPollingResult(
             status=LLMPollingStatus.RUNNING,
             plugin_state={"job_id": "job-1"},
             next_check_after_seconds=1,
@@ -314,7 +318,7 @@ def test_polling_llm_respects_existing_abort_before_start(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model = _PollingLLM([
-        LLMPollingResponse(
+        LLMPollingResult(
             status=LLMPollingStatus.SUCCEEDED,
             result=_llm_result(),
         ),
@@ -337,7 +341,7 @@ def test_polling_llm_requires_workflow_run_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model = _PollingLLM([
-        LLMPollingResponse(
+        LLMPollingResult(
             status=LLMPollingStatus.SUCCEEDED,
             result=_llm_result(),
         ),
@@ -359,7 +363,7 @@ def test_polling_llm_uses_run_context_workflow_run_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model = _PollingLLM([
-        LLMPollingResponse(
+        LLMPollingResult(
             status=LLMPollingStatus.SUCCEEDED,
             result=_llm_result("done"),
         ),
@@ -387,7 +391,7 @@ def test_polling_llm_can_use_model_schema_feature(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model = _SchemaPollingLLM([
-        LLMPollingResponse(
+        LLMPollingResult(
             status=LLMPollingStatus.SUCCEEDED,
             result=_llm_result("feature-enabled"),
         ),
@@ -405,6 +409,76 @@ def test_polling_llm_can_use_model_schema_feature(
     )
     assert completed_event.node_run_result.outputs["text"] == "feature-enabled"
     assert model.start_calls[0]["workflow_run_id"] == "wr-test"
+
+
+@pytest.mark.parametrize(
+    "supports_polling",
+    [False, "true", _dynamic_supports_polling],
+)
+def test_polling_llm_requires_graph_bool_support_flag(
+    supports_polling: object,
+) -> None:
+    model = _PollingLLM([])
+    cast(Any, model).supports_polling = supports_polling
+    node = _build_llm_node(model_instance=model)
+
+    assert node._polling_model_instance() is None
+
+
+def test_polling_llm_fails_when_response_arrives_after_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _PollingLLM([
+        LLMPollingResult(
+            status=LLMPollingStatus.SUCCEEDED,
+            result=_llm_result("late"),
+        ),
+    ])
+    node = _build_llm_node(model_instance=model)
+    _stub_simple_prompt(monkeypatch, node)
+
+    ticks = iter([0.0, 1.1])
+
+    def perf_counter() -> float:
+        return next(ticks, 1.1)
+
+    monkeypatch.setattr("graphon.nodes.llm.node.time.perf_counter", perf_counter)
+
+    events = list(node._run())
+
+    completed_event = next(
+        event for event in events if isinstance(event, StreamCompletedEvent)
+    )
+    assert completed_event.node_run_result.status == WorkflowNodeExecutionStatus.FAILED
+    assert "timed out" in completed_event.node_run_result.error
+
+
+def test_polling_progress_event_omits_next_check_when_deadline_wins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("graphon.nodes.llm.node.time.perf_counter", lambda: 10.0)
+
+    event = LLMNode._build_polling_progress_event(
+        attempt=0,
+        delay_seconds=5,
+        deadline=12,
+    )
+
+    assert event.next_check_at is None
+
+
+def test_polling_progress_event_keeps_next_check_when_delay_wins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("graphon.nodes.llm.node.time.perf_counter", lambda: 10.0)
+
+    event = LLMNode._build_polling_progress_event(
+        attempt=0,
+        delay_seconds=5,
+        deadline=20,
+    )
+
+    assert event.next_check_at == event.last_checked_at + timedelta(seconds=5)
 
 
 def test_polling_progress_event_dispatches_to_graph_event() -> None:
