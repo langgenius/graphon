@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any, Never, cast
 from unittest.mock import MagicMock
 
@@ -15,6 +16,7 @@ from graphon.model_runtime.entities.llm_entities import (
     LLMUsage,
 )
 from graphon.model_runtime.entities.message_entities import AssistantPromptMessage
+from graphon.model_runtime.entities.model_entities import ModelFeature
 from graphon.node_events.node import (
     ModelInvokeCompletedEvent,
     ModelPollingProgressEvent,
@@ -33,7 +35,7 @@ class _PollingLLM:
     stop = ()
     supports_polling = True
 
-    def __init__(self, responses: list[LLMPollingResponse]) -> None:
+    def __init__(self, responses: Sequence[object]) -> None:
         self.parameters = {}
         self.polling_config = LLMPollingConfig(
             min_check_interval_seconds=0,
@@ -42,15 +44,15 @@ class _PollingLLM:
             max_attempts=3,
             wake_interval_seconds=0.001,
         )
-        self._responses = responses
+        self._responses = list(responses)
         self.start_calls: list[dict[str, Any]] = []
         self.check_calls: list[dict[str, Any]] = []
 
-    def start_llm_polling(self, **kwargs: Any) -> LLMPollingResponse:
+    def start_llm_polling(self, **kwargs: Any) -> object:
         self.start_calls.append(kwargs)
         return self._responses.pop(0)
 
-    def check_llm_polling(self, **kwargs: Any) -> LLMPollingResponse:
+    def check_llm_polling(self, **kwargs: Any) -> object:
         self.check_calls.append(kwargs)
         return self._responses.pop(0)
 
@@ -66,6 +68,13 @@ class _PollingLLM:
         return False
 
 
+class _SchemaPollingLLM(_PollingLLM):
+    supports_polling = None
+
+    def get_model_schema(self) -> SimpleNamespace:
+        return SimpleNamespace(features=[ModelFeature.POLLING])
+
+
 def _llm_result(text: str = "final answer") -> LLMResult:
     return LLMResult(
         model="gpt-4o",
@@ -79,6 +88,8 @@ def _build_llm_node(
     *,
     model_instance: object | None = None,
     variables: Sequence[tuple[Sequence[str], Any]] = (),
+    workflow_run_id: str | None = "wr-test",
+    run_context: dict[str, Any] | None = None,
 ) -> LLMNode:
     prepared_model = model_instance
     if prepared_model is None:
@@ -88,6 +99,10 @@ def _build_llm_node(
             parameters={},
             stop=(),
         )
+    prepared_variables = []
+    if workflow_run_id is not None:
+        prepared_variables.append((("sys", "workflow_run_id"), workflow_run_id))
+    prepared_variables.extend(variables)
 
     return LLMNode(
         node_id="llm",
@@ -108,10 +123,11 @@ def _build_llm_node(
             "context": {"enabled": False},
         }),
         graph_init_params=build_graph_init_params(
-            graph_config={"nodes": [], "edges": []}
+            graph_config={"nodes": [], "edges": []},
+            run_context=run_context,
         ),
         graph_runtime_state=GraphRuntimeState(
-            variable_pool=build_variable_pool(variables=variables),
+            variable_pool=build_variable_pool(variables=prepared_variables),
             start_at=0.0,
         ),
         model_instance=cast(LLMProtocol, prepared_model),
@@ -193,12 +209,12 @@ def test_polling_llm_checks_until_success(monkeypatch: pytest.MonkeyPatch) -> No
         LLMPollingResponse(
             status=LLMPollingStatus.RUNNING,
             plugin_state={"job_id": "job-1"},
-            next_check_after_seconds=0,
+            next_check_after_seconds=1,
         ),
         LLMPollingResponse(
             status=LLMPollingStatus.RUNNING,
             plugin_state={"job_id": "job-1", "cursor": "2"},
-            next_check_after_seconds=0,
+            next_check_after_seconds=1,
         ),
         LLMPollingResponse(
             status=LLMPollingStatus.SUCCEEDED,
@@ -229,22 +245,22 @@ def test_polling_llm_checks_until_success(monkeypatch: pytest.MonkeyPatch) -> No
     ("response", "message"),
     [
         (
-            LLMPollingResponse(status=LLMPollingStatus.RUNNING),
+            {"status": "running"},
             "plugin_state",
         ),
         (
-            LLMPollingResponse(status=LLMPollingStatus.SUCCEEDED),
-            "without a result",
+            {"status": "succeeded"},
+            "result is required",
         ),
         (
-            LLMPollingResponse(status=LLMPollingStatus.FAILED),
-            "without an error",
+            {"status": "failed"},
+            "error is required",
         ),
     ],
 )
 def test_polling_llm_rejects_invalid_terminal_or_running_payloads(
     monkeypatch: pytest.MonkeyPatch,
-    response: LLMPollingResponse,
+    response: object,
     message: str,
 ) -> None:
     node = _build_llm_node(model_instance=_PollingLLM([response]))
@@ -266,13 +282,13 @@ def test_polling_llm_fails_when_max_attempts_are_exceeded(
         LLMPollingResponse(
             status=LLMPollingStatus.RUNNING,
             plugin_state={"job_id": "job-1"},
-            next_check_after_seconds=0,
+            next_check_after_seconds=1,
             max_attempts=1,
         ),
         LLMPollingResponse(
             status=LLMPollingStatus.RUNNING,
             plugin_state={"job_id": "job-1"},
-            next_check_after_seconds=0,
+            next_check_after_seconds=1,
         ),
     ])
     node = _build_llm_node(model_instance=model)
@@ -286,7 +302,7 @@ def test_polling_llm_fails_when_max_attempts_are_exceeded(
     assert model.check_calls == [
         {
             "plugin_state": {"job_id": "job-1"},
-            "workflow_run_id": None,
+            "workflow_run_id": "wr-test",
             "node_id": "llm",
         },
     ]
@@ -315,6 +331,80 @@ def test_polling_llm_respects_existing_abort_before_start(
     assert model.start_calls == []
     assert completed_event.node_run_result.status == WorkflowNodeExecutionStatus.FAILED
     assert "aborted" in completed_event.node_run_result.error
+
+
+def test_polling_llm_requires_workflow_run_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _PollingLLM([
+        LLMPollingResponse(
+            status=LLMPollingStatus.SUCCEEDED,
+            result=_llm_result(),
+        ),
+    ])
+    node = _build_llm_node(model_instance=model, workflow_run_id=None)
+    _stub_simple_prompt(monkeypatch, node)
+
+    events = list(node._run())
+
+    completed_event = next(
+        event for event in events if isinstance(event, StreamCompletedEvent)
+    )
+    assert model.start_calls == []
+    assert completed_event.node_run_result.status == WorkflowNodeExecutionStatus.FAILED
+    assert "workflow_run_id" in completed_event.node_run_result.error
+
+
+def test_polling_llm_uses_run_context_workflow_run_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _PollingLLM([
+        LLMPollingResponse(
+            status=LLMPollingStatus.SUCCEEDED,
+            result=_llm_result("done"),
+        ),
+    ])
+    node = _build_llm_node(
+        model_instance=model,
+        workflow_run_id=None,
+        run_context={"workflow_run_id": "wr-context"},
+    )
+    _stub_simple_prompt(monkeypatch, node)
+
+    events = list(node._run())
+
+    completed_event = next(
+        event for event in events if isinstance(event, StreamCompletedEvent)
+    )
+    assert (
+        completed_event.node_run_result.status == WorkflowNodeExecutionStatus.SUCCEEDED
+    )
+    assert completed_event.node_run_result.outputs["text"] == "done"
+    assert model.start_calls[0]["workflow_run_id"] == "wr-context"
+
+
+def test_polling_llm_can_use_model_schema_feature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _SchemaPollingLLM([
+        LLMPollingResponse(
+            status=LLMPollingStatus.SUCCEEDED,
+            result=_llm_result("feature-enabled"),
+        ),
+    ])
+    node = _build_llm_node(model_instance=model)
+    _stub_simple_prompt(monkeypatch, node)
+
+    events = list(node._run())
+
+    completed_event = next(
+        event for event in events if isinstance(event, StreamCompletedEvent)
+    )
+    assert (
+        completed_event.node_run_result.status == WorkflowNodeExecutionStatus.SUCCEEDED
+    )
+    assert completed_event.node_run_result.outputs["text"] == "feature-enabled"
+    assert model.start_calls[0]["workflow_run_id"] == "wr-test"
 
 
 def test_polling_progress_event_dispatches_to_graph_event() -> None:

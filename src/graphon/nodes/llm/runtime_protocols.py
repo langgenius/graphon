@@ -147,7 +147,7 @@ class LLMPollingCapableProtocol(LLMProtocol, Protocol):
         tools: Sequence[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         json_schema: Mapping[str, Any] | None,
-        workflow_run_id: str | None,
+        workflow_run_id: str,
         node_id: str,
     ) -> LLMPollingResponse: ...
 
@@ -156,7 +156,7 @@ class LLMPollingCapableProtocol(LLMProtocol, Protocol):
         self,
         *,
         plugin_state: Mapping[str, Any],
-        workflow_run_id: str | None,
+        workflow_run_id: str,
         node_id: str,
     ) -> LLMPollingResponse: ...
 

@@ -221,12 +221,35 @@ class LLMPollingStatus(StrEnum):
 
 class LLMPollingResponse(BaseModel):
     status: LLMPollingStatus
-    plugin_state: Mapping[str, Any] | None = None
+    plugin_state: dict[str, Any] | None = None
     result: LLMResult | LLMResultWithStructuredOutput | None = None
     error: str | None = None
-    next_check_after_seconds: float | None = None
-    expires_after_seconds: float | None = None
+    next_check_after_seconds: int | None = None
+    expires_after_seconds: int | None = None
     max_attempts: int | None = None
+
+    @model_validator(mode="after")
+    def _validate_status_payload(self) -> LLMPollingResponse:
+        if self.status == LLMPollingStatus.RUNNING and self.plugin_state is None:
+            msg = "plugin_state is required when polling status is running."
+            raise ValueError(msg)
+        if self.status == LLMPollingStatus.SUCCEEDED and self.result is None:
+            msg = "result is required when polling status is succeeded."
+            raise ValueError(msg)
+        if self.status == LLMPollingStatus.FAILED and not self.error:
+            msg = "error is required when polling status is failed."
+            raise ValueError(msg)
+
+        for field_name in (
+            "next_check_after_seconds",
+            "expires_after_seconds",
+            "max_attempts",
+        ):
+            value = getattr(self, field_name)
+            if value is not None and value <= 0:
+                msg = f"{field_name} must be greater than 0."
+                raise ValueError(msg)
+        return self
 
 
 class LLMPollingConfig(BaseModel):

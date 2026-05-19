@@ -43,7 +43,7 @@ from graphon.model_runtime.entities.message_entities import (
     TextPromptMessageContent,
     UserPromptMessage,
 )
-from graphon.model_runtime.entities.model_entities import ModelPropertyKey
+from graphon.model_runtime.entities.model_entities import ModelFeature, ModelPropertyKey
 from graphon.model_runtime.memory.prompt_message_memory import PromptMessageMemory
 from graphon.model_runtime.utils.encoders import jsonable_encoder
 from graphon.node_events.base import (
@@ -445,14 +445,28 @@ class LLMNode(Node[LLMNodeData]):
         )
 
     def _polling_model_instance(self) -> LLMPollingCapableProtocol | None:
-        if getattr(self._model_instance, "supports_polling", False) is not True:
-            return None
-
         start_polling = getattr(self._model_instance, "start_llm_polling", None)
         check_polling = getattr(self._model_instance, "check_llm_polling", None)
         if not callable(start_polling) or not callable(check_polling):
             return None
+
+        supports_polling = getattr(self._model_instance, "supports_polling", None)
+        if supports_polling is not True and (
+            supports_polling is not None or not self._model_schema_supports_polling()
+        ):
+            return None
         return cast(LLMPollingCapableProtocol, self._model_instance)
+
+    def _model_schema_supports_polling(self) -> bool:
+        try:
+            features = self._model_instance.get_model_schema().features
+        except (AttributeError, TypeError, ValueError):
+            logger.debug("failed to read model schema for polling support")
+            return False
+        if not features:
+            return False
+        polling_values = {ModelFeature.POLLING, ModelFeature.POLLING.value}
+        return any(feature in polling_values for feature in features)
 
     def _invoke_llm_with_polling(
         self,
@@ -470,10 +484,9 @@ class LLMNode(Node[LLMNodeData]):
             if self.node_data.structured_output_enabled
             else None
         )
-        workflow_run_id = self._resolve_workflow_run_id()
-
-        request_start_time = time.perf_counter()
         self._raise_if_polling_aborted()
+        workflow_run_id = self._resolve_required_workflow_run_id()
+        request_start_time = time.perf_counter()
         response = self._normalize_polling_response(
             polling_model.start_llm_polling(
                 prompt_messages=prompt_messages,
@@ -567,12 +580,15 @@ class LLMNode(Node[LLMNodeData]):
             return response
         return LLMPollingResponse.model_validate(response)
 
-    def _resolve_workflow_run_id(self) -> str | None:
+    def _resolve_required_workflow_run_id(self) -> str:
         segment = self.graph_runtime_state.variable_pool.get(("sys", "workflow_run_id"))
-        if segment is None:
-            return None
-        value = segment.text
-        return value or None
+        if segment is not None and segment.text:
+            return segment.text
+        run_context_value = self.get_run_context_value("workflow_run_id")
+        if isinstance(run_context_value, str) and run_context_value:
+            return run_context_value
+        msg = "LLM polling requires workflow_run_id"
+        raise LLMNodeError(msg)
 
     @staticmethod
     def _updated_polling_deadline(
