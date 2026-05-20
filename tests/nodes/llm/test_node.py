@@ -1,3 +1,4 @@
+import base64
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -7,6 +8,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from graphon.enums import WorkflowNodeExecutionStatus
+from graphon.file import helpers as file_helpers
+from graphon.file.enums import FileTransferMethod, FileType
+from graphon.file.models import File
 from graphon.graph_events.node import NodeRunModelPollingProgressEvent
 from graphon.model_runtime.entities.llm_entities import (
     LLMPollingConfig,
@@ -15,7 +19,10 @@ from graphon.model_runtime.entities.llm_entities import (
     LLMResult,
     LLMUsage,
 )
-from graphon.model_runtime.entities.message_entities import AssistantPromptMessage
+from graphon.model_runtime.entities.message_entities import (
+    AssistantPromptMessage,
+    VideoPromptMessageContent,
+)
 from graphon.model_runtime.entities.model_entities import ModelFeature
 from graphon.node_events.node import (
     ModelInvokeCompletedEvent,
@@ -94,6 +101,7 @@ def _build_llm_node(
     variables: Sequence[tuple[Sequence[str], Any]] = (),
     workflow_run_id: str | None = "wr-test",
     run_context: dict[str, Any] | None = None,
+    llm_file_saver: Any | None = None,
 ) -> LLMNode:
     prepared_model = model_instance
     if prepared_model is None:
@@ -135,7 +143,7 @@ def _build_llm_node(
             start_at=0.0,
         ),
         model_instance=cast(LLMProtocol, prepared_model),
-        llm_file_saver=MagicMock(),
+        llm_file_saver=MagicMock() if llm_file_saver is None else llm_file_saver,
         prompt_message_serializer=MagicMock(
             serialize=MagicMock(return_value=[]),
         ),
@@ -243,6 +251,126 @@ def test_polling_llm_checks_until_success(monkeypatch: pytest.MonkeyPatch) -> No
         "cursor": "2",
     }
     assert completed_event.node_run_result.outputs["text"] == "checked"
+
+
+def test_polling_llm_saves_video_output_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    saved_file = File(
+        file_id="tool-file-id",
+        file_type=FileType.VIDEO,
+        transfer_method=FileTransferMethod.TOOL_FILE,
+        reference="tool-file-id",
+        filename="video.mp4",
+        extension=".mp4",
+        mime_type="video/mp4",
+        size=1024,
+    )
+    file_saver = MagicMock()
+    file_saver.save_remote_url.return_value = saved_file
+    model = _PollingLLM([
+        LLMPollingResult(
+            status=LLMPollingStatus.SUCCEEDED,
+            result=LLMResult(
+                model="seedance",
+                prompt_messages=[],
+                message=AssistantPromptMessage(
+                    content=[
+                        VideoPromptMessageContent(
+                            format="mp4",
+                            mime_type="video/mp4",
+                            url="https://example.com/video.mp4",
+                            filename="video.mp4",
+                        ),
+                    ],
+                ),
+                usage=LLMUsage.empty_usage(),
+            ),
+        ),
+    ])
+    node = _build_llm_node(model_instance=model, llm_file_saver=file_saver)
+    _stub_simple_prompt(monkeypatch, node)
+    monkeypatch.setattr(
+        file_helpers,
+        "resolve_file_url",
+        lambda _file, **_kwargs: "https://files.example.com/video.mp4",
+    )
+
+    events = list(node._run())
+
+    completed_event = next(
+        event for event in events if isinstance(event, StreamCompletedEvent)
+    )
+    assert completed_event.node_run_result.outputs["text"] == (
+        "[video.mp4](https://files.example.com/video.mp4)"
+    )
+    assert completed_event.node_run_result.outputs["files"].value == [saved_file]
+    file_saver.save_remote_url.assert_called_once_with(
+        "https://example.com/video.mp4",
+        FileType.VIDEO,
+    )
+
+
+def test_save_multimodal_output_persists_inline_video() -> None:
+    file_saver = MagicMock()
+    saved_file = MagicMock()
+    file_saver.save_binary_string.return_value = saved_file
+    content = VideoPromptMessageContent(
+        format="mp4",
+        mime_type="video/mp4",
+        base64_data=base64.b64encode(b"video-bytes").decode(),
+        filename="clip.mp4",
+    )
+
+    result = LLMNode.save_multimodal_output(
+        content=content,
+        file_saver=file_saver,
+    )
+
+    assert result is saved_file
+    file_saver.save_binary_string.assert_called_once_with(
+        data=b"video-bytes",
+        mime_type="video/mp4",
+        file_type=FileType.VIDEO,
+        extension_override=".mp4",
+    )
+
+
+def test_save_multimodal_output_requires_data_source() -> None:
+    file_saver = MagicMock()
+    content = VideoPromptMessageContent(
+        format="mp4",
+        mime_type="video/mp4",
+        filename="clip.mp4",
+    )
+
+    with pytest.raises(ValueError, match="url or base64_data"):
+        LLMNode.save_multimodal_output(
+            content=content,
+            file_saver=file_saver,
+        )
+
+    file_saver.save_binary_string.assert_not_called()
+    file_saver.save_remote_url.assert_not_called()
+
+
+def test_save_multimodal_output_rejects_invalid_inline_data() -> None:
+    file_saver = MagicMock()
+    content = VideoPromptMessageContent(
+        format="mp4",
+        mime_type="video/mp4",
+        base64_data="not valid base64",
+        filename="clip.mp4",
+    )
+
+    with pytest.raises(ValueError, match="base64_data is invalid"):
+        LLMNode.save_multimodal_output(
+            content=content,
+            file_saver=file_saver,
+        )
+
+    file_saver.save_binary_string.assert_not_called()
+    file_saver.save_remote_url.assert_not_called()
 
 
 @pytest.mark.parametrize(

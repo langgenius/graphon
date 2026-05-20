@@ -53,6 +53,7 @@ def test_llm_polling_result_validates_status_payload() -> None:
 
     for payload in (
         {"status": "running"},
+        {"status": "running", "plugin_state": {}},
         {"status": "succeeded"},
         {"status": "failed"},
         {"status": "failed", "error": "   "},
