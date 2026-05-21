@@ -2,6 +2,8 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any, ClassVar, cast
 
+import pytest
+
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType, NodeState, NodeType
 from graphon.filters import (
     GraphEventFilterContext,
@@ -15,7 +17,12 @@ from graphon.graph_events.node import (
     NodeRunStreamChunkEvent,
 )
 from graphon.graph_events.traversal import GraphEdgeTakenEvent
-from graphon.nodes.base.template import Template, TextSegment, VariableSegment
+from graphon.nodes.base.template import (
+    Template,
+    TemplateSegmentUnion,
+    TextSegment,
+    VariableSegment,
+)
 from graphon.runtime.graph_runtime_state import (
     EdgeProtocol,
     GraphProtocol,
@@ -53,6 +60,21 @@ class _TestNode(NodeProtocol):
         variable_selectors: set[tuple[str, ...]],
     ) -> bool:
         return bool({(self.id, "answer")} & variable_selectors)
+
+
+class _BrokenResponseNode:
+    node_type: ClassVar[NodeType] = BuiltinNodeTypes.END
+
+    def __init__(self, node_id: str) -> None:
+        self.id = node_id
+        self.execution_type = NodeExecutionType.RESPONSE
+        self.state = NodeState.UNKNOWN
+
+    def blocks_variable_output(
+        self,
+        _variable_selectors: set[tuple[str, ...]],
+    ) -> bool:
+        return False
 
 
 class _TestEdge(EdgeProtocol):
@@ -107,6 +129,67 @@ def _context(
     )
 
 
+def _variable_response_graph(
+    *,
+    source_id: str = "source",
+    answer_id: str = "answer",
+    selector: Sequence[str] | None = None,
+    segments: Sequence[TemplateSegmentUnion] | None = None,
+    edge_id: str = "edge-1",
+) -> _TestGraph:
+    source = _TestNode(source_id)
+    response_segments: list[TemplateSegmentUnion]
+    if segments is None:
+        response_segments = [
+            VariableSegment(selector=list(selector or [source_id, "answer"])),
+        ]
+    else:
+        response_segments = list(segments)
+    answer = _TestNode(
+        answer_id,
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template(segments=response_segments),
+    )
+    edge = _TestEdge(edge_id, source_id, answer_id)
+    return _TestGraph(
+        nodes={source_id: source, answer_id: answer},
+        edges={edge_id: edge},
+        root_node_id=source_id,
+    )
+
+
+def _edge_taken(
+    *,
+    edge_id: str = "edge-1",
+    source_id: str = "source",
+    answer_id: str = "answer",
+) -> GraphEdgeTakenEvent:
+    return GraphEdgeTakenEvent(
+        edge_id=edge_id,
+        source_node_id=source_id,
+        target_node_id=answer_id,
+        source_handle="success",
+    )
+
+
+def _stream_chunk(
+    chunk: str,
+    *,
+    run_id: str = "source-run",
+    source_id: str = "source",
+    selector: Sequence[str] | None = None,
+    is_final: bool = True,
+) -> NodeRunStreamChunkEvent:
+    return NodeRunStreamChunkEvent(
+        id=run_id,
+        node_id=source_id,
+        node_type=BuiltinNodeTypes.CODE,
+        selector=list(selector or [source_id, "answer"]),
+        chunk=chunk,
+        is_final=is_final,
+    )
+
+
 def test_response_stream_filter_emits_text_segments_when_session_starts() -> None:
     answer = _TestNode(
         "answer",
@@ -125,25 +208,42 @@ def test_response_stream_filter_emits_text_segments_when_session_starts() -> Non
     assert chunks[0].is_final is True
 
 
+def test_response_stream_filter_rejects_events_before_initialize() -> None:
+    event_filter = ResponseStreamFilter()
+
+    with pytest.raises(RuntimeError, match="initialized"):
+        list(event_filter.on_event(GraphRunStartedEvent()))
+
+    with pytest.raises(RuntimeError, match="initialized"):
+        list(event_filter.flush())
+
+    with pytest.raises(RuntimeError, match="initialized"):
+        event_filter.dumps()
+
+
+def test_response_stream_filter_resets_when_initialize_fails() -> None:
+    graph = _TestGraph(
+        nodes=cast(Any, {"answer": _BrokenResponseNode("answer")}),
+        edges={},
+        root_node_id="answer",
+    )
+    event_filter = ResponseStreamFilter()
+
+    with pytest.raises(TypeError, match="get_streaming_template"):
+        event_filter.initialize(_context(graph))
+
+    with pytest.raises(RuntimeError, match="initialized"):
+        list(event_filter.on_event(GraphRunStartedEvent()))
+
+
 def test_response_stream_filter_reorders_buffered_stream_chunks_after_edge_taken() -> (
     None
 ):
-    source = _TestNode("source")
-    answer = _TestNode(
-        "answer",
-        execution_type=NodeExecutionType.RESPONSE,
-        template=Template(
-            segments=[
-                TextSegment(text="prefix "),
-                VariableSegment(selector=["source", "answer"]),
-            ]
-        ),
-    )
-    edge = _TestEdge("edge-1", "source", "answer")
-    graph = _TestGraph(
-        nodes={"source": source, "answer": answer},
-        edges={"edge-1": edge},
-        root_node_id="source",
+    graph = _variable_response_graph(
+        segments=[
+            TextSegment(text="prefix "),
+            VariableSegment(selector=["source", "answer"]),
+        ],
     )
     event_filter = ResponseStreamFilter()
     event_filter.initialize(_context(graph))
@@ -155,20 +255,8 @@ def test_response_stream_filter_reorders_buffered_stream_chunks_after_edge_taken
         node_title="Source",
         start_at=datetime.now(UTC).replace(tzinfo=None),
     )
-    chunk = NodeRunStreamChunkEvent(
-        id="source-run",
-        node_id="source",
-        node_type=BuiltinNodeTypes.CODE,
-        selector=["source", "answer"],
-        chunk="value",
-        is_final=True,
-    )
-    taken = GraphEdgeTakenEvent(
-        edge_id="edge-1",
-        source_node_id="source",
-        target_node_id="answer",
-        source_handle="success",
-    )
+    chunk = _stream_chunk("value")
+    taken = _edge_taken()
 
     assert list(event_filter.on_event(started)) == [started]
     assert list(event_filter.on_event(chunk)) == []
@@ -179,51 +267,20 @@ def test_response_stream_filter_reorders_buffered_stream_chunks_after_edge_taken
 
 
 def test_response_stream_filter_reads_scalar_variable_values() -> None:
-    source = _TestNode("source")
-    answer = _TestNode(
-        "answer",
-        execution_type=NodeExecutionType.RESPONSE,
-        template=Template(segments=[VariableSegment(selector=["source", "answer"])]),
-    )
-    edge = _TestEdge("edge-1", "source", "answer")
-    graph = _TestGraph(
-        nodes={"source": source, "answer": answer},
-        edges={"edge-1": edge},
-        root_node_id="source",
-    )
+    graph = _variable_response_graph()
     variable_pool = VariablePool()
     variable_pool.add(["source", "answer"], StringSegment(value="saved"))
     event_filter = ResponseStreamFilter()
     event_filter.initialize(_context(graph, variable_pool))
 
-    output = list(
-        event_filter.on_event(
-            GraphEdgeTakenEvent(
-                edge_id="edge-1",
-                source_node_id="source",
-                target_node_id="answer",
-                source_handle="success",
-            )
-        )
-    )
+    output = list(event_filter.on_event(_edge_taken()))
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     assert [event.chunk for event in chunks] == ["saved"]
 
 
 def test_response_stream_filter_uses_retry_execution_id_for_scalar_value() -> None:
-    source = _TestNode("source")
-    answer = _TestNode(
-        "answer",
-        execution_type=NodeExecutionType.RESPONSE,
-        template=Template(segments=[VariableSegment(selector=["source", "answer"])]),
-    )
-    edge = _TestEdge("edge-1", "source", "answer")
-    graph = _TestGraph(
-        nodes={"source": source, "answer": answer},
-        edges={"edge-1": edge},
-        root_node_id="source",
-    )
+    graph = _variable_response_graph()
     variable_pool = VariablePool()
     variable_pool.add(["source", "answer"], StringSegment(value="saved"))
     event_filter = ResponseStreamFilter()
@@ -239,81 +296,29 @@ def test_response_stream_filter_uses_retry_execution_id_for_scalar_value() -> No
     )
 
     assert list(event_filter.on_event(retry)) == [retry]
-    output = list(
-        event_filter.on_event(
-            GraphEdgeTakenEvent(
-                edge_id="edge-1",
-                source_node_id="source",
-                target_node_id="answer",
-                source_handle="success",
-            )
-        )
-    )
+    output = list(event_filter.on_event(_edge_taken()))
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     assert [(event.id, event.chunk) for event in chunks] == [("retry-run", "saved")]
 
 
 def test_response_stream_filter_initialize_resets_run_state() -> None:
-    source = _TestNode("source")
-    answer = _TestNode(
-        "answer",
-        execution_type=NodeExecutionType.RESPONSE,
-        template=Template(segments=[VariableSegment(selector=["source", "answer"])]),
-    )
-    edge = _TestEdge("edge-1", "source", "answer")
-    graph = _TestGraph(
-        nodes={"source": source, "answer": answer},
-        edges={"edge-1": edge},
-        root_node_id="source",
-    )
+    graph = _variable_response_graph()
     context = _context(graph)
     event_filter = ResponseStreamFilter()
     event_filter.initialize(context)
-    first_chunk = NodeRunStreamChunkEvent(
-        id="source-run-1",
-        node_id="source",
-        node_type=BuiltinNodeTypes.CODE,
-        selector=["source", "answer"],
-        chunk="first",
-        is_final=True,
-    )
+    first_chunk = _stream_chunk("first", run_id="source-run-1")
     assert list(event_filter.on_event(first_chunk)) == []
-    first_output = list(
-        event_filter.on_event(
-            GraphEdgeTakenEvent(
-                edge_id="edge-1",
-                source_node_id="source",
-                target_node_id="answer",
-                source_handle="success",
-            )
-        )
-    )
+    first_output = list(event_filter.on_event(_edge_taken()))
     first_chunks = [
         event for event in first_output if isinstance(event, NodeRunStreamChunkEvent)
     ]
     assert [event.chunk for event in first_chunks] == ["first"]
 
     event_filter.initialize(context)
-    second_chunk = NodeRunStreamChunkEvent(
-        id="source-run-2",
-        node_id="source",
-        node_type=BuiltinNodeTypes.CODE,
-        selector=["source", "answer"],
-        chunk="second",
-        is_final=True,
-    )
+    second_chunk = _stream_chunk("second", run_id="source-run-2")
     assert list(event_filter.on_event(second_chunk)) == []
-    second_output = list(
-        event_filter.on_event(
-            GraphEdgeTakenEvent(
-                edge_id="edge-1",
-                source_node_id="source",
-                target_node_id="answer",
-                source_handle="success",
-            )
-        )
-    )
+    second_output = list(event_filter.on_event(_edge_taken()))
 
     second_chunks = [
         event for event in second_output if isinstance(event, NodeRunStreamChunkEvent)
@@ -322,87 +327,37 @@ def test_response_stream_filter_initialize_resets_run_state() -> None:
 
 
 def test_response_stream_filter_round_trips_resume_state() -> None:
-    source = _TestNode("source")
-    answer = _TestNode(
-        "answer",
-        execution_type=NodeExecutionType.RESPONSE,
-        template=Template(segments=[VariableSegment(selector=["source", "answer"])]),
-    )
-    edge = _TestEdge("edge-1", "source", "answer")
-    graph = _TestGraph(
-        nodes={"source": source, "answer": answer},
-        edges={"edge-1": edge},
-        root_node_id="source",
-    )
+    graph = _variable_response_graph()
     context = _context(graph)
     first_filter = ResponseStreamFilter()
     first_filter.initialize(context)
-    raw_chunk = NodeRunStreamChunkEvent(
-        id="source-run",
-        node_id="source",
-        node_type=BuiltinNodeTypes.CODE,
-        selector=["source", "answer"],
-        chunk="resumed",
-        is_final=True,
-    )
+    raw_chunk = _stream_chunk("resumed")
     assert list(first_filter.on_event(raw_chunk)) == []
 
     restored_filter = ResponseStreamFilter()
     restored_filter.initialize(context)
     restored_filter.loads(first_filter.dumps())
-    output = list(
-        restored_filter.on_event(
-            GraphEdgeTakenEvent(
-                edge_id="edge-1",
-                source_node_id="source",
-                target_node_id="answer",
-                source_handle="success",
-            )
-        )
-    )
+    output = list(restored_filter.on_event(_edge_taken()))
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     assert [event.chunk for event in chunks] == ["resumed"]
 
 
 def test_response_stream_filter_can_load_before_filter_chain_initializes() -> None:
-    source = _TestNode("source")
-    answer = _TestNode(
-        "answer",
-        execution_type=NodeExecutionType.RESPONSE,
-        template=Template(segments=[VariableSegment(selector=["source", "answer"])]),
-    )
-    edge = _TestEdge("edge-1", "source", "answer")
-    graph = _TestGraph(
-        nodes={"source": source, "answer": answer},
-        edges={"edge-1": edge},
-        root_node_id="source",
-    )
+    graph = _variable_response_graph()
     context = _context(graph)
     first_filter = ResponseStreamFilter()
     first_filter.initialize(context)
-    raw_chunk = NodeRunStreamChunkEvent(
-        id="source-run",
-        node_id="source",
-        node_type=BuiltinNodeTypes.CODE,
-        selector=["source", "answer"],
-        chunk="chain-resumed",
-        is_final=True,
-    )
+    raw_chunk = _stream_chunk("chain-resumed")
     assert list(first_filter.on_event(raw_chunk)) == []
 
     restored_filter = ResponseStreamFilter()
-    restored_filter.loads(first_filter.dumps())
+    snapshot = first_filter.dumps()
+    restored_filter.loads(snapshot)
+    assert restored_filter.dumps() == snapshot
     output = list(
         filter_graph_events(
-            [
-                GraphEdgeTakenEvent(
-                    edge_id="edge-1",
-                    source_node_id="source",
-                    target_node_id="answer",
-                    source_handle="success",
-                )
-            ],
+            [_edge_taken()],
             context=context,
             filters=[restored_filter],
         )
@@ -410,3 +365,75 @@ def test_response_stream_filter_can_load_before_filter_chain_initializes() -> No
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     assert [event.chunk for event in chunks] == ["chain-resumed"]
+
+
+def test_response_stream_filter_restores_referenced_selectors() -> None:
+    graph = _variable_response_graph()
+    context = _context(graph)
+    first_filter = ResponseStreamFilter()
+    first_filter.initialize(context)
+
+    restored_filter = ResponseStreamFilter()
+    restored_filter.loads(first_filter.dumps())
+    output = list(
+        filter_graph_events(
+            [
+                _edge_taken(),
+                _stream_chunk("late"),
+            ],
+            context=context,
+            filters=[restored_filter],
+        )
+    )
+
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert [event.chunk for event in chunks] == ["late"]
+
+
+def test_response_stream_filter_keeps_pending_state_when_initialize_fails() -> None:
+    graph = _variable_response_graph()
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+    snapshot = event_filter.dumps()
+
+    incompatible_graph = _TestGraph(
+        nodes={"source": _TestNode("source")},
+        edges={},
+        root_node_id="source",
+    )
+    restored_filter = ResponseStreamFilter()
+    restored_filter.loads(snapshot)
+
+    with pytest.raises(ValueError, match="Unknown response node 'answer'"):
+        restored_filter.initialize(_context(incompatible_graph))
+
+    assert restored_filter.dumps() == snapshot
+    restored_filter.loads(snapshot)
+    assert restored_filter.dumps() == snapshot
+    with pytest.raises(RuntimeError, match="initialized"):
+        list(restored_filter.on_event(GraphRunStartedEvent()))
+
+
+def test_response_stream_filter_keeps_current_state_when_load_fails() -> None:
+    graph = _variable_response_graph()
+    context = _context(graph)
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(context)
+    raw_chunk = _stream_chunk("preserved")
+    assert list(event_filter.on_event(raw_chunk)) == []
+
+    other_graph = _variable_response_graph(
+        source_id="other-source",
+        answer_id="other-answer",
+        edge_id="other-edge",
+    )
+    other_filter = ResponseStreamFilter()
+    other_filter.initialize(_context(other_graph))
+
+    with pytest.raises(ValueError, match="Unknown response node 'other-answer'"):
+        event_filter.loads(other_filter.dumps())
+
+    output = list(event_filter.on_event(_edge_taken()))
+
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert [event.chunk for event in chunks] == ["preserved"]

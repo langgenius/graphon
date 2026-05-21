@@ -25,6 +25,7 @@ from graphon.runtime.graph_runtime_state_protocol import ReadOnlyGraphRuntimeSta
 
 type NodeID = str
 type EdgeID = str
+type Selector = tuple[str, ...]
 
 
 @dataclass
@@ -33,11 +34,8 @@ class Path:
 
     edges: list[EdgeID] = field(default_factory=list)
 
-    def contains_edge(self, edge_id: EdgeID) -> bool:
-        return edge_id in self.edges
-
     def remove_edge(self, edge_id: EdgeID) -> None:
-        if self.contains_edge(edge_id):
+        if edge_id in self.edges:
             self.edges.remove(edge_id)
 
     def is_empty(self) -> bool:
@@ -77,15 +75,113 @@ class ResponseSessionState(BaseModel):
 class StreamBufferState(BaseModel):
     """Serializable representation of buffered stream chunks."""
 
-    selector: tuple[str, ...]
+    selector: Selector
     events: list[NodeRunStreamChunkEvent] = Field(default_factory=list)
 
 
 class StreamPositionState(BaseModel):
     """Serializable representation for stream read positions."""
 
-    selector: tuple[str, ...]
+    selector: Selector
     position: int = Field(default=0, ge=0)
+
+
+@dataclass
+class StreamBuffers:
+    """Buffered stream chunks plus per-selector read cursors."""
+
+    events: dict[Selector, list[NodeRunStreamChunkEvent]] = field(default_factory=dict)
+    positions: dict[Selector, int] = field(default_factory=dict)
+    closed_selectors: set[Selector] = field(default_factory=set)
+
+    @classmethod
+    def from_state(
+        cls,
+        *,
+        buffers: Sequence[StreamBufferState],
+        positions: Sequence[StreamPositionState],
+        closed_selectors: Sequence[Selector],
+    ) -> StreamBuffers:
+        stream_buffers = cls(
+            events={
+                tuple(buffer.selector): [
+                    event.model_copy(deep=True) for event in buffer.events
+                ]
+                for buffer in buffers
+            },
+            positions={
+                tuple(position.selector): position.position for position in positions
+            },
+            closed_selectors={tuple(selector) for selector in closed_selectors},
+        )
+        for selector in stream_buffers.events:
+            stream_buffers.positions.setdefault(selector, 0)
+        return stream_buffers
+
+    def append(
+        self,
+        selector: Sequence[str],
+        event: NodeRunStreamChunkEvent,
+    ) -> None:
+        key = tuple(selector)
+        if key in self.closed_selectors:
+            msg = f"Stream {'.'.join(selector)} is already closed"
+            raise ValueError(msg)
+
+        if key not in self.events:
+            self.events[key] = []
+            self.positions[key] = 0
+
+        self.events[key].append(event)
+
+    def pop(
+        self,
+        selector: Sequence[str],
+    ) -> NodeRunStreamChunkEvent | None:
+        key = tuple(selector)
+        if key not in self.events:
+            return None
+
+        position = self.positions.get(key, 0)
+        buffer = self.events[key]
+        if position >= len(buffer):
+            return None
+
+        event = buffer[position]
+        self.positions[key] = position + 1
+        return event
+
+    def has_unread(self, selector: Sequence[str]) -> bool:
+        key = tuple(selector)
+        if key not in self.events:
+            return False
+
+        position = self.positions.get(key, 0)
+        return position < len(self.events[key])
+
+    def close(self, selector: Sequence[str]) -> None:
+        self.closed_selectors.add(tuple(selector))
+
+    def is_closed(self, selector: Sequence[str]) -> bool:
+        return tuple(selector) in self.closed_selectors
+
+    def dump_buffers(self) -> list[StreamBufferState]:
+        return [
+            StreamBufferState(
+                selector=selector,
+                events=[event.model_copy(deep=True) for event in events],
+            )
+            for selector, events in sorted(self.events.items())
+        ]
+
+    def dump_positions(self) -> list[StreamPositionState]:
+        return [
+            StreamPositionState(selector=selector, position=position)
+            for selector, position in sorted(self.positions.items())
+        ]
+
+    def dump_closed_selectors(self) -> list[Selector]:
+        return sorted(self.closed_selectors)
 
 
 class ResponseStreamFilterState(BaseModel):
@@ -101,7 +197,7 @@ class ResponseStreamFilterState(BaseModel):
     paths_map: dict[str, list[list[str]]] = Field(default_factory=dict)
     stream_buffers: Sequence[StreamBufferState] = Field(default_factory=list)
     stream_positions: Sequence[StreamPositionState] = Field(default_factory=list)
-    closed_streams: Sequence[tuple[str, ...]] = Field(default_factory=list)
+    closed_streams: Sequence[Selector] = Field(default_factory=list)
 
 
 class ResponseStreamFilter:
@@ -111,7 +207,6 @@ class ResponseStreamFilter:
 
     def __init__(self, *, pass_unmatched_chunks: bool = False) -> None:
         self._pass_unmatched_chunks = pass_unmatched_chunks
-        self._context: GraphEventFilterContext | None = None
         self._graph: GraphProtocol | None = None
         self._runtime_state: ReadOnlyGraphRuntimeState | None = None
         self._pending_state: ResponseStreamFilterState | None = None
@@ -120,31 +215,36 @@ class ResponseStreamFilter:
     def _reset_run_state(self) -> None:
         self._active_session: ResponseSession | None = None
         self._waiting_sessions: deque[ResponseSession] = deque()
-        self._stream_buffers: dict[tuple[str, ...], list[NodeRunStreamChunkEvent]] = {}
-        self._stream_positions: dict[tuple[str, ...], int] = {}
-        self._closed_streams: set[tuple[str, ...]] = set()
+        self._stream_buffers = StreamBuffers()
         self._response_nodes: set[str] = set()
         self._paths_maps: dict[str, list[Path]] = {}
         self._node_execution_ids: dict[str, str] = {}
         self._response_sessions: dict[str, ResponseSession] = {}
-        self._referenced_selectors: set[tuple[str, ...]] = set()
+        self._referenced_selectors: set[Selector] = set()
 
     def initialize(self, context: GraphEventFilterContext) -> None:
         pending_state = self._pending_state
-        self._context = context
         self._graph = cast(GraphProtocol, context.graph)
         self._runtime_state = context.runtime_state
 
-        if pending_state is not None:
-            self._apply_state(pending_state)
-            return
+        try:
+            if pending_state is not None:
+                self._apply_state(pending_state)
+                return
 
-        self._reset_run_state()
-        for node in context.graph.nodes.values():
-            if node.execution_type == NodeExecutionType.RESPONSE:
-                self._register(node.id)
+            self._reset_run_state()
+            for node in context.graph.nodes.values():
+                if node.execution_type == NodeExecutionType.RESPONSE:
+                    self._register(node.id)
+        except Exception:
+            self._graph = None
+            self._runtime_state = None
+            if pending_state is None:
+                self._reset_run_state()
+            raise
 
     def on_event(self, event: GraphEngineEvent) -> Iterable[GraphEngineEvent]:
+        self._ensure_initialized()
         match event:
             case GraphRunStartedEvent():
                 output: Iterable[GraphEngineEvent] = [
@@ -167,11 +267,13 @@ class ResponseStreamFilter:
         return output
 
     def flush(self) -> Iterable[GraphEngineEvent]:
+        self._ensure_initialized()
         return self._try_flush()
 
     def dumps(self) -> str:
-        if self._pending_state is not None and self._graph is None:
+        if self._pending_state is not None:
             return self._pending_state.model_dump_json()
+        self._ensure_initialized()
 
         state = ResponseStreamFilterState(
             response_nodes=sorted(self._response_nodes),
@@ -191,24 +293,15 @@ class ResponseStreamFilter:
                 node_id: [path.edges.copy() for path in paths]
                 for node_id, paths in sorted(self._paths_maps.items())
             },
-            stream_buffers=[
-                StreamBufferState(
-                    selector=selector,
-                    events=[event.model_copy(deep=True) for event in events],
-                )
-                for selector, events in sorted(self._stream_buffers.items())
-            ],
-            stream_positions=[
-                StreamPositionState(selector=selector, position=position)
-                for selector, position in sorted(self._stream_positions.items())
-            ],
-            closed_streams=sorted(self._closed_streams),
+            stream_buffers=self._stream_buffers.dump_buffers(),
+            stream_positions=self._stream_buffers.dump_positions(),
+            closed_streams=self._stream_buffers.dump_closed_selectors(),
         )
         return state.model_dump_json()
 
     def loads(self, data: str) -> None:
         state = self._parse_state(data)
-        if self._graph is None:
+        if self._graph is None or self._pending_state is not None:
             self._pending_state = state
             return
 
@@ -229,46 +322,56 @@ class ResponseStreamFilter:
         return state
 
     def _apply_state(self, state: ResponseStreamFilterState) -> None:
-        self._reset_run_state()
-        self._response_nodes = set(state.response_nodes)
-        self._paths_maps = {
+        response_nodes = set(state.response_nodes)
+        paths_maps = {
             node_id: [Path(edges=list(path_edges)) for path_edges in paths]
             for node_id, paths in state.paths_map.items()
         }
-        self._node_execution_ids = dict(state.node_execution_ids)
+        node_execution_ids = dict(state.node_execution_ids)
 
-        self._stream_buffers = {
-            tuple(buffer.selector): [
-                event.model_copy(deep=True) for event in buffer.events
-            ]
-            for buffer in state.stream_buffers
-        }
-        self._stream_positions = {
-            tuple(position.selector): position.position
-            for position in state.stream_positions
-        }
-        for selector in self._stream_buffers:
-            self._stream_positions.setdefault(selector, 0)
-
-        self._closed_streams = {tuple(selector) for selector in state.closed_streams}
-        self._waiting_sessions = deque(
+        stream_buffers = StreamBuffers.from_state(
+            buffers=state.stream_buffers,
+            positions=state.stream_positions,
+            closed_selectors=state.closed_streams,
+        )
+        waiting_sessions = deque(
             self._session_from_state(session_state)
             for session_state in state.waiting_sessions
         )
-        self._response_sessions = {
+        response_sessions = {
             session_state.node_id: self._session_from_state(session_state)
             for session_state in state.pending_sessions
         }
-        self._active_session = (
+        active_session = (
             self._session_from_state(state.active_session)
             if state.active_session
             else None
         )
 
-        self._referenced_selectors = set()
-        for response_node_id in self._response_nodes:
-            self._record_referenced_selectors(response_node_id)
+        referenced_selectors: set[Selector] = set()
+        for response_node_id in response_nodes:
+            referenced_selectors.update(
+                self._get_referenced_selectors(response_node_id)
+            )
+
+        self._active_session = active_session
+        self._waiting_sessions = waiting_sessions
+        self._stream_buffers = stream_buffers
+        self._response_nodes = response_nodes
+        self._paths_maps = paths_maps
+        self._node_execution_ids = node_execution_ids
+        self._response_sessions = response_sessions
+        self._referenced_selectors = referenced_selectors
         self._pending_state = None
+
+    def _ensure_initialized(self) -> None:
+        if (
+            self._graph is None
+            or self._runtime_state is None
+            or self._pending_state is not None
+        ):
+            msg = "ResponseStreamFilter must be initialized before use."
+            raise RuntimeError(msg)
 
     @property
     def _bound_graph(self) -> GraphProtocol:
@@ -297,14 +400,24 @@ class ResponseStreamFilter:
         self._record_referenced_selectors(response_node_id)
 
     def _record_referenced_selectors(self, response_node_id: NodeID) -> None:
+        self._referenced_selectors.update(
+            self._get_referenced_selectors(response_node_id)
+        )
+
+    def _get_referenced_selectors(
+        self,
+        response_node_id: NodeID,
+    ) -> set[Selector]:
         response_node = self._bound_graph.nodes.get(response_node_id)
         if response_node is None:
-            return
+            return set()
 
         response_session = ResponseSession.from_node(response_node)
-        for segment in response_session.template.segments:
-            if isinstance(segment, VariableSegment):
-                self._referenced_selectors.add(tuple(segment.selector))
+        return {
+            tuple(segment.selector)
+            for segment in response_session.template.segments
+            if isinstance(segment, VariableSegment)
+        }
 
     def _build_paths_map(self, response_node_id: NodeID) -> list[Path]:
         root_node_id = self._bound_graph.root_node.id
@@ -321,7 +434,7 @@ class ResponseStreamFilter:
     def _get_response_variable_selectors(
         self,
         response_node_id: NodeID,
-    ) -> set[tuple[str, ...]]:
+    ) -> set[Selector]:
         response_node = self._bound_graph.nodes[response_node_id]
         response_session = ResponseSession.from_node(response_node)
         return {
@@ -360,7 +473,7 @@ class ResponseStreamFilter:
     def _get_blocking_edges(
         self,
         path: list[EdgeID],
-        variable_selectors: set[tuple[str, ...]],
+        variable_selectors: set[Selector],
     ) -> list[EdgeID]:
         return [
             edge_id
@@ -371,7 +484,7 @@ class ResponseStreamFilter:
     def _is_blocking_edge(
         self,
         edge_id: EdgeID,
-        variable_selectors: set[tuple[str, ...]],
+        variable_selectors: set[Selector],
     ) -> bool:
         edge = self._bound_graph.edges[edge_id]
         source_node = self._bound_graph.nodes[edge.tail]
@@ -427,9 +540,9 @@ class ResponseStreamFilter:
     ) -> list[GraphEngineEvent]:
         selector_key = tuple(event.selector)
         if selector_key in self._referenced_selectors:
-            self._append_stream_chunk(event.selector, event)
+            self._stream_buffers.append(event.selector, event)
             if event.is_final:
-                self._close_stream(event.selector)
+                self._stream_buffers.close(event.selector)
             return self._try_flush()
         if self._pass_unmatched_chunks:
             return [event]
@@ -485,8 +598,8 @@ class ResponseStreamFilter:
             output_node_id = source_selector_prefix
         execution_id = self._get_or_create_execution_id(output_node_id)
 
-        while self._has_unread_stream(segment.selector):
-            event = self._pop_stream_chunk(segment.selector)
+        while self._stream_buffers.has_unread(segment.selector):
+            event = self._stream_buffers.pop(segment.selector)
             if event is None:
                 continue
 
@@ -505,7 +618,7 @@ class ResponseStreamFilter:
             else:
                 events.append(event)
 
-        if self._is_stream_closed(segment.selector):
+        if self._stream_buffers.is_closed(segment.selector):
             is_complete = True
         elif value := self._bound_runtime_state.variable_pool.get(segment.selector):
             is_last_segment = bool(
@@ -607,53 +720,6 @@ class ResponseStreamFilter:
 
         self._active_session = self._waiting_sessions.popleft()
         return self._try_flush()
-
-    def _append_stream_chunk(
-        self,
-        selector: Sequence[str],
-        event: NodeRunStreamChunkEvent,
-    ) -> None:
-        key = tuple(selector)
-        if key in self._closed_streams:
-            msg = f"Stream {'.'.join(selector)} is already closed"
-            raise ValueError(msg)
-
-        if key not in self._stream_buffers:
-            self._stream_buffers[key] = []
-            self._stream_positions[key] = 0
-
-        self._stream_buffers[key].append(event)
-
-    def _pop_stream_chunk(
-        self,
-        selector: Sequence[str],
-    ) -> NodeRunStreamChunkEvent | None:
-        key = tuple(selector)
-        if key not in self._stream_buffers:
-            return None
-
-        position = self._stream_positions.get(key, 0)
-        buffer = self._stream_buffers[key]
-        if position >= len(buffer):
-            return None
-
-        event = buffer[position]
-        self._stream_positions[key] = position + 1
-        return event
-
-    def _has_unread_stream(self, selector: Sequence[str]) -> bool:
-        key = tuple(selector)
-        if key not in self._stream_buffers:
-            return False
-
-        position = self._stream_positions.get(key, 0)
-        return position < len(self._stream_buffers[key])
-
-    def _close_stream(self, selector: Sequence[str]) -> None:
-        self._closed_streams.add(tuple(selector))
-
-    def _is_stream_closed(self, selector: Sequence[str]) -> bool:
-        return tuple(selector) in self._closed_streams
 
     def _serialize_session(
         self,

@@ -92,10 +92,7 @@ class SkipPropagator:
         events: list[GraphEdgeSkippedEvent] = []
         outgoing_edges = self._graph.get_outgoing_edges(node_id)
         for edge in outgoing_edges:
-            self._state_manager.mark_edge_skipped(edge.id)
-            events.append(self._build_skipped_event(edge))
-            # Recursively propagate skip
-            events.extend(self.propagate_skip_from_edge(edge.id))
+            events.extend(self._skip_edge_path(edge))
         return events
 
     def skip_branch_paths(
@@ -113,10 +110,15 @@ class SkipPropagator:
         """
         events: list[GraphEdgeSkippedEvent] = []
         for edge in unselected_edges:
-            self._state_manager.mark_edge_skipped(edge.id)
-            events.append(self._build_skipped_event(edge))
-            events.extend(self.propagate_skip_from_edge(edge.id))
+            events.extend(self._skip_edge_path(edge))
         return events
+
+    def _skip_edge_path(self, edge: Edge) -> list[GraphEdgeSkippedEvent]:
+        self._state_manager.mark_edge_skipped(edge.id)
+        return [
+            self._build_skipped_event(edge),
+            *self.propagate_skip_from_edge(edge.id),
+        ]
 
     @staticmethod
     def _build_skipped_event(edge: Edge) -> GraphEdgeSkippedEvent:

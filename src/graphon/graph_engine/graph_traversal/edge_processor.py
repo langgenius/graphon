@@ -76,15 +76,18 @@ class EdgeProcessor:
             list of traversal events)
 
         """
-        ready_nodes: list[str] = []
-        traversal_events: list[GraphTraversalEvent] = []
-        outgoing_edges = self._graph.get_outgoing_edges(node_id)
+        return self._process_taken_edges(self._graph.get_outgoing_edges(node_id))
 
-        for edge in outgoing_edges:
+    def _process_taken_edges(
+        self,
+        edges: Sequence[Edge],
+    ) -> tuple[list[str], list[GraphEdgeTakenEvent]]:
+        ready_nodes: list[str] = []
+        traversal_events: list[GraphEdgeTakenEvent] = []
+        for edge in edges:
             nodes, events = self._process_taken_edge(edge)
             ready_nodes.extend(nodes)
             traversal_events.extend(events)
-
         return ready_nodes, traversal_events
 
     def _process_taken_edge(
@@ -143,14 +146,8 @@ class EdgeProcessor:
 
         skipped_events = self._skip_propagator.skip_branch_paths(unselected_edges)
 
-        ready_nodes: list[str] = []
-        traversal_events: list[GraphTraversalEvent] = [*skipped_events]
-        for edge in selected_edges:
-            nodes, events = self._process_taken_edge(edge)
-            ready_nodes.extend(nodes)
-            traversal_events.extend(events)
-
-        return ready_nodes, traversal_events
+        ready_nodes, taken_events = self._process_taken_edges(selected_edges)
+        return ready_nodes, [*skipped_events, *taken_events]
 
     def validate_branch_selection(self, node_id: str, selected_handle: str) -> bool:
         """Validate that a branch selection is valid.

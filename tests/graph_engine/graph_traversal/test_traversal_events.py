@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from typing import cast
 
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType, NodeState
@@ -7,6 +8,8 @@ from graphon.graph_engine.graph_state_manager import GraphStateManager
 from graphon.graph_engine.graph_traversal.edge_processor import EdgeProcessor
 from graphon.graph_engine.graph_traversal.skip_propagator import SkipPropagator
 from graphon.graph_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTakenEvent
+
+type _TraversalEvent = GraphEdgeTakenEvent | GraphEdgeSkippedEvent
 
 
 class _Node:
@@ -98,28 +101,38 @@ class _StateManager:
         self.started_nodes.append(node_id)
 
 
-def test_edge_processor_emits_taken_and_skipped_events_for_branch() -> None:
+def _branch_processor() -> EdgeProcessor:
     graph = _Graph()
     state_manager = _StateManager(graph)
     skip_propagator = SkipPropagator(
         graph=cast(Graph, graph),
         state_manager=cast(GraphStateManager, state_manager),
     )
-    processor = EdgeProcessor(
+    return EdgeProcessor(
         graph=cast(Graph, graph),
         state_manager=cast(GraphStateManager, state_manager),
         skip_propagator=skip_propagator,
     )
+
+
+def _edge_payloads(
+    events: Sequence[_TraversalEvent],
+) -> list[tuple[str, str, str, str | None]]:
+    return [
+        (event.edge_id, event.source_node_id, event.target_node_id, event.source_handle)
+        for event in events
+    ]
+
+
+def test_edge_processor_emits_taken_and_skipped_events_for_branch() -> None:
+    processor = _branch_processor()
 
     ready_nodes, events = processor.handle_branch_completion("branch", "yes")
 
     assert ready_nodes == ["selected"]
     assert any(isinstance(event, GraphEdgeTakenEvent) for event in events)
     assert any(isinstance(event, GraphEdgeSkippedEvent) for event in events)
-    assert [
-        (event.edge_id, event.source_node_id, event.target_node_id, event.source_handle)
-        for event in events
-    ] == [
+    assert _edge_payloads(events) == [
         ("edge-skipped", "branch", "skipped", "no"),
         ("edge-propagated", "skipped", "skipped_child", "success"),
         ("edge-selected", "branch", "selected", "yes"),
@@ -127,25 +140,12 @@ def test_edge_processor_emits_taken_and_skipped_events_for_branch() -> None:
 
 
 def test_process_node_success_emits_propagated_skip_events_for_branch() -> None:
-    graph = _Graph()
-    state_manager = _StateManager(graph)
-    skip_propagator = SkipPropagator(
-        graph=cast(Graph, graph),
-        state_manager=cast(GraphStateManager, state_manager),
-    )
-    processor = EdgeProcessor(
-        graph=cast(Graph, graph),
-        state_manager=cast(GraphStateManager, state_manager),
-        skip_propagator=skip_propagator,
-    )
+    processor = _branch_processor()
 
     ready_nodes, events = processor.process_node_success("branch", "yes")
 
     assert ready_nodes == ["selected"]
-    assert [
-        (event.edge_id, event.source_node_id, event.target_node_id, event.source_handle)
-        for event in events
-    ] == [
+    assert _edge_payloads(events) == [
         ("edge-skipped", "branch", "skipped", "no"),
         ("edge-propagated", "skipped", "skipped_child", "success"),
         ("edge-selected", "branch", "selected", "yes"),
