@@ -114,6 +114,7 @@ class ResponseStreamFilter:
         self._context: GraphEventFilterContext | None = None
         self._graph: GraphProtocol | None = None
         self._runtime_state: ReadOnlyGraphRuntimeState | None = None
+        self._pending_state: ResponseStreamFilterState | None = None
         self._reset_run_state()
 
     def _reset_run_state(self) -> None:
@@ -129,10 +130,16 @@ class ResponseStreamFilter:
         self._referenced_selectors: set[tuple[str, ...]] = set()
 
     def initialize(self, context: GraphEventFilterContext) -> None:
-        self._reset_run_state()
+        pending_state = self._pending_state
         self._context = context
         self._graph = cast(GraphProtocol, context.graph)
         self._runtime_state = context.runtime_state
+
+        if pending_state is not None:
+            self._apply_state(pending_state)
+            return
+
+        self._reset_run_state()
         for node in context.graph.nodes.values():
             if node.execution_type == NodeExecutionType.RESPONSE:
                 self._register(node.id)
@@ -163,6 +170,9 @@ class ResponseStreamFilter:
         return self._try_flush()
 
     def dumps(self) -> str:
+        if self._pending_state is not None and self._graph is None:
+            return self._pending_state.model_dump_json()
+
         state = ResponseStreamFilterState(
             response_nodes=sorted(self._response_nodes),
             active_session=self._serialize_session(self._active_session),
@@ -197,6 +207,15 @@ class ResponseStreamFilter:
         return state.model_dump_json()
 
     def loads(self, data: str) -> None:
+        state = self._parse_state(data)
+        if self._graph is None:
+            self._pending_state = state
+            return
+
+        self._apply_state(state)
+
+    @staticmethod
+    def _parse_state(data: str) -> ResponseStreamFilterState:
         state = ResponseStreamFilterState.model_validate_json(data)
 
         if state.type != "ResponseStreamFilter":
@@ -207,6 +226,10 @@ class ResponseStreamFilter:
             msg = f"Unsupported serialized version: {state.version}"
             raise ValueError(msg)
 
+        return state
+
+    def _apply_state(self, state: ResponseStreamFilterState) -> None:
+        self._reset_run_state()
         self._response_nodes = set(state.response_nodes)
         self._paths_maps = {
             node_id: [Path(edges=list(path_edges)) for path_edges in paths]
@@ -245,6 +268,7 @@ class ResponseStreamFilter:
         self._referenced_selectors = set()
         for response_node_id in self._response_nodes:
             self._record_referenced_selectors(response_node_id)
+        self._pending_state = None
 
     @property
     def _bound_graph(self) -> GraphProtocol:

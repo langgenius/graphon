@@ -3,7 +3,11 @@ from datetime import UTC, datetime
 from typing import Any, ClassVar, cast
 
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType, NodeState, NodeType
-from graphon.filters import GraphEventFilterContext, ResponseStreamFilter
+from graphon.filters import (
+    GraphEventFilterContext,
+    ResponseStreamFilter,
+    filter_graph_events,
+)
 from graphon.graph_events.graph import GraphRunStartedEvent
 from graphon.graph_events.node import (
     NodeRunRetryEvent,
@@ -359,3 +363,50 @@ def test_response_stream_filter_round_trips_resume_state() -> None:
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     assert [event.chunk for event in chunks] == ["resumed"]
+
+
+def test_response_stream_filter_can_load_before_filter_chain_initializes() -> None:
+    source = _TestNode("source")
+    answer = _TestNode(
+        "answer",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template(segments=[VariableSegment(selector=["source", "answer"])]),
+    )
+    edge = _TestEdge("edge-1", "source", "answer")
+    graph = _TestGraph(
+        nodes={"source": source, "answer": answer},
+        edges={"edge-1": edge},
+        root_node_id="source",
+    )
+    context = _context(graph)
+    first_filter = ResponseStreamFilter()
+    first_filter.initialize(context)
+    raw_chunk = NodeRunStreamChunkEvent(
+        id="source-run",
+        node_id="source",
+        node_type=BuiltinNodeTypes.CODE,
+        selector=["source", "answer"],
+        chunk="chain-resumed",
+        is_final=True,
+    )
+    assert list(first_filter.on_event(raw_chunk)) == []
+
+    restored_filter = ResponseStreamFilter()
+    restored_filter.loads(first_filter.dumps())
+    output = list(
+        filter_graph_events(
+            [
+                GraphEdgeTakenEvent(
+                    edge_id="edge-1",
+                    source_node_id="source",
+                    target_node_id="answer",
+                    source_handle="success",
+                )
+            ],
+            context=context,
+            filters=[restored_filter],
+        )
+    )
+
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert [event.chunk for event in chunks] == ["chain-resumed"]
