@@ -5,6 +5,7 @@ from typing import final
 
 from graphon.graph.edge import Edge
 from graphon.graph.graph import Graph
+from graphon.graph_events.traversal import GraphEdgeSkippedEvent
 
 from ..graph_state_manager import GraphStateManager
 
@@ -32,7 +33,7 @@ class SkipPropagator:
         self._graph = graph
         self._state_manager = state_manager
 
-    def propagate_skip_from_edge(self, edge_id: str) -> None:
+    def propagate_skip_from_edge(self, edge_id: str) -> list[GraphEdgeSkippedEvent]:
         """Recursively propagate skip state from a skipped edge.
 
         Rules:
@@ -43,6 +44,9 @@ class SkipPropagator:
         Args:
             edge_id: The ID of the skipped edge to start from
 
+        Returns:
+            Traversal events for edges marked skipped during propagation.
+
         """
         downstream_node_id = self._graph.edges[edge_id].head
         incoming_edges = self._graph.get_incoming_edges(downstream_node_id)
@@ -52,47 +56,75 @@ class SkipPropagator:
 
         # Stop if there are unknown edges (not yet processed)
         if edge_states["has_unknown"]:
-            return
+            return []
 
         # If any edge is taken, node may still execute
         if edge_states["has_taken"]:
             # Enqueue node
             self._state_manager.enqueue_node(downstream_node_id)
             self._state_manager.start_execution(downstream_node_id)
-            return
+            return []
 
         # All edges are skipped, propagate skip to this node
         if edge_states["all_skipped"]:
-            self._propagate_skip_to_node(downstream_node_id)
+            return self._propagate_skip_to_node(downstream_node_id)
 
-    def propagate_skip_to_node(self, node_id: str) -> None:
+        return []
+
+    def propagate_skip_to_node(self, node_id: str) -> list[GraphEdgeSkippedEvent]:
         """Mark a node and its downstream edges as skipped."""
-        self._propagate_skip_to_node(node_id)
+        return self._propagate_skip_to_node(node_id)
 
-    def _propagate_skip_to_node(self, node_id: str) -> None:
+    def _propagate_skip_to_node(self, node_id: str) -> list[GraphEdgeSkippedEvent]:
         """Mark a node and all its outgoing edges as skipped.
 
         Args:
             node_id: The ID of the node to skip
+
+        Returns:
+            Traversal events for outgoing edges marked skipped.
 
         """
         # Mark node as skipped
         self._state_manager.mark_node_skipped(node_id)
 
         # Mark all outgoing edges as skipped and propagate
+        events: list[GraphEdgeSkippedEvent] = []
         outgoing_edges = self._graph.get_outgoing_edges(node_id)
         for edge in outgoing_edges:
-            self._state_manager.mark_edge_skipped(edge.id)
-            # Recursively propagate skip
-            self.propagate_skip_from_edge(edge.id)
+            events.extend(self._skip_edge_path(edge))
+        return events
 
-    def skip_branch_paths(self, unselected_edges: Sequence[Edge]) -> None:
+    def skip_branch_paths(
+        self,
+        unselected_edges: Sequence[Edge],
+    ) -> list[GraphEdgeSkippedEvent]:
         """Skip all paths from unselected branch edges.
 
         Args:
             unselected_edges: List of edges not taken by the branch
 
+        Returns:
+            Traversal events for skipped branch edges and propagated skips.
+
         """
+        events: list[GraphEdgeSkippedEvent] = []
         for edge in unselected_edges:
-            self._state_manager.mark_edge_skipped(edge.id)
-            self.propagate_skip_from_edge(edge.id)
+            events.extend(self._skip_edge_path(edge))
+        return events
+
+    def _skip_edge_path(self, edge: Edge) -> list[GraphEdgeSkippedEvent]:
+        self._state_manager.mark_edge_skipped(edge.id)
+        return [
+            self._build_skipped_event(edge),
+            *self.propagate_skip_from_edge(edge.id),
+        ]
+
+    @staticmethod
+    def _build_skipped_event(edge: Edge) -> GraphEdgeSkippedEvent:
+        return GraphEdgeSkippedEvent(
+            edge_id=edge.id,
+            source_node_id=edge.tail,
+            target_node_id=edge.head,
+            source_handle=edge.source_handle,
+        )

@@ -9,7 +9,7 @@ start -> llm -> answer
 ## Files
 
 - `graph.yml`: the DSL graph
-- `dsl.py`: imports `graph.yml` with `graphon.dsl.loads()`
+- `dsl.py`: imports `graph.yml` and streams response events with `ResponseStreamFilter`
 - `code.py`: builds the graph with Python code
 - `settings.py`: shared credentials and Slim setup
 - `credentials.example.json`: credentials template

@@ -94,11 +94,15 @@ class TestSkipPropagator:
 
         edge1 = MagicMock(spec=Edge)
         edge1.id = "edge_2"
+        edge1.tail = "node_1"
         edge1.head = "node_downstream_1"
+        edge1.source_handle = "source"
 
         edge2 = MagicMock(spec=Edge)
         edge2.id = "edge_3"
+        edge2.tail = "node_1"
         edge2.head = "node_downstream_2"
+        edge2.source_handle = "source"
 
         mock_graph.edges = {"edge_2": edge1, "edge_3": edge2}
         mock_graph.get_outgoing_edges.return_value = [edge1, edge2]
@@ -119,11 +123,15 @@ class TestSkipPropagator:
 
         edge1 = MagicMock(spec=Edge)
         edge1.id = "edge_1"
+        edge1.tail = "node_1"
         edge1.head = "node_downstream_1"
+        edge1.source_handle = "source"
 
         edge2 = MagicMock(spec=Edge)
         edge2.id = "edge_2"
+        edge2.tail = "node_1"
         edge2.head = "node_downstream_2"
+        edge2.source_handle = "source"
 
         mock_graph.edges = {"edge_1": edge1, "edge_2": edge2}
         mock_graph.get_incoming_edges.return_value = []
@@ -144,11 +152,15 @@ class TestSkipPropagator:
 
         edge1 = MagicMock(spec=Edge)
         edge1.id = "edge_1"
+        edge1.tail = "node_1"
         edge1.head = "node_2"
+        edge1.source_handle = "source"
 
         edge3 = MagicMock(spec=Edge)
         edge3.id = "edge_3"
+        edge3.tail = "node_2"
         edge3.head = "node_4"
+        edge3.source_handle = "source"
 
         mock_graph.edges = {"edge_1": edge1, "edge_3": edge3}
 
