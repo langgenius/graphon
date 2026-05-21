@@ -36,7 +36,7 @@ class ModelPollingProgressEvent(NodeEventBase):
     last_checked_at: datetime = Field(..., description="last polling check time")
     next_check_at: datetime | None = Field(
         default=None,
-        description="next polling check time",
+        description="next polling check time; None means no further check is scheduled",
     )
 
 

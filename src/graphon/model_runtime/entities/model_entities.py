@@ -173,6 +173,7 @@ class ProviderModel(BaseModel):
 
     @property
     def support_polling(self) -> bool:
+        """Whether the model schema declares polling capability."""
         return self.features is not None and ModelFeature.POLLING in self.features
 
 

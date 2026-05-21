@@ -10,7 +10,7 @@ import time
 from collections.abc import Generator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal, assert_never, cast, override
+from typing import Any, Literal, assert_never, override
 
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import (
@@ -45,7 +45,7 @@ from graphon.model_runtime.entities.message_entities import (
     TextPromptMessageContent,
     UserPromptMessage,
 )
-from graphon.model_runtime.entities.model_entities import ModelFeature, ModelPropertyKey
+from graphon.model_runtime.entities.model_entities import ModelPropertyKey
 from graphon.model_runtime.memory.prompt_message_memory import PromptMessageMemory
 from graphon.model_runtime.utils.encoders import jsonable_encoder
 from graphon.node_events.base import (
@@ -454,31 +454,9 @@ class LLMNode(Node[LLMNodeData]):
         )
 
     def _polling_model_instance(self) -> LLMPollingCapableProtocol | None:
-        start_polling = getattr(self._model_instance, "start_llm_polling", None)
-        check_polling = getattr(self._model_instance, "check_llm_polling", None)
-        if not callable(start_polling) or not callable(check_polling):
-            return None
-
-        if not self._model_instance_supports_polling():
-            return None
-        return cast(LLMPollingCapableProtocol, self._model_instance)
-
-    def _model_instance_supports_polling(self) -> bool:
-        supports_polling = getattr(self._model_instance, "supports_polling", None)
-        if supports_polling is None:
-            return self._model_schema_supports_polling()
-        return supports_polling is True
-
-    def _model_schema_supports_polling(self) -> bool:
-        try:
-            features = self._model_instance.get_model_schema().features
-        except (AttributeError, TypeError, ValueError):
-            logger.debug("failed to read model schema for polling support")
-            return False
-        if not features:
-            return False
-        polling_values = {ModelFeature.POLLING, ModelFeature.POLLING.value}
-        return any(feature in polling_values for feature in features)
+        if isinstance(self._model_instance, LLMPollingCapableProtocol):
+            return self._model_instance
+        return None
 
     def _invoke_llm_with_polling(
         self,
@@ -488,7 +466,7 @@ class LLMNode(Node[LLMNodeData]):
         stop: Sequence[str] | None,
     ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
         config = self._polling_config(polling_model)
-        model_parameters = dict(polling_model.parameters)
+        model_parameters = dict(self._model_instance.parameters)
         json_schema = (
             LLMNode.fetch_structured_output_schema(
                 structured_output=self.node_data.structured_output or {},

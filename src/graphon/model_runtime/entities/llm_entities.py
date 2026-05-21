@@ -9,6 +9,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    JsonValue,
     StrictFloat,
     StrictInt,
     TypeAdapter,
@@ -221,7 +222,7 @@ class LLMPollingStatus(StrEnum):
 
 class LLMPollingResult(BaseModel):
     status: LLMPollingStatus
-    plugin_state: dict[str, Any] | None = None
+    plugin_state: dict[str, JsonValue] | None = None
     result: LLMResult | LLMResultWithStructuredOutput | None = None
     error: str | None = None
     next_check_after_seconds: float | None = Field(default=None, gt=0)

@@ -62,6 +62,7 @@ def test_llm_polling_result_validates_status_payload() -> None:
             "plugin_state": {"job_id": "job-1"},
             "next_check_after_seconds": 0,
         },
+        {"status": "running", "plugin_state": {"job": object()}},
     ):
         with pytest.raises(ValidationError):
             LLMPollingResult.model_validate(payload)

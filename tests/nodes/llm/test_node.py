@@ -30,17 +30,16 @@ from graphon.node_events.node import (
     StreamCompletedEvent,
 )
 from graphon.nodes.llm import LLMNode, LLMNodeData
-from graphon.nodes.llm.runtime_protocols import LLMProtocol
+from graphon.nodes.llm.runtime_protocols import LLMPollingCapableProtocol, LLMProtocol
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
 from ...helpers import build_graph_init_params, build_variable_pool
 
 
-class _PollingLLM:
+class _PollingLLM(LLMPollingCapableProtocol):
     provider = "openai"
     model_name = "gpt-4o"
     stop = ()
-    supports_polling = True
 
     def __init__(self, responses: Sequence[object]) -> None:
         self.parameters = {}
@@ -55,11 +54,11 @@ class _PollingLLM:
         self.start_calls: list[dict[str, Any]] = []
         self.check_calls: list[dict[str, Any]] = []
 
-    def start_llm_polling(self, **kwargs: Any) -> object:
+    def start_llm_polling(self, **kwargs: Any) -> Any:
         self.start_calls.append(kwargs)
         return self._responses.pop(0)
 
-    def check_llm_polling(self, **kwargs: Any) -> object:
+    def check_llm_polling(self, **kwargs: Any) -> Any:
         self.check_calls.append(kwargs)
         return self._responses.pop(0)
 
@@ -73,17 +72,6 @@ class _PollingLLM:
 
     def is_structured_output_parse_error(self, _error: Exception) -> bool:
         return False
-
-
-class _SchemaPollingLLM(_PollingLLM):
-    supports_polling = None
-
-    def get_model_schema(self) -> SimpleNamespace:
-        return SimpleNamespace(features=[ModelFeature.POLLING])
-
-
-def _dynamic_supports_polling(*_: object) -> bool:
-    return True
 
 
 def _llm_result(text: str = "final answer") -> LLMResult:
@@ -515,39 +503,30 @@ def test_polling_llm_uses_run_context_workflow_run_id(
     assert model.start_calls[0]["workflow_run_id"] == "wr-context"
 
 
-def test_polling_llm_can_use_model_schema_feature(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    model = _SchemaPollingLLM([
-        LLMPollingResult(
-            status=LLMPollingStatus.SUCCEEDED,
-            result=_llm_result("feature-enabled"),
-        ),
-    ])
+def test_polling_llm_ignores_schema_feature_without_capability_base() -> None:
+    model = MagicMock(
+        provider="openai",
+        model_name="gpt-4o",
+        parameters={},
+        stop=(),
+    )
+    model.get_model_schema.return_value = SimpleNamespace(
+        features=[ModelFeature.POLLING]
+    )
     node = _build_llm_node(model_instance=model)
-    _stub_simple_prompt(monkeypatch, node)
 
-    events = list(node._run())
+    assert node._polling_model_instance() is None
 
-    completed_event = next(
-        event for event in events if isinstance(event, StreamCompletedEvent)
+
+def test_polling_llm_requires_capability_base_for_polling_methods() -> None:
+    model = MagicMock(
+        provider="openai",
+        model_name="gpt-4o",
+        parameters={},
+        stop=(),
     )
-    assert (
-        completed_event.node_run_result.status == WorkflowNodeExecutionStatus.SUCCEEDED
-    )
-    assert completed_event.node_run_result.outputs["text"] == "feature-enabled"
-    assert model.start_calls[0]["workflow_run_id"] == "wr-test"
-
-
-@pytest.mark.parametrize(
-    "supports_polling",
-    [False, "true", _dynamic_supports_polling],
-)
-def test_polling_llm_requires_graph_bool_support_flag(
-    supports_polling: object,
-) -> None:
-    model = _PollingLLM([])
-    cast(Any, model).supports_polling = supports_polling
+    model.start_llm_polling = MagicMock()
+    model.check_llm_polling = MagicMock()
     node = _build_llm_node(model_instance=model)
 
     assert node._polling_model_instance() is None
