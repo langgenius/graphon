@@ -5,7 +5,11 @@ from typing import Any, ClassVar, cast
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType, NodeState, NodeType
 from graphon.filters import GraphEventFilterContext, ResponseStreamFilter
 from graphon.graph_events.graph import GraphRunStartedEvent
-from graphon.graph_events.node import NodeRunStartedEvent, NodeRunStreamChunkEvent
+from graphon.graph_events.node import (
+    NodeRunRetryEvent,
+    NodeRunStartedEvent,
+    NodeRunStreamChunkEvent,
+)
 from graphon.graph_events.traversal import GraphEdgeTakenEvent
 from graphon.nodes.base.template import Template, TextSegment, VariableSegment
 from graphon.runtime.graph_runtime_state import (
@@ -201,6 +205,116 @@ def test_response_stream_filter_reads_scalar_variable_values() -> None:
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     assert [event.chunk for event in chunks] == ["saved"]
+
+
+def test_response_stream_filter_uses_retry_execution_id_for_scalar_value() -> None:
+    source = _TestNode("source")
+    answer = _TestNode(
+        "answer",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template(segments=[VariableSegment(selector=["source", "answer"])]),
+    )
+    edge = _TestEdge("edge-1", "source", "answer")
+    graph = _TestGraph(
+        nodes={"source": source, "answer": answer},
+        edges={"edge-1": edge},
+        root_node_id="source",
+    )
+    variable_pool = VariablePool()
+    variable_pool.add(["source", "answer"], StringSegment(value="saved"))
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph, variable_pool))
+    retry = NodeRunRetryEvent(
+        id="retry-run",
+        node_id="source",
+        node_type=BuiltinNodeTypes.CODE,
+        node_title="Source",
+        start_at=datetime.now(UTC).replace(tzinfo=None),
+        error="temporary",
+        retry_index=1,
+    )
+
+    assert list(event_filter.on_event(retry)) == [retry]
+    output = list(
+        event_filter.on_event(
+            GraphEdgeTakenEvent(
+                edge_id="edge-1",
+                source_node_id="source",
+                target_node_id="answer",
+                source_handle="success",
+            )
+        )
+    )
+
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert [(event.id, event.chunk) for event in chunks] == [("retry-run", "saved")]
+
+
+def test_response_stream_filter_initialize_resets_run_state() -> None:
+    source = _TestNode("source")
+    answer = _TestNode(
+        "answer",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template(segments=[VariableSegment(selector=["source", "answer"])]),
+    )
+    edge = _TestEdge("edge-1", "source", "answer")
+    graph = _TestGraph(
+        nodes={"source": source, "answer": answer},
+        edges={"edge-1": edge},
+        root_node_id="source",
+    )
+    context = _context(graph)
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(context)
+    first_chunk = NodeRunStreamChunkEvent(
+        id="source-run-1",
+        node_id="source",
+        node_type=BuiltinNodeTypes.CODE,
+        selector=["source", "answer"],
+        chunk="first",
+        is_final=True,
+    )
+    assert list(event_filter.on_event(first_chunk)) == []
+    first_output = list(
+        event_filter.on_event(
+            GraphEdgeTakenEvent(
+                edge_id="edge-1",
+                source_node_id="source",
+                target_node_id="answer",
+                source_handle="success",
+            )
+        )
+    )
+    first_chunks = [
+        event for event in first_output if isinstance(event, NodeRunStreamChunkEvent)
+    ]
+    assert [event.chunk for event in first_chunks] == ["first"]
+
+    event_filter.initialize(context)
+    second_chunk = NodeRunStreamChunkEvent(
+        id="source-run-2",
+        node_id="source",
+        node_type=BuiltinNodeTypes.CODE,
+        selector=["source", "answer"],
+        chunk="second",
+        is_final=True,
+    )
+    assert list(event_filter.on_event(second_chunk)) == []
+    second_output = list(
+        event_filter.on_event(
+            GraphEdgeTakenEvent(
+                edge_id="edge-1",
+                source_node_id="source",
+                target_node_id="answer",
+                source_handle="success",
+            )
+        )
+    )
+
+    second_chunks = [
+        event for event in second_output if isinstance(event, NodeRunStreamChunkEvent)
+    ]
+    assert [event.chunk for event in second_chunks] == ["second"]
 
 
 def test_response_stream_filter_round_trips_resume_state() -> None:

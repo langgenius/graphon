@@ -851,7 +851,6 @@ class GraphRuntimeState:  # noqa: PLR0904
         graph_state_payload = payload.get("graph_state", {}) or {}
         graph_node_states = _coerce_graph_state_map(graph_state_payload, "nodes")
         graph_edge_states = _coerce_graph_state_map(graph_state_payload, "edges")
-        _ = payload.get("response_coordinator")
 
         return _GraphRuntimeStateSnapshot(
             start_at=start_at,

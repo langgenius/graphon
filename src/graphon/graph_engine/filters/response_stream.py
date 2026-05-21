@@ -114,6 +114,9 @@ class ResponseStreamFilter:
         self._context: GraphEventFilterContext | None = None
         self._graph: GraphProtocol | None = None
         self._runtime_state: ReadOnlyGraphRuntimeState | None = None
+        self._reset_run_state()
+
+    def _reset_run_state(self) -> None:
         self._active_session: ResponseSession | None = None
         self._waiting_sessions: deque[ResponseSession] = deque()
         self._stream_buffers: dict[tuple[str, ...], list[NodeRunStreamChunkEvent]] = {}
@@ -126,6 +129,7 @@ class ResponseStreamFilter:
         self._referenced_selectors: set[tuple[str, ...]] = set()
 
     def initialize(self, context: GraphEventFilterContext) -> None:
+        self._reset_run_state()
         self._context = context
         self._graph = cast(GraphProtocol, context.graph)
         self._runtime_state = context.runtime_state

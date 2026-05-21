@@ -18,9 +18,8 @@ type GraphTraversalEvent = GraphEdgeTakenEvent | GraphEdgeSkippedEvent
 class EdgeProcessor:
     """Processes edges during graph execution.
 
-    This handles marking edges as taken or skipped, notifying
-    the response coordinator, triggering downstream node execution,
-    and managing branch node logic.
+    This handles marking edges as taken or skipped, emitting traversal events,
+    triggering downstream node execution, and managing branch node logic.
     """
 
     def __init__(
@@ -60,7 +59,7 @@ class EdgeProcessor:
         node = self._graph.nodes[node_id]
 
         if node.execution_type == NodeExecutionType.BRANCH:
-            return self._process_branch_node_edges(node_id, selected_handle)
+            return self.handle_branch_completion(node_id, selected_handle)
         return self._process_non_branch_node_edges(node_id)
 
     def _process_non_branch_node_edges(
@@ -82,50 +81,6 @@ class EdgeProcessor:
         outgoing_edges = self._graph.get_outgoing_edges(node_id)
 
         for edge in outgoing_edges:
-            nodes, events = self._process_taken_edge(edge)
-            ready_nodes.extend(nodes)
-            traversal_events.extend(events)
-
-        return ready_nodes, traversal_events
-
-    def _process_branch_node_edges(
-        self,
-        node_id: str,
-        selected_handle: str | None,
-    ) -> tuple[Sequence[str], Sequence[GraphTraversalEvent]]:
-        """Process edges for branch nodes.
-
-        Args:
-            node_id: The ID of the branch node
-            selected_handle: The handle of the selected edge
-
-        Returns:
-            Tuple of (list of downstream nodes ready for execution,
-            list of traversal events)
-
-        Raises:
-            ValueError: If no edge was selected
-
-        """
-        if not selected_handle:
-            msg = f"Branch node {node_id} did not select any edge"
-            raise ValueError(msg)
-
-        ready_nodes: list[str] = []
-        traversal_events: list[GraphTraversalEvent] = []
-
-        # Categorize edges
-        selected_edges, unselected_edges = self._state_manager.categorize_branch_edges(
-            node_id,
-            selected_handle,
-        )
-
-        # Process unselected edges first (mark as skipped)
-        for edge in unselected_edges:
-            traversal_events.extend(self._process_skipped_edge(edge))
-
-        # Process selected edges
-        for edge in selected_edges:
             nodes, events = self._process_taken_edge(edge)
             ready_nodes.extend(nodes)
             traversal_events.extend(events)
@@ -210,7 +165,7 @@ class EdgeProcessor:
         # Skip all unselected paths
         skipped_events = self._skip_propagator.skip_branch_paths(unselected_edges)
 
-        # Process selected edges and get ready nodes and streaming events
+        # Process selected edges and get ready nodes and traversal events
         selected_edges, _ = self._state_manager.categorize_branch_edges(
             node_id,
             selected_handle,

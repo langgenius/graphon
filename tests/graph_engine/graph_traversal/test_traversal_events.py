@@ -24,6 +24,7 @@ class _Graph:
             "branch": _Node("branch", NodeExecutionType.BRANCH),
             "selected": _Node("selected", NodeExecutionType.EXECUTABLE),
             "skipped": _Node("skipped", NodeExecutionType.EXECUTABLE),
+            "skipped_child": _Node("skipped_child", NodeExecutionType.EXECUTABLE),
         }
         self.edges = {
             "edge-selected": Edge(
@@ -37,6 +38,12 @@ class _Graph:
                 tail="branch",
                 head="skipped",
                 source_handle="no",
+            ),
+            "edge-propagated": Edge(
+                id="edge-propagated",
+                tail="skipped",
+                head="skipped_child",
+                source_handle="success",
             ),
         }
 
@@ -114,5 +121,32 @@ def test_edge_processor_emits_taken_and_skipped_events_for_branch() -> None:
         for event in events
     ] == [
         ("edge-skipped", "branch", "skipped", "no"),
+        ("edge-propagated", "skipped", "skipped_child", "success"),
+        ("edge-selected", "branch", "selected", "yes"),
+    ]
+
+
+def test_process_node_success_emits_propagated_skip_events_for_branch() -> None:
+    graph = _Graph()
+    state_manager = _StateManager(graph)
+    skip_propagator = SkipPropagator(
+        graph=cast(Graph, graph),
+        state_manager=cast(GraphStateManager, state_manager),
+    )
+    processor = EdgeProcessor(
+        graph=cast(Graph, graph),
+        state_manager=cast(GraphStateManager, state_manager),
+        skip_propagator=skip_propagator,
+    )
+
+    ready_nodes, events = processor.process_node_success("branch", "yes")
+
+    assert ready_nodes == ["selected"]
+    assert [
+        (event.edge_id, event.source_node_id, event.target_node_id, event.source_handle)
+        for event in events
+    ] == [
+        ("edge-skipped", "branch", "skipped", "no"),
+        ("edge-propagated", "skipped", "skipped_child", "success"),
         ("edge-selected", "branch", "selected", "yes"),
     ]
