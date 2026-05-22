@@ -35,6 +35,15 @@ class NodeRunStreamChunkEvent(GraphNodeEventBase):
     )
 
 
+class NodeRunModelPollingProgressEvent(GraphNodeEventBase):
+    attempt: int = Field(..., ge=0, description="polling check attempt count")
+    last_checked_at: datetime = Field(..., description="last polling check time")
+    next_check_at: datetime | None = Field(
+        default=None,
+        description="next polling check time; None means no further check is scheduled",
+    )
+
+
 class NodeRunRetrieverResourceEvent(GraphNodeEventBase):
     retriever_resources: Sequence[Mapping[str, object]] = Field(
         ...,

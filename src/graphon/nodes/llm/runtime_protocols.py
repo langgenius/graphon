@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from collections.abc import Generator, Mapping, Sequence
 from typing import Any, Literal, Protocol, overload
+
+from pydantic import JsonValue
 
 from graphon.file.models import File
 from graphon.model_runtime.entities.llm_entities import (
     LLMMode,
+    LLMPollingResult,
     LLMResult,
     LLMResultChunk,
     LLMResultChunkWithStructuredOutput,
@@ -119,6 +122,38 @@ class LLMProtocol(Protocol):
 
     @abstractmethod
     def is_structured_output_parse_error(self, error: Exception) -> bool: ...
+
+
+class PreparedLLMProtocol(LLMProtocol, Protocol):
+    """Prepared graph-facing LLM adapter."""
+
+
+class LLMPollingCapableProtocol(ABC):
+    """Base class for graph-facing LLM adapters that support polling."""
+
+    @abstractmethod
+    def start_llm_polling(
+        self,
+        *,
+        prompt_messages: Sequence[PromptMessage],
+        model_parameters: Mapping[str, Any],
+        tools: Sequence[PromptMessageTool] | None,
+        stop: Sequence[str] | None,
+        json_schema: Mapping[str, Any] | None,
+        workflow_run_id: str,
+        node_id: str,
+    ) -> LLMPollingResult:
+        pass
+
+    @abstractmethod
+    def check_llm_polling(
+        self,
+        *,
+        plugin_state: Mapping[str, JsonValue],
+        workflow_run_id: str,
+        node_id: str,
+    ) -> LLMPollingResult:
+        pass
 
 
 class PromptMessageSerializerProtocol(Protocol):

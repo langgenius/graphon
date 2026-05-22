@@ -38,6 +38,7 @@ from graphon.graph_events.node import (
     NodeRunFailedEvent,
     NodeRunHumanInputFormFilledEvent,
     NodeRunHumanInputFormTimeoutEvent,
+    NodeRunModelPollingProgressEvent,
     NodeRunPauseRequestedEvent,
     NodeRunRetrieverResourceEvent,
     NodeRunStartedEvent,
@@ -65,6 +66,7 @@ from graphon.node_events.loop import (
 from graphon.node_events.node import (
     HumanInputFormFilledEvent,
     HumanInputFormTimeoutEvent,
+    ModelPollingProgressEvent,
     PauseRequestedEvent,
     RunRetrieverResourceEvent,
     StreamChunkEvent,
@@ -797,6 +799,17 @@ class Node[NodeDataT: BaseNodeData](
             selector=event.selector,
             chunk=event.chunk,
             is_final=event.is_final,
+        )
+
+    @_dispatch.register
+    def _(self, event: ModelPollingProgressEvent) -> NodeRunModelPollingProgressEvent:
+        return NodeRunModelPollingProgressEvent(
+            id=self.execution_id,
+            node_id=self._node_id,
+            node_type=self.node_type,
+            attempt=event.attempt,
+            last_checked_at=event.last_checked_at,
+            next_check_at=event.next_check_at,
         )
 
     @_dispatch.register

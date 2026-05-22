@@ -86,6 +86,7 @@ class ModelFeature(StrEnum):
     VIDEO = auto()
     AUDIO = auto()
     STRUCTURED_OUTPUT = "structured-output"
+    POLLING = auto()
 
 
 _REQUIRED_MODEL_FEATURE_BY_CONTENT_TYPE: dict[
@@ -169,6 +170,11 @@ class ProviderModel(BaseModel):
             self.features is not None
             and ModelFeature.STRUCTURED_OUTPUT in self.features
         )
+
+    @property
+    def support_polling(self) -> bool:
+        """Whether the model schema declares polling capability."""
+        return self.features is not None and ModelFeature.POLLING in self.features
 
 
 class ParameterRule(BaseModel):

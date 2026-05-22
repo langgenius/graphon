@@ -20,7 +20,9 @@ from graphon.model_runtime.protocols.tts_runtime import TTSModelRuntime
 from graphon.nodes.code.code_node import CodeExecutorProtocol
 from graphon.nodes.llm.protocols import CredentialsProvider, ModelFactory
 from graphon.nodes.llm.runtime_protocols import (
+    LLMPollingCapableProtocol,
     LLMProtocol,
+    PreparedLLMProtocol,
     PromptMessageSerializerProtocol,
     RetrieverAttachmentLoaderProtocol,
 )
@@ -51,12 +53,14 @@ __all__ = [
     "HumanInputFormStateProtocol",
     "HumanInputNodeRuntimeProtocol",
     "LLMModelRuntime",
+    "LLMPollingCapableProtocol",
     "LLMProtocol",
     "ModelFactory",
     "ModelProviderRuntime",
     "ModelRuntime",
     "ModerationModelRuntime",
     "NodeFactory",
+    "PreparedLLMProtocol",
     "PromptMessageMemory",
     "PromptMessageSerializerProtocol",
     "ReadOnlyGraphRuntimeState",

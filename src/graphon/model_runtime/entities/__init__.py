@@ -1,5 +1,8 @@
 from .llm_entities import (
     LLMMode,
+    LLMPollingConfig,
+    LLMPollingResult,
+    LLMPollingStatus,
     LLMResult,
     LLMResultChunk,
     LLMResultChunkDelta,
@@ -30,6 +33,9 @@ __all__ = [
     "DocumentPromptMessageContent",
     "ImagePromptMessageContent",
     "LLMMode",
+    "LLMPollingConfig",
+    "LLMPollingResult",
+    "LLMPollingStatus",
     "LLMResult",
     "LLMResultChunk",
     "LLMResultChunkDelta",

@@ -8,6 +8,7 @@ import pytest
 
 from graphon.dsl.slim.config import SlimConfig, SlimLocalSettings, SlimProviderBinding
 from graphon.dsl.slim.package_loader import SlimPackageLoader
+from graphon.model_runtime.entities.model_entities import ModelFeature
 
 
 def test_slim_package_loader_selects_requested_provider(tmp_path: Path) -> None:
@@ -37,6 +38,7 @@ def test_slim_package_loader_selects_requested_provider(tmp_path: Path) -> None:
 
     assert loaded.provider_entity.provider == "other-provider"
     assert loaded.provider_entity.models[0].model == "other-chat"
+    assert ModelFeature.POLLING in (loaded.provider_entity.models[0].features or [])
 
 
 def test_slim_config_auto_discovers_uv_and_python(
@@ -127,6 +129,8 @@ def _write_multi_provider_plugin(plugin_root: Path) -> None:
                   en_US: {label} Model
                 model_type: llm
                 fetch_from: predefined-model
+                features:
+                  - polling
                 model_properties:
                   mode: chat
                   context_size: 8192
