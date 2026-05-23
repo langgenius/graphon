@@ -522,6 +522,6 @@ class SlimPackageLoader:
         if value is None:
             return None
         try:
-            return ModelType.value_of(str(value))
+            return ModelType(str(value))
         except ValueError:
             return None

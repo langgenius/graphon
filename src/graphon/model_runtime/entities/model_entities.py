@@ -9,6 +9,20 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from graphon.model_runtime.entities.common_entities import I18nObject
 from graphon.model_runtime.entities.message_entities import PromptMessageContentType
 
+_ORIGIN_MODEL_TYPE_BY_MODEL_TYPE: dict[str, str] = {
+    "llm": "text-generation",
+    "text-embedding": "embeddings",
+    "rerank": "reranking",
+    "speech2text": "speech2text",
+    "moderation": "moderation",
+    "tts": "tts",
+}
+
+_MODEL_TYPE_BY_ORIGIN_MODEL_TYPE: dict[str, str] = {
+    origin_model_type: model_type
+    for model_type, origin_model_type in _ORIGIN_MODEL_TYPE_BY_MODEL_TYPE.items()
+}
+
 
 class ModelType(StrEnum):
     """Enum class for model type."""
@@ -21,50 +35,20 @@ class ModelType(StrEnum):
     TTS = auto()
 
     @classmethod
-    def value_of(cls, origin_model_type: str) -> ModelType:
-        """Map a provider-native model type string to a `ModelType`."""
-        return _normalize_origin_model_type(origin_model_type)
+    def _missing_(cls, value: object) -> ModelType | None:
+        if isinstance(value, str):
+            model_type = _MODEL_TYPE_BY_ORIGIN_MODEL_TYPE.get(value)
+            if model_type is not None:
+                return cls(model_type)
+        return None
 
     def to_origin_model_type(self) -> str:
         """Map `ModelType` back to the provider-native model type string."""
-        origin_model_type = _ORIGIN_MODEL_TYPE_BY_MODEL_TYPE.get(self)
+        origin_model_type = _ORIGIN_MODEL_TYPE_BY_MODEL_TYPE.get(self.value)
         if origin_model_type is None:
             msg = f"invalid model type {self}"
             raise ValueError(msg)
         return origin_model_type
-
-
-_ORIGIN_MODEL_TYPE_BY_MODEL_TYPE: dict[ModelType, str] = {
-    ModelType.LLM: "text-generation",
-    ModelType.TEXT_EMBEDDING: "embeddings",
-    ModelType.RERANK: "reranking",
-    ModelType.SPEECH2TEXT: "speech2text",
-    ModelType.MODERATION: "moderation",
-    ModelType.TTS: "tts",
-}
-
-
-def _normalize_origin_model_type(origin_model_type: str) -> ModelType:
-    match origin_model_type:
-        case "text-generation":
-            normalized_model_type = ModelType.LLM
-        case "embeddings":
-            normalized_model_type = ModelType.TEXT_EMBEDDING
-        case "reranking":
-            normalized_model_type = ModelType.RERANK
-        case "speech2text":
-            normalized_model_type = ModelType.SPEECH2TEXT
-        case "moderation":
-            normalized_model_type = ModelType.MODERATION
-        case "tts":
-            normalized_model_type = ModelType.TTS
-        case _:
-            try:
-                normalized_model_type = ModelType(origin_model_type)
-            except ValueError as error:
-                msg = f"invalid origin model type {origin_model_type}"
-                raise ValueError(msg) from error
-    return normalized_model_type
 
 
 class FetchFrom(StrEnum):
