@@ -34,3 +34,6 @@ cover/
 # IDE configs
 .idea/
 .vscode/
+
+# Local credentials for examples
+examples/*/credentials.json
