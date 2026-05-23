@@ -347,7 +347,7 @@ class _SpeechToTextRuntimeStub(_ProviderRuntimeStub):
 
 
 @pytest.mark.parametrize(
-    ("origin_model_type", "expected_model_type"),
+    ("raw_model_type", "expected_model_type"),
     [
         ("text-generation", ModelType.LLM),
         (ModelType.LLM.value, ModelType.LLM),
@@ -359,11 +359,11 @@ class _SpeechToTextRuntimeStub(_ProviderRuntimeStub):
         ("tts", ModelType.TTS),
     ],
 )
-def test_model_type_value_of_uses_model_map(
-    origin_model_type: str,
+def test_model_type_accepts_origin_model_type_aliases(
+    raw_model_type: str,
     expected_model_type: ModelType,
 ) -> None:
-    assert ModelType.value_of(origin_model_type) == expected_model_type
+    assert ModelType(raw_model_type) == expected_model_type
 
 
 @pytest.mark.parametrize(
