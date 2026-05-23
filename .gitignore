@@ -34,13 +34,3 @@ cover/
 # IDE configs
 .idea/
 .vscode/
-
-# Claude
-.claude/
-claude_cache/
-
-# Local scratch / drafts
-.scratch/
-
-# Local credentials for examples (only example.json is tracked)
-examples/*/credentials.json
