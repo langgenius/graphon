@@ -9,6 +9,7 @@ import pytest
 import graphon.dsl.slim.llm as slim_llm_module
 from graphon.dsl.slim import SlimClientConfig, SlimClientError, SlimLLM
 from graphon.model_runtime.entities.llm_entities import LLMResult
+from graphon.model_runtime.entities.message_entities import SystemPromptMessage
 
 
 class _RecordingSlimClient:
@@ -46,6 +47,31 @@ class _FailingSlimClient:
         _ = plugin_id, action, data
         message = "daemon down"
         raise SlimClientError(message)
+
+
+class _TimeoutSlimClient:
+    def __init__(
+        self,
+        *,
+        message: str = "token counting timed out",
+        code: str | None = "killed_by_timeout",
+    ) -> None:
+        self.message = message
+        self.code = code
+
+    def invoke_chunks(
+        self,
+        *,
+        plugin_id: str,
+        action: str,
+        data: Mapping[str, Any],
+    ) -> Iterable[Any]:
+        _ = plugin_id, action, data
+        raise SlimClientError(
+            self.message,
+            code=self.code,
+            stage="get_llm_num_tokens",
+        )
 
 
 def _patch_recording_slim_client(
@@ -153,7 +179,7 @@ def test_slim_llm_counts_tokens_and_collects_blocking_result(
     }
 
 
-def test_slim_llm_wraps_slim_client_errors(
+def test_slim_llm_preserves_slim_client_errors(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -164,5 +190,66 @@ def test_slim_llm_wraps_slim_client_errors(
     monkeypatch.setattr(slim_llm_module, "SlimClient", slim_client_factory)
     llm = _build_llm(tmp_path)
 
-    with pytest.raises(RuntimeError, match="daemon down"):
+    with pytest.raises(SlimClientError, match="daemon down"):
         llm.get_llm_num_tokens([])
+
+
+def test_slim_llm_estimates_tokens_when_slim_token_count_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def slim_client_factory(*, config: SlimClientConfig) -> _TimeoutSlimClient:
+        _ = config
+        return _TimeoutSlimClient()
+
+    monkeypatch.setattr(slim_llm_module, "SlimClient", slim_client_factory)
+    llm = _build_llm(tmp_path)
+
+    token_count = llm.get_llm_num_tokens([
+        SystemPromptMessage(content="classify this short prompt"),
+    ])
+
+    assert token_count > 0
+
+
+def test_slim_llm_estimates_tokens_when_timeout_is_only_in_message(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def slim_client_factory(*, config: SlimClientConfig) -> _TimeoutSlimClient:
+        _ = config
+        return _TimeoutSlimClient(message="killed by timeout", code=None)
+
+    monkeypatch.setattr(slim_llm_module, "SlimClient", slim_client_factory)
+    llm = _build_llm(tmp_path)
+
+    token_count = llm.get_llm_num_tokens([
+        SystemPromptMessage(content="classify this short prompt"),
+    ])
+
+    assert token_count > 0
+
+
+def test_slim_llm_token_estimate_returns_zero_for_empty_prompt() -> None:
+    assert slim_llm_module._estimate_prompt_message_tokens([]) == 0
+
+
+def test_slim_llm_token_estimate_uses_length_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_tokenizer(text: str) -> int:
+        _ = text
+        msg = "tokenizer unavailable"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(
+        slim_llm_module.GPT2Tokenizer,
+        "get_num_tokens",
+        fail_tokenizer,
+    )
+
+    token_count = slim_llm_module._estimate_prompt_message_tokens([
+        SystemPromptMessage(content="x" * 20),
+    ])
+
+    assert token_count == 7

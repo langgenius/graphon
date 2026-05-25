@@ -112,6 +112,12 @@ See [examples/slim_llm/dsl.py](examples/slim_llm/dsl.py) for the DSL import
 version and [examples/slim_llm/code.py](examples/slim_llm/code.py) for the
 Python graph construction version.
 
+Default DSL import currently supports `start`, `end`, `answer`, `if-else`,
+`template-transform`, `code`, `llm`, `tool`, `http-request`,
+`variable-aggregator`, `assigner`, `list-operator`, `question-classifier`, and
+`parameter-extractor`. HTTP request import covers text request bodies and text
+responses; file request bodies still require application-level file adapters.
+
 For direct Python graph construction, use `graphon.dsl.slim.SlimLLM` as the
 standard Slim-backed LLM runtime. Integrations that need to replace model
 execution, routing, credential injection, or token counting can implement

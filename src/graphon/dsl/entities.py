@@ -28,11 +28,27 @@ class PluginDependencyType(StrEnum):
     PACKAGE = auto()
 
 
+class DslRuntimeVariable(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    value: Any = None
+    source: Mapping[str, Any] = Field(default_factory=dict)
+
+
+class DslRuntimeVariables(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    environment_variables: list[DslRuntimeVariable] = Field(default_factory=list)
+    conversation_variables: list[DslRuntimeVariable] = Field(default_factory=list)
+
+
 class DslDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: DslKind
     graph_config: Mapping[str, Any] | None = None
+    runtime_variables: DslRuntimeVariables = Field(default_factory=DslRuntimeVariables)
 
 
 class DslDependency(BaseModel):
