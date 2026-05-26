@@ -31,6 +31,22 @@ _SLIM_BINARY_PATH_ENV = "SLIM_BINARY_PATH"
 class SlimClientError(RuntimeError):
     """Raised when the DSL slim client cannot run or parse Slim output."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str | int | None = None,
+        stage: str | None = None,
+        data: Mapping[str, Any] | None = None,
+        return_code: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.code = code
+        self.stage = stage
+        self.data = dict(data or {})
+        self.return_code = return_code
+
 
 @dataclass(frozen=True, slots=True)
 class SlimMessageEvent:
@@ -259,9 +275,7 @@ class SlimClient:
             check=False,
         )
         if process.returncode != 0:
-            raise SlimClientError(
-                _slim_error_message(process.stderr, process.returncode)
-            )
+            raise _slim_process_error(process.stderr, process.returncode)
 
         try:
             payload = json.loads(process.stdout)
@@ -319,7 +333,14 @@ def _unwrap_remote_daemon_payload(payload: Any) -> Any:
     code = payload.get("code")
     if code != 0:
         msg = str(payload.get("message") or "Slim daemon returned an error.")
-        raise SlimClientError(msg)
+        data = payload.get("data")
+        stage = data.get("stage") if isinstance(data, Mapping) else payload.get("stage")
+        raise SlimClientError(
+            msg,
+            code=code if isinstance(code, str | int) else None,
+            stage=stage if isinstance(stage, str) else None,
+            data=payload,
+        )
     return payload.get("data")
 
 
@@ -363,13 +384,13 @@ def _iter_slim_events(stdout: Iterable[str]) -> Generator[SlimEvent, None, None]
     for line in stdout:
         if not line.strip():
             continue
-        event = _parse_slim_event(line)
+        event = parse_slim_event(line)
         yield event
         if isinstance(event, SlimDoneEvent):
             return
 
 
-def _parse_slim_event(line: str) -> SlimEvent:
+def parse_slim_event(line: str) -> SlimEvent:
     try:
         event = json.loads(line)
     except json.JSONDecodeError as error:
@@ -391,8 +412,15 @@ def _parse_slim_event(line: str) -> SlimEvent:
             error = event.get("data") or {}
             if isinstance(error, Mapping):
                 message = str(error.get("message") or "Slim error.")
-            else:
-                message = str(error or "Slim error.")
+                code = error.get("code") or error.get("error_code")
+                stage = error.get("stage")
+                raise SlimClientError(
+                    message,
+                    code=code if isinstance(code, str | int) else None,
+                    stage=stage if isinstance(stage, str) else None,
+                    data=error,
+                )
+            message = str(error or "Slim error.")
             raise SlimClientError(message)
         case _:
             msg = f"Unknown Slim event type: {event_type}"
@@ -421,19 +449,37 @@ def _check_slim_process_exit(
     stderr_text = stderr_file.read().strip()
     if return_code == 0:
         return
-    raise SlimClientError(_slim_error_message(stderr_text, return_code))
+    raise _slim_process_error(stderr_text, return_code)
 
 
-def _slim_error_message(stderr_text: str, return_code: int) -> str:
+def _slim_process_error(stderr_text: str, return_code: int) -> SlimClientError:
     if not stderr_text:
-        return f"Slim process exited with code {return_code}"
+        return SlimClientError(
+            f"Slim process exited with code {return_code}",
+            return_code=return_code,
+        )
     try:
         stderr_payload = json.loads(stderr_text.splitlines()[-1])
     except json.JSONDecodeError:
-        return f"Slim process exited with code {return_code}: {stderr_text}"
+        return SlimClientError(
+            f"Slim process exited with code {return_code}: {stderr_text}",
+            return_code=return_code,
+        )
     if isinstance(stderr_payload, Mapping):
-        return str(
+        message = str(
             stderr_payload.get("message")
             or f"Slim process exited with code {return_code}",
         )
-    return f"Slim process exited with code {return_code}: {stderr_text}"
+        code = stderr_payload.get("code") or stderr_payload.get("error_code")
+        stage = stderr_payload.get("stage")
+        return SlimClientError(
+            message,
+            code=code if isinstance(code, str | int) else None,
+            stage=stage if isinstance(stage, str) else None,
+            data=stderr_payload,
+            return_code=return_code,
+        )
+    return SlimClientError(
+        f"Slim process exited with code {return_code}: {stderr_text}",
+        return_code=return_code,
+    )

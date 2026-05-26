@@ -7,6 +7,7 @@ from .client import (
     SlimEvent,
     SlimMessageEvent,
     cached_slim_plugin_root,
+    parse_slim_event,
     resolve_slim_binary_path,
     slim_plugin_cache_path,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "SlimMessageEvent",
     "SlimStructuredOutputParseError",
     "cached_slim_plugin_root",
+    "parse_slim_event",
     "resolve_slim_binary_path",
     "slim_plugin_cache_path",
 ]

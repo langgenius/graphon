@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Generator, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, overload, override
@@ -32,6 +33,9 @@ from graphon.model_runtime.entities.model_entities import AIModelEntity
 from graphon.model_runtime.model_providers.base.large_language_model import (
     merge_tool_call_deltas,
 )
+from graphon.model_runtime.model_providers.base.tokenizers.gpt2_tokenizer import (
+    GPT2Tokenizer,
+)
 from graphon.model_runtime.utils.encoders import jsonable_encoder
 from graphon.nodes.llm.runtime_protocols import LLMProtocol
 
@@ -41,6 +45,10 @@ _MODEL_TYPE_LLM = "llm"
 _MISSING_STRUCTURED_OUTPUT_MESSAGE = (
     "Slim structured-output response is missing structured_output data"
 )
+_SLIM_TIMEOUT_ERROR_CODE = "killed_by_timeout"
+_SLIM_TIMEOUT_ERROR_MESSAGE = "killed by timeout"
+
+logger = logging.getLogger(__name__)
 
 _OPTIONAL_STR_ADAPTER = TypeAdapter(StrictStr | None)
 _STRUCTURED_OUTPUT_ADAPTER = TypeAdapter(dict[StrictStr, Any] | None)
@@ -161,17 +169,27 @@ class SlimLLM(LLMProtocol):
 
     @override
     def get_llm_num_tokens(self, prompt_messages: Sequence[PromptMessage]) -> int:
-        result = self._invoke_unary_action(
-            action=_ACTION_GET_LLM_NUM_TOKENS,
-            data={
-                "provider": self._provider,
-                "model_type": _MODEL_TYPE_LLM,
-                "model": self._model_name,
-                "credentials": self._credentials,
-                "prompt_messages": _serialize_prompt_messages(prompt_messages),
-                "tools": [],
-            },
-        )
+        try:
+            result = self._invoke_unary_action(
+                action=_ACTION_GET_LLM_NUM_TOKENS,
+                data={
+                    "provider": self._provider,
+                    "model_type": _MODEL_TYPE_LLM,
+                    "model": self._model_name,
+                    "credentials": self._credentials,
+                    "prompt_messages": _serialize_prompt_messages(prompt_messages),
+                    "tools": [],
+                },
+            )
+        except SlimClientError as error:
+            if not _is_token_count_timeout(error):
+                raise
+            logger.info(
+                "Slim token counting timed out for %s/%s; using local estimate",
+                self._provider,
+                self._model_name,
+            )
+            return _estimate_prompt_message_tokens(prompt_messages)
         return int(result["num_tokens"])
 
     @overload
@@ -398,14 +416,11 @@ class SlimLLM(LLMProtocol):
         action: str,
         data: Mapping[str, Any],
     ) -> Iterable[Any]:
-        try:
-            return self._client.invoke_chunks(
-                plugin_id=self._plugin_id,
-                action=action,
-                data=data,
-            )
-        except SlimClientError as error:
-            raise RuntimeError(str(error)) from error
+        return self._client.invoke_chunks(
+            plugin_id=self._plugin_id,
+            action=action,
+            data=data,
+        )
 
 
 @overload
@@ -641,6 +656,27 @@ def _serialize_prompt_messages(
     prompt_messages: Sequence[PromptMessage],
 ) -> list[dict[str, Any]]:
     return [jsonable_encoder(item) for item in prompt_messages]
+
+
+def _estimate_prompt_message_tokens(prompt_messages: Sequence[PromptMessage]) -> int:
+    # Fallback estimate only considers text content. Multimodal token accounting
+    # remains provider-specific and should use Slim token counting when available.
+    text = "\n".join(
+        f"{message.role.value}: {message.get_text_content()}"
+        for message in prompt_messages
+    )
+    if not text:
+        return 0
+    try:
+        return GPT2Tokenizer.get_num_tokens(text)
+    except Exception:  # noqa: BLE001
+        return max(1, len(text) // 4)
+
+
+def _is_token_count_timeout(error: SlimClientError) -> bool:
+    if error.code == _SLIM_TIMEOUT_ERROR_CODE:
+        return True
+    return _SLIM_TIMEOUT_ERROR_MESSAGE in error.message
 
 
 def _normalize_prompt_message_payload(payload: Mapping[str, Any]) -> dict[str, Any]:

@@ -5,6 +5,8 @@ from .entities import (
     DslDocument,
     DslImportPlan,
     DslKind,
+    DslRuntimeVariable,
+    DslRuntimeVariables,
     LoadStatus,
     PluginDependencyType,
 )
@@ -20,6 +22,8 @@ __all__ = [
     "DslError",
     "DslImportPlan",
     "DslKind",
+    "DslRuntimeVariable",
+    "DslRuntimeVariables",
     "LoadStatus",
     "PluginDependencyType",
     "SandboxCodeExecutionError",

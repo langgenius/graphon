@@ -3,10 +3,10 @@ from __future__ import annotations
 import importlib
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.entities.graph_config import NodeConfigDict
@@ -21,8 +21,27 @@ from graphon.nodes.code.code_node import CodeNode
 from graphon.nodes.code.entities import CodeNodeData
 from graphon.nodes.code.limits import CodeNodeLimits
 from graphon.nodes.end.end_node import EndNode
+from graphon.nodes.http_request.config import build_http_request_config
+from graphon.nodes.http_request.entities import HttpRequestNodeData
+from graphon.nodes.http_request.exc import FileFetchError, HttpRequestNodeError
+from graphon.nodes.http_request.node import (
+    HttpRequestNode,
+    HttpRequestNodeDependencies,
+)
 from graphon.nodes.if_else.if_else_node import IfElseNode
+from graphon.nodes.list_operator.entities import ListOperatorNodeData
+from graphon.nodes.list_operator.node import ListOperatorNode
 from graphon.nodes.llm import LLMNode, LLMNodeData
+from graphon.nodes.llm.exc import LLMNodeError
+from graphon.nodes.parameter_extractor.entities import ParameterExtractorNodeData
+from graphon.nodes.parameter_extractor.parameter_extractor_node import (
+    ParameterExtractorNode,
+)
+from graphon.nodes.question_classifier import (
+    QuestionClassifierNode,
+    QuestionClassifierNodeData,
+    QuestionClassifierNodeDependencies,
+)
 from graphon.nodes.start import StartNode
 from graphon.nodes.template_transform.entities import TemplateTransformNodeData
 from graphon.nodes.template_transform.template_transform_node import (
@@ -30,6 +49,18 @@ from graphon.nodes.template_transform.template_transform_node import (
 )
 from graphon.nodes.tool.entities import ToolNodeData
 from graphon.nodes.tool.tool_node import ToolNode
+from graphon.nodes.variable_aggregator.entities import VariableAggregatorNodeData
+from graphon.nodes.variable_aggregator.variable_aggregator_node import (
+    VariableAggregatorNode,
+)
+from graphon.nodes.variable_assigner.v1.node import (
+    VariableAssignerNode as VariableAssignerNodeV1,
+)
+from graphon.nodes.variable_assigner.v1.node_data import VariableAssignerData
+from graphon.nodes.variable_assigner.v2.entities import VariableAssignerNodeData
+from graphon.nodes.variable_assigner.v2.node import (
+    VariableAssignerNode as VariableAssignerNodeV2,
+)
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.template_rendering import Jinja2TemplateRenderer, TemplateRenderError
 
@@ -104,12 +135,12 @@ class _TextOnlyFileSaver:
     ) -> File:
         _ = data, mime_type, file_type, extension_override
         msg = "DSL import default LLM file saver only supports text responses."
-        raise RuntimeError(msg)
+        raise LLMNodeError(msg)
 
     def save_remote_url(self, url: str, file_type: FileType) -> File:
         _ = url, file_type
         msg = "DSL import default LLM file saver only supports text responses."
-        raise RuntimeError(msg)
+        raise LLMNodeError(msg)
 
 
 class _UnsupportedToolFileManager:
@@ -130,6 +161,40 @@ class _UnsupportedToolFileManager:
     ) -> tuple[None, None]:
         _ = tool_file_id
         return None, None
+
+
+class _UnsupportedHttpRequestFileManager:
+    def download(self, f: File, /) -> bytes:
+        _ = f
+        msg = "DSL import default HTTP request runtime only supports text requests."
+        raise FileFetchError(msg)
+
+
+class _TextOnlyHttpResponseFileManager:
+    def create_file_by_raw(
+        self,
+        *,
+        file_binary: bytes,
+        mimetype: str,
+        filename: str | None = None,
+    ) -> object:
+        _ = file_binary, mimetype, filename
+        msg = "DSL import default HTTP request runtime only supports text responses."
+        raise HttpRequestNodeError(msg)
+
+    def get_file_generator_by_tool_file_id(
+        self,
+        tool_file_id: str,
+    ) -> tuple[None, None]:
+        _ = tool_file_id
+        return None, None
+
+
+class _UnsupportedHttpFileReferenceFactory:
+    def build_from_mapping(self, *, mapping: Mapping[str, Any]) -> File:
+        _ = mapping
+        msg = "DSL import default HTTP request runtime only supports text responses."
+        raise HttpRequestNodeError(msg)
 
 
 class _DefaultJinja2TemplateRenderer(Jinja2TemplateRenderer):
@@ -334,6 +399,17 @@ def _node_data_payload(data: BaseNodeData | Mapping[str, Any]) -> dict[str, Any]
 
 
 @dataclass(slots=True)
+class _NodeBuildRequest:
+    node_id: str
+    data: BaseNodeData | Mapping[str, Any]
+    data_payload: dict[str, Any]
+    node_type: Any
+
+
+type _NodeBuilder = Callable[[Any, _NodeBuildRequest], Node]
+
+
+@dataclass(slots=True)
 class SlimDslNodeFactory:
     graph_config: Mapping[str, Any]
     graph_init_params: Any
@@ -359,97 +435,260 @@ class SlimDslNodeFactory:
             ignore_uv_lock=slim.ignore_uv_lock,
         )
 
-    def create_node(self, node_config: NodeConfigDict) -> Node:  # noqa: C901, PLR0911
+    def create_node(self, node_config: NodeConfigDict) -> Node:
+        request = self._node_request(node_config)
+        builder = self.NODE_BUILDERS.get(request.node_type)
+        if builder is None:
+            raise self._unsupported_node_error(request)
+        return builder(self, request)
+
+    def _node_request(
+        self,
+        node_config: NodeConfigDict,
+    ) -> _NodeBuildRequest:
         node_id = str(node_config["id"])
         data = node_config["data"]
         data_payload = _node_data_payload(data)
-        node_type = data_payload["type"]
+        return _NodeBuildRequest(
+            node_id=node_id,
+            data=data,
+            data_payload=data_payload,
+            node_type=data_payload["type"],
+        )
 
-        match node_type:
-            case BuiltinNodeTypes.START:
-                return StartNode(
-                    node_id=node_id,
-                    data=StartNode.validate_node_data(data),
-                    graph_init_params=self.graph_init_params,
-                    graph_runtime_state=self.graph_runtime_state,
-                )
-            case BuiltinNodeTypes.END:
-                return EndNode(
-                    node_id=node_id,
-                    data=EndNode.validate_node_data(data),
-                    graph_init_params=self.graph_init_params,
-                    graph_runtime_state=self.graph_runtime_state,
-                )
-            case BuiltinNodeTypes.ANSWER:
-                return AnswerNode(
-                    node_id=node_id,
-                    data=AnswerNode.validate_node_data(data),
-                    graph_init_params=self.graph_init_params,
-                    graph_runtime_state=self.graph_runtime_state,
-                )
-            case BuiltinNodeTypes.IF_ELSE:
-                return IfElseNode(
-                    node_id=node_id,
-                    data=IfElseNode.validate_node_data(data),
-                    graph_init_params=self.graph_init_params,
-                    graph_runtime_state=self.graph_runtime_state,
-                )
-            case BuiltinNodeTypes.TEMPLATE_TRANSFORM:
-                return TemplateTransformNode(
-                    node_id=node_id,
-                    data=TemplateTransformNodeData.model_validate(data_payload),
-                    graph_init_params=self.graph_init_params,
-                    graph_runtime_state=self.graph_runtime_state,
-                    jinja2_template_renderer=_DefaultJinja2TemplateRenderer(),
-                )
-            case BuiltinNodeTypes.CODE:
-                return CodeNode(
-                    node_id=node_id,
-                    data=CodeNodeData.model_validate(data_payload),
-                    graph_init_params=self.graph_init_params,
-                    graph_runtime_state=self.graph_runtime_state,
-                    code_executor=SandboxCodeExecutor(self.credentials.code),
-                    code_limits=_code_limits(self.credentials.code),
-                )
-            case BuiltinNodeTypes.LLM:
-                return self._create_llm_node(node_id=node_id, data=data_payload)
-            case BuiltinNodeTypes.TOOL:
-                tool_data = ToolNodeData.model_validate(data_payload)
-                try:
-                    runtime = self._create_tool_runtime(tool_data)
-                except DslError:
-                    raise
-                except Exception as error:
-                    raise _dsl_error(
-                        str(error),
-                        code="runtime.slim_unavailable",
-                        path=f"/nodes/{node_id}/data",
-                        details={"node_id": node_id, "node_type": node_type},
-                    ) from error
-                return ToolNode(
-                    node_id=node_id,
-                    data=tool_data,
-                    graph_init_params=self.graph_init_params,
-                    graph_runtime_state=self.graph_runtime_state,
-                    tool_file_manager=_UnsupportedToolFileManager(),
-                    runtime=runtime,
-                )
-            case _:
-                msg = f"Unsupported DSL node type: {node_type}"
-                raise _dsl_error(
-                    msg,
-                    code="node.unsupported_type",
-                    path=f"/nodes/{node_id}",
-                    details={"node_id": node_id, "node_type": node_type},
-                )
+    def _create_start_node(self, request: _NodeBuildRequest) -> StartNode:
+        return StartNode(
+            node_id=request.node_id,
+            data=StartNode.validate_node_data(request.data),
+            graph_init_params=self.graph_init_params,
+            graph_runtime_state=self.graph_runtime_state,
+        )
 
-    def _create_llm_node(self, *, node_id: str, data: Mapping[str, Any]) -> LLMNode:
+    def _create_end_node(self, request: _NodeBuildRequest) -> EndNode:
+        return EndNode(
+            node_id=request.node_id,
+            data=EndNode.validate_node_data(request.data),
+            graph_init_params=self.graph_init_params,
+            graph_runtime_state=self.graph_runtime_state,
+        )
+
+    def _create_answer_node(self, request: _NodeBuildRequest) -> AnswerNode:
+        return AnswerNode(
+            node_id=request.node_id,
+            data=AnswerNode.validate_node_data(request.data),
+            graph_init_params=self.graph_init_params,
+            graph_runtime_state=self.graph_runtime_state,
+        )
+
+    def _create_if_else_node(self, request: _NodeBuildRequest) -> IfElseNode:
+        return IfElseNode(
+            node_id=request.node_id,
+            data=IfElseNode.validate_node_data(request.data),
+            graph_init_params=self.graph_init_params,
+            graph_runtime_state=self.graph_runtime_state,
+        )
+
+    def _create_template_transform_node(
+        self,
+        request: _NodeBuildRequest,
+    ) -> TemplateTransformNode:
+        return TemplateTransformNode(
+            node_id=request.node_id,
+            data=TemplateTransformNodeData.model_validate(request.data_payload),
+            graph_init_params=self.graph_init_params,
+            graph_runtime_state=self.graph_runtime_state,
+            jinja2_template_renderer=_DefaultJinja2TemplateRenderer(),
+        )
+
+    def _create_code_node(self, request: _NodeBuildRequest) -> CodeNode:
+        return CodeNode(
+            node_id=request.node_id,
+            data=CodeNodeData.model_validate(request.data_payload),
+            graph_init_params=self.graph_init_params,
+            graph_runtime_state=self.graph_runtime_state,
+            code_executor=SandboxCodeExecutor(self.credentials.code),
+            code_limits=_code_limits(self.credentials.code),
+        )
+
+    def _create_tool_node(self, request: _NodeBuildRequest) -> ToolNode:
+        tool_data = ToolNodeData.model_validate(request.data_payload)
+        try:
+            runtime = self._create_tool_runtime(tool_data)
+        except DslError:
+            raise
+        except Exception as error:
+            raise _dsl_error(
+                str(error),
+                code="runtime.slim_unavailable",
+                path=f"/nodes/{request.node_id}/data",
+                details={
+                    "node_id": request.node_id,
+                    "node_type": BuiltinNodeTypes.TOOL,
+                },
+            ) from error
+        return ToolNode(
+            node_id=request.node_id,
+            data=tool_data,
+            graph_init_params=self.graph_init_params,
+            graph_runtime_state=self.graph_runtime_state,
+            tool_file_manager=_UnsupportedToolFileManager(),
+            runtime=runtime,
+        )
+
+    def _create_http_request_node(
+        self,
+        request: _NodeBuildRequest,
+    ) -> HttpRequestNode:
+        return HttpRequestNode(
+            node_id=request.node_id,
+            data=HttpRequestNodeData.model_validate(request.data_payload),
+            graph_init_params=self.graph_init_params,
+            graph_runtime_state=self.graph_runtime_state,
+            http_request_config=build_http_request_config(),
+            dependencies=HttpRequestNodeDependencies(
+                tool_file_manager_factory=_TextOnlyHttpResponseFileManager,
+                file_manager=_UnsupportedHttpRequestFileManager(),
+                file_reference_factory=_UnsupportedHttpFileReferenceFactory(),
+            ),
+        )
+
+    def _create_variable_aggregator_node(
+        self,
+        request: _NodeBuildRequest,
+    ) -> VariableAggregatorNode:
+        return VariableAggregatorNode(
+            node_id=request.node_id,
+            data=VariableAggregatorNodeData.model_validate(request.data_payload),
+            graph_init_params=self.graph_init_params,
+            graph_runtime_state=self.graph_runtime_state,
+        )
+
+    def _create_list_operator_node(
+        self,
+        request: _NodeBuildRequest,
+    ) -> ListOperatorNode:
+        return ListOperatorNode(
+            node_id=request.node_id,
+            data=ListOperatorNodeData.model_validate(request.data_payload),
+            graph_init_params=self.graph_init_params,
+            graph_runtime_state=self.graph_runtime_state,
+        )
+
+    def _unsupported_node_error(self, request: _NodeBuildRequest) -> DslError:
+        msg = f"Unsupported DSL node type: {request.node_type}"
+        return _dsl_error(
+            msg,
+            code="node.unsupported_type",
+            path=f"/nodes/{request.node_id}",
+            details={"node_id": request.node_id, "node_type": request.node_type},
+        )
+
+    def _create_variable_assigner_node(
+        self,
+        request: _NodeBuildRequest,
+    ) -> VariableAssignerNodeV1 | VariableAssignerNodeV2:
+        node_id = request.node_id
+        data = request.data_payload
+        version = str(data.get("version") or "")
+        if "items" in data or version == VariableAssignerNodeV2.version():
+            return VariableAssignerNodeV2(
+                node_id=node_id,
+                data=VariableAssignerNodeData.model_validate(data),
+                graph_init_params=self.graph_init_params,
+                graph_runtime_state=self.graph_runtime_state,
+            )
+
+        v1_fields = {
+            "assigned_variable_selector",
+            "write_mode",
+            "input_variable_selector",
+        }
+        if v1_fields.issubset(data):
+            return VariableAssignerNodeV1(
+                node_id=node_id,
+                data=VariableAssignerData.model_validate(data),
+                graph_init_params=self.graph_init_params,
+                graph_runtime_state=self.graph_runtime_state,
+            )
+
+        msg = "Variable assigner DSL node data is not recognized."
+        raise _dsl_error(
+            msg,
+            code="node.assigner_invalid_payload",
+            path=f"/nodes/{node_id}/data",
+            details={"node_id": node_id},
+        )
+
+    def _create_question_classifier_node(
+        self,
+        request: _NodeBuildRequest,
+    ) -> QuestionClassifierNode:
+        normalized_data, model_instance = self._create_slim_llm_runtime(
+            node_id=request.node_id,
+            data=request.data_payload,
+            node_type_label="Question classifier",
+        )
+        return QuestionClassifierNode(
+            node_id=request.node_id,
+            data=QuestionClassifierNodeData.model_validate(normalized_data),
+            graph_init_params=self.graph_init_params,
+            graph_runtime_state=self.graph_runtime_state,
+            dependencies=QuestionClassifierNodeDependencies(
+                model_instance=model_instance,
+                template_renderer=_DefaultJinja2TemplateRenderer(),
+                llm_file_saver=_TextOnlyFileSaver(),
+                prompt_message_serializer=_PassthroughPromptMessageSerializer(),
+            ),
+        )
+
+    def _create_parameter_extractor_node(
+        self,
+        request: _NodeBuildRequest,
+    ) -> ParameterExtractorNode:
+        normalized_data, model_instance = self._create_slim_llm_runtime(
+            node_id=request.node_id,
+            data=request.data_payload,
+            node_type_label="Parameter extractor",
+        )
+        return ParameterExtractorNode(
+            node_id=request.node_id,
+            data=ParameterExtractorNodeData.model_validate(normalized_data),
+            graph_init_params=self.graph_init_params,
+            graph_runtime_state=self.graph_runtime_state,
+            model_instance=model_instance,
+            prompt_message_serializer=_PassthroughPromptMessageSerializer(),
+        )
+
+    def _create_llm_node(self, request: _NodeBuildRequest) -> LLMNode:
+        normalized_data, model_instance = self._create_slim_llm_runtime(
+            node_id=request.node_id,
+            data=request.data_payload,
+            node_type_label="LLM",
+        )
+        return LLMNode(
+            node_id=request.node_id,
+            data=LLMNodeData.model_validate(normalized_data),
+            graph_init_params=self.graph_init_params,
+            graph_runtime_state=self.graph_runtime_state,
+            model_instance=model_instance,
+            llm_file_saver=_TextOnlyFileSaver(),
+            prompt_message_serializer=_PassthroughPromptMessageSerializer(),
+            default_query_selector=("sys", "query"),
+        )
+
+    def _create_slim_llm_runtime(
+        self,
+        *,
+        node_id: str,
+        data: Mapping[str, Any],
+        node_type_label: str,
+    ) -> tuple[dict[str, Any], SlimLLM]:
         normalized_data = dict(data)
         model = dict(normalized_data.get("model") or {})
         raw_provider = str(model.get("provider") or "")
         vendor = _canonical_vendor(raw_provider)
         if not vendor:
-            msg = "LLM node is missing model provider."
+            msg = f"{node_type_label} node is missing model provider."
             raise _dsl_error(
                 msg,
                 code="node.llm_missing_provider",
@@ -464,7 +703,7 @@ class SlimDslNodeFactory:
             dependencies=self.dependencies,
         )
         if plugin_id is None:
-            msg = "LLM node dependency could not be resolved."
+            msg = f"{node_type_label} node dependency could not be resolved."
             raise _dsl_error(
                 msg,
                 code="dependency.missing_plugin",
@@ -494,16 +733,7 @@ class SlimDslNodeFactory:
                 path=f"/nodes/{node_id}/data/model",
                 details={"node_id": node_id, "vendor": vendor},
             ) from error
-        return LLMNode(
-            node_id=node_id,
-            data=LLMNodeData.model_validate(normalized_data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
-            model_instance=model_instance,
-            llm_file_saver=_TextOnlyFileSaver(),
-            prompt_message_serializer=_PassthroughPromptMessageSerializer(),
-            default_query_selector=("sys", "query"),
-        )
+        return normalized_data, model_instance
 
     def _create_tool_runtime(self, node_data: ToolNodeData) -> SlimToolNodeRuntime:
         plugin_dependencies = [
@@ -549,3 +779,23 @@ class SlimDslNodeFactory:
             credentials=tool_credential.values,
             credential_type=tool_credential.credential_type,
         )
+
+    NODE_BUILDERS: ClassVar[Mapping[Any, _NodeBuilder]] = {
+        BuiltinNodeTypes.START: _create_start_node,
+        BuiltinNodeTypes.END: _create_end_node,
+        BuiltinNodeTypes.ANSWER: _create_answer_node,
+        BuiltinNodeTypes.IF_ELSE: _create_if_else_node,
+        BuiltinNodeTypes.TEMPLATE_TRANSFORM: _create_template_transform_node,
+        BuiltinNodeTypes.CODE: _create_code_node,
+        BuiltinNodeTypes.LLM: _create_llm_node,
+        BuiltinNodeTypes.TOOL: _create_tool_node,
+        BuiltinNodeTypes.HTTP_REQUEST: _create_http_request_node,
+        BuiltinNodeTypes.VARIABLE_AGGREGATOR: _create_variable_aggregator_node,
+        BuiltinNodeTypes.VARIABLE_ASSIGNER: _create_variable_assigner_node,
+        BuiltinNodeTypes.LIST_OPERATOR: _create_list_operator_node,
+        BuiltinNodeTypes.QUESTION_CLASSIFIER: _create_question_classifier_node,
+        BuiltinNodeTypes.PARAMETER_EXTRACTOR: _create_parameter_extractor_node,
+    }
+
+
+SUPPORTED_DEFAULT_FACTORY_NODE_TYPES = frozenset(SlimDslNodeFactory.NODE_BUILDERS)

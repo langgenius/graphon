@@ -26,11 +26,13 @@ from .entities import (
     DslDocument,
     DslImportPlan,
     DslKind,
+    DslRuntimeVariable,
+    DslRuntimeVariables,
     LoadStatus,
     PluginDependencyType,
 )
 from .errors import DslError
-from .node_factory import SlimDslNodeFactory
+from .node_factory import SUPPORTED_DEFAULT_FACTORY_NODE_TYPES, SlimDslNodeFactory
 
 
 class _DslKey(StrEnum):
@@ -48,16 +50,6 @@ _CONFIG_ONLY_DIFY_APP_MODES = frozenset((
     "chat",
     "agent-chat",
     "channel",
-))
-_SUPPORTED_DEFAULT_FACTORY_NODES = frozenset((
-    BuiltinNodeTypes.START,
-    BuiltinNodeTypes.END,
-    BuiltinNodeTypes.ANSWER,
-    BuiltinNodeTypes.IF_ELSE,
-    BuiltinNodeTypes.TEMPLATE_TRANSFORM,
-    BuiltinNodeTypes.CODE,
-    BuiltinNodeTypes.LLM,
-    BuiltinNodeTypes.TOOL,
 ))
 
 
@@ -129,6 +121,7 @@ def loads(
     root_id = root_node_id or _select_root_node_id(graph_config)
     workflow_id = workflow_id if workflow_id is not None else str(uuid4())
     variable_pool = _build_variable_pool(
+        runtime_variables=plan.document.runtime_variables,
         root_node_id=root_id,
         run_context=run_context or {},
         start_inputs=start_inputs or {},
@@ -144,6 +137,7 @@ def loads(
         start_at=time.time(),
     )
     parsed_credentials = _parse_credentials(credentials)
+    engine_config = config or GraphEngineConfig()
     node_factory = SlimDslNodeFactory(
         graph_config=graph_config,
         graph_init_params=graph_init_params,
@@ -179,7 +173,7 @@ def loads(
         graph=graph,
         graph_runtime_state=graph_runtime_state,
         command_channel=command_channel or InMemoryChannel(),
-        config=config or GraphEngineConfig(),
+        config=engine_config,
     )
 
 
@@ -339,6 +333,7 @@ def _build_dify_app_plan(payload: Mapping[str, Any]) -> DslImportPlan:
         kind=DslKind.APP,
         graph_config=graph,
         dependencies=dependencies,
+        runtime_variables=_extract_app_runtime_variables(workflow),
     )
 
 
@@ -361,28 +356,30 @@ def _build_graph_plan(
     kind: DslKind,
     graph_config: Mapping[str, Any],
     dependencies: list[DslDependency],
+    runtime_variables: DslRuntimeVariables | None = None,
 ) -> DslImportPlan:
     normalized_graph = _normalize_graph_config(graph_config, kind=kind)
     node_types = _node_types(normalized_graph)
     unsupported = sorted(
         node_type
         for node_type in node_types
-        if node_type not in _SUPPORTED_DEFAULT_FACTORY_NODES
+        if node_type not in SUPPORTED_DEFAULT_FACTORY_NODE_TYPES
     )
-    load_status: LoadStatus = LoadStatus.LOADABLE
-    load_reason: str | None = None
+    unsupported_node_reasons = _unsupported_node_reasons(normalized_graph)
+    load_reasons: list[str] = []
     if unsupported:
-        load_status = LoadStatus.UNSUPPORTED
-        load_reason = f"Unsupported node types: {', '.join(unsupported)}"
+        load_reasons.append(f"Unsupported node types: {', '.join(unsupported)}")
+    load_reasons.extend(unsupported_node_reasons)
 
     return DslImportPlan(
         document=DslDocument(
             kind=kind,
             graph_config=normalized_graph,
+            runtime_variables=runtime_variables or DslRuntimeVariables(),
         ),
-        load_status=load_status,
+        load_status=LoadStatus.UNSUPPORTED if load_reasons else LoadStatus.LOADABLE,
         dependencies=dependencies,
-        load_reason=load_reason,
+        load_reason="; ".join(load_reasons) or None,
     )
 
 
@@ -421,6 +418,110 @@ def _normalize_graph_config(
     normalized["nodes"] = nodes
     normalized["edges"] = edges
     return normalized
+
+
+def _extract_app_runtime_variables(
+    workflow: Mapping[str, Any],
+) -> DslRuntimeVariables:
+    return DslRuntimeVariables(
+        environment_variables=_normalize_runtime_variables(
+            workflow.get("environment_variables"),
+            path="/workflow/environment_variables",
+        ),
+        conversation_variables=_normalize_runtime_variables(
+            workflow.get("conversation_variables"),
+            path="/workflow/conversation_variables",
+        ),
+    )
+
+
+def _normalize_runtime_variables(
+    raw_variables: object,
+    *,
+    path: str,
+) -> list[DslRuntimeVariable]:
+    if raw_variables is None:
+        return []
+    if not isinstance(raw_variables, list):
+        msg = "Runtime variables must be a list."
+        raise _dsl_error(
+            msg,
+            code="runtime_variables.invalid",
+            path=path,
+            kind=DslKind.APP,
+            details={"actual_type": type(raw_variables).__name__},
+        )
+
+    variables: list[DslRuntimeVariable] = []
+    for index, raw_variable in enumerate(raw_variables):
+        variable_path = f"{path}/{index}"
+        if not isinstance(raw_variable, Mapping):
+            msg = "Runtime variable must be a mapping."
+            raise _dsl_error(
+                msg,
+                code="runtime_variables.invalid_item",
+                path=variable_path,
+                kind=DslKind.APP,
+                details={"actual_type": type(raw_variable).__name__},
+            )
+        variable = cast(Mapping[str, Any], raw_variable)
+        name = variable.get("name")
+        if not isinstance(name, str) or not name:
+            msg = "Runtime variable name must be a non-empty string."
+            raise _dsl_error(
+                msg,
+                code="runtime_variables.invalid_name",
+                path=f"{variable_path}/name",
+                kind=DslKind.APP,
+                details={"actual_type": type(name).__name__},
+            )
+        variables.append(
+            DslRuntimeVariable(
+                name=name,
+                value=variable.get("value"),
+                source=dict(variable),
+            )
+        )
+    return variables
+
+
+def _unsupported_node_reasons(graph_config: Mapping[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    for node in graph_config.get("nodes", []):
+        if not isinstance(node, Mapping) or not isinstance(node.get("data"), Mapping):
+            continue
+        data = cast(Mapping[str, Any], node["data"])
+        if data.get("type") != BuiltinNodeTypes.HTTP_REQUEST:
+            continue
+        reason = _unsupported_http_request_reason(data)
+        if reason is None:
+            continue
+        node_id = node.get("id")
+        prefix = (
+            f"HTTP request node {node_id!r}"
+            if isinstance(node_id, str)
+            else "HTTP request node"
+        )
+        reasons.append(f"{prefix} is unsupported: {reason}")
+    return reasons
+
+
+def _unsupported_http_request_reason(data: Mapping[str, Any]) -> str | None:
+    body = data.get("body")
+    if not isinstance(body, Mapping):
+        return None
+    body_type = body.get("type")
+    if body_type == "binary":
+        return "binary request bodies require file download support"
+    if body_type != "form-data":
+        return None
+    body_data = body.get("data") or []
+    if not isinstance(body_data, Sequence) or isinstance(body_data, str):
+        return None
+    for item in body_data:
+        if isinstance(item, Mapping) and item.get("type") == "file":
+            return "multipart file fields require file download support"
+    return None
 
 
 def _normalize_nodes(nodes: object, *, kind: DslKind) -> list[dict[str, Any]]:
@@ -493,7 +594,11 @@ def _normalize_nodes(nodes: object, *, kind: DslKind) -> list[dict[str, Any]]:
 
 
 def _normalize_node_data(data: dict[str, Any]) -> None:
-    if data.get("type") == BuiltinNodeTypes.LLM:
+    if data.get("type") in {
+        BuiltinNodeTypes.LLM,
+        BuiltinNodeTypes.QUESTION_CLASSIFIER,
+        BuiltinNodeTypes.PARAMETER_EXTRACTOR,
+    }:
         model = data.get("model")
         if isinstance(model, Mapping):
             normalized_model = dict(model)
@@ -690,11 +795,13 @@ def _select_root_node_id(graph_config: Mapping[str, Any]) -> str:
 
 def _build_variable_pool(
     *,
+    runtime_variables: DslRuntimeVariables,
     root_node_id: str,
     run_context: Mapping[str, Any],
     start_inputs: Mapping[str, Any],
 ) -> VariablePool:
     variable_pool = VariablePool()
+    _add_runtime_variables(variable_pool, runtime_variables=runtime_variables)
     for key, value in run_context.items():
         if isinstance(value, str | int | float | bool) or value is None:
             variable_pool.add(("sys", str(key)), value)
@@ -704,3 +811,16 @@ def _build_variable_pool(
         variable_pool.add((root_node_id, str(key)), value)
         variable_pool.add(("sys", str(key)), value)
     return variable_pool
+
+
+def _add_runtime_variables(
+    variable_pool: VariablePool,
+    *,
+    runtime_variables: DslRuntimeVariables,
+) -> None:
+    for namespace, variables in (
+        ("env", runtime_variables.environment_variables),
+        ("conversation", runtime_variables.conversation_variables),
+    ):
+        for variable in variables:
+            variable_pool.add((namespace, variable.name), variable.value)
