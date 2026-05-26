@@ -33,6 +33,7 @@ from graphon.model_runtime.entities.message_entities import (
 from graphon.model_runtime.entities.model_entities import (
     AIModelEntity,
     FetchFrom,
+    ModelFeature,
     ModelType,
 )
 from graphon.nodes.http_request.exc import HttpRequestNodeError
@@ -61,6 +62,8 @@ _OPENAI_PLUGIN_ID = "langgenius/openai:0.3.8@test"
 class _FakeSlimLLM:
     instances: ClassVar[list[_FakeSlimLLM]] = []
     responses: ClassVar[dict[str, Any]] = {}
+    features: ClassVar[list[ModelFeature]] = []
+    tool_calls: ClassVar[dict[str, list[AssistantPromptMessage.ToolCall]]] = {}
 
     def __init__(
         self,
@@ -108,7 +111,7 @@ class _FakeSlimLLM:
             model=self._model_name,
             label=I18nObject(en_US=self._model_name),
             model_type=ModelType.LLM,
-            features=[],
+            features=list(self.features),
             fetch_from=FetchFrom.CUSTOMIZABLE_MODEL,
             model_properties={},
             parameter_rules=[],
@@ -139,6 +142,7 @@ class _FakeSlimLLM:
             prompt_messages=list(prompt_messages),
             message=AssistantPromptMessage(
                 content=self.responses.get(self._model_name, "{}"),
+                tool_calls=list(self.tool_calls.get(self._model_name, [])),
             ),
             usage=LLMUsage.empty_usage(),
         )
@@ -147,6 +151,8 @@ class _FakeSlimLLM:
 def _patch_fake_slim_llm(monkeypatch: pytest.MonkeyPatch) -> type[_FakeSlimLLM]:
     _FakeSlimLLM.instances = []
     _FakeSlimLLM.responses = {}
+    _FakeSlimLLM.features = []
+    _FakeSlimLLM.tool_calls = {}
     monkeypatch.setattr("graphon.dsl.node_factory.SlimLLM", _FakeSlimLLM)
     return _FakeSlimLLM
 
@@ -805,3 +811,40 @@ def test_parameter_extractor_node_from_dsl_runs_with_slim_model(
     assert success.node_run_result.outputs["__reason"] is None
     assert success.node_run_result.outputs["location"] == "Paris"
     assert fake_slim_llm.instances[-1].invoke_calls[-1]["stream"] is False
+
+
+def test_parameter_extractor_node_from_dsl_runs_function_call_with_slim_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_slim_llm = _patch_fake_slim_llm(monkeypatch)
+    fake_slim_llm.features = [ModelFeature.TOOL_CALL]
+    fake_slim_llm.tool_calls = {
+        "extractor-model": [
+            AssistantPromptMessage.ToolCall(
+                id="call-1",
+                type="function",
+                function=AssistantPromptMessage.ToolCall.ToolCallFunction(
+                    name="extract_parameters",
+                    arguments='{"location": "Berlin"}',
+                ),
+            ),
+        ],
+    }
+    engine = loads(
+        _graph_dsl_for_node({
+            **_parameter_extractor_data(),
+            "reasoning_mode": "function_call",
+        }),
+        credentials=_openai_credentials(),
+        start_inputs={"query": "Book a trip to Berlin"},
+    )
+    node = engine.graph.nodes["node"]
+
+    success = _succeeded_event(list(node.run()))
+
+    assert success.node_run_result.outputs["__is_success"] == 1
+    assert success.node_run_result.outputs["__reason"] is None
+    assert success.node_run_result.outputs["location"] == "Berlin"
+    invoke_call = fake_slim_llm.instances[-1].invoke_calls[-1]
+    assert invoke_call["stream"] is False
+    assert [tool.name for tool in invoke_call["tools"]] == ["extract_parameters"]

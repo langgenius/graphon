@@ -32,7 +32,7 @@ from .entities import (
     PluginDependencyType,
 )
 from .errors import DslError
-from .node_factory import SlimDslNodeFactory
+from .node_factory import SUPPORTED_DEFAULT_FACTORY_NODE_TYPES, SlimDslNodeFactory
 
 
 class _DslKey(StrEnum):
@@ -50,22 +50,6 @@ _CONFIG_ONLY_DIFY_APP_MODES = frozenset((
     "chat",
     "agent-chat",
     "channel",
-))
-_SUPPORTED_DEFAULT_FACTORY_NODES = frozenset((
-    BuiltinNodeTypes.START,
-    BuiltinNodeTypes.END,
-    BuiltinNodeTypes.ANSWER,
-    BuiltinNodeTypes.IF_ELSE,
-    BuiltinNodeTypes.TEMPLATE_TRANSFORM,
-    BuiltinNodeTypes.CODE,
-    BuiltinNodeTypes.LLM,
-    BuiltinNodeTypes.TOOL,
-    BuiltinNodeTypes.HTTP_REQUEST,
-    BuiltinNodeTypes.VARIABLE_AGGREGATOR,
-    BuiltinNodeTypes.VARIABLE_ASSIGNER,
-    BuiltinNodeTypes.LIST_OPERATOR,
-    BuiltinNodeTypes.QUESTION_CLASSIFIER,
-    BuiltinNodeTypes.PARAMETER_EXTRACTOR,
 ))
 
 
@@ -379,17 +363,13 @@ def _build_graph_plan(
     unsupported = sorted(
         node_type
         for node_type in node_types
-        if node_type not in _SUPPORTED_DEFAULT_FACTORY_NODES
+        if node_type not in SUPPORTED_DEFAULT_FACTORY_NODE_TYPES
     )
     unsupported_node_reasons = _unsupported_node_reasons(normalized_graph)
-    load_status: LoadStatus = LoadStatus.LOADABLE
     load_reasons: list[str] = []
     if unsupported:
         load_reasons.append(f"Unsupported node types: {', '.join(unsupported)}")
     load_reasons.extend(unsupported_node_reasons)
-    load_reason: str | None = "; ".join(load_reasons) or None
-    if load_reasons:
-        load_status = LoadStatus.UNSUPPORTED
 
     return DslImportPlan(
         document=DslDocument(
@@ -397,9 +377,9 @@ def _build_graph_plan(
             graph_config=normalized_graph,
             runtime_variables=runtime_variables or DslRuntimeVariables(),
         ),
-        load_status=load_status,
+        load_status=LoadStatus.UNSUPPORTED if load_reasons else LoadStatus.LOADABLE,
         dependencies=dependencies,
-        load_reason=load_reason,
+        load_reason="; ".join(load_reasons) or None,
     )
 
 

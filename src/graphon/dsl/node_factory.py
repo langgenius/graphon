@@ -6,7 +6,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.entities.graph_config import NodeConfigDict
@@ -406,6 +406,9 @@ class _NodeBuildRequest:
     node_type: Any
 
 
+type _NodeBuilder = Callable[[Any, _NodeBuildRequest], Node]
+
+
 @dataclass(slots=True)
 class SlimDslNodeFactory:
     graph_config: Mapping[str, Any]
@@ -434,10 +437,10 @@ class SlimDslNodeFactory:
 
     def create_node(self, node_config: NodeConfigDict) -> Node:
         request = self._node_request(node_config)
-        builder = self._node_builders().get(request.node_type)
+        builder = self.NODE_BUILDERS.get(request.node_type)
         if builder is None:
             raise self._unsupported_node_error(request)
-        return builder(request)
+        return builder(self, request)
 
     def _node_request(
         self,
@@ -452,24 +455,6 @@ class SlimDslNodeFactory:
             data_payload=data_payload,
             node_type=data_payload["type"],
         )
-
-    def _node_builders(self) -> Mapping[Any, Callable[[_NodeBuildRequest], Node]]:
-        return {
-            BuiltinNodeTypes.START: self._create_start_node,
-            BuiltinNodeTypes.END: self._create_end_node,
-            BuiltinNodeTypes.ANSWER: self._create_answer_node,
-            BuiltinNodeTypes.IF_ELSE: self._create_if_else_node,
-            BuiltinNodeTypes.TEMPLATE_TRANSFORM: self._create_template_transform_node,
-            BuiltinNodeTypes.CODE: self._create_code_node,
-            BuiltinNodeTypes.LLM: self._create_llm_node,
-            BuiltinNodeTypes.TOOL: self._create_tool_node,
-            BuiltinNodeTypes.HTTP_REQUEST: self._create_http_request_node,
-            BuiltinNodeTypes.VARIABLE_AGGREGATOR: self._create_variable_aggregator_node,
-            BuiltinNodeTypes.VARIABLE_ASSIGNER: self._create_variable_assigner_node,
-            BuiltinNodeTypes.LIST_OPERATOR: self._create_list_operator_node,
-            BuiltinNodeTypes.QUESTION_CLASSIFIER: self._create_question_classifier_node,
-            BuiltinNodeTypes.PARAMETER_EXTRACTOR: self._create_parameter_extractor_node,
-        }
 
     def _create_start_node(self, request: _NodeBuildRequest) -> StartNode:
         return StartNode(
@@ -794,3 +779,23 @@ class SlimDslNodeFactory:
             credentials=tool_credential.values,
             credential_type=tool_credential.credential_type,
         )
+
+    NODE_BUILDERS: ClassVar[Mapping[Any, _NodeBuilder]] = {
+        BuiltinNodeTypes.START: _create_start_node,
+        BuiltinNodeTypes.END: _create_end_node,
+        BuiltinNodeTypes.ANSWER: _create_answer_node,
+        BuiltinNodeTypes.IF_ELSE: _create_if_else_node,
+        BuiltinNodeTypes.TEMPLATE_TRANSFORM: _create_template_transform_node,
+        BuiltinNodeTypes.CODE: _create_code_node,
+        BuiltinNodeTypes.LLM: _create_llm_node,
+        BuiltinNodeTypes.TOOL: _create_tool_node,
+        BuiltinNodeTypes.HTTP_REQUEST: _create_http_request_node,
+        BuiltinNodeTypes.VARIABLE_AGGREGATOR: _create_variable_aggregator_node,
+        BuiltinNodeTypes.VARIABLE_ASSIGNER: _create_variable_assigner_node,
+        BuiltinNodeTypes.LIST_OPERATOR: _create_list_operator_node,
+        BuiltinNodeTypes.QUESTION_CLASSIFIER: _create_question_classifier_node,
+        BuiltinNodeTypes.PARAMETER_EXTRACTOR: _create_parameter_extractor_node,
+    }
+
+
+SUPPORTED_DEFAULT_FACTORY_NODE_TYPES = frozenset(SlimDslNodeFactory.NODE_BUILDERS)
