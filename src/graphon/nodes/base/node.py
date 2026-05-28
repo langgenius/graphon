@@ -11,7 +11,7 @@ from typing import Any, ClassVar, assert_never, get_args, get_origin
 from uuid import uuid4
 
 from graphon.entities.base_node_data import BaseNodeData, RetryConfig
-from graphon.entities.graph_config import NodeConfigDict
+from graphon.entities.graph_config import NodeConfigDict, NodeConfigDictAdapter
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import (
     ErrorStrategy,
@@ -171,6 +171,49 @@ class _NodeRegistryMixin[NodeDataT: BaseNodeData]:
             node_type: MappingProxyType(version_map)
             for node_type, version_map in cls._registry.items()
         }
+
+    @classmethod
+    def _extract_mapping_from_node_config(
+        cls: type[Node[NodeDataT]],
+        *,
+        graph_config: Mapping[str, Any],
+        config: Mapping[str, Any],
+    ) -> Mapping[str, Sequence[str]]:
+        try:
+            return cls._extract_mapping_from_valid_node_config(
+                graph_config=graph_config,
+                config=config,
+            )
+        except NotImplementedError:
+            return {}
+
+    @classmethod
+    def _extract_mapping_from_valid_node_config(
+        cls: type[Node[NodeDataT]],
+        *,
+        graph_config: Mapping[str, Any],
+        config: Mapping[str, Any],
+    ) -> Mapping[str, Sequence[str]]:
+        typed_config = NodeConfigDictAdapter.validate_python(config)
+        node_cls = cls._get_node_class_for_config(typed_config)
+        if node_cls is None:
+            return {}
+        return node_cls.extract_variable_selector_to_variable_mapping(
+            graph_config=graph_config,
+            config=typed_config,
+        )
+
+    @classmethod
+    def _get_node_class_for_config(
+        cls: type[Node[NodeDataT]],
+        config: NodeConfigDict,
+    ) -> type[Node] | None:
+        node_type = config["data"].type
+        node_mapping = cls.get_node_type_classes_mapping()
+        if node_type not in node_mapping:
+            return None
+        node_version = str(config["data"].version)
+        return node_mapping[node_type][node_version]
 
 
 class _NodeDataModelMixin[NodeDataT: BaseNodeData]:
@@ -627,45 +670,46 @@ class Node[NodeDataT: BaseNodeData](
         yield start_event
 
         try:
-            result = self._run()
-
-            # Handle NodeRunResult
-            if isinstance(result, NodeRunResult):
-                yield self._convert_node_run_result_to_graph_node_event(result)
-                return
-
-            # Handle event stream
-            for event in result:
-                # NOTE: this is necessary because iteration and loop nodes
-                # yield GraphNodeEventBase.
-                if isinstance(event, NodeEventBase):
-                    yield self._dispatch(event)
-                elif (
-                    isinstance(event, GraphNodeEventBase)
-                    and not event.in_iteration_id
-                    and not event.in_loop_id
-                ):
-                    event.id = self.execution_id
-                    yield event
-                else:
-                    yield event
+            yield from self._run_events()
         except Exception as e:
             logger.exception("Node %s failed to run", self._node_id)
-            result = NodeRunResult(
-                status=WorkflowNodeExecutionStatus.FAILED,
-                error=str(e),
-                error_type="WorkflowNodeError",
-            )
-            finished_at = datetime.now(UTC).replace(tzinfo=None)
-            yield NodeRunFailedEvent(
-                id=self.execution_id,
-                node_id=self._node_id,
-                node_type=self.node_type,
-                start_at=self._start_at,
-                finished_at=finished_at,
-                node_run_result=result,
-                error=str(e),
-            )
+            yield self._build_run_failed_event(e)
+
+    def _run_events(self) -> Generator[GraphNodeEventBase, None, None]:
+        result = self._run()
+        if isinstance(result, NodeRunResult):
+            yield self._convert_node_run_result_to_graph_node_event(result)
+            return
+
+        for event in result:
+            yield self._normalize_run_event(event)
+
+    def _normalize_run_event(
+        self,
+        event: NodeEventBase | GraphNodeEventBase,
+    ) -> GraphNodeEventBase:
+        if isinstance(event, NodeEventBase):
+            return self._dispatch(event)
+        if not event.in_iteration_id and not event.in_loop_id:
+            event.id = self.execution_id
+        return event
+
+    def _build_run_failed_event(self, error: Exception) -> NodeRunFailedEvent:
+        result = NodeRunResult(
+            status=WorkflowNodeExecutionStatus.FAILED,
+            error=str(error),
+            error_type="WorkflowNodeError",
+        )
+        finished_at = datetime.now(UTC).replace(tzinfo=None)
+        return NodeRunFailedEvent(
+            id=self.execution_id,
+            node_id=self._node_id,
+            node_type=self.node_type,
+            start_at=self._start_at,
+            finished_at=finished_at,
+            node_run_result=result,
+            error=str(error),
+        )
 
     @classmethod
     def extract_variable_selector_to_variable_mapping(

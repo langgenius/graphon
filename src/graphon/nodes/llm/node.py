@@ -121,6 +121,17 @@ class _PreparedRunPrompt:
     model_instance: LLMProtocol | None = None
 
 
+@dataclass
+class _StreamingInvokeState:
+    usage: LLMUsage = field(default_factory=LLMUsage.empty_usage)
+    finish_reason: str | None = None
+    full_text_buffer: io.StringIO = field(default_factory=io.StringIO)
+    start_time: float = 0.0
+    first_token_time: float | None = None
+    has_content: bool = False
+    structured_output: dict[str, Any] | None = None
+
+
 class LLMNode(Node[LLMNodeData]):
     node_type = BuiltinNodeTypes.LLM
 
@@ -840,66 +851,25 @@ class LLMNode(Node[LLMNodeData]):
         reasoning_format: Literal["separated", "tagged"] = "tagged",
         request_start_time: float | None = None,
     ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
-        model = ""
-        usage = LLMUsage.empty_usage()
-        finish_reason = None
-        full_text_buffer = io.StringIO()
-
-        # Initialize streaming metrics tracking
         start_time = (
             request_start_time
             if request_start_time is not None
             else time.perf_counter()
         )
-        first_token_time = None
-        has_content = False
+        state = _StreamingInvokeState(start_time=start_time)
 
-        collected_structured_output = (
-            None  # Collect structured_output from streaming chunks
-        )
-        # Consume the invoke result and handle generator exception
         try:
-            for result in invoke_result:
-                if isinstance(result, LLMResultChunkWithStructuredOutput):
-                    # Collect structured_output from the chunk
-                    if result.structured_output is not None:
-                        collected_structured_output = dict(result.structured_output)
-                    yield result
-                if isinstance(result, LLMResultChunk):
-                    contents = result.delta.message.content
-                    for (
-                        text_part
-                    ) in LLMNode._save_multimodal_output_and_convert_result_to_markdown(
-                        contents=contents,
-                        file_saver=file_saver,
-                        file_outputs=file_outputs,
-                    ):
-                        # Detect first token for TTFT calculation
-                        if text_part and not has_content:
-                            first_token_time = time.perf_counter()
-                            has_content = True
-
-                        full_text_buffer.write(text_part)
-                        yield StreamChunkEvent(
-                            selector=[node_id, "text"],
-                            chunk=text_part,
-                            is_final=False,
-                        )
-
-                    model, usage, finish_reason = LLMNode._update_streaming_metadata(
-                        result=result,
-                        model=model,
-                        usage=usage,
-                        finish_reason=finish_reason,
-                    )
-        except Exception as e:
-            is_structured_output_parse_error = getattr(
-                model_instance,
-                "is_structured_output_parse_error",
-                None,
+            yield from LLMNode._yield_streaming_events(
+                invoke_result=invoke_result,
+                state=state,
+                file_saver=file_saver,
+                file_outputs=file_outputs,
+                node_id=node_id,
             )
-            if callable(is_structured_output_parse_error) and (
-                is_structured_output_parse_error(e)
+        except Exception as e:
+            if LLMNode._is_structured_output_parse_error(
+                model_instance=model_instance,
+                error=e,
             ):
                 msg = f"Failed to parse structured output: {e}"
                 raise LLMNodeError(msg) from e
@@ -909,44 +879,136 @@ class LLMNode(Node[LLMNodeData]):
             raise
 
         # Extract reasoning content from <think> tags in the main text
-        full_text = full_text_buffer.getvalue()
+        full_text = state.full_text_buffer.getvalue()
         clean_text, reasoning_content = LLMNode._extract_stream_reasoning(
             full_text=full_text,
             reasoning_format=reasoning_format,
         )
         LLMNode._finalize_streaming_usage(
-            usage=usage,
-            has_content=has_content,
-            first_token_time=first_token_time,
-            start_time=start_time,
+            usage=state.usage,
+            has_content=state.has_content,
+            first_token_time=state.first_token_time,
+            start_time=state.start_time,
         )
 
         yield ModelInvokeCompletedEvent(
             # Use clean_text for separated mode, full_text for tagged mode
             text=clean_text if reasoning_format == "separated" else full_text,
-            usage=usage,
-            finish_reason=finish_reason,
+            usage=state.usage,
+            finish_reason=state.finish_reason,
             # Reasoning content for workflow variables and downstream nodes
             reasoning_content=reasoning_content,
             # Pass structured output if collected from streaming chunks
-            structured_output=collected_structured_output,
+            structured_output=state.structured_output,
+        )
+
+    @staticmethod
+    def _yield_streaming_events(
+        *,
+        invoke_result: Generator[LLMResultChunk | LLMStructuredOutput, None, None],
+        state: _StreamingInvokeState,
+        file_saver: LLMFileSaver,
+        file_outputs: list[File],
+        node_id: str,
+    ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
+        for result in invoke_result:
+            yield from LLMNode._handle_stream_result(
+                result=result,
+                state=state,
+                file_saver=file_saver,
+                file_outputs=file_outputs,
+                node_id=node_id,
+            )
+
+    @staticmethod
+    def _handle_stream_result(
+        *,
+        result: LLMResultChunk | LLMStructuredOutput,
+        state: _StreamingInvokeState,
+        file_saver: LLMFileSaver,
+        file_outputs: list[File],
+        node_id: str,
+    ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
+        if isinstance(result, LLMResultChunkWithStructuredOutput):
+            if result.structured_output is not None:
+                state.structured_output = dict(result.structured_output)
+            yield result
+
+        if isinstance(result, LLMResultChunk):
+            yield from LLMNode._yield_stream_text_events(
+                result=result,
+                state=state,
+                file_saver=file_saver,
+                file_outputs=file_outputs,
+                node_id=node_id,
+            )
+            LLMNode._update_streaming_metadata(result=result, state=state)
+
+    @staticmethod
+    def _yield_stream_text_events(
+        *,
+        result: LLMResultChunk,
+        state: _StreamingInvokeState,
+        file_saver: LLMFileSaver,
+        file_outputs: list[File],
+        node_id: str,
+    ) -> Generator[StreamChunkEvent, None, None]:
+        text_parts = LLMNode._save_multimodal_output_and_convert_result_to_markdown(
+            contents=result.delta.message.content,
+            file_saver=file_saver,
+            file_outputs=file_outputs,
+        )
+        for text_part in text_parts:
+            yield LLMNode._build_stream_text_event(
+                text_part=text_part,
+                state=state,
+                node_id=node_id,
+            )
+
+    @staticmethod
+    def _build_stream_text_event(
+        *,
+        text_part: str,
+        state: _StreamingInvokeState,
+        node_id: str,
+    ) -> StreamChunkEvent:
+        if text_part and not state.has_content:
+            state.first_token_time = time.perf_counter()
+            state.has_content = True
+
+        state.full_text_buffer.write(text_part)
+        return StreamChunkEvent(
+            selector=[node_id, "text"],
+            chunk=text_part,
+            is_final=False,
         )
 
     @staticmethod
     def _update_streaming_metadata(
         *,
         result: LLMResultChunk,
-        model: str,
-        usage: LLMUsage,
-        finish_reason: str | None,
-    ) -> tuple[str, LLMUsage, str | None]:
-        if not model and result.model:
-            model = result.model
-        if usage.prompt_tokens == 0 and result.delta.usage:
-            usage = result.delta.usage
-        if finish_reason is None and result.delta.finish_reason:
-            finish_reason = result.delta.finish_reason
-        return model, usage, finish_reason
+        state: _StreamingInvokeState,
+    ) -> None:
+        if state.usage.prompt_tokens == 0 and result.delta.usage:
+            state.usage = result.delta.usage
+        if state.finish_reason is None and result.delta.finish_reason:
+            state.finish_reason = result.delta.finish_reason
+
+    @staticmethod
+    def _is_structured_output_parse_error(
+        *,
+        model_instance: LLMProtocol,
+        error: Exception,
+    ) -> bool:
+        is_structured_output_parse_error = getattr(
+            model_instance,
+            "is_structured_output_parse_error",
+            None,
+        )
+        return bool(
+            callable(is_structured_output_parse_error)
+            and is_structured_output_parse_error(error)
+        )
 
     @staticmethod
     def _extract_stream_reasoning(

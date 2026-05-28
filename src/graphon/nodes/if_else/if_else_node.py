@@ -1,4 +1,5 @@
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any, override
 
 from graphon.enums import (
@@ -10,6 +11,18 @@ from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.node import Node
 from graphon.nodes.if_else.entities import IfElseNodeData
 from graphon.utils.condition.processor import ConditionProcessor
+
+
+@dataclass(slots=True)
+class _IfElseEvaluation:
+    node_inputs: dict[str, Sequence[Mapping[str, Any]]] = field(
+        default_factory=lambda: {"conditions": []},
+    )
+    process_data: dict[str, list[dict[str, Any]]] = field(
+        default_factory=lambda: {"condition_results": []},
+    )
+    final_result: bool = False
+    selected_case_id: str = "false"
 
 
 class IfElseNode(Node[IfElseNodeData]):
@@ -24,55 +37,61 @@ class IfElseNode(Node[IfElseNodeData]):
     @override
     def _run(self) -> NodeRunResult:
         """Evaluate the configured cases and return the matching branch result."""
-        node_inputs: dict[str, Sequence[Mapping[str, Any]]] = {"conditions": []}
-
-        process_data: dict[str, list] = {"condition_results": []}
-
-        input_conditions: Sequence[Mapping[str, Any]] = []
-        final_result = False
-        selected_case_id = "false"
+        evaluation = _IfElseEvaluation()
         condition_processor = ConditionProcessor()
         try:
-            uses_legacy_shape = self.node_data.cases is None
-            for case in self.node_data.iter_cases():
-                input_conditions, group_result, final_result = (
-                    condition_processor.process_conditions(
-                        variable_pool=self.graph_runtime_state.variable_pool,
-                        conditions=case.conditions,
-                        operator=case.logical_operator,
-                    )
-                )
-
-                process_data["condition_results"].append({
-                    "group": "default" if uses_legacy_shape else case.model_dump(),
-                    "results": group_result,
-                    "final_result": final_result,
-                })
-
-                # Break if a case passes (logical short-circuit)
-                if final_result:
-                    selected_case_id = "true" if uses_legacy_shape else case.case_id
-                    break
-
-            node_inputs["conditions"] = input_conditions
-
+            self._evaluate_cases(condition_processor, evaluation)
         except (TypeError, ValueError) as e:
             return NodeRunResult(
                 status=WorkflowNodeExecutionStatus.FAILED,
-                inputs=node_inputs,
-                process_data=process_data,
+                inputs=evaluation.node_inputs,
+                process_data=evaluation.process_data,
                 error=str(e),
             )
 
-        outputs = {"result": final_result, "selected_case_id": selected_case_id}
+        outputs = {
+            "result": evaluation.final_result,
+            "selected_case_id": evaluation.selected_case_id,
+        }
 
         return NodeRunResult(
             status=WorkflowNodeExecutionStatus.SUCCEEDED,
-            inputs=node_inputs,
-            process_data=process_data,
-            edge_source_handle=selected_case_id or "false",
+            inputs=evaluation.node_inputs,
+            process_data=evaluation.process_data,
+            edge_source_handle=evaluation.selected_case_id or "false",
             outputs=outputs,
         )
+
+    def _evaluate_cases(
+        self,
+        condition_processor: ConditionProcessor,
+        evaluation: _IfElseEvaluation,
+    ) -> None:
+        input_conditions: Sequence[Mapping[str, Any]] = []
+        uses_legacy_shape = self.node_data.cases is None
+        for case in self.node_data.iter_cases():
+            input_conditions, group_result, final_result = (
+                condition_processor.process_conditions(
+                    variable_pool=self.graph_runtime_state.variable_pool,
+                    conditions=case.conditions,
+                    operator=case.logical_operator,
+                )
+            )
+
+            evaluation.process_data["condition_results"].append({
+                "group": "default" if uses_legacy_shape else case.model_dump(),
+                "results": group_result,
+                "final_result": final_result,
+            })
+
+            if final_result:
+                evaluation.final_result = final_result
+                evaluation.selected_case_id = (
+                    "true" if uses_legacy_shape else case.case_id
+                )
+                break
+
+        evaluation.node_inputs["conditions"] = input_conditions
 
     @classmethod
     @override

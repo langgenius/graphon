@@ -1,13 +1,16 @@
-from collections.abc import Generator, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from decimal import Decimal
 from io import BytesIO
 from typing import IO, Any, cast
 
 import pytest
 
+from graphon.model_runtime.callbacks.base_callback import Callback
 from graphon.model_runtime.entities.common_entities import I18nObject
 from graphon.model_runtime.entities.llm_entities import (
     LLMResult,
+    LLMResultChunk,
+    LLMResultChunkDelta,
     LLMResultChunkWithStructuredOutput,
     LLMResultWithStructuredOutput,
     LLMUsage,
@@ -15,7 +18,9 @@ from graphon.model_runtime.entities.llm_entities import (
 from graphon.model_runtime.entities.message_entities import (
     AssistantPromptMessage,
     PromptMessage,
+    PromptMessageContentUnionTypes,
     PromptMessageTool,
+    TextPromptMessageContent,
     UserPromptMessage,
 )
 from graphon.model_runtime.entities.model_entities import AIModelEntity, ModelType
@@ -35,6 +40,8 @@ from graphon.model_runtime.entities.text_embedding_entities import (
     EmbeddingResult,
     EmbeddingUsage,
 )
+from graphon.model_runtime.errors.invoke import InvokeError
+from graphon.model_runtime.model_providers.base.ai_model import AIModel
 from graphon.model_runtime.model_providers.base.large_language_model import (
     LargeLanguageModel,
 )
@@ -151,7 +158,7 @@ class _LLMRuntimeStub(_ProviderRuntimeStub):
         tools: list[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         stream: bool,
-    ) -> LLMResult:
+    ) -> LLMResult | Generator[LLMResultChunk, None, None]:
         _ = provider, credentials, model_parameters, tools, stop, stream
         return LLMResult(
             model=model,
@@ -196,6 +203,170 @@ class _LLMRuntimeStub(_ProviderRuntimeStub):
             usage=LLMUsage.empty_usage(),
             structured_output={"ok": True},
         )
+
+
+class _StreamingLLMRuntimeStub(_LLMRuntimeStub):
+    def __init__(
+        self,
+        chunks: Sequence[LLMResultChunk],
+        *,
+        fail_after_chunks: bool = False,
+    ) -> None:
+        super().__init__()
+        self._chunks = tuple(chunks)
+        self._fail_after_chunks = fail_after_chunks
+
+    def invoke_llm(
+        self,
+        *,
+        provider: str,
+        model: str,
+        credentials: dict[str, Any],
+        model_parameters: dict[str, Any],
+        prompt_messages: Sequence[PromptMessage],
+        tools: list[PromptMessageTool] | None,
+        stop: Sequence[str] | None,
+        stream: bool,
+    ) -> Generator[LLMResultChunk, None, None]:
+        _ = provider, model, credentials, model_parameters, prompt_messages
+        _ = tools, stop, stream
+        yield from self._chunks
+        if self._fail_after_chunks:
+            msg = "stream failed"
+            raise RuntimeError(msg)
+
+
+class _RecordingCallback(Callback):
+    def __init__(self) -> None:
+        self.after_results: list[LLMResult] = []
+
+    def on_before_invoke(
+        self,
+        llm_instance: AIModel,
+        model: str,
+        credentials: dict,
+        prompt_messages: list[PromptMessage],
+        model_parameters: dict,
+        tools: list[PromptMessageTool] | None = None,
+        stop: Sequence[str] | None = None,
+        stream: bool = True,
+        user: str | None = None,
+        invocation_context: Mapping[str, object] | None = None,
+    ) -> None:
+        _ = (
+            llm_instance,
+            model,
+            credentials,
+            prompt_messages,
+            model_parameters,
+            tools,
+            stop,
+            stream,
+            user,
+            invocation_context,
+        )
+
+    def on_new_chunk(
+        self,
+        llm_instance: AIModel,
+        chunk: LLMResultChunk,
+        model: str,
+        credentials: dict,
+        prompt_messages: Sequence[PromptMessage],
+        model_parameters: dict,
+        tools: list[PromptMessageTool] | None = None,
+        stop: Sequence[str] | None = None,
+        stream: bool = True,
+        user: str | None = None,
+        invocation_context: Mapping[str, object] | None = None,
+    ) -> None:
+        _ = (
+            llm_instance,
+            chunk,
+            model,
+            credentials,
+            prompt_messages,
+            model_parameters,
+            tools,
+            stop,
+            stream,
+            user,
+            invocation_context,
+        )
+
+    def on_after_invoke(
+        self,
+        llm_instance: AIModel,
+        result: LLMResult,
+        model: str,
+        credentials: dict,
+        prompt_messages: Sequence[PromptMessage],
+        model_parameters: dict,
+        tools: list[PromptMessageTool] | None = None,
+        stop: Sequence[str] | None = None,
+        stream: bool = True,
+        user: str | None = None,
+        invocation_context: Mapping[str, object] | None = None,
+    ) -> None:
+        _ = (
+            llm_instance,
+            model,
+            credentials,
+            prompt_messages,
+            model_parameters,
+            tools,
+            stop,
+            stream,
+            user,
+            invocation_context,
+        )
+        self.after_results.append(result)
+
+    def on_invoke_error(
+        self,
+        llm_instance: AIModel,
+        ex: Exception,
+        model: str,
+        credentials: dict,
+        prompt_messages: list[PromptMessage],
+        model_parameters: dict,
+        tools: list[PromptMessageTool] | None = None,
+        stop: Sequence[str] | None = None,
+        stream: bool = True,
+        user: str | None = None,
+        invocation_context: Mapping[str, object] | None = None,
+    ) -> None:
+        _ = (
+            llm_instance,
+            ex,
+            model,
+            credentials,
+            prompt_messages,
+            model_parameters,
+            tools,
+            stop,
+            stream,
+            user,
+            invocation_context,
+        )
+
+
+def _make_chunk(
+    *,
+    model: str,
+    content: str | list[PromptMessageContentUnionTypes] | None,
+    usage: LLMUsage | None = None,
+    system_fingerprint: str | None = None,
+) -> LLMResultChunk:
+    return LLMResultChunk(
+        model=model,
+        delta=LLMResultChunkDelta(
+            index=0,
+            message=AssistantPromptMessage(content=content),
+            usage=usage,
+        ),
+        system_fingerprint=system_fingerprint,
+    )
 
 
 class _EmbeddingRuntimeStub(_ProviderRuntimeStub):
@@ -485,6 +656,90 @@ def test_large_language_model_accepts_llm_only_runtime_surface() -> None:
         )
         == 7
     )
+
+
+def test_large_language_model_stream_after_invoke_preserves_chunk_state() -> None:
+    provider = ProviderEntity(
+        provider="test-provider",
+        label=I18nObject(en_US="Test Provider"),
+        supported_model_types=[ModelType.LLM],
+        configurate_methods=[],
+    )
+    usage = LLMUsage.empty_usage().model_copy(
+        update={"prompt_tokens": 1, "total_tokens": 1},
+    )
+    list_content: list[PromptMessageContentUnionTypes] = [
+        TextPromptMessageContent(data=" there"),
+    ]
+    runtime = cast(
+        "LLMModelRuntime",
+        _StreamingLLMRuntimeStub([
+            _make_chunk(
+                model="first-model",
+                content="hi",
+                system_fingerprint="fp-1",
+            ),
+            _make_chunk(
+                model="second-model",
+                content=list_content,
+                usage=usage,
+                system_fingerprint="fp-2",
+            ),
+        ]),
+    )
+    model = LargeLanguageModel(provider_schema=provider, model_runtime=runtime)
+    prompt_messages: list[PromptMessage] = [UserPromptMessage(content="hello")]
+    callback = _RecordingCallback()
+
+    result = model.invoke(
+        model="fake-chat",
+        credentials={},
+        prompt_messages=prompt_messages,
+        stream=True,
+        callbacks=[callback],
+    )
+
+    emitted_chunks = list(cast("Generator[LLMResultChunk, None, None]", result))
+
+    assert [chunk.prompt_messages for chunk in emitted_chunks] == [
+        prompt_messages,
+        prompt_messages,
+    ]
+    assert len(callback.after_results) == 1
+    after_result = callback.after_results[0]
+    assert after_result.model == "second-model"
+    assert after_result.message.content == [
+        TextPromptMessageContent(data="hi"),
+        *list_content,
+    ]
+    assert after_result.usage == usage
+    assert after_result.system_fingerprint == "fp-2"
+
+
+def test_large_language_model_stream_errors_are_transformed() -> None:
+    provider = ProviderEntity(
+        provider="test-provider",
+        label=I18nObject(en_US="Test Provider"),
+        supported_model_types=[ModelType.LLM],
+        configurate_methods=[],
+    )
+    runtime = cast(
+        "LLMModelRuntime",
+        _StreamingLLMRuntimeStub(
+            [_make_chunk(model="first-model", content="hi")],
+            fail_after_chunks=True,
+        ),
+    )
+    model = LargeLanguageModel(provider_schema=provider, model_runtime=runtime)
+    result = model.invoke(
+        model="fake-chat",
+        credentials={},
+        prompt_messages=[UserPromptMessage(content="hello")],
+        stream=True,
+    )
+
+    with pytest.raises(InvokeError, match="stream failed"):
+        list(cast("Generator[LLMResultChunk, None, None]", result))
 
 
 def test_text_embedding_model_accepts_embedding_only_runtime_surface() -> None:

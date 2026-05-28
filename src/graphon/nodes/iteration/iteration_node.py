@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, Literal, NewType, assert_never, override
 
 from typing_extensions import TypeIs
 
-from graphon.entities.graph_config import NodeConfigDictAdapter
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import (
     BuiltinNodeTypes,
@@ -683,26 +682,10 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
             if sub_node_config.get("data", {}).get("iteration_id") != node_id:
                 continue
 
-            # variable selector to variable mapping
-            try:
-                typed_sub_node_config = NodeConfigDictAdapter.validate_python(
-                    sub_node_config,
-                )
-                node_type = typed_sub_node_config["data"].type
-                node_mapping = Node.get_node_type_classes_mapping()
-                if node_type not in node_mapping:
-                    continue
-                node_version = str(typed_sub_node_config["data"].version)
-                node_cls = node_mapping[node_type][node_version]
-
-                sub_node_variable_mapping = (
-                    node_cls.extract_variable_selector_to_variable_mapping(
-                        graph_config=graph_config,
-                        config=typed_sub_node_config,
-                    )
-                )
-            except NotImplementedError:
-                sub_node_variable_mapping = {}
+            sub_node_variable_mapping = cls._extract_mapping_from_node_config(
+                graph_config=graph_config,
+                config=sub_node_config,
+            )
 
             # remove iteration variables
             sub_node_variable_mapping = {

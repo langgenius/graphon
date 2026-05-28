@@ -2,6 +2,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
 
 from graphon.model_runtime.callbacks.base_callback import Callback
 from graphon.model_runtime.callbacks.logging_callback import LoggingCallback
@@ -114,6 +115,99 @@ def _merge_tool_call_delta(
         tool_call.function.arguments += delta.function.arguments
 
 
+@dataclass(slots=True)
+class _LLMChunkAccumulator:
+    content: str = ""
+    content_list: list[PromptMessageContentUnionTypes] = field(default_factory=list)
+    usage: LLMUsage = field(default_factory=LLMUsage.empty_usage)
+    system_fingerprint: str | None = None
+    tool_calls: list[AssistantPromptMessage.ToolCall] = field(default_factory=list)
+
+    def consume_all(self, chunks: Iterator[LLMResultChunk]) -> None:
+        for chunk in chunks:
+            self.consume(chunk)
+
+    def consume(self, chunk: LLMResultChunk) -> None:
+        self._consume_content(chunk)
+        if chunk.delta.message.tool_calls:
+            merge_tool_call_deltas(chunk.delta.message.tool_calls, self.tool_calls)
+        if chunk.delta.usage:
+            self.usage = chunk.delta.usage
+        if chunk.system_fingerprint:
+            self.system_fingerprint = chunk.system_fingerprint
+
+    def _consume_content(self, chunk: LLMResultChunk) -> None:
+        content = chunk.delta.message.content
+        if isinstance(content, str):
+            self.content += content
+        elif isinstance(content, list):
+            self.content_list.extend(content)
+
+    def to_result(
+        self,
+        *,
+        model: str,
+        prompt_messages: Sequence[PromptMessage],
+    ) -> LLMResult:
+        return LLMResult(
+            model=model,
+            prompt_messages=prompt_messages,
+            message=AssistantPromptMessage(
+                content=self.content or self.content_list,
+                tool_calls=self.tool_calls,
+            ),
+            usage=self.usage,
+            system_fingerprint=self.system_fingerprint,
+        )
+
+
+@dataclass(slots=True)
+class _StreamingInvokeAccumulator:
+    real_model: str
+    message_content: list[PromptMessageContentUnionTypes] = field(default_factory=list)
+    usage: LLMUsage | None = None
+    system_fingerprint: str | None = None
+
+    def consume(self, chunk: LLMResultChunk) -> None:
+        self._consume_content(chunk.delta.message.content)
+        self.real_model = chunk.model
+        if chunk.delta.usage:
+            self.usage = chunk.delta.usage
+        if chunk.system_fingerprint:
+            self.system_fingerprint = chunk.system_fingerprint
+
+    def _consume_content(
+        self,
+        content: str | list[PromptMessageContentUnionTypes] | None,
+    ) -> None:
+        if not content:
+            return
+        if isinstance(content, list):
+            self.message_content.extend(content)
+            return
+        if isinstance(content, str):
+            self.message_content.append(TextPromptMessageContent(data=content))
+
+    def to_result(
+        self,
+        *,
+        prompt_messages: Sequence[PromptMessage],
+    ) -> LLMResult:
+        return LLMResult(
+            model=self.real_model,
+            prompt_messages=prompt_messages,
+            message=AssistantPromptMessage(content=self.message_content),
+            usage=self.usage or LLMUsage.empty_usage(),
+            system_fingerprint=self.system_fingerprint,
+        )
+
+
+def _close_chunk_iterator(chunks: Iterator[LLMResultChunk]) -> None:
+    close = getattr(chunks, "close", None)
+    if callable(close):
+        close()
+
+
 def _build_llm_result_from_chunks(
     model: str,
     prompt_messages: Sequence[PromptMessage],
@@ -128,43 +222,18 @@ def _build_llm_result_from_chunks(
         A normalized `LLMResult` assembled from the consumed chunks.
 
     """
-    content = ""
-    content_list: list[PromptMessageContentUnionTypes] = []
-    usage = LLMUsage.empty_usage()
-    system_fingerprint: str | None = None
-    tools_calls: list[AssistantPromptMessage.ToolCall] = []
-
+    accumulator = _LLMChunkAccumulator()
     try:
-        for chunk in chunks:
-            if isinstance(chunk.delta.message.content, str):
-                content += chunk.delta.message.content
-            elif isinstance(chunk.delta.message.content, list):
-                content_list.extend(chunk.delta.message.content)
-
-            if chunk.delta.message.tool_calls:
-                merge_tool_call_deltas(chunk.delta.message.tool_calls, tools_calls)
-
-            if chunk.delta.usage:
-                usage = chunk.delta.usage
-            if chunk.system_fingerprint:
-                system_fingerprint = chunk.system_fingerprint
+        accumulator.consume_all(chunks)
     except Exception:
         logger.exception("Error while consuming non-stream plugin chunk iterator.")
         raise
     finally:
-        close = getattr(chunks, "close", None)
-        if callable(close):
-            close()
+        _close_chunk_iterator(chunks)
 
-    return LLMResult(
+    return accumulator.to_result(
         model=model,
         prompt_messages=prompt_messages,
-        message=AssistantPromptMessage(
-            content=content or content_list,
-            tool_calls=tools_calls,
-        ),
-        usage=usage,
-        system_fingerprint=system_fingerprint,
     )
 
 
@@ -351,65 +420,29 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
     ) -> Generator[LLMResultChunk, None, None]:
         """Stream runtime result chunks through callbacks and bookkeeping hooks."""
         callbacks = callbacks or []
-        message_content: list[PromptMessageContentUnionTypes] = []
-        usage = None
-        system_fingerprint = None
-        real_model = model
-
-        def _update_message_content(
-            content: str | list[PromptMessageContentUnionTypes] | None,
-        ) -> None:
-            if not content:
-                return
-            if isinstance(content, list):
-                message_content.extend(content)
-                return
-            if isinstance(content, str):
-                message_content.append(TextPromptMessageContent(data=content))
-                return
+        accumulator = _StreamingInvokeAccumulator(real_model=model)
 
         try:
-            for chunk in result:
-                # Following https://github.com/langgenius/dify/issues/17799,
-                # We removed prompt_messages from the chunk on the plugin
-                # daemon side.
-                # To ensure compatibility, we add the prompt_messages back here.
-                chunk.prompt_messages = prompt_messages
-                yield chunk
-
-                self._trigger_new_chunk_callbacks(
-                    chunk=chunk,
-                    model=model,
-                    credentials=credentials,
-                    prompt_messages=prompt_messages,
-                    model_parameters=model_parameters,
-                    tools=tools,
-                    stop=stop,
-                    stream=stream,
-                    invocation_context=invocation_context,
-                    callbacks=callbacks,
-                )
-
-                _update_message_content(chunk.delta.message.content)
-
-                real_model = chunk.model
-                if chunk.delta.usage:
-                    usage = chunk.delta.usage
-
-                if chunk.system_fingerprint:
-                    system_fingerprint = chunk.system_fingerprint
+            yield from self._stream_invoke_result_chunks(
+                result=result,
+                accumulator=accumulator,
+                model=model,
+                credentials=credentials,
+                prompt_messages=prompt_messages,
+                model_parameters=model_parameters,
+                tools=tools,
+                stop=stop,
+                stream=stream,
+                invocation_context=invocation_context,
+                callbacks=callbacks,
+            )
         except Exception as e:
             raise self._transform_invoke_error(e) from e
 
-        assistant_message = AssistantPromptMessage(content=message_content)
         self._trigger_after_invoke_callbacks(
             model=model,
-            result=LLMResult(
-                model=real_model,
+            result=accumulator.to_result(
                 prompt_messages=prompt_messages,
-                message=assistant_message,
-                usage=usage or LLMUsage.empty_usage(),
-                system_fingerprint=system_fingerprint,
             ),
             credentials=credentials,
             prompt_messages=prompt_messages,
@@ -420,6 +453,43 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
             invocation_context=invocation_context,
             callbacks=callbacks,
         )
+
+    def _stream_invoke_result_chunks(
+        self,
+        *,
+        result: Generator[LLMResultChunk, None, None],
+        accumulator: _StreamingInvokeAccumulator,
+        model: str,
+        credentials: dict,
+        prompt_messages: Sequence[PromptMessage],
+        model_parameters: dict,
+        tools: list[PromptMessageTool] | None,
+        stop: Sequence[str] | None,
+        stream: bool,
+        invocation_context: Mapping[str, object] | None,
+        callbacks: list[Callback],
+    ) -> Generator[LLMResultChunk, None, None]:
+        for chunk in result:
+            # Following https://github.com/langgenius/dify/issues/17799,
+            # We removed prompt_messages from the chunk on the plugin
+            # daemon side.
+            # To ensure compatibility, we add the prompt_messages back here.
+            chunk.prompt_messages = prompt_messages
+            yield chunk
+
+            self._trigger_new_chunk_callbacks(
+                chunk=chunk,
+                model=model,
+                credentials=credentials,
+                prompt_messages=prompt_messages,
+                model_parameters=model_parameters,
+                tools=tools,
+                stop=stop,
+                stream=stream,
+                invocation_context=invocation_context,
+                callbacks=callbacks,
+            )
+            accumulator.consume(chunk)
 
     def get_num_tokens(
         self,

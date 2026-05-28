@@ -9,7 +9,7 @@ import queue
 import threading
 import time
 from collections.abc import Sequence
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, datetime
 from typing import final, override
 
@@ -135,47 +135,32 @@ class Worker(threading.Thread):
         """
         node.ensure_execution_id()
 
+        context = self._execution_context
+        if context is None:
+            context = nullcontext()
+
         error: Exception | None = None
         result_event: GraphNodeEventBase | None = None
 
-        # Execute the node with preserved context if execution context is provided
-        if self._execution_context is not None:
-            with self._execution_context:
-                self._invoke_node_run_start_hooks(node)
-                try:
-                    node_events = node.run()
-                    for event in node_events:
-                        if (
-                            isinstance(event, NodeRunStartedEvent)
-                            and event.id == node.execution_id
-                        ):
-                            self._current_node_started_at = event.start_at
-                        self._event_queue.put(event)
-                        if is_node_result_event(event):
-                            result_event = event
-                except Exception as exc:
-                    error = exc
-                    raise
-                finally:
-                    self._invoke_node_run_end_hooks(node, error, result_event)
-        else:
+        with context:
             self._invoke_node_run_start_hooks(node)
             try:
-                node_events = node.run()
-                for event in node_events:
-                    if (
-                        isinstance(event, NodeRunStartedEvent)
-                        and event.id == node.execution_id
-                    ):
-                        self._current_node_started_at = event.start_at
-                    self._event_queue.put(event)
-                    if is_node_result_event(event):
-                        result_event = event
+                result_event = self._consume_node_events(node)
             except Exception as exc:
                 error = exc
                 raise
             finally:
                 self._invoke_node_run_end_hooks(node, error, result_event)
+
+    def _consume_node_events(self, node: Node) -> GraphNodeEventBase | None:
+        result_event: GraphNodeEventBase | None = None
+        for event in node.run():
+            if isinstance(event, NodeRunStartedEvent) and event.id == node.execution_id:
+                self._current_node_started_at = event.start_at
+            self._event_queue.put(event)
+            if is_node_result_event(event):
+                result_event = event
+        return result_event
 
     def _invoke_node_run_start_hooks(self, node: Node) -> None:
         """Invoke on_node_run_start hooks for all layers."""

@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import logging
 import queue
-from collections.abc import Generator
+from collections.abc import Callable, Generator
+from dataclasses import dataclass
 from typing import final
 
 from graphon.entities.graph_init_params import GraphInitParams
@@ -28,6 +29,7 @@ from graphon.graph_events.graph import (
 )
 from graphon.runtime.graph_runtime_state import (
     ChildGraphEngineBuilderProtocol,
+    GraphExecutionProtocol,
     GraphRuntimeState,
 )
 from graphon.runtime.read_only_wrappers import ReadOnlyGraphRuntimeStateWrapper
@@ -54,6 +56,60 @@ logger = logging.getLogger(__name__)
 
 
 _DEFAULT_CONFIG = GraphEngineConfig()
+
+
+@dataclass(slots=True)
+class _GraphRunLifecycle:
+    graph_execution: GraphExecutionProtocol
+    event_manager: EventManager
+    initialize_layers: Callable[[], None]
+    start_execution: Callable[..., None]
+    stop_execution: Callable[[], None]
+    emit_terminal_events: Callable[[], Generator[GraphEngineEvent, None, None]]
+    is_resume: bool = False
+
+    def run(self) -> Generator[GraphEngineEvent, None, None]:
+        try:
+            self._prepare()
+            yield self._started_event()
+            self.start_execution(resume=self.is_resume)
+            yield from self.event_manager.emit_events()
+            yield from self.emit_terminal_events()
+        except Exception as error:
+            yield self._failed_event(error)
+            raise
+        finally:
+            self.stop_execution()
+
+    def _prepare(self) -> None:
+        self.initialize_layers()
+        self.is_resume = self.graph_execution.started
+        if self.is_resume:
+            self._resume_graph_execution()
+            return
+        self.graph_execution.start()
+
+    def _resume_graph_execution(self) -> None:
+        self.graph_execution.paused = False
+        self.graph_execution.pause_reasons = []
+
+    def _started_event(self) -> GraphRunStartedEvent:
+        event = GraphRunStartedEvent(reason=self._start_reason())
+        self.event_manager.notify_layers(event)
+        return event
+
+    def _start_reason(self) -> WorkflowStartReason:
+        if self.is_resume:
+            return WorkflowStartReason.RESUMPTION
+        return WorkflowStartReason.INITIAL
+
+    def _failed_event(self, error: Exception) -> GraphRunFailedEvent:
+        event = GraphRunFailedEvent(
+            error=str(error),
+            exceptions_count=self.graph_execution.exceptions_count,
+        )
+        self.event_manager.notify_layers(event)
+        return event
 
 
 @final
@@ -242,45 +298,15 @@ class GraphEngine:
             `GraphEngineEvent` instances emitted during workflow execution.
 
         """
-        try:
-            # Initialize layers
-            self._initialize_layers()
-
-            is_resume = self._graph_execution.started
-            if not is_resume:
-                self._graph_execution.start()
-            else:
-                self._graph_execution.paused = False
-                self._graph_execution.pause_reasons = []
-
-            start_event = GraphRunStartedEvent(
-                reason=WorkflowStartReason.RESUMPTION
-                if is_resume
-                else WorkflowStartReason.INITIAL,
-            )
-            self._event_manager.notify_layers(start_event)
-            yield start_event
-
-            # Start subsystems
-            self._start_execution(resume=is_resume)
-
-            # Yield events as they occur
-            yield from self._event_manager.emit_events()
-
-            # Handle completion
-            yield from self._emit_terminal_events()
-
-        except Exception as error:
-            failed_event = GraphRunFailedEvent(
-                error=str(error),
-                exceptions_count=self._graph_execution.exceptions_count,
-            )
-            self._event_manager.notify_layers(failed_event)
-            yield failed_event
-            raise
-
-        finally:
-            self._stop_execution()
+        lifecycle = _GraphRunLifecycle(
+            graph_execution=self._graph_execution,
+            event_manager=self._event_manager,
+            initialize_layers=self._initialize_layers,
+            start_execution=self._start_execution,
+            stop_execution=self._stop_execution,
+            emit_terminal_events=self._emit_terminal_events,
+        )
+        yield from lifecycle.run()
 
     def _emit_terminal_events(self) -> Generator[GraphEngineEvent, None, None]:
         if self._graph_execution.is_paused:

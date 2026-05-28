@@ -1,5 +1,5 @@
 import base64
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, Never, cast
@@ -17,19 +17,26 @@ from graphon.model_runtime.entities.llm_entities import (
     LLMPollingResult,
     LLMPollingStatus,
     LLMResult,
+    LLMResultChunk,
+    LLMResultChunkDelta,
+    LLMResultChunkWithStructuredOutput,
+    LLMStructuredOutput,
     LLMUsage,
 )
 from graphon.model_runtime.entities.message_entities import (
     AssistantPromptMessage,
+    PromptMessageContentUnionTypes,
     VideoPromptMessageContent,
 )
 from graphon.model_runtime.entities.model_entities import ModelFeature
 from graphon.node_events.node import (
     ModelInvokeCompletedEvent,
     ModelPollingProgressEvent,
+    StreamChunkEvent,
     StreamCompletedEvent,
 )
 from graphon.nodes.llm import LLMNode, LLMNodeData
+from graphon.nodes.llm.exc import LLMNodeError
 from graphon.nodes.llm.runtime_protocols import LLMPollingCapableProtocol, LLMProtocol
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
@@ -81,6 +88,29 @@ def _llm_result(text: str = "final answer") -> LLMResult:
         message=AssistantPromptMessage(content=text),
         usage=LLMUsage.empty_usage(),
     )
+
+
+def _stream_chunk(
+    content: str | list[PromptMessageContentUnionTypes] | None,
+    *,
+    usage: LLMUsage | None = None,
+    finish_reason: str | None = None,
+) -> LLMResultChunk:
+    return LLMResultChunk(
+        model="gpt-4o",
+        delta=LLMResultChunkDelta(
+            index=0,
+            message=AssistantPromptMessage(content=content),
+            usage=usage,
+            finish_reason=finish_reason,
+        ),
+    )
+
+
+def _stream_results(
+    *results: LLMResultChunk | LLMStructuredOutput,
+) -> Generator[LLMResultChunk | LLMStructuredOutput, None, None]:
+    yield from results
 
 
 def _build_llm_node(
@@ -297,6 +327,124 @@ def test_polling_llm_saves_video_output_file(
         "https://example.com/video.mp4",
         FileType.VIDEO,
     )
+
+
+def test_streaming_invoke_result_emits_chunks_and_completion() -> None:
+    usage = LLMUsage.empty_usage().model_copy(
+        update={"prompt_tokens": 1, "total_tokens": 1},
+    )
+    model = MagicMock(is_structured_output_parse_error=lambda _error: False)
+
+    events = list(
+        LLMNode.handle_invoke_result(
+            invoke_result=_stream_results(
+                _stream_chunk("hello", usage=usage, finish_reason="stop"),
+            ),
+            file_saver=MagicMock(),
+            file_outputs=[],
+            node_id="llm",
+            model_instance=cast(LLMProtocol, model),
+        ),
+    )
+
+    stream_event = next(
+        event for event in events if isinstance(event, StreamChunkEvent)
+    )
+    completed_event = next(
+        event for event in events if isinstance(event, ModelInvokeCompletedEvent)
+    )
+    assert stream_event.chunk == "hello"
+    assert completed_event.text == "hello"
+    assert completed_event.finish_reason == "stop"
+    assert completed_event.usage.time_to_first_token is not None
+
+
+def test_structured_streaming_chunk_is_forwarded_and_processed() -> None:
+    model = MagicMock(is_structured_output_parse_error=lambda _error: False)
+    structured_chunk = LLMResultChunkWithStructuredOutput(
+        model="gpt-4o",
+        delta=LLMResultChunkDelta(
+            index=0,
+            message=AssistantPromptMessage(content="hello"),
+            usage=LLMUsage.empty_usage(),
+        ),
+        structured_output={"ok": True},
+    )
+
+    events = list(
+        LLMNode.handle_invoke_result(
+            invoke_result=_stream_results(structured_chunk),
+            file_saver=MagicMock(),
+            file_outputs=[],
+            node_id="llm",
+            model_instance=cast(LLMProtocol, model),
+        ),
+    )
+
+    assert events[0] == structured_chunk
+    assert any(
+        isinstance(event, StreamChunkEvent) and event.chunk == "hello"
+        for event in events
+    )
+    completed_event = next(
+        event for event in events if isinstance(event, ModelInvokeCompletedEvent)
+    )
+    assert completed_event.structured_output == {"ok": True}
+
+
+def test_streaming_structured_parse_error_is_converted() -> None:
+    class StructuredParseError(Exception):
+        pass
+
+    def _failing_stream() -> Generator[
+        LLMResultChunk | LLMStructuredOutput,
+        None,
+        None,
+    ]:
+        msg = "invalid payload"
+        raise StructuredParseError(msg)
+        yield
+
+    model = MagicMock(
+        is_structured_output_parse_error=lambda error: isinstance(
+            error,
+            StructuredParseError,
+        ),
+    )
+
+    with pytest.raises(LLMNodeError, match="Failed to parse structured output"):
+        list(
+            LLMNode.handle_invoke_result(
+                invoke_result=_failing_stream(),
+                file_saver=MagicMock(),
+                file_outputs=[],
+                node_id="llm",
+                model_instance=cast(LLMProtocol, model),
+            ),
+        )
+
+
+def test_empty_streaming_content_does_not_set_first_token_time() -> None:
+    usage = LLMUsage.empty_usage().model_copy(
+        update={"prompt_tokens": 1, "total_tokens": 1},
+    )
+    model = MagicMock(is_structured_output_parse_error=lambda _error: False)
+
+    events = list(
+        LLMNode.handle_invoke_result(
+            invoke_result=_stream_results(_stream_chunk("", usage=usage)),
+            file_saver=MagicMock(),
+            file_outputs=[],
+            node_id="llm",
+            model_instance=cast(LLMProtocol, model),
+        ),
+    )
+
+    completed_event = next(
+        event for event in events if isinstance(event, ModelInvokeCompletedEvent)
+    )
+    assert completed_event.usage.time_to_first_token is None
+    assert completed_event.usage.time_to_generate is None
 
 
 def test_save_multimodal_output_persists_inline_video() -> None:

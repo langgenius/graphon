@@ -2,10 +2,10 @@ import contextlib
 import json
 import logging
 from collections.abc import Generator, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, assert_never, override
 
-from graphon.entities.graph_config import NodeConfigDictAdapter
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import (
     BuiltinNodeTypes,
@@ -61,6 +61,17 @@ class _IterationState(TypedDict, total=False):
     single_loop_variable: dict[str, object]
 
 
+@dataclass(slots=True)
+class _LoopRunState:
+    loop_count: int
+    reach_break_condition: bool = False
+    loop_usage: LLMUsage = field(default_factory=LLMUsage.empty_usage)
+    loop_duration_map: dict[str, float] = field(default_factory=dict)
+    single_loop_variable_map: dict[str, dict[str, object]] = field(
+        default_factory=dict,
+    )
+
+
 class LoopNode(LLMUsageTrackingMixin, Node[LoopNodeData]):
     """Loop Node."""
 
@@ -84,9 +95,7 @@ class LoopNode(LLMUsageTrackingMixin, Node[LoopNodeData]):
 
         start_at = datetime.now(UTC).replace(tzinfo=None)
         condition_processor = ConditionProcessor()
-        loop_duration_map: dict[str, float] = {}
-        single_loop_variable_map: dict[str, dict[str, object]] = {}
-        loop_usage = LLMUsage.empty_usage()
+        loop_state = _LoopRunState(loop_count=loop_count)
 
         yield LoopStartedEvent(
             start_at=start_at,
@@ -95,74 +104,118 @@ class LoopNode(LLMUsageTrackingMixin, Node[LoopNodeData]):
         )
 
         try:
-            reach_break_condition = self._evaluate_break_conditions(
+            yield from self._run_loop_body(
                 condition_processor=condition_processor,
-                break_conditions=self.node_data.break_conditions,
-                logical_operator=self.node_data.logical_operator,
-                suppress_errors=True,
+                root_node_id=root_node_id,
+                loop_node_ids=loop_node_ids,
+                loop_variable_selectors=loop_variable_selectors,
+                loop_state=loop_state,
             )
-            if reach_break_condition:
-                loop_count = 0
-
-            for i in range(loop_count):
-                iteration_state: _IterationState = {}
-                try:
-                    yield from self._execute_loop_iteration(
-                        current_index=i,
-                        root_node_id=root_node_id,
-                        loop_node_ids=loop_node_ids,
-                        loop_variable_selectors=loop_variable_selectors,
-                        iteration_state=iteration_state,
-                    )
-                finally:
-                    iteration_usage = iteration_state.get("iteration_usage")
-                    if isinstance(iteration_usage, LLMUsage):
-                        loop_usage = self._merge_usage(loop_usage, iteration_usage)
-
-                if self._record_iteration_state(
-                    current_index=i,
-                    iteration_state=iteration_state,
-                    loop_duration_map=loop_duration_map,
-                    single_loop_variable_map=single_loop_variable_map,
-                ):
-                    break
-
-                reach_break_condition = self._evaluate_break_conditions(
-                    condition_processor=condition_processor,
-                    break_conditions=self.node_data.break_conditions,
-                    logical_operator=self.node_data.logical_operator,
-                )
-                if reach_break_condition:
-                    break
-
-                yield LoopNextEvent(
-                    index=i + 1,
-                    pre_loop_output=self.node_data.outputs,
-                )
-
-            self._accumulate_usage(loop_usage)
-            yield from self._yield_loop_success_events(
-                start_at=start_at,
-                inputs=inputs,
-                steps=loop_count,
-                loop_usage=loop_usage,
-                loop_duration_map=loop_duration_map,
-                single_loop_variable_map=single_loop_variable_map,
-                reach_break_condition=reach_break_condition,
-            )
-
         except Exception as exc:
             logger.exception("Loop node %s failed", self._node_id)
-            self._accumulate_usage(loop_usage)
+            self._accumulate_usage(loop_state.loop_usage)
             yield from self._yield_loop_failure_events(
                 start_at=start_at,
                 inputs=inputs,
-                steps=loop_count,
-                loop_usage=loop_usage,
-                loop_duration_map=loop_duration_map,
-                single_loop_variable_map=single_loop_variable_map,
+                steps=loop_state.loop_count,
+                loop_usage=loop_state.loop_usage,
+                loop_duration_map=loop_state.loop_duration_map,
+                single_loop_variable_map=loop_state.single_loop_variable_map,
                 error=exc,
             )
+        else:
+            self._accumulate_usage(loop_state.loop_usage)
+            yield from self._yield_loop_success_events(
+                start_at=start_at,
+                inputs=inputs,
+                steps=loop_state.loop_count,
+                loop_usage=loop_state.loop_usage,
+                loop_duration_map=loop_state.loop_duration_map,
+                single_loop_variable_map=loop_state.single_loop_variable_map,
+                reach_break_condition=loop_state.reach_break_condition,
+            )
+
+    def _run_loop_body(
+        self,
+        *,
+        condition_processor: ConditionProcessor,
+        root_node_id: str,
+        loop_node_ids: set[str],
+        loop_variable_selectors: Mapping[str, Sequence[str]],
+        loop_state: _LoopRunState,
+    ) -> Generator[NodeEventBase | GraphNodeEventBase, None, None]:
+        loop_state.reach_break_condition = self._evaluate_break_conditions(
+            condition_processor=condition_processor,
+            break_conditions=self.node_data.break_conditions,
+            logical_operator=self.node_data.logical_operator,
+            suppress_errors=True,
+        )
+        if loop_state.reach_break_condition:
+            loop_state.loop_count = 0
+            return
+
+        for current_index in range(loop_state.loop_count):
+            iteration_state: _IterationState = {}
+            try:
+                yield from self._execute_loop_iteration(
+                    current_index=current_index,
+                    root_node_id=root_node_id,
+                    loop_node_ids=loop_node_ids,
+                    loop_variable_selectors=loop_variable_selectors,
+                    iteration_state=iteration_state,
+                )
+            finally:
+                self._merge_loop_iteration_usage(
+                    loop_state=loop_state,
+                    iteration_state=iteration_state,
+                )
+
+            if self._record_loop_iteration_state(
+                current_index=current_index,
+                iteration_state=iteration_state,
+                loop_state=loop_state,
+            ):
+                break
+
+            loop_state.reach_break_condition = self._evaluate_break_conditions(
+                condition_processor=condition_processor,
+                break_conditions=self.node_data.break_conditions,
+                logical_operator=self.node_data.logical_operator,
+            )
+            if loop_state.reach_break_condition:
+                break
+
+            yield LoopNextEvent(
+                index=current_index + 1,
+                pre_loop_output=self.node_data.outputs,
+            )
+
+    @staticmethod
+    def _merge_loop_iteration_usage(
+        *,
+        loop_state: _LoopRunState,
+        iteration_state: _IterationState,
+    ) -> None:
+        iteration_usage = iteration_state.get("iteration_usage")
+        if isinstance(iteration_usage, LLMUsage):
+            loop_state.loop_usage = LoopNode._merge_usage(
+                loop_state.loop_usage,
+                iteration_usage,
+            )
+
+    @staticmethod
+    def _record_loop_iteration_state(
+        *,
+        current_index: int,
+        iteration_state: _IterationState,
+        loop_state: _LoopRunState,
+    ) -> bool:
+        return LoopNode._record_iteration_state(
+            current_index=current_index,
+            iteration_state=iteration_state,
+            loop_duration_map=loop_state.loop_duration_map,
+            single_loop_variable_map=loop_state.single_loop_variable_map,
+        )
 
     @staticmethod
     def _record_iteration_state(
@@ -500,26 +553,10 @@ class LoopNode(LLMUsageTrackingMixin, Node[LoopNodeData]):
             if sub_node_config.get("data", {}).get("loop_id") != node_id:
                 continue
 
-            # variable selector to variable mapping
-            try:
-                typed_sub_node_config = NodeConfigDictAdapter.validate_python(
-                    sub_node_config,
-                )
-                node_type = typed_sub_node_config["data"].type
-                node_mapping = Node.get_node_type_classes_mapping()
-                if node_type not in node_mapping:
-                    continue
-                node_version = str(typed_sub_node_config["data"].version)
-                node_cls = node_mapping[node_type][node_version]
-
-                sub_node_variable_mapping = (
-                    node_cls.extract_variable_selector_to_variable_mapping(
-                        graph_config=graph_config,
-                        config=typed_sub_node_config,
-                    )
-                )
-            except NotImplementedError:
-                sub_node_variable_mapping = {}
+            sub_node_variable_mapping = cls._extract_mapping_from_node_config(
+                graph_config=graph_config,
+                config=sub_node_config,
+            )
 
             # remove loop variables
             sub_node_variable_mapping = {

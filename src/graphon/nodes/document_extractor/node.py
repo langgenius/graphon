@@ -468,19 +468,23 @@ def _extract_text_from_yaml(file_content: bytes) -> str:
 
 def _extract_text_from_pdf(file_content: bytes) -> str:
     try:
-        pdf_file = io.BytesIO(file_content)
-        pdf_document = pypdfium2.PdfDocument(pdf_file, autoclose=True)
-        text = ""
-        for page in pdf_document:
-            text_page = page.get_textpage()
-            text += text_page.get_text_range()
-            text_page.close()
-            page.close()
+        pdf_document = pypdfium2.PdfDocument(io.BytesIO(file_content), autoclose=True)
+        return _read_pdf_text(pdf_document)
     except Exception as e:
         msg = f"Failed to extract text from PDF: {e!s}"
         raise TextExtractionError(msg) from e
-    else:
-        return text
+
+
+def _read_pdf_text(pdf_document: pypdfium2.PdfDocument) -> str:
+    text_parts = []
+    for page in pdf_document:
+        text_page = page.get_textpage()
+        try:
+            text_parts.append(text_page.get_text_range())
+        finally:
+            text_page.close()
+            page.close()
+    return "".join(text_parts)
 
 
 def _extract_text_from_doc(
@@ -549,15 +553,22 @@ def _normalize_docx_zip(file_content: bytes) -> bytes:
                 "w",
                 compression=zipfile.ZIP_DEFLATED,
             ) as zout:
-                for item in zin.infolist():
-                    data = zin.read(item.filename)
-                    # Normalize backslash path separators to forward slash
-                    item.filename = item.filename.replace("\\", "/")
-                    zout.writestr(item, data)
+                _rewrite_docx_zip_entries(zin, zout)
             return out_buf.getvalue()
     except zipfile.BadZipFile:
         # Not a valid zip — return as-is and let python-docx report the real error
         return file_content
+
+
+def _rewrite_docx_zip_entries(
+    zin: zipfile.ZipFile,
+    zout: zipfile.ZipFile,
+) -> None:
+    for item in zin.infolist():
+        data = zin.read(item.filename)
+        # Normalize backslash path separators to forward slash.
+        item.filename = item.filename.replace("\\", "/")
+        zout.writestr(item, data)
 
 
 def _extract_text_from_docx(file_content: bytes) -> str:
@@ -698,98 +709,97 @@ def _extract_text_from_file(
 
 def _extract_text_from_csv(file_content: bytes) -> str:
     try:
-        # Detect encoding using charset_normalizer
-        result = charset_normalizer.from_bytes(file_content).best()
-        encoding = result.encoding if result else "utf-8"
-
-        # Fallback to utf-8 if detection fails
-        if not encoding:
-            encoding = "utf-8"
-
-        try:
-            csv_file = io.StringIO(file_content.decode(encoding, errors="ignore"))
-        except (UnicodeDecodeError, LookupError):
-            # If decoding fails, try with utf-8 as last resort
-            csv_file = io.StringIO(file_content.decode("utf-8", errors="ignore"))
-
-        csv_reader = csv.reader(csv_file)
-        rows = list(csv_reader)
-
-        if not rows:
-            return ""
-
-        # Combine multi-line text in the header row
-        header_row = [cell.replace("\n", " ").replace("\r", "") for cell in rows[0]]
-
-        # Create Markdown table
-        markdown_table = "| " + " | ".join(header_row) + " |\n"
-        markdown_table += (
-            "| " + " | ".join(["-" * len(col) for col in rows[0]]) + " |\n"
-        )
-
-        # Process each data row and combine multi-line text in each cell
-        for row in rows[1:]:
-            processed_row = [cell.replace("\n", " ").replace("\r", "") for cell in row]
-            markdown_table += "| " + " | ".join(processed_row) + " |\n"
-
+        csv_file = io.StringIO(_decode_csv_text(file_content))
+        return _rows_to_markdown_table(list(csv.reader(csv_file)))
     except Exception as e:
         msg = f"Failed to extract text from CSV: {e!s}"
         raise TextExtractionError(msg) from e
-    else:
-        return markdown_table
+
+
+def _decode_csv_text(file_content: bytes) -> str:
+    result = charset_normalizer.from_bytes(file_content).best()
+    encoding = result.encoding if result else "utf-8"
+    if not encoding:
+        encoding = "utf-8"
+
+    try:
+        return file_content.decode(encoding, errors="ignore")
+    except (UnicodeDecodeError, LookupError):
+        return file_content.decode("utf-8", errors="ignore")
+
+
+def _normalize_table_cell(cell: str) -> str:
+    return cell.replace("\n", " ").replace("\r", "")
+
+
+def _rows_to_markdown_table(rows: list[list[str]]) -> str:
+    if not rows:
+        return ""
+
+    header_row = [_normalize_table_cell(cell) for cell in rows[0]]
+    lines = [
+        "| " + " | ".join(header_row) + " |\n",
+        "| " + " | ".join(["-" * len(col) for col in rows[0]]) + " |\n",
+    ]
+    for row in rows[1:]:
+        processed_row = [_normalize_table_cell(cell) for cell in row]
+        lines.append("| " + " | ".join(processed_row) + " |\n")
+    return "".join(lines)
 
 
 def _extract_text_from_excel(file_content: bytes) -> str:
     """Extract text from an Excel file using pandas."""
-
-    def _construct_markdown_table(df: pd.DataFrame) -> str:
-        """Manually construct a Markdown table from a DataFrame."""
-        # Construct the header row
-        header_row = "| " + " | ".join(df.columns) + " |"
-
-        # Construct the separator row
-        separator_row = "| " + " | ".join(["-" * len(col) for col in df.columns]) + " |"
-
-        # Construct the data rows
-        data_rows = []
-        for _, row in df.iterrows():
-            data_row = "| " + " | ".join(map(str, row)) + " |"
-            data_rows.append(data_row)
-
-        # Combine all rows into a single string
-        return "\n".join([header_row, separator_row, *data_rows])
-
     try:
         excel_file = pd.ExcelFile(io.BytesIO(file_content))
-        markdown_table = ""
-        for sheet_name in excel_file.sheet_names:
-            try:
-                df = excel_file.parse(sheet_name=sheet_name)
-                if not isinstance(df, pd.DataFrame):
-                    continue
-                df = df.dropna(how="all")
-
-                # Combine multi-line text in each cell into a single line
-                df = df.map(
-                    lambda x: (
-                        " ".join(str(x).splitlines()) if isinstance(x, str) else x
-                    ),
-                )
-
-                # Combine multi-line text in column names into a single line
-                df.columns = pd.Index([
-                    " ".join(str(col).splitlines()) for col in df.columns
-                ])
-
-                # Manually construct the Markdown table
-                markdown_table += _construct_markdown_table(df) + "\n\n"
-            except (TypeError, ValueError):
-                continue
+        return _excel_file_to_markdown(excel_file)
     except Exception as e:
         msg = f"Failed to extract text from Excel file: {e!s}"
         raise TextExtractionError(msg) from e
-    else:
-        return markdown_table
+
+
+def _excel_file_to_markdown(excel_file: Any) -> str:
+    markdown_tables = []
+    for sheet_name in excel_file.sheet_names:
+        markdown_table = _excel_sheet_to_markdown(excel_file, sheet_name)
+        if markdown_table is not None:
+            markdown_tables.append(markdown_table + "\n\n")
+    return "".join(markdown_tables)
+
+
+def _excel_sheet_to_markdown(
+    excel_file: Any,
+    sheet_name: str,
+) -> str | None:
+    try:
+        return _parse_excel_sheet_to_markdown(excel_file, sheet_name)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_excel_sheet_to_markdown(
+    excel_file: Any,
+    sheet_name: str,
+) -> str | None:
+    df = excel_file.parse(sheet_name=sheet_name)
+    if not isinstance(df, pd.DataFrame):
+        return None
+    normalized_df = _normalize_excel_dataframe(df.dropna(how="all"))
+    return _excel_dataframe_to_markdown(normalized_df)
+
+
+def _normalize_excel_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.map(lambda x: " ".join(str(x).splitlines()) if isinstance(x, str) else x)
+    df.columns = pd.Index([" ".join(str(col).splitlines()) for col in df.columns])
+    return df
+
+
+def _excel_dataframe_to_markdown(df: pd.DataFrame) -> str:
+    header_row = "| " + " | ".join(df.columns) + " |"
+    separator_row = "| " + " | ".join(["-" * len(col) for col in df.columns]) + " |"
+    data_rows = []
+    for _, row in df.iterrows():
+        data_rows.append("| " + " | ".join(map(str, row)) + " |")
+    return "\n".join([header_row, separator_row, *data_rows])
 
 
 def _extract_text_from_ppt(
@@ -798,24 +808,15 @@ def _extract_text_from_ppt(
     unstructured_api_config: UnstructuredApiConfig,
 ) -> str:
     try:
-        if unstructured_api_config.api_url:
-            from unstructured.partition.api import partition_via_api  # noqa: PLC0415
-
-            elements = _partition_file_via_unstructured_api(
-                partition_via_api,
-                file_content,
-                suffix=".ppt",
-                unstructured_api_config=unstructured_api_config,
-            )
-        else:
-            from unstructured.partition.ppt import partition_ppt  # noqa: PLC0415
-
-            with io.BytesIO(file_content) as file:
-                elements = partition_ppt(file=file)
-        return "\n".join([getattr(element, "text", "") for element in elements])
-
+        return _partition_unstructured_file(
+            file_content,
+            suffix=".ppt",
+            unstructured_api_config=unstructured_api_config,
+            load_local_partition=_load_partition_ppt,
+            render_element=_render_unstructured_text_element,
+        )
     except Exception as e:
-        msg = f"Failed to extract text from PPTX: {e!s}"
+        msg = f"Failed to extract text from PPT: {e!s}"
         raise TextExtractionError(msg) from e
 
 
@@ -825,21 +826,13 @@ def _extract_text_from_pptx(
     unstructured_api_config: UnstructuredApiConfig,
 ) -> str:
     try:
-        if unstructured_api_config.api_url:
-            from unstructured.partition.api import partition_via_api  # noqa: PLC0415
-
-            elements = _partition_file_via_unstructured_api(
-                partition_via_api,
-                file_content,
-                suffix=".pptx",
-                unstructured_api_config=unstructured_api_config,
-            )
-        else:
-            from unstructured.partition.pptx import partition_pptx  # noqa: PLC0415
-
-            with io.BytesIO(file_content) as file:
-                elements = partition_pptx(file=file)
-        return "\n".join([getattr(element, "text", "") for element in elements])
+        return _partition_unstructured_file(
+            file_content,
+            suffix=".pptx",
+            unstructured_api_config=unstructured_api_config,
+            load_local_partition=_load_partition_pptx,
+            render_element=_render_unstructured_text_element,
+        )
     except Exception as e:
         msg = f"Failed to extract text from PPTX: {e!s}"
         raise TextExtractionError(msg) from e
@@ -851,25 +844,92 @@ def _extract_text_from_epub(
     unstructured_api_config: UnstructuredApiConfig,
 ) -> str:
     try:
-        if unstructured_api_config.api_url:
-            from unstructured.partition.api import partition_via_api  # noqa: PLC0415
-
-            elements = _partition_file_via_unstructured_api(
-                partition_via_api,
-                file_content,
-                suffix=".epub",
-                unstructured_api_config=unstructured_api_config,
-            )
-        else:
-            pypandoc.download_pandoc()
-            from unstructured.partition.epub import partition_epub  # noqa: PLC0415
-
-            with io.BytesIO(file_content) as file:
-                elements = partition_epub(file=file)
-        return "\n".join([str(element) for element in elements])
+        return _partition_unstructured_file(
+            file_content,
+            suffix=".epub",
+            unstructured_api_config=unstructured_api_config,
+            load_local_partition=_load_partition_epub,
+            render_element=str,
+            prepare=pypandoc.download_pandoc,
+        )
     except Exception as e:
         msg = f"Failed to extract text from EPUB: {e!s}"
         raise TextExtractionError(msg) from e
+
+
+def _partition_unstructured_file(
+    file_content: bytes,
+    *,
+    suffix: str,
+    unstructured_api_config: UnstructuredApiConfig,
+    load_local_partition: Callable[[], Callable[..., Sequence[Any]]],
+    render_element: Callable[[Any], str],
+    prepare: Callable[[], None] | None = None,
+) -> str:
+    if unstructured_api_config.api_url:
+        elements = _partition_unstructured_file_via_api(
+            file_content,
+            suffix=suffix,
+            unstructured_api_config=unstructured_api_config,
+        )
+    else:
+        elements = _partition_unstructured_file_locally(
+            file_content,
+            load_local_partition=load_local_partition,
+            prepare=prepare,
+        )
+    return "\n".join([render_element(element) for element in elements])
+
+
+def _partition_unstructured_file_via_api(
+    file_content: bytes,
+    *,
+    suffix: str,
+    unstructured_api_config: UnstructuredApiConfig,
+) -> Sequence[Any]:
+    from unstructured.partition.api import partition_via_api  # noqa: PLC0415
+
+    return _partition_file_via_unstructured_api(
+        partition_via_api,
+        file_content,
+        suffix=suffix,
+        unstructured_api_config=unstructured_api_config,
+    )
+
+
+def _partition_unstructured_file_locally(
+    file_content: bytes,
+    *,
+    load_local_partition: Callable[[], Callable[..., Sequence[Any]]],
+    prepare: Callable[[], None] | None,
+) -> Sequence[Any]:
+    if prepare is not None:
+        prepare()
+    partition_file = load_local_partition()
+    with io.BytesIO(file_content) as file:
+        return partition_file(file=file)
+
+
+def _load_partition_ppt() -> Callable[..., Sequence[Any]]:
+    from unstructured.partition.ppt import partition_ppt  # noqa: PLC0415
+
+    return partition_ppt
+
+
+def _load_partition_pptx() -> Callable[..., Sequence[Any]]:
+    from unstructured.partition.pptx import partition_pptx  # noqa: PLC0415
+
+    return partition_pptx
+
+
+def _load_partition_epub() -> Callable[..., Sequence[Any]]:
+    from unstructured.partition.epub import partition_epub  # noqa: PLC0415
+
+    return partition_epub
+
+
+def _render_unstructured_text_element(element: Any) -> str:
+    return getattr(element, "text", "")
 
 
 def _extract_text_from_eml(file_content: bytes) -> str:
@@ -938,28 +998,29 @@ def _extract_text_from_vtt(vtt_bytes: bytes) -> str:
 def _extract_text_from_properties(file_content: bytes) -> str:
     try:
         text = _extract_text_from_plain_text(file_content)
-        lines = text.splitlines()
-        result = []
-        for line in lines:
-            stripped_line = line.strip()
-            # Preserve comments and empty lines
-            if not stripped_line or stripped_line.startswith(("#", "!")):
-                result.append(stripped_line)
-                continue
-
-            if "=" in stripped_line:
-                key, value = stripped_line.split("=", 1)
-            elif ":" in stripped_line:
-                key, value = stripped_line.split(":", 1)
-            else:
-                key, value = stripped_line, ""
-
-            result.append(f"{key.strip()}: {value.strip()}")
-
-        return "\n".join(result)
+        return _format_properties_text(text)
     except Exception as e:
         msg = f"Failed to extract text from properties file: {e!s}"
         raise TextExtractionError(msg) from e
+
+
+def _format_properties_text(text: str) -> str:
+    return "\n".join(_format_property_line(line) for line in text.splitlines())
+
+
+def _format_property_line(line: str) -> str:
+    stripped_line = line.strip()
+    if not stripped_line or stripped_line.startswith(("#", "!")):
+        return stripped_line
+
+    if "=" in stripped_line:
+        key, value = stripped_line.split("=", 1)
+    elif ":" in stripped_line:
+        key, value = stripped_line.split(":", 1)
+    else:
+        key, value = stripped_line, ""
+
+    return f"{key.strip()}: {value.strip()}"
 
 
 def _build_text_extractor_registry() -> _TextExtractorRegistry:
