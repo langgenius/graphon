@@ -62,17 +62,21 @@ class VariableEntity(BaseModel):
     ) -> dict[str, Any] | None:
         # The schema is persisted as raw editor text on the frontend, so accept
         # either a parsed object, a JSON string, or empty/None inputs.
-        if schema is None or schema == "":
+        if schema is None:
             return None
         if isinstance(schema, str):
+            if not schema:
+                return None
             try:
                 schema = json.loads(schema)
             except json.JSONDecodeError as error:
                 msg = f"json_schema is not valid JSON: {error.msg}"
                 raise ValueError(msg) from error
         if not isinstance(schema, dict):
+            # Pydantic only wraps ValueError/AssertionError into ValidationError,
+            # so we deliberately keep ValueError instead of TypeError here.
             msg = f"json_schema must be a JSON object, got {type(schema).__name__}"
-            raise ValueError(msg)
+            raise ValueError(msg)  # noqa: TRY004
         try:
             Draft7Validator.check_schema(schema)
         except SchemaError as error:
