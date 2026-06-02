@@ -54,10 +54,22 @@ class TestValidateJsonSchema:
         entity = VariableEntity.model_validate(_make_payload(""))
         assert entity.json_schema is None
 
+    def test_treats_whitespace_string_as_none(self) -> None:
+        entity = VariableEntity.model_validate(_make_payload("  \n\t  "))
+        assert entity.json_schema is None
+
     def test_rejects_malformed_json_string(self) -> None:
         with pytest.raises(ValidationError) as exc_info:
             VariableEntity.model_validate(_make_payload('{"type": "object"'))
         assert "not valid JSON" in str(exc_info.value)
+
+    @pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+    def test_rejects_non_standard_json_constant(self, constant: str) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            VariableEntity.model_validate(
+                _make_payload(f'{{"type": "number", "minimum": {constant}}}'),
+            )
+        assert "invalid constant" in str(exc_info.value)
 
     def test_rejects_non_object_non_string_input(self) -> None:
         with pytest.raises(ValidationError) as exc_info:

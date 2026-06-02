@@ -12,6 +12,11 @@ from graphon.file.enums import (
 )
 
 
+def _reject_non_standard_json_constant(constant: str) -> None:
+    msg = f"json_schema is not valid JSON: invalid constant {constant}"
+    raise ValueError(msg)
+
+
 class VariableEntityType(StrEnum):
     TEXT_INPUT = "text-input"
     SELECT = "select"
@@ -65,10 +70,14 @@ class VariableEntity(BaseModel):
         if schema is None:
             return None
         if isinstance(schema, str):
+            schema = schema.strip()
             if not schema:
                 return None
             try:
-                schema = json.loads(schema)
+                schema = json.loads(
+                    schema,
+                    parse_constant=_reject_non_standard_json_constant,
+                )
             except json.JSONDecodeError as error:
                 msg = f"json_schema is not valid JSON: {error.msg}"
                 raise ValueError(msg) from error
