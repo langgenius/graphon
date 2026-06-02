@@ -30,7 +30,8 @@ Graphon is currently easiest to evaluate from a source checkout.
 
 - Python 3.12 or 3.13
 - [`uv`](https://docs.astral.sh/uv/)
-- `make`
+- [`just`](https://just.systems/)
+- [`fd`](https://github.com/sharkdp/fd)
 
 Python 3.14 is currently unsupported because `unstructured`, which backs part
 of the document extraction stack, currently declares `Requires-Python: <3.14`.
@@ -38,15 +39,15 @@ of the document extraction stack, currently declares `Requires-Python: <3.14`.
 ### Set up the repository
 
 ```bash
-make dev
+just dev
 source .venv/bin/activate
-make test
+just test
 ```
 
-`make dev` installs the project, syncs development dependencies, and sets up
-[`prek`](https://prek.j178.dev/) Git hooks. `make test` is the progressive
+`just dev` installs the project, syncs development dependencies, and sets up
+[`prek`](https://prek.j178.dev/) Git hooks. `just test` is the progressive
 local validation entrypoint: it formats, applies lint fixes, runs `ty check`,
-and then runs `pytest`.
+and then runs [`pytest`](https://docs.pytest.org/).
 
 ## Run the Example Workflows
 
@@ -62,7 +63,7 @@ start -> llm -> answer
 To run it:
 
 ```bash
-make dev
+just dev
 source .venv/bin/activate
 cd examples/slim_llm
 cp credentials.example.json credentials.json
@@ -158,7 +159,7 @@ planned as a separate follow-up.
 Contributor setup, tooling details, CLA notes, and commit/PR conventions live
 in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-CI currently validates pull request titles, runs `make check` including
+CI currently validates pull request titles, runs `just check` including
 `uv.lock` freshness validation, and runs `uv run pytest` on Python 3.12 and
 3.13. Python 3.14 is currently excluded because `unstructured` does not yet
 support it.
