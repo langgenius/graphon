@@ -3,10 +3,10 @@
 This guide reflects the repository's current local tooling and GitHub Actions
 checks.
 
-By default, use `make` for routine development. Direct
-[`uv`](https://docs.astral.sh/uv/), `ruff`, `pytest`, and
-[`prek`](https://prek.j178.dev/) usage is still fine when you need a targeted
-command.
+By default, use `just` for routine development. Direct
+[`uv`](https://docs.astral.sh/uv/), [`ruff`](https://docs.astral.sh/ruff/),
+[`pytest`](https://docs.pytest.org/), and [`prek`](https://prek.j178.dev/)
+usage is still fine when you need a targeted command.
 
 ## Development Setup
 
@@ -14,7 +14,8 @@ command.
 
 - Python 3.12 or 3.13
 - [`uv`](https://docs.astral.sh/uv/)
-- `make`
+- [`just`](https://just.systems/)
+- [`fd`](https://github.com/sharkdp/fd)
 - `git`
 
 Python 3.14 is currently unsupported because `unstructured`, which is used by
@@ -23,24 +24,25 @@ the document extraction node, currently declares `Requires-Python: <3.14`.
 ### Bootstrap
 
 ```bash
-make dev
+just dev
 # optional for interactive work
 source .venv/bin/activate
 ```
 
-`make dev` will:
+`just dev` will:
 
 - run `uv sync`
 - install [`prek`](https://prek.j178.dev/) Git hooks
 
 The repository uses [`uv`](https://docs.astral.sh/uv/) for dependency and
 virtual environment management. The default development environment includes
-`ruff`, `pytest`, `pytest-xdist`, `pytest-cov`, `pytest-mock`, and
+[`ruff`](https://docs.astral.sh/ruff/), [`pytest`](https://docs.pytest.org/),
+`pytest-xdist`, `pytest-cov`, `pytest-mock`, and
 [`prek`](https://prek.j178.dev/).
 
 ### Git Hooks
 
-`make dev` installs [`prek`](https://prek.j178.dev/) hooks from
+`just dev` installs [`prek`](https://prek.j178.dev/) hooks from
 [`prek.toml`](prek.toml).
 
 The current hook set includes:
@@ -49,7 +51,7 @@ The current hook set includes:
 - BOM cleanup and line ending normalization
 - TOML and YAML validation
 - shebang executable checks
-- local `make tc` (which runs `format`, `lint`, and `ty check` in sequence)
+- local `just tc` (which runs `format`, `lint`, and `ty check` in sequence)
 
 Useful direct commands:
 
@@ -57,10 +59,10 @@ Useful direct commands:
 uv run prek install
 uv run prek run -a
 uv run prek list
-uv run prek validate-config
+uv run prek validate-config prek.toml
 ```
 
-Use `make` by default. For targeted work, direct tool usage is still fine:
+Use `just` by default. For targeted work, direct tool usage is still fine:
 
 ```bash
 uv run ruff check src/graphon/path.py
@@ -72,48 +74,49 @@ uv run prek run -a
 
 Use these commands for normal development:
 
-- `make format`: run `uv run ruff format`
-- `make lint`: run `make format`, then `uv run ruff check --fix`
-- `make tc`: run `make lint`, then `uv run ty check`
-- `make check`: run `uv lock --check && uv run ruff format --check && uv run ruff check && uv run ty check`
-- `make test`: run `make tc`, then `uv run pytest`
-- `make build`: build the package distributions
-- `make clean`: remove build artifacts and caches
+- `just`: list available recipes
+- `just format`: run `uv run ruff format`
+- `just lint`: run `just format`, then `uv run ruff check --fix`
+- `just tc`: run `just lint`, then `uv run ty check`
+- `just check`: run `uv run prek validate-config prek.toml && uv lock --check && uv run ruff format --check && uv run ruff check && uv run ty check`
+- `just test`: run `just tc`, then `uv run pytest`
+- `just build`: build the package distributions
+- `just clean`: remove build artifacts and caches
 
 Notes:
 
-- `make lint` is mutating. It may rewrite files.
-- `make tc` is the local type-check entrypoint used by Git hooks. It includes
+- `just lint` is mutating. It may rewrite files.
+- `just tc` is the local type-check entrypoint used by Git hooks. It includes
   formatting and lint fixes first.
-- `make test` is the progressive local full-chain target. It formats, applies
+- `just test` is the progressive local full-chain target. It formats, applies
   lint fixes, runs `ty check`, and then runs the test suite.
-- `make check` aggregates the same non-mutating lockfile, lint, and type-check
+- `just check` aggregates the same non-mutating lockfile, lint, and type-check
   commands used by CI.
-- `pytest` is configured with `-n auto` and `testpaths = ['tests']`, so the
-  test suite runs in parallel by default.
+- [`pytest`](https://docs.pytest.org/) is configured with `-n auto` and
+  `testpaths = ['tests']`, so the test suite runs in parallel by default.
 - If you change dependencies, refresh and commit `uv.lock` before opening a
   pull request.
 
 For most changes, a good local sequence is:
 
 ```bash
-make test
-make check
+just test
+just check
 ```
 
-`make test` applies local fixes, runs `ty check`, and then runs the test suite.
-`make check` then confirms the non-mutating CI check job will pass.
+`just test` applies local fixes, runs `ty check`, and then runs the test suite.
+`just check` then confirms the non-mutating CI check job will pass.
 
 ### CI Checks
 
 Pull requests targeting `main` currently run three kinds of checks:
 
 1. PR title validation with `amannn/action-semantic-pull-request`
-2. `make check` including `uv.lock` freshness validation
+2. `just check` including `uv.lock` freshness validation
 3. `uv run pytest` on Python 3.12 and 3.13
 
-Keep local workflow aligned with those checks. A green local `make test` plus
-`make check` is useful, but it is not a complete substitute for the exact CI
+Keep local workflow aligned with those checks. A green local `just test` plus
+`just check` is useful, but it is not a complete substitute for the exact CI
 flow because CI also validates PR titles and a Python version matrix.
 
 ## Git Commits
@@ -177,7 +180,7 @@ Before you open a pull request:
 - search existing pull requests again to confirm there is no duplicate review in
   progress
 - make sure the change stays focused and reviewable
-- run `make test` before pushing and keep `make check` green locally when
+- run `just test` before pushing and keep `just check` green locally when
   possible
 
 When you open a pull request:
