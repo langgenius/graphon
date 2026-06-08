@@ -5,7 +5,6 @@ import binascii
 import io
 import json
 import logging
-import re
 import time
 from collections.abc import Generator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -62,6 +61,11 @@ from graphon.node_events.node import (
 from graphon.nodes.base.entities import VariableSelector
 from graphon.nodes.base.node import Node
 from graphon.nodes.base.variable_template_parser import VariableTemplateParser
+from graphon.nodes.llm.reasoning import (
+    ThinkStreamFilter,
+    extract_stream_reasoning,
+    split_reasoning,
+)
 from graphon.nodes.llm.runtime_protocols import (
     LLMPollingCapableProtocol,
     LLMProtocol,
@@ -130,13 +134,12 @@ class _StreamingInvokeState:
     first_token_time: float | None = None
     has_content: bool = False
     structured_output: dict[str, Any] | None = None
+    # None in "tagged" mode (stream raw tokens); a filter in "separated" mode.
+    text_filter: ThinkStreamFilter | None = None
 
 
 class LLMNode(Node[LLMNodeData]):
     node_type = BuiltinNodeTypes.LLM
-
-    # Compiled regex for extracting <think> blocks (with compatibility for attributes)
-    _THINK_PATTERN = re.compile(r"<think[^>]*>(.*?)</think>", re.IGNORECASE | re.DOTALL)
 
     # Instance attributes specific to LLMNode.
     # Output variable for file
@@ -688,10 +691,7 @@ class LLMNode(Node[LLMNodeData]):
         if self.node_data.reasoning_format == "tagged":
             return text
 
-        clean_text, _ = LLMNode._split_reasoning(
-            text,
-            self.node_data.reasoning_format,
-        )
+        clean_text, _ = split_reasoning(text, self.node_data.reasoning_format)
         return clean_text
 
     def _build_process_data(
@@ -857,6 +857,8 @@ class LLMNode(Node[LLMNodeData]):
             else time.perf_counter()
         )
         state = _StreamingInvokeState(start_time=start_time)
+        if reasoning_format == "separated":
+            state.text_filter = ThinkStreamFilter()
 
         try:
             yield from LLMNode._yield_streaming_events(
@@ -878,9 +880,19 @@ class LLMNode(Node[LLMNodeData]):
                 raise LLMNodeError(msg) from e
             raise
 
+        # Flush any clean text the filter was still holding (separated mode).
+        if state.text_filter is not None:
+            remainder = state.text_filter.finalize()
+            if remainder:
+                yield StreamChunkEvent(
+                    selector=[node_id, "text"],
+                    chunk=remainder,
+                    is_final=False,
+                )
+
         # Extract reasoning content from <think> tags in the main text
         full_text = state.full_text_buffer.getvalue()
-        clean_text, reasoning_content = LLMNode._extract_stream_reasoning(
+        clean_text, reasoning_content = extract_stream_reasoning(
             full_text=full_text,
             reasoning_format=reasoning_format,
         )
@@ -959,11 +971,13 @@ class LLMNode(Node[LLMNodeData]):
             file_outputs=file_outputs,
         )
         for text_part in text_parts:
-            yield LLMNode._build_stream_text_event(
+            event = LLMNode._build_stream_text_event(
                 text_part=text_part,
                 state=state,
                 node_id=node_id,
             )
+            if event is not None:
+                yield event
 
     @staticmethod
     def _build_stream_text_event(
@@ -971,15 +985,30 @@ class LLMNode(Node[LLMNodeData]):
         text_part: str,
         state: _StreamingInvokeState,
         node_id: str,
-    ) -> StreamChunkEvent:
+    ) -> StreamChunkEvent | None:
         if text_part and not state.has_content:
             state.first_token_time = time.perf_counter()
             state.has_content = True
 
+        # Keep the raw text (including <think> tags) in the buffer so the final
+        # reasoning extraction still sees the full output.
         state.full_text_buffer.write(text_part)
+
+        # "tagged" (no filter): stream the raw token unchanged.
+        if state.text_filter is None:
+            return StreamChunkEvent(
+                selector=[node_id, "text"],
+                chunk=text_part,
+                is_final=False,
+            )
+
+        # "separated": strip <think> reasoning before it reaches the selector.
+        chunk = state.text_filter.feed(text_part)
+        if not chunk:
+            return None
         return StreamChunkEvent(
             selector=[node_id, "text"],
-            chunk=text_part,
+            chunk=chunk,
             is_final=False,
         )
 
@@ -1011,16 +1040,6 @@ class LLMNode(Node[LLMNodeData]):
         )
 
     @staticmethod
-    def _extract_stream_reasoning(
-        *,
-        full_text: str,
-        reasoning_format: Literal["separated", "tagged"],
-    ) -> tuple[str, str]:
-        if reasoning_format == "tagged":
-            return full_text, ""
-        return LLMNode._split_reasoning(full_text, reasoning_format)
-
-    @staticmethod
     def _finalize_streaming_usage(
         *,
         usage: LLMUsage,
@@ -1044,45 +1063,6 @@ class LLMNode(Node[LLMNodeData]):
         if file.type == FileType.IMAGE:
             return f"![]({file.generate_url()})"
         return file.markdown
-
-    @classmethod
-    def _split_reasoning(
-        cls,
-        text: str,
-        reasoning_format: Literal["separated", "tagged"] = "tagged",
-    ) -> tuple[str, str]:
-        """Split reasoning content from text based on reasoning_format strategy.
-
-        Args:
-            text: Full text that may contain <think> blocks
-            reasoning_format: Strategy for handling reasoning content
-                - "separated": Remove <think> tags and return clean text
-                plus reasoning_content field
-                - "tagged": Keep <think> tags in text, return empty reasoning_content
-
-        Returns:
-            tuple of (clean_text, reasoning_content)
-
-        """
-        if reasoning_format == "tagged":
-            return text, ""
-
-        # Find all <think>...</think> blocks (case-insensitive)
-        matches = cls._THINK_PATTERN.findall(text)
-
-        # Extract reasoning content from all <think> blocks
-        reasoning_content = (
-            "\n".join(match.strip() for match in matches) if matches else ""
-        )
-
-        # Remove all <think>...</think> blocks from original text
-        clean_text = cls._THINK_PATTERN.sub("", text)
-
-        # Clean up extra whitespace
-        clean_text = re.sub(r"\n\s*\n", "\n\n", clean_text).strip()
-
-        # Separated mode: always return clean text and reasoning_content
-        return clean_text, reasoning_content or ""
 
     def _transform_chat_messages(
         self,
@@ -1962,7 +1942,7 @@ class LLMNode(Node[LLMNodeData]):
             reasoning_content = ""
         else:
             # Extract clean text and reasoning from <think> tags
-            clean_text, reasoning_content = LLMNode._split_reasoning(
+            clean_text, reasoning_content = split_reasoning(
                 full_text,
                 reasoning_format,
             )
