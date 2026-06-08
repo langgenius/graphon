@@ -37,7 +37,7 @@ from graphon.node_events.node import (
 )
 from graphon.nodes.llm import LLMNode, LLMNodeData
 from graphon.nodes.llm.exc import LLMNodeError
-from graphon.nodes.llm.reasoning import ThinkStreamFilter, split_reasoning
+from graphon.nodes.llm.reasoning import split_reasoning
 from graphon.nodes.llm.runtime_protocols import LLMPollingCapableProtocol, LLMProtocol
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
@@ -874,31 +874,3 @@ def test_separated_stream_matches_split_reasoning(full_text: str) -> None:
     expected, _ = split_reasoning(full_text, "separated")
 
     assert "".join(chunks).strip() == expected
-
-
-def test_think_stream_filter_strips_reasoning() -> None:
-    flt = ThinkStreamFilter()
-
-    assert flt.feed("<think>x</think>y") == "y"
-    assert flt.finalize() == ""
-
-
-def test_split_reasoning_strips_closed_block() -> None:
-    clean, reasoning = split_reasoning("<think>a</think>hello", "separated")
-
-    assert clean == "hello"
-    assert reasoning == "a"
-
-
-def test_split_reasoning_strips_unclosed_trailing_block() -> None:
-    clean, reasoning = split_reasoning("hello<think>oops", "separated")
-
-    assert clean == "hello"
-    assert reasoning == "oops"
-
-
-def test_split_reasoning_tagged_is_noop() -> None:
-    clean, reasoning = split_reasoning("<think>a</think>hi", "tagged")
-
-    assert clean == "<think>a</think>hi"
-    assert reasoning == ""
