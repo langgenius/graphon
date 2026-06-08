@@ -75,3 +75,40 @@ def test_split_reasoning_tagged_is_noop() -> None:
 
     assert clean == "<think>a</think>hi"
     assert reasoning == ""
+
+
+def test_filter_is_case_insensitive() -> None:
+    assert _feed_all(["<THINK>x</THINK>y"]) == "y"
+
+
+def test_filter_keeps_discarding_on_false_partial_close() -> None:
+    # "</thi" looks like a closing tag start but turns into "</this", which is
+    # still reasoning and must stay discarded.
+    assert _feed_all(["<think>a</thi", "s b</think>c"]) == "c"
+
+
+def test_filter_releases_dangling_open_bracket_as_literal() -> None:
+    # A "<" that never grows into "<think" is literal text, not a held tag.
+    assert _feed_all(["a<", "b"]) == "a<b"
+
+
+def test_filter_handles_empty_input() -> None:
+    flt = ThinkStreamFilter()
+
+    assert flt.feed("") == ""
+    assert flt.finalize() == ""
+
+
+def test_filter_emits_nothing_for_reasoning_only_output() -> None:
+    assert _feed_all(["<think>just reasoning</think>"]) == ""
+
+
+def test_filter_strips_block_streamed_character_by_character() -> None:
+    assert _feed_all(list("<think>plan</think>answer")) == "answer"
+
+
+def test_split_reasoning_is_case_insensitive() -> None:
+    clean, reasoning = split_reasoning("<THINK>a</THINK>hi", "separated")
+
+    assert clean == "hi"
+    assert reasoning == "a"
