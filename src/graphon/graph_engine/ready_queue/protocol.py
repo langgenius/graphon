@@ -1,4 +1,8 @@
-"""Public ready queue types for GraphEngine."""
+"""ReadyQueue protocol for GraphEngine node execution queue.
+
+This protocol defines the interface for managing the queue of nodes ready
+for execution, supporting both in-memory and persistent storage scenarios.
+"""
 
 from collections.abc import Sequence
 
