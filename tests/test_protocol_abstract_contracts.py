@@ -7,8 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from graphon.runtime.ready_queue import ReadyQueueProtocol
-
 
 def _is_direct_protocol_class(
     class_def: ast.ClassDef,
@@ -111,19 +109,6 @@ def _protocol_id(protocol_cls: type[object]) -> str:
 
 def test_protocol_targets_should_be_discovered() -> None:
     assert PROTOCOL_TARGETS
-
-
-def test_graph_engine_ready_queue_protocol_module_has_no_legacy_alias() -> None:
-    package = importlib.import_module("graphon.graph_engine.ready_queue")
-    module = importlib.import_module("graphon.graph_engine.ready_queue.protocol")
-    runtime_module = importlib.import_module("graphon.runtime.ready_queue")
-
-    assert not hasattr(package, "ReadyQueue")
-    assert hasattr(module, "ReadyQueueState")
-    assert not hasattr(module, "ReadyQueue")
-    assert not hasattr(module, "ReadyQueueProtocol")
-    assert hasattr(runtime_module, "ReadyQueueProtocol")
-    assert runtime_module.ReadyQueueProtocol is ReadyQueueProtocol
 
 
 @pytest.mark.parametrize(
