@@ -7,8 +7,7 @@ from typing import TypedDict, final
 from graphon.enums import NodeState
 from graphon.graph.edge import Edge
 from graphon.graph.graph import Graph
-
-from .ready_queue import ReadyQueue
+from graphon.runtime.ready_queue import ReadyQueueProtocol
 
 
 class EdgeStateAnalysis(TypedDict):
@@ -21,12 +20,12 @@ class EdgeStateAnalysis(TypedDict):
 
 @final
 class GraphStateManager:
-    def __init__(self, graph: Graph, ready_queue: ReadyQueue) -> None:
+    def __init__(self, graph: Graph, ready_queue: ReadyQueueProtocol) -> None:
         """Initialize the state manager.
 
         Args:
             graph: The workflow graph
-            ready_queue: Queue for nodes ready to execute
+            ready_queue: Ready queue protocol for nodes ready to execute
 
         """
         self._graph = graph

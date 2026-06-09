@@ -1,4 +1,4 @@
-"""In-memory implementation of the ReadyQueue protocol.
+"""In-memory implementation of the ready queue protocol.
 
 This implementation wraps Python's standard queue.Queue and adds
 serialization capabilities for state storage.
@@ -7,11 +7,13 @@ serialization capabilities for state storage.
 import queue
 from typing import final
 
-from .protocol import ReadyQueue, ReadyQueueState
+from graphon.runtime.ready_queue import ReadyQueueProtocol
+
+from .protocol import ReadyQueueState
 
 
 @final
-class InMemoryReadyQueue(ReadyQueue):
+class InMemoryReadyQueue(ReadyQueueProtocol):
     """In-memory ready queue implementation with serialization support.
 
     This implementation uses Python's queue.Queue internally and provides

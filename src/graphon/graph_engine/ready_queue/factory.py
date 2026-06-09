@@ -1,26 +1,28 @@
-"""Factory for creating ReadyQueue instances from serialized state."""
+"""Factory for creating ready queue instances from serialized state."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
-from .in_memory import InMemoryReadyQueue
-from .protocol import ReadyQueue, ReadyQueueState
+from graphon.runtime.ready_queue import ReadyQueueProtocol
 
-_READY_QUEUE_BUILDERS: dict[str, tuple[Callable[[], ReadyQueue], str]] = {
+from .in_memory import InMemoryReadyQueue
+from .protocol import ReadyQueueState
+
+_READY_QUEUE_BUILDERS: dict[str, tuple[Callable[[], ReadyQueueProtocol], str]] = {
     "InMemoryReadyQueue": (InMemoryReadyQueue, "1.0"),
 }
 
 
-def create_ready_queue_from_state(state: ReadyQueueState) -> ReadyQueue:
-    """Create a ReadyQueue instance from a serialized state.
+def create_ready_queue_from_state(state: ReadyQueueState) -> ReadyQueueProtocol:
+    """Create a ready queue instance from a serialized state.
 
     Args:
         state: The serialized queue state (Pydantic model, dict, or JSON string),
             or None for a new empty queue
 
     Returns:
-        A ReadyQueue instance initialized with the given state
+        A ready queue instance initialized with the given state
 
     Raises:
         ValueError: If the queue type is unknown or version is unsupported

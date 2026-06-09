@@ -1,14 +1,8 @@
-"""ReadyQueue protocol for GraphEngine node execution queue.
-
-This protocol defines the interface for managing the queue of nodes ready
-for execution, supporting both in-memory and persistent storage scenarios.
-"""
+"""Serialized state models for GraphEngine ready queue implementations."""
 
 from collections.abc import Sequence
 
 from pydantic import BaseModel, Field
-
-from graphon.runtime.ready_queue import ReadyQueueProtocol
 
 
 class ReadyQueueState(BaseModel):
@@ -26,6 +20,3 @@ class ReadyQueueState(BaseModel):
         default_factory=list,
         description="List of node IDs in the queue",
     )
-
-
-ReadyQueue = ReadyQueueProtocol

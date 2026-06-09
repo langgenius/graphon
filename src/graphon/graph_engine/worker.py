@@ -24,8 +24,7 @@ from graphon.graph_events.node import (
 )
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.node import Node
-
-from .ready_queue import ReadyQueue
+from graphon.runtime.ready_queue import ReadyQueueProtocol
 
 logger = logging.getLogger(__name__)
 WORKER_IDLE_THRESHOLD_SECONDS = 0.2
@@ -42,7 +41,7 @@ class Worker(threading.Thread):
 
     def __init__(
         self,
-        ready_queue: ReadyQueue,
+        ready_queue: ReadyQueueProtocol,
         event_queue: queue.Queue[GraphNodeEventBase],
         graph: Graph,
         layers: Sequence[GraphEngineLayer],

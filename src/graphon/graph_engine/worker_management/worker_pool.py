@@ -12,10 +12,10 @@ from typing import final
 
 from graphon.graph.graph import Graph
 from graphon.graph_events.base import GraphNodeEventBase
+from graphon.runtime.ready_queue import ReadyQueueProtocol
 
 from ..config import GraphEngineConfig
 from ..layers.base import GraphEngineLayer
-from ..ready_queue import ReadyQueue
 from ..worker import Worker
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ class WorkerPool:
 
     def __init__(
         self,
-        ready_queue: ReadyQueue,
+        ready_queue: ReadyQueueProtocol,
         event_queue: queue.Queue[GraphNodeEventBase],
         graph: Graph,
         layers: list[GraphEngineLayer],
@@ -43,7 +43,7 @@ class WorkerPool:
         """Initialize the simple worker pool.
 
         Args:
-            ready_queue: Ready queue for nodes ready for execution
+            ready_queue: Ready queue protocol for nodes ready for execution
             event_queue: Queue for worker events
             graph: The workflow graph
             layers: Graph engine layers for node execution hooks
