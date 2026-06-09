@@ -1,14 +1,10 @@
-"""ReadyQueue protocol for GraphEngine node execution queue.
+"""Public ready queue types for GraphEngine."""
 
-This protocol defines the interface for managing the queue of nodes ready
-for execution, supporting both in-memory and persistent storage scenarios.
-"""
-
-from abc import abstractmethod
 from collections.abc import Sequence
-from typing import Protocol
 
 from pydantic import BaseModel, Field
+
+from graphon.runtime.ready_queue import ReadyQueueProtocol
 
 
 class ReadyQueueState(BaseModel):
@@ -28,83 +24,4 @@ class ReadyQueueState(BaseModel):
     )
 
 
-class ReadyQueue(Protocol):
-    """Protocol for managing nodes ready for execution in GraphEngine.
-
-    This protocol defines the interface that any ready queue implementation
-    must provide, enabling both in-memory queues and persistent queues
-    that can be serialized for state storage.
-    """
-
-    @abstractmethod
-    def put(self, item: str) -> None:
-        """Add a node ID to the ready queue.
-
-        Args:
-            item: The node ID to add to the queue
-
-        """
-        ...
-
-    @abstractmethod
-    def get(self, timeout: float | None = None) -> str:
-        """Retrieve and remove a node ID from the queue.
-
-        Args:
-            timeout: Maximum time to wait for an item (None for blocking)
-
-        Returns:
-            The node ID retrieved from the queue
-
-        """
-        ...
-
-    @abstractmethod
-    def task_done(self) -> None:
-        """Indicate that a previously retrieved task is complete.
-
-        Used by worker threads to signal task completion for
-        join() synchronization.
-        """
-        ...
-
-    @abstractmethod
-    def empty(self) -> bool:
-        """Check if the queue is empty.
-
-        Returns:
-            True if the queue has no items, False otherwise
-
-        """
-        ...
-
-    @abstractmethod
-    def qsize(self) -> int:
-        """Get the approximate size of the queue.
-
-        Returns:
-            The approximate number of items in the queue
-
-        """
-        ...
-
-    @abstractmethod
-    def dumps(self) -> str:
-        """Serialize the queue state to a JSON string for storage.
-
-        Returns:
-            A JSON string containing the serialized queue state
-            that can be persisted and later restored
-
-        """
-        ...
-
-    @abstractmethod
-    def loads(self, data: str) -> None:
-        """Restore the queue state from a JSON string.
-
-        Args:
-            data: The JSON string containing the serialized queue state to restore
-
-        """
-        ...
+ReadyQueue = ReadyQueueProtocol

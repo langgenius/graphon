@@ -7,6 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from graphon.graph_engine.ready_queue.protocol import ReadyQueue
+from graphon.runtime.ready_queue import ReadyQueueProtocol
+
 
 def _is_direct_protocol_class(
     class_def: ast.ClassDef,
@@ -109,6 +112,10 @@ def _protocol_id(protocol_cls: type[object]) -> str:
 
 def test_protocol_targets_should_be_discovered() -> None:
     assert PROTOCOL_TARGETS
+
+
+def test_graph_engine_ready_queue_reuses_runtime_protocol() -> None:
+    assert ReadyQueue is ReadyQueueProtocol
 
 
 @pytest.mark.parametrize(

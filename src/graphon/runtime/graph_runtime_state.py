@@ -14,53 +14,13 @@ from pydantic_core import to_jsonable_python
 
 from graphon.enums import NodeExecutionType, NodeState, NodeType
 from graphon.model_runtime.entities.llm_entities import LLMUsage
+from graphon.runtime.ready_queue import ReadyQueueProtocol
 from graphon.runtime.variable_pool import VariablePool
 
 if TYPE_CHECKING:
     from graphon.entities.graph_init_params import GraphInitParams
     from graphon.entities.pause_reason import PauseReason
     from graphon.graph.graph import Graph
-
-
-class ReadyQueueProtocol(Protocol):
-    """Structural interface required from ready queue implementations."""
-
-    @abstractmethod
-    def put(self, item: str) -> None:
-        """Enqueue the identifier of a node that is ready to run."""
-        ...
-
-    @abstractmethod
-    def get(self, timeout: float | None = None) -> str:
-        """Return the next node identifier,
-        blocking until available or timeout expires.
-        """
-        ...
-
-    @abstractmethod
-    def task_done(self) -> None:
-        """Signal that the most recently dequeued node has completed processing."""
-        ...
-
-    @abstractmethod
-    def empty(self) -> bool:
-        """Return True when the queue contains no pending nodes."""
-        ...
-
-    @abstractmethod
-    def qsize(self) -> int:
-        """Approximate the number of pending nodes awaiting execution."""
-        ...
-
-    @abstractmethod
-    def dumps(self) -> str:
-        """Serialize the queue contents for persistence."""
-        ...
-
-    @abstractmethod
-    def loads(self, data: str) -> None:
-        """Restore the queue contents from a serialized payload."""
-        ...
 
 
 class NodeExecutionProtocol(Protocol):
