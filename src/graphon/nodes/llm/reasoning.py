@@ -16,14 +16,11 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-# Content of complete <think>...</think> blocks (optional attributes,
-# case-insensitive, across newlines).
+# Complete <think>...</think> blocks (attrs, case-insensitive, multiline).
 _THINK_PATTERN = re.compile(r"<think[^>]*>(.*?)</think>", re.IGNORECASE | re.DOTALL)
-# Open/close matchers used by the streaming filter; mirror _THINK_PATTERN.
 _THINK_OPEN_RE = re.compile(r"<think[^>]*>", re.IGNORECASE)
 _THINK_CLOSE_RE = re.compile(r"</think>", re.IGNORECASE)
-# A trailing, unclosed <think> with no matching </think> (e.g. a truncated
-# generation). Used to keep reasoning out of the final text on both paths.
+# Trailing unclosed <think> (truncated generation).
 _THINK_OPEN_TRAILING_RE = re.compile(
     r"<think[^>]*>(?P<reasoning>(?:(?!</think>)[\s\S])*)\Z",
     re.IGNORECASE,
@@ -44,6 +41,9 @@ class ThinkStreamFilter:
 
     ``tagged`` mode does not use this filter at all (it streams raw tokens), so
     the class is unconditional: it always strips.
+
+    Matches :func:`split_reasoning` only up to whitespace: that also collapses
+    blank-line runs and strips; this only lstrips the leading text.
     """
 
     def __init__(self) -> None:
@@ -85,7 +85,7 @@ class ThinkStreamFilter:
     def finalize(self) -> str:
         """Flush whatever is safe to emit once the stream ends."""
         if self._inside_think:
-            # Unclosed trailing <think>: drop the truncated reasoning, never leak.
+            # Unclosed <think>: drop truncated reasoning, never leak.
             self._hold = ""
             return ""
         remainder = self._hold
@@ -93,8 +93,7 @@ class ThinkStreamFilter:
         return self._strip_leading(remainder)
 
     def _strip_leading(self, clean: str) -> str:
-        # Mirror split_reasoning()'s leading .strip() for the first visible text
-        # (covers reasoning-first models: "<think>...</think>\nanswer").
+        # Mirror split_reasoning()'s leading strip (reasoning-first models).
         if self._seen_clean or not clean:
             return clean
         stripped = clean.lstrip()
@@ -145,13 +144,11 @@ def split_reasoning(
     if reasoning_format == "tagged":
         return text, ""
 
-    # Closed <think>...</think> blocks (case-insensitive).
     matches = _THINK_PATTERN.findall(text)
     reasoning_parts = [match.strip() for match in matches if match.strip()]
     clean_text = _THINK_PATTERN.sub("", text)
 
-    # Also drop a trailing, unclosed <think> (e.g. truncated generation) so
-    # reasoning never leaks into the final text; keep it as reasoning.
+    # Drop a trailing unclosed <think>, keeping it as reasoning, not text.
     trailing = _THINK_OPEN_TRAILING_RE.search(clean_text)
     if trailing:
         trailing_reasoning = trailing.group("reasoning").strip()

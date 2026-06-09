@@ -1,4 +1,5 @@
 import base64
+import re
 from collections.abc import Generator, Sequence
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -838,6 +839,15 @@ def test_separated_stream_does_not_swallow_non_think_angle_brackets() -> None:
     assert "".join(chunks) == "<div>ok"
 
 
+def test_separated_stream_flushes_held_partial_open_on_finalize() -> None:
+    # Stream ends on a held partial open: finalize() must flush "<thi", not drop it.
+    chunks, completed = _run_stream(["answer<thi"], reasoning_format="separated")
+
+    assert "".join(chunks) == "answer<thi"
+    assert chunks[-1] == "<thi"  # from the finalize() flush, not feed()
+    assert completed.text == "answer<thi"
+
+
 def test_separated_stream_strips_leading_whitespace_after_reasoning() -> None:
     chunks, completed = _run_stream(
         ["<think>r</think>", "\n", "answer"],
@@ -859,18 +869,25 @@ def test_tagged_stream_keeps_think_tags_unchanged() -> None:
     assert completed.reasoning_content == ""
 
 
+def _normalize_like_split_reasoning(text: str) -> str:
+    # Mirror split_reasoning()'s whitespace handling: collapse blank-line runs + strip.
+    return re.sub(r"\n\s*\n", "\n\n", text).strip()
+
+
 @pytest.mark.parametrize(
     "full_text",
     [
         "<think>plan</think>answer",
         "before<think>a</think>middle<think>b</think>after",
         "<think>only reasoning</think>\n\nanswer body",
+        "before<think>a</think>\n\n\nmiddle",  # internal blank-line run
+        "<think>r</think>answer\n\n",  # trailing whitespace
     ],
 )
 def test_separated_stream_matches_split_reasoning(full_text: str) -> None:
-    # Any chunk boundary must produce the same clean text as the batch splitter.
+    # Stream and batch splitter agree only up to split_reasoning()'s whitespace pass.
     parts = [full_text[i : i + 3] for i in range(0, len(full_text), 3)]
     chunks, _ = _run_stream(parts, reasoning_format="separated")
     expected, _ = split_reasoning(full_text, "separated")
 
-    assert "".join(chunks).strip() == expected
+    assert _normalize_like_split_reasoning("".join(chunks)) == expected
