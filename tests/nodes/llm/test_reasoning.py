@@ -20,6 +20,13 @@ def test_filter_passes_through_non_think_angle_brackets() -> None:
     assert _feed_all(["<div>ok"]) == "<div>ok"
 
 
+def test_filter_passes_through_tags_with_think_prefix() -> None:
+    assert (
+        _feed_all(["before<think", "ing>idea</thinking>after"])
+        == "before<thinking>idea</thinking>after"
+    )
+
+
 def test_filter_strips_tag_split_across_chunks() -> None:
     assert _feed_all(["<thi", "nk>plan</thi", "nk>ans", "wer"]) == "answer"
 
@@ -92,6 +99,18 @@ def test_filter_releases_dangling_open_bracket_as_literal() -> None:
     assert _feed_all(["a<", "b"]) == "a<b"
 
 
+def test_filter_keeps_malformed_open_tag_with_nested_bracket() -> None:
+    assert _feed_all(["x<think <y", ">secret</think>z"]) == (
+        "x<think <y>secret</think>z"
+    )
+
+
+def test_filter_releases_overlong_partial_open_tag_as_literal() -> None:
+    partial = "<think " + ("x" * 600)
+
+    assert _feed_all(["a", partial, " end"]) == f"a{partial} end"
+
+
 def test_filter_handles_empty_input() -> None:
     flt = ThinkStreamFilter()
 
@@ -112,3 +131,21 @@ def test_split_reasoning_is_case_insensitive() -> None:
 
     assert clean == "hi"
     assert reasoning == "a"
+
+
+def test_split_reasoning_keeps_tags_with_think_prefix() -> None:
+    text = "before<thinking>idea</thinking>after"
+
+    clean, reasoning = split_reasoning(text, "separated")
+
+    assert clean == text
+    assert reasoning == ""
+
+
+def test_split_reasoning_keeps_malformed_open_tag_with_nested_bracket() -> None:
+    text = "x<think <y>secret</think>z"
+
+    clean, reasoning = split_reasoning(text, "separated")
+
+    assert clean == text
+    assert reasoning == ""

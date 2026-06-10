@@ -839,6 +839,28 @@ def test_separated_stream_does_not_swallow_non_think_angle_brackets() -> None:
     assert "".join(chunks) == "<div>ok"
 
 
+def test_separated_stream_keeps_tags_with_think_prefix() -> None:
+    chunks, completed = _run_stream(
+        ["before<think", "ing>idea</thinking>after"],
+        reasoning_format="separated",
+    )
+
+    assert "".join(chunks) == "before<thinking>idea</thinking>after"
+    assert completed.text == "before<thinking>idea</thinking>after"
+    assert completed.reasoning_content == ""
+
+
+def test_separated_stream_keeps_malformed_open_tag_with_nested_bracket() -> None:
+    chunks, completed = _run_stream(
+        ["x<think <y", ">secret</think>z"],
+        reasoning_format="separated",
+    )
+
+    assert "".join(chunks) == "x<think <y>secret</think>z"
+    assert completed.text == "x<think <y>secret</think>z"
+    assert completed.reasoning_content == ""
+
+
 def test_separated_stream_flushes_held_partial_open_on_finalize() -> None:
     # Stream ends on a held partial open: finalize() must flush "<thi", not drop it.
     chunks, completed = _run_stream(["answer<thi"], reasoning_format="separated")

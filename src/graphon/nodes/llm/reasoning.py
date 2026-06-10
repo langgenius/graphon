@@ -17,16 +17,22 @@ import re
 from typing import Literal
 
 # Complete <think>...</think> blocks (attrs, case-insensitive, multiline).
-_THINK_PATTERN = re.compile(r"<think[^>]*>(.*?)</think>", re.IGNORECASE | re.DOTALL)
-_THINK_OPEN_RE = re.compile(r"<think[^>]*>", re.IGNORECASE)
+_THINK_OPEN_ATTR_MAX_CHARS = 512
+_THINK_OPEN_PREFIX = "<think"
+_THINK_OPEN_TAG = rf"<think(?:\s[^<>]{{0,{_THINK_OPEN_ATTR_MAX_CHARS}}})?>"
+_THINK_PATTERN = re.compile(
+    rf"{_THINK_OPEN_TAG}(.*?)</think>",
+    re.IGNORECASE | re.DOTALL,
+)
+_THINK_OPEN_RE = re.compile(_THINK_OPEN_TAG, re.IGNORECASE)
 _THINK_CLOSE_RE = re.compile(r"</think>", re.IGNORECASE)
 # Trailing unclosed <think> (truncated generation).
 _THINK_OPEN_TRAILING_RE = re.compile(
-    r"<think[^>]*>(?P<reasoning>(?:(?!</think>)[\s\S])*)\Z",
+    rf"{_THINK_OPEN_TAG}(?P<reasoning>(?:(?!</think>)[\s\S])*)\Z",
     re.IGNORECASE,
 )
-_THINK_OPEN_KEYWORD = "<think"
 _THINK_CLOSE_TAG = "</think>"
+_THINK_OPEN_PREFIX_MAX_LEN = len(_THINK_OPEN_PREFIX) + 1 + _THINK_OPEN_ATTR_MAX_CHARS
 
 
 class ThinkStreamFilter:
@@ -104,18 +110,22 @@ class ThinkStreamFilter:
     @staticmethod
     def _open_suffix_len(work: str) -> int:
         """Length of the trailing suffix that could still become ``<think...>``."""
+        keep = 0
         lt = work.rfind("<")
-        if lt == -1:
-            return 0
-        tail = work[lt:]
-        if ">" in tail:
-            return 0
-        keyword = _THINK_OPEN_KEYWORD
-        if len(tail) <= len(keyword):
-            return len(tail) if keyword.startswith(tail.lower()) else 0
-        if tail[: len(keyword)].lower() == keyword:
-            return len(tail)
-        return 0
+        if lt != -1:
+            tail = work[lt:]
+            tail_lower = tail.lower()
+            if ">" in tail:
+                keep = 0
+            elif len(tail) <= len(_THINK_OPEN_PREFIX):
+                keep = len(tail) if _THINK_OPEN_PREFIX.startswith(tail_lower) else 0
+            elif (
+                tail_lower.startswith(_THINK_OPEN_PREFIX)
+                and tail[len(_THINK_OPEN_PREFIX)].isspace()
+                and len(tail) <= _THINK_OPEN_PREFIX_MAX_LEN
+            ):
+                keep = len(tail)
+        return keep
 
     @staticmethod
     def _close_suffix_len(work: str) -> int:
