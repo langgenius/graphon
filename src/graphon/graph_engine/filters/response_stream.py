@@ -159,6 +159,9 @@ class StreamBuffers:
         position = self.positions.get(key, 0)
         return position < len(self.events[key])
 
+    def has_events(self, selector: Sequence[str]) -> bool:
+        return tuple(selector) in self.events
+
     def close(self, selector: Sequence[str]) -> None:
         self.closed_selectors.add(tuple(selector))
 
@@ -597,6 +600,7 @@ class ResponseStreamFilter:
         else:
             output_node_id = source_selector_prefix
         execution_id = self._get_or_create_execution_id(output_node_id)
+        has_stream_events = self._stream_buffers.has_events(segment.selector)
 
         while self._stream_buffers.has_unread(segment.selector):
             event = self._stream_buffers.pop(segment.selector)
@@ -620,7 +624,9 @@ class ResponseStreamFilter:
 
         if self._stream_buffers.is_closed(segment.selector):
             is_complete = True
-        elif value := self._bound_runtime_state.variable_pool.get(segment.selector):
+        elif not has_stream_events and (
+            value := self._bound_runtime_state.variable_pool.get(segment.selector)
+        ):
             is_last_segment = bool(
                 self._active_session
                 and self._active_session.index

@@ -279,6 +279,25 @@ def test_response_stream_filter_reads_scalar_variable_values() -> None:
     assert [event.chunk for event in chunks] == ["saved"]
 
 
+def test_response_stream_filter_does_not_mix_buffered_chunks_with_final_value() -> None:
+    graph = _variable_response_graph()
+    variable_pool = VariablePool()
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph, variable_pool))
+
+    assert list(event_filter.on_event(_stream_chunk("Quiet", is_final=False))) == []
+    variable_pool.add(["source", "answer"], StringSegment(value="Quiet Night Thought"))
+
+    output = [
+        *event_filter.on_event(_edge_taken()),
+        *event_filter.on_event(_stream_chunk(" Night", is_final=False)),
+        *event_filter.on_event(_stream_chunk(" Thought")),
+    ]
+
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert [event.chunk for event in chunks] == ["Quiet", " Night", " Thought"]
+
+
 def test_response_stream_filter_uses_retry_execution_id_for_scalar_value() -> None:
     graph = _variable_response_graph()
     variable_pool = VariablePool()
