@@ -18,13 +18,12 @@ test: tc
     uv run pytest
 
 check:
-    uv run prek validate-config prek.toml
     uv lock --check
     uv run ruff format --check
     uv run ruff check
     uv run ty check
 
-build:
+build: check
     uv build --no-create-gitignore --no-sources
 
 clean:
