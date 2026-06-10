@@ -1,8 +1,9 @@
 import base64
+import re
 from collections.abc import Generator, Sequence
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from typing import Any, Never, cast
+from typing import Any, Literal, Never, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -37,6 +38,7 @@ from graphon.node_events.node import (
 )
 from graphon.nodes.llm import LLMNode, LLMNodeData
 from graphon.nodes.llm.exc import LLMNodeError
+from graphon.nodes.llm.reasoning import split_reasoning
 from graphon.nodes.llm.runtime_protocols import LLMPollingCapableProtocol, LLMProtocol
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
@@ -748,3 +750,166 @@ def test_polling_progress_event_dispatches_to_graph_event() -> None:
 
     assert isinstance(graph_event, NodeRunModelPollingProgressEvent)
     assert graph_event.attempt == 2
+
+
+def _run_stream(
+    parts: Sequence[str],
+    *,
+    reasoning_format: Literal["separated", "tagged"],
+) -> tuple[list[str], ModelInvokeCompletedEvent]:
+    """Stream ``parts`` through the LLM node and return (chunks, completion)."""
+    model = MagicMock(is_structured_output_parse_error=lambda _error: False)
+    events = list(
+        LLMNode.handle_invoke_result(
+            invoke_result=_stream_results(*[_stream_chunk(part) for part in parts]),
+            file_saver=MagicMock(),
+            file_outputs=[],
+            node_id="llm",
+            model_instance=cast(LLMProtocol, model),
+            reasoning_format=reasoning_format,
+        ),
+    )
+    chunks = [e.chunk for e in events if isinstance(e, StreamChunkEvent)]
+    completed = next(e for e in events if isinstance(e, ModelInvokeCompletedEvent))
+    return chunks, completed
+
+
+def test_separated_stream_strips_think_in_single_chunk() -> None:
+    chunks, completed = _run_stream(
+        ["<think>plan</think>answer"],
+        reasoning_format="separated",
+    )
+
+    assert "".join(chunks) == "answer"
+    assert all("<think>" not in chunk for chunk in chunks)
+    assert completed.text == "answer"
+    assert completed.reasoning_content == "plan"
+
+
+def test_separated_stream_strips_think_split_across_chunks() -> None:
+    chunks, completed = _run_stream(
+        ["<thi", "nk>plan</thi", "nk>ans", "wer"],
+        reasoning_format="separated",
+    )
+
+    assert "".join(chunks) == "answer"
+    assert all("think" not in chunk for chunk in chunks)
+    assert completed.text == "answer"
+    assert completed.reasoning_content == "plan"
+
+
+def test_separated_stream_handles_think_tag_attributes() -> None:
+    chunks, completed = _run_stream(
+        ['<think foo="x">p</think>hi'],
+        reasoning_format="separated",
+    )
+
+    assert "".join(chunks) == "hi"
+    assert completed.text == "hi"
+    assert completed.reasoning_content == "p"
+
+
+def test_separated_stream_handles_multiple_think_blocks() -> None:
+    chunks, completed = _run_stream(
+        ["<think>a</think>X<think>b</think>Y"],
+        reasoning_format="separated",
+    )
+
+    assert "".join(chunks) == "XY"
+    assert completed.text == "XY"
+    assert completed.reasoning_content == "a\nb"
+
+
+def test_separated_stream_drops_unclosed_trailing_think() -> None:
+    chunks, completed = _run_stream(
+        ["hi<think>tail"],
+        reasoning_format="separated",
+    )
+
+    assert "".join(chunks) == "hi"
+    assert all("<think>" not in chunk for chunk in chunks)
+    # Truncated reasoning is kept out of the text but preserved as reasoning.
+    assert completed.text == "hi"
+    assert completed.reasoning_content == "tail"
+
+
+def test_separated_stream_does_not_swallow_non_think_angle_brackets() -> None:
+    chunks, _ = _run_stream(["<div>ok"], reasoning_format="separated")
+
+    assert "".join(chunks) == "<div>ok"
+
+
+def test_separated_stream_keeps_tags_with_think_prefix() -> None:
+    chunks, completed = _run_stream(
+        ["before<think", "ing>idea</thinking>after"],
+        reasoning_format="separated",
+    )
+
+    assert "".join(chunks) == "before<thinking>idea</thinking>after"
+    assert completed.text == "before<thinking>idea</thinking>after"
+    assert completed.reasoning_content == ""
+
+
+def test_separated_stream_keeps_malformed_open_tag_with_nested_bracket() -> None:
+    chunks, completed = _run_stream(
+        ["x<think <y", ">secret</think>z"],
+        reasoning_format="separated",
+    )
+
+    assert "".join(chunks) == "x<think <y>secret</think>z"
+    assert completed.text == "x<think <y>secret</think>z"
+    assert completed.reasoning_content == ""
+
+
+def test_separated_stream_flushes_held_partial_open_on_finalize() -> None:
+    # Stream ends on a held partial open: finalize() must flush "<thi", not drop it.
+    chunks, completed = _run_stream(["answer<thi"], reasoning_format="separated")
+
+    assert "".join(chunks) == "answer<thi"
+    assert chunks[-1] == "<thi"  # from the finalize() flush, not feed()
+    assert completed.text == "answer<thi"
+
+
+def test_separated_stream_strips_leading_whitespace_after_reasoning() -> None:
+    chunks, completed = _run_stream(
+        ["<think>r</think>", "\n", "answer"],
+        reasoning_format="separated",
+    )
+
+    assert "".join(chunks) == "answer"
+    assert completed.text == "answer"
+
+
+def test_tagged_stream_keeps_think_tags_unchanged() -> None:
+    chunks, completed = _run_stream(
+        ["<think>plan</think>answer"],
+        reasoning_format="tagged",
+    )
+
+    assert "".join(chunks) == "<think>plan</think>answer"
+    assert completed.text == "<think>plan</think>answer"
+    assert completed.reasoning_content == ""
+
+
+def _normalize_like_split_reasoning(text: str) -> str:
+    # Mirror split_reasoning()'s whitespace handling: collapse blank-line runs + strip.
+    return re.sub(r"\n\s*\n", "\n\n", text).strip()
+
+
+@pytest.mark.parametrize(
+    "full_text",
+    [
+        "<think>plan</think>answer",
+        "before<think>a</think>middle<think>b</think>after",
+        "<think>only reasoning</think>\n\nanswer body",
+        "before<think>a</think>\n\n\nmiddle",  # internal blank-line run
+        "<think>r</think>answer\n\n",  # trailing whitespace
+    ],
+)
+def test_separated_stream_matches_split_reasoning(full_text: str) -> None:
+    # Stream and batch splitter agree only up to split_reasoning()'s whitespace pass.
+    parts = [full_text[i : i + 3] for i in range(0, len(full_text), 3)]
+    chunks, _ = _run_stream(parts, reasoning_format="separated")
+    expected, _ = split_reasoning(full_text, "separated")
+
+    assert _normalize_like_split_reasoning("".join(chunks)) == expected
