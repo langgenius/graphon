@@ -12,6 +12,7 @@ from graphon.filters import (
 )
 from graphon.graph_events.graph import GraphRunStartedEvent
 from graphon.graph_events.node import (
+    NodeRunReasoningChunkEvent,
     NodeRunRetryEvent,
     NodeRunStartedEvent,
     NodeRunStreamChunkEvent,
@@ -188,6 +189,27 @@ def _stream_chunk(
         chunk=chunk,
         is_final=is_final,
     )
+
+
+def test_response_stream_filter_passes_reasoning_chunk_through_untouched() -> None:
+    graph = _variable_response_graph()
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+
+    reasoning = NodeRunReasoningChunkEvent(
+        id="source-run",
+        node_id="source",
+        node_type=BuiltinNodeTypes.CODE,
+        chunk="thinking...",
+        is_final=False,
+    )
+
+    output = list(event_filter.on_event(reasoning))
+
+    # Out-of-band reasoning is not a referenced-selector stream: it rides the
+    # `case _:` passthrough untouched and is never buffered or reordered.
+    assert output == [reasoning]
+    assert output[0] is reasoning
 
 
 def test_response_stream_filter_emits_text_segments_when_session_starts() -> None:
