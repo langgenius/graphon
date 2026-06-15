@@ -19,6 +19,14 @@ from graphon.model_runtime.protocols.text_embedding_runtime import (
 )
 from graphon.model_runtime.protocols.tts_runtime import TTSModelRuntime
 from graphon.nodes.code.code_node import CodeExecutorProtocol
+from graphon.nodes.human_input.hitl import (
+    Completed,
+    Expired,
+    HITLCallback,
+    HITLContext,
+    HITLDecision,
+    PauseRequested,
+)
 from graphon.nodes.llm.protocols import CredentialsProvider, ModelFactory
 from graphon.nodes.llm.runtime_protocols import (
     LLMPollingCapableProtocol,
@@ -32,15 +40,13 @@ from graphon.nodes.protocols import (
     FileReferenceFactoryProtocol,
     ToolFileManagerProtocol,
 )
-from graphon.nodes.runtime import (
-    HumanInputFormStateProtocol,
-    HumanInputNodeRuntimeProtocol,
-    ToolNodeRuntimeProtocol,
-)
+from graphon.nodes.runtime import ToolNodeRuntimeProtocol
 from graphon.protocols import CodeExecutorProtocol as PublicCodeExecutorProtocol
+from graphon.protocols import Completed as PublicCompleted
 from graphon.protocols import (
     CredentialsProvider as PublicCredentialsProvider,
 )
+from graphon.protocols import Expired as PublicExpired
 from graphon.protocols import (
     FileManagerProtocol as PublicFileManagerProtocol,
 )
@@ -48,14 +54,11 @@ from graphon.protocols import (
     FileReferenceFactoryProtocol as PublicFileReferenceFactoryProtocol,
 )
 from graphon.protocols import GraphValidationRule as PublicGraphValidationRule
+from graphon.protocols import HITLCallback as PublicHITLCallback
+from graphon.protocols import HITLContext as PublicHITLContext
+from graphon.protocols import HITLDecision as PublicHITLDecision
 from graphon.protocols import HttpClientProtocol as PublicHttpClientProtocol
 from graphon.protocols import HttpResponseProtocol as PublicHttpResponseProtocol
-from graphon.protocols import (
-    HumanInputFormStateProtocol as PublicHumanInputFormStateProtocol,
-)
-from graphon.protocols import (
-    HumanInputNodeRuntimeProtocol as PublicHumanInputNodeRuntimeProtocol,
-)
 from graphon.protocols import LLMModelRuntime as PublicLLMModelRuntime
 from graphon.protocols import (
     LLMPollingCapableProtocol as PublicLLMPollingCapableProtocol,
@@ -66,6 +69,7 @@ from graphon.protocols import ModelProviderRuntime as PublicModelProviderRuntime
 from graphon.protocols import ModelRuntime as PublicModelRuntime
 from graphon.protocols import ModerationModelRuntime as PublicModerationModelRuntime
 from graphon.protocols import NodeFactory as PublicNodeFactory
+from graphon.protocols import PauseRequested as PublicPauseRequested
 from graphon.protocols import PreparedLLMProtocol as PublicPreparedLLMProtocol
 from graphon.protocols import PromptMessageMemory as PublicPromptMessageMemory
 from graphon.protocols import (
@@ -126,8 +130,12 @@ def test_public_protocol_exports_match_canonical_definitions() -> None:
     assert PublicToolFileManagerProtocol is ToolFileManagerProtocol
     assert PublicFileReferenceFactoryProtocol is FileReferenceFactoryProtocol
     assert PublicToolNodeRuntimeProtocol is ToolNodeRuntimeProtocol
-    assert PublicHumanInputNodeRuntimeProtocol is HumanInputNodeRuntimeProtocol
-    assert PublicHumanInputFormStateProtocol is HumanInputFormStateProtocol
+    assert PublicHITLContext is HITLContext
+    assert PublicPauseRequested is PauseRequested
+    assert PublicCompleted is Completed
+    assert PublicExpired is Expired
+    assert PublicHITLDecision is HITLDecision
+    assert PublicHITLCallback is HITLCallback
     assert PublicReadOnlyVariablePool is ReadOnlyVariablePool
     assert PublicReadOnlyGraphRuntimeState is ReadOnlyGraphRuntimeState
     assert PublicVariableLoader is VariableLoader
@@ -136,14 +144,17 @@ def test_public_protocol_exports_match_canonical_definitions() -> None:
 def test_public_protocol_package_exports_are_stable() -> None:
     assert protocols.__all__ == [
         "CodeExecutorProtocol",
+        "Completed",
         "CredentialsProvider",
+        "Expired",
         "FileManagerProtocol",
         "FileReferenceFactoryProtocol",
         "GraphValidationRule",
+        "HITLCallback",
+        "HITLContext",
+        "HITLDecision",
         "HttpClientProtocol",
         "HttpResponseProtocol",
-        "HumanInputFormStateProtocol",
-        "HumanInputNodeRuntimeProtocol",
         "LLMModelRuntime",
         "LLMPollingCapableProtocol",
         "LLMProtocol",
@@ -152,6 +163,7 @@ def test_public_protocol_package_exports_are_stable() -> None:
         "ModelRuntime",
         "ModerationModelRuntime",
         "NodeFactory",
+        "PauseRequested",
         "PreparedLLMProtocol",
         "PromptMessageMemory",
         "PromptMessageSerializerProtocol",

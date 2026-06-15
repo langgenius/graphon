@@ -3,7 +3,6 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from graphon.nodes.base.entities import VariableSelector
 from graphon.nodes.human_input.entities import (
     FormDefinition,
     HumanInputNodeData,
@@ -14,7 +13,6 @@ from graphon.nodes.human_input.entities import (
 from graphon.nodes.human_input.enums import (
     ButtonStyle,
     FormInputType,
-    TimeoutUnit,
     ValueSourceType,
 )
 
@@ -58,7 +56,7 @@ class _FormInputHolder(BaseModel):
 
 
 class TestHumanInputNodeDataDeserialization:
-    def test_model_validate_accepts_current_form_input_payload(self) -> None:
+    def test_model_validate_keeps_legacy_form_payload_as_extras(self) -> None:
         payload: dict[str, Any] = {
             "type": "human-input",
             "title": "Collect Input",
@@ -73,29 +71,11 @@ class TestHumanInputNodeDataDeserialization:
 
         assert restored.type == "human-input"
         assert restored.title == "Collect Input"
-        assert restored.form_content == "Name: {{#$output.name#}}"
-        assert len(restored.inputs) == 2
-        assert isinstance(restored.inputs[0], ParagraphInputConfig)
-        assert restored.inputs[0].type == FormInputType.PARAGRAPH
-        assert restored.inputs[0].output_variable_name == "name"
-        assert restored.inputs[0].default is not None
-        assert restored.inputs[0].default.type == ValueSourceType.CONSTANT
-        assert restored.inputs[0].default.selector == []
-        assert restored.inputs[0].default.value == "Alice"
-
-        assert isinstance(restored.inputs[1], ParagraphInputConfig)
-
-        assert restored.inputs[1].type == FormInputType.PARAGRAPH
-        assert restored.inputs[1].default is not None
-        assert restored.inputs[1].default.type == ValueSourceType.VARIABLE
-        assert restored.inputs[1].default.selector == ["start", "bio"]
-        assert [action.id for action in restored.user_actions] == ["approve", "reject"]
-        assert [action.button_style.value for action in restored.user_actions] == [
-            "primary",
-            "ghost",
-        ]
-        assert restored.timeout == 3
-        assert restored.timeout_unit == TimeoutUnit.DAY
+        assert restored.get("form_content") == "Name: {{#$output.name#}}"
+        assert restored.get("inputs") == _FORM_INPUTS_JSON_PAYLOAD
+        assert restored.get("user_actions") == _USER_ACTIONS_JSON_PAYLOAD
+        assert restored.get("timeout") == 3
+        assert restored.get("timeout_unit") == "day"
 
 
 class TestFormDefinitionDeserialization:
@@ -167,74 +147,6 @@ class TestFormInputRoundTrip:
         assert restored.form_input.default.type == ValueSourceType.VARIABLE
         assert restored.form_input.default.selector == ["start", "bio"]
         assert restored.form_input.default.value == ""
-
-
-class TestHumanInputNodeDataVariableSelectorMapping:
-    def test_extract_variable_mapping_preserves_current_paragraph_input_behavior(
-        self,
-    ) -> None:
-        node_data = HumanInputNodeData(
-            title="Collect Input",
-            form_content=(
-                "Profile: {{#start.user.name#}} "
-                "Query: {{#sys.query#}} "
-                "Output: {{#$output.answer#}}"
-            ),
-            inputs=[
-                ParagraphInputConfig(
-                    output_variable_name="notes",
-                ),
-                ParagraphInputConfig(
-                    output_variable_name="summary",
-                    default=StringSource(
-                        type=ValueSourceType.CONSTANT,
-                        value="Pinned summary",
-                    ),
-                ),
-                ParagraphInputConfig(
-                    output_variable_name="bio",
-                    default=StringSource(
-                        type=ValueSourceType.VARIABLE,
-                        selector=("input", "profile", "bio"),
-                    ),
-                ),
-            ],
-        )
-
-        mapping = node_data.extract_variable_selector_to_variable_mapping("human-node")
-
-        assert mapping == {
-            "human-node.#start.user#": ["start", "user"],
-            "human-node.#sys.query#": ["sys", "query"],
-            "human-node.#input.profile.bio#": ("input", "profile", "bio"),
-        }
-
-    def test_extract_variable_mapping_ignores_short_template_selectors(
-        self,
-        monkeypatch: Any,
-    ) -> None:
-        def _extract_short_selector(_self: Any) -> list[VariableSelector]:
-            return [
-                VariableSelector(
-                    variable="#start#",
-                    value_selector=["start"],
-                )
-            ]
-
-        monkeypatch.setattr(
-            "graphon.nodes.human_input.entities.VariableTemplateParser.extract_variable_selectors",
-            _extract_short_selector,
-        )
-
-        node_data = HumanInputNodeData(
-            title="Collect Input",
-            form_content="ignored",
-            inputs=[],
-        )
-
-        mapping = node_data.extract_variable_selector_to_variable_mapping("human-node")
-
-        assert mapping == {}
 
 
 def test_user_action_title_accepts_long_business_value() -> None:
