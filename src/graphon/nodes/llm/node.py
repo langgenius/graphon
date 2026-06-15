@@ -57,6 +57,7 @@ from graphon.node_events.node import (
     RunRetrieverResourceEvent,
     StreamChunkEvent,
     StreamCompletedEvent,
+    StreamReasoningEvent,
 )
 from graphon.nodes.base.entities import VariableSelector
 from graphon.nodes.base.node import Node
@@ -136,6 +137,8 @@ class _StreamingInvokeState:
     structured_output: dict[str, Any] | None = None
     # None in "tagged" mode (stream raw tokens); a filter in "separated" mode.
     text_filter: ThinkStreamFilter | None = None
+    # Set once reasoning has streamed, to emit one terminal marker at stream end.
+    reasoning_started: bool = False
 
 
 class LLMNode(Node[LLMNodeData]):
@@ -875,15 +878,20 @@ class LLMNode(Node[LLMNodeData]):
                 raise LLMNodeError(msg) from e
             raise
 
-        # Flush any clean text the filter was still holding (separated mode).
+        # Flush held text, then mark the reasoning stream finished (separated mode).
         if state.text_filter is not None:
-            remainder = state.text_filter.finalize()
-            if remainder:
+            final = state.text_filter.finalize()
+            if final.text:
                 yield StreamChunkEvent(
                     selector=[node_id, "text"],
-                    chunk=remainder,
+                    chunk=final.text,
                     is_final=False,
                 )
+            if final.reasoning:
+                state.reasoning_started = True
+                yield StreamReasoningEvent(chunk=final.reasoning, is_final=True)
+            elif state.reasoning_started:
+                yield StreamReasoningEvent(chunk="", is_final=True)
 
         # Extract reasoning content from <think> tags in the main text
         full_text = state.full_text_buffer.getvalue()
@@ -959,28 +967,26 @@ class LLMNode(Node[LLMNodeData]):
         file_saver: LLMFileSaver,
         file_outputs: list[File],
         node_id: str,
-    ) -> Generator[StreamChunkEvent, None, None]:
+    ) -> Generator[StreamChunkEvent | StreamReasoningEvent, None, None]:
         text_parts = LLMNode._save_multimodal_output_and_convert_result_to_markdown(
             contents=result.delta.message.content,
             file_saver=file_saver,
             file_outputs=file_outputs,
         )
         for text_part in text_parts:
-            event = LLMNode._build_stream_text_event(
+            yield from LLMNode._build_stream_text_events(
                 text_part=text_part,
                 state=state,
                 node_id=node_id,
             )
-            if event is not None:
-                yield event
 
     @staticmethod
-    def _build_stream_text_event(
+    def _build_stream_text_events(
         *,
         text_part: str,
         state: _StreamingInvokeState,
         node_id: str,
-    ) -> StreamChunkEvent | None:
+    ) -> Generator[StreamChunkEvent | StreamReasoningEvent, None, None]:
         if text_part and not state.has_content:
             state.first_token_time = time.perf_counter()
             state.has_content = True
@@ -989,23 +995,26 @@ class LLMNode(Node[LLMNodeData]):
         # reasoning extraction still sees the full output.
         state.full_text_buffer.write(text_part)
 
-        # "tagged" (no filter): stream the raw token unchanged.
+        # "tagged" (no filter): stream the raw token unchanged, no reasoning.
         if state.text_filter is None:
-            return StreamChunkEvent(
+            yield StreamChunkEvent(
                 selector=[node_id, "text"],
                 chunk=text_part,
                 is_final=False,
             )
+            return
 
-        # "separated": strip <think> reasoning before it reaches the selector.
-        chunk = state.text_filter.feed(text_part)
-        if not chunk:
-            return None
-        return StreamChunkEvent(
-            selector=[node_id, "text"],
-            chunk=chunk,
-            is_final=False,
-        )
+        # "separated": split <think> reasoning off the answer onto its own channel.
+        filtered = state.text_filter.feed(text_part)
+        if filtered.text:
+            yield StreamChunkEvent(
+                selector=[node_id, "text"],
+                chunk=filtered.text,
+                is_final=False,
+            )
+        if filtered.reasoning:
+            state.reasoning_started = True
+            yield StreamReasoningEvent(chunk=filtered.reasoning)
 
     @staticmethod
     def _update_streaming_metadata(

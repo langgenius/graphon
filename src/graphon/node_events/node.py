@@ -61,6 +61,16 @@ class StreamChunkEvent(NodeEventBase):
     )
 
 
+class StreamReasoningEvent(NodeEventBase):
+    """Out-of-band reasoning chunk; no selector (not a variable-pool stream)."""
+
+    chunk: str = Field(..., description="the reasoning chunk content")
+    is_final: bool = Field(
+        default=False,
+        description="indicates if this is the last reasoning chunk for the node run",
+    )
+
+
 class StreamCompletedEvent(NodeEventBase):
     node_run_result: NodeRunResult = Field(..., description="run result")
 

@@ -14,7 +14,17 @@ that reasoning so the two code paths stay consistent:
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Literal
+
+
+@dataclass(frozen=True)
+class FilterChunk:
+    """A chunk split by :class:`ThinkStreamFilter` into clean text and reasoning."""
+
+    text: str
+    reasoning: str
+
 
 # Complete <think>...</think> blocks (attrs, case-insensitive, multiline).
 _THINK_OPEN_ATTR_MAX_CHARS = 512
@@ -57,9 +67,10 @@ class ThinkStreamFilter:
         self._hold = ""
         self._seen_clean = False
 
-    def feed(self, text_part: str) -> str:
-        """Return the clean text that is safe to emit for this chunk."""
+    def feed(self, text_part: str) -> FilterChunk:
+        """Return the clean text and the reasoning stripped from this chunk."""
         out_parts: list[str] = []
+        reasoning_parts: list[str] = []
         work = self._hold + text_part
         self._hold = ""
         while work:
@@ -80,23 +91,30 @@ class ThinkStreamFilter:
             else:
                 match = _THINK_CLOSE_RE.search(work)
                 if match:
+                    reasoning_parts.append(work[: match.start()])
                     self._inside_think = False
                     work = work[match.end() :]
                     continue
                 keep = self._close_suffix_len(work)
-                self._hold = work[-keep:] if keep else ""
+                if keep:
+                    reasoning_parts.append(work[:-keep])
+                    self._hold = work[-keep:]
+                else:
+                    reasoning_parts.append(work)
                 work = ""
-        return self._strip_leading("".join(out_parts))
+        return FilterChunk(
+            text=self._strip_leading("".join(out_parts)),
+            reasoning="".join(reasoning_parts),
+        )
 
-    def finalize(self) -> str:
+    def finalize(self) -> FilterChunk:
         """Flush whatever is safe to emit once the stream ends."""
-        if self._inside_think:
-            # Unclosed <think>: drop truncated reasoning, never leak.
-            self._hold = ""
-            return ""
         remainder = self._hold
         self._hold = ""
-        return self._strip_leading(remainder)
+        if self._inside_think:
+            # Unclosed <think>: held bytes are truncated reasoning, not text.
+            return FilterChunk(text="", reasoning=remainder)
+        return FilterChunk(text=self._strip_leading(remainder), reasoning="")
 
     def _strip_leading(self, clean: str) -> str:
         # Mirror split_reasoning()'s leading strip (reasoning-first models).

@@ -35,6 +35,16 @@ class NodeRunStreamChunkEvent(GraphNodeEventBase):
     )
 
 
+class NodeRunReasoningChunkEvent(GraphNodeEventBase):
+    """Graph-level lift of :class:`StreamReasoningEvent` (out-of-band, no selector)."""
+
+    chunk: str = Field(..., description="the reasoning chunk content")
+    is_final: bool = Field(
+        default=False,
+        description="indicates if this is the last reasoning chunk for the node run",
+    )
+
+
 class NodeRunModelPollingProgressEvent(GraphNodeEventBase):
     attempt: int = Field(..., ge=0, description="polling check attempt count")
     last_checked_at: datetime = Field(..., description="last polling check time")
