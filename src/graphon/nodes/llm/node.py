@@ -489,7 +489,6 @@ class LLMNode(Node[LLMNodeData]):
             else None
         )
         self._raise_if_polling_aborted()
-        workflow_run_id = self._resolve_required_workflow_run_id()
         request_start_time = time.perf_counter()
         polling_result = self._normalize_polling_result(
             polling_model.start_llm_polling(
@@ -498,8 +497,6 @@ class LLMNode(Node[LLMNodeData]):
                 tools=None,
                 stop=stop,
                 json_schema=json_schema,
-                workflow_run_id=workflow_run_id,
-                node_id=self._node_id,
             ),
         )
 
@@ -567,8 +564,6 @@ class LLMNode(Node[LLMNodeData]):
                     polling_result = self._normalize_polling_result(
                         polling_model.check_llm_polling(
                             plugin_state=plugin_state,
-                            workflow_run_id=workflow_run_id,
-                            node_id=self._node_id,
                         ),
                     )
 
