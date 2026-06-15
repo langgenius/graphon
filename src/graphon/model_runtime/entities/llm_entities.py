@@ -225,9 +225,9 @@ class LLMPollingResult(BaseModel):
     plugin_state: dict[str, JsonValue] | None = None
     result: LLMResult | LLMResultWithStructuredOutput | None = None
     error: str | None = None
-    next_check_after_seconds: float | None = Field(default=None, gt=0)
-    expires_after_seconds: float | None = Field(default=None, gt=0)
-    max_attempts: int | None = Field(default=None, ge=1)
+    next_check_after_seconds: StrictInt | None = Field(default=None, ge=1)
+    expires_after_seconds: StrictInt | None = Field(default=None, ge=1)
+    max_attempts: StrictInt | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def _validate_status_payload(self) -> LLMPollingResult:
