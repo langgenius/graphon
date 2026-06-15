@@ -68,16 +68,26 @@ def test_llm_polling_result_validates_status_payload() -> None:
             LLMPollingResult.model_validate(payload)
 
 
-def test_llm_polling_result_accepts_fractional_intervals() -> None:
+def test_llm_polling_result_accepts_positive_integer_intervals() -> None:
     result = LLMPollingResult(
         status=LLMPollingStatus.RUNNING,
         plugin_state={"job_id": "job-1"},
-        next_check_after_seconds=0.25,
-        expires_after_seconds=0.5,
+        next_check_after_seconds=1,
+        expires_after_seconds=2,
     )
 
-    assert result.next_check_after_seconds == pytest.approx(0.25)
-    assert result.expires_after_seconds == pytest.approx(0.5)
+    assert result.next_check_after_seconds == 1
+    assert result.expires_after_seconds == 2
+
+
+def test_llm_polling_result_rejects_fractional_intervals() -> None:
+    with pytest.raises(ValidationError):
+        LLMPollingResult.model_validate({
+            "status": "running",
+            "plugin_state": {"job_id": "job-1"},
+            "next_check_after_seconds": 0.25,
+            "expires_after_seconds": 0.5,
+        })
 
 
 def test_llm_polling_config_rejects_zero_min_interval() -> None:
