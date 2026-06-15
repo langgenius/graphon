@@ -231,8 +231,6 @@ def test_polling_llm_start_can_succeed_immediately(
         completed_event.node_run_result.status == WorkflowNodeExecutionStatus.SUCCEEDED
     )
     assert completed_event.node_run_result.outputs["text"] == "done"
-    assert model.start_calls[0]["workflow_run_id"] == "wr-1"
-    assert model.start_calls[0]["node_id"] == "llm"
     assert model.check_calls == []
 
 
@@ -572,8 +570,6 @@ def test_polling_llm_fails_when_max_attempts_are_exceeded(
     assert model.check_calls == [
         {
             "plugin_state": {"job_id": "job-1"},
-            "workflow_run_id": "wr-test",
-            "node_id": "llm",
         },
     ]
     assert completed_event.node_run_result.status == WorkflowNodeExecutionStatus.FAILED
@@ -603,29 +599,7 @@ def test_polling_llm_respects_existing_abort_before_start(
     assert "aborted" in completed_event.node_run_result.error
 
 
-def test_polling_llm_requires_workflow_run_id(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    model = _PollingLLM([
-        LLMPollingResult(
-            status=LLMPollingStatus.SUCCEEDED,
-            result=_llm_result(),
-        ),
-    ])
-    node = _build_llm_node(model_instance=model, workflow_run_id=None)
-    _stub_simple_prompt(monkeypatch, node)
-
-    events = list(node._run())
-
-    completed_event = next(
-        event for event in events if isinstance(event, StreamCompletedEvent)
-    )
-    assert model.start_calls == []
-    assert completed_event.node_run_result.status == WorkflowNodeExecutionStatus.FAILED
-    assert "workflow_run_id" in completed_event.node_run_result.error
-
-
-def test_polling_llm_uses_run_context_workflow_run_id(
+def test_polling_llm_not_use_run_context_workflow_run_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model = _PollingLLM([
@@ -650,7 +624,6 @@ def test_polling_llm_uses_run_context_workflow_run_id(
         completed_event.node_run_result.status == WorkflowNodeExecutionStatus.SUCCEEDED
     )
     assert completed_event.node_run_result.outputs["text"] == "done"
-    assert model.start_calls[0]["workflow_run_id"] == "wr-context"
 
 
 def test_polling_llm_ignores_schema_feature_without_capability_base() -> None:

@@ -140,8 +140,6 @@ class LLMPollingCapableProtocol(ABC):
         tools: Sequence[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         json_schema: Mapping[str, Any] | None,
-        workflow_run_id: str,
-        node_id: str,
     ) -> LLMPollingResult:
         pass
 
@@ -150,8 +148,6 @@ class LLMPollingCapableProtocol(ABC):
         self,
         *,
         plugin_state: Mapping[str, JsonValue],
-        workflow_run_id: str,
-        node_id: str,
     ) -> LLMPollingResult:
         pass
 
