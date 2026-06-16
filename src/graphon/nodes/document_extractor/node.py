@@ -6,6 +6,7 @@ import json
 import logging
 import pathlib
 import tempfile
+import threading
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ import charset_normalizer
 import docx
 import pandas as pd
 import pypandoc
+import pypdf
 import pypdfium2
 import webvtt
 import yaml
@@ -44,6 +46,7 @@ from .exc import (
 )
 
 logger = logging.getLogger(__name__)
+_PDFIUM_LOCK = threading.Lock()
 
 _MIME_PLAIN_TEXT_TYPES = frozenset((
     "text/plain",
@@ -468,23 +471,61 @@ def _extract_text_from_yaml(file_content: bytes) -> str:
 
 def _extract_text_from_pdf(file_content: bytes) -> str:
     try:
-        pdf_document = pypdfium2.PdfDocument(io.BytesIO(file_content), autoclose=True)
-        return _read_pdf_text(pdf_document)
+        text = _read_pdf_text_with_pdfium(file_content)
     except Exception as e:
         msg = f"Failed to extract text from PDF: {e!s}"
         raise TextExtractionError(msg) from e
+    if text.strip():
+        return text
+    logger.debug("PDFium returned empty text for PDF; trying pypdf fallback")
+    return _read_fallback_pdf_text(file_content, default_text=text)
+
+
+def _read_pdf_text_with_pdfium(file_content: bytes) -> str:
+    with (
+        _PDFIUM_LOCK,
+        pypdfium2.PdfDocument(
+            io.BytesIO(file_content),
+            autoclose=True,
+        ) as pdf_document,
+    ):
+        return _read_pdf_text(pdf_document)
 
 
 def _read_pdf_text(pdf_document: pypdfium2.PdfDocument) -> str:
     text_parts = []
     for page in pdf_document:
-        text_page = page.get_textpage()
         try:
-            text_parts.append(text_page.get_text_range())
+            text_page = page.get_textpage()
+            try:
+                text_parts.append(text_page.get_text_range())
+            finally:
+                text_page.close()
         finally:
-            text_page.close()
             page.close()
     return "".join(text_parts)
+
+
+def _read_pdf_text_with_pypdf(file_content: bytes) -> str:
+    pdf_reader = pypdf.PdfReader(io.BytesIO(file_content))
+    try:
+        text_parts = [page.extract_text() or "" for page in pdf_reader.pages]
+        return "".join(text_parts)
+    finally:
+        pdf_reader.close()
+
+
+def _read_fallback_pdf_text(file_content: bytes, *, default_text: str) -> str:
+    try:
+        fallback_text = _read_pdf_text_with_pypdf(file_content)
+    except Exception:
+        logger.debug("pypdf fallback failed for PDF text extraction", exc_info=True)
+        return default_text
+    if fallback_text.strip():
+        logger.debug("pypdf fallback extracted text from PDF")
+        return fallback_text
+    logger.debug("pypdf fallback returned empty text for PDF")
+    return default_text
 
 
 def _extract_text_from_doc(

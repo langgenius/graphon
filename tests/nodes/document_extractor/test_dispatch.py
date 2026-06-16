@@ -1,7 +1,7 @@
 import io
 import json
 from types import SimpleNamespace
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Self
 from unittest.mock import MagicMock
 
 import pandas as pd
@@ -13,6 +13,46 @@ from graphon.nodes.document_extractor.exc import (
     TextExtractionError,
     UnsupportedFileTypeError,
 )
+
+_PDF_BYTES = b"%PDF"
+
+
+def _minimal_text_pdf(text: str) -> bytes:
+    stream = f"BT /F1 24 Tf 72 720 Td ({text}) Tj ET".encode()
+    objects = [
+        b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+        b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+        (
+            b"3 0 obj\n"
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\n"
+            b"endobj\n"
+        ),
+        b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+        (
+            b"5 0 obj\n<< /Length "
+            + str(len(stream)).encode()
+            + b" >>\nstream\n"
+            + stream
+            + b"\nendstream\nendobj\n"
+        ),
+    ]
+    content = b"%PDF-1.4\n"
+    offsets = [0]
+    for obj in objects:
+        offsets.append(len(content))
+        content += obj
+
+    xref_offset = len(content)
+    xref = [b"xref\n0 6\n", b"0000000000 65535 f \n"]
+    xref.extend(f"{offset:010d} 00000 n \n".encode() for offset in offsets[1:])
+    return (
+        content
+        + b"".join(xref)
+        + b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n"
+        + str(xref_offset).encode()
+        + b"\n%%EOF\n"
+    )
 
 
 def test_extract_text_by_file_extension_routes_registered_extractor() -> None:
@@ -97,6 +137,188 @@ def test_extract_text_from_excel_reads_memory_workbook() -> None:
 
     assert "| Name | Value |" in extracted
     assert "| Alice Smith | 1 |" in extracted
+
+
+@pytest.mark.parametrize("route_kind", ["direct", "extension", "mime_type"])
+def test_pdf_extractors_read_real_text_pdf(route_kind: str) -> None:
+    file_content = _minimal_text_pdf("Graphon PDF")
+
+    if route_kind == "direct":
+        extracted = document_extractor_node._extract_text_from_pdf(file_content)
+    elif route_kind == "extension":
+        extracted = document_extractor_node._extract_text_by_file_extension(
+            file_content=file_content,
+            file_extension=".pdf",
+            unstructured_api_config=UnstructuredApiConfig(),
+        )
+    else:
+        extracted = document_extractor_node._extract_text_by_mime_type(
+            file_content=file_content,
+            mime_type="application/pdf",
+            unstructured_api_config=UnstructuredApiConfig(),
+        )
+
+    assert "Graphon PDF" in extracted
+
+
+@pytest.mark.parametrize(
+    ("pdfium_text", "fallback_text", "expected", "fallback_calls"),
+    [
+        ("pdfium text", "unused fallback", "pdfium text", 0),
+        ("\n  ", "fallback text", "fallback text", 1),
+    ],
+)
+def test_extract_text_from_pdf_uses_fallback_only_for_empty_pdfium_text(
+    monkeypatch: pytest.MonkeyPatch,
+    pdfium_text: str,
+    fallback_text: str,
+    expected: str,
+    fallback_calls: int,
+) -> None:
+    fallback_inputs = []
+
+    monkeypatch.setattr(
+        document_extractor_node,
+        "_read_pdf_text_with_pdfium",
+        lambda _file_content: pdfium_text,
+    )
+
+    def read_fallback(file_content: bytes) -> str:
+        fallback_inputs.append(file_content)
+        return fallback_text
+
+    monkeypatch.setattr(
+        document_extractor_node,
+        "_read_pdf_text_with_pypdf",
+        read_fallback,
+    )
+
+    extracted = document_extractor_node._extract_text_from_pdf(_PDF_BYTES)
+
+    assert extracted == expected
+    assert fallback_inputs == [_PDF_BYTES] * fallback_calls
+
+
+@pytest.mark.parametrize("fallback_text", ["", "  "])
+def test_extract_text_from_pdf_keeps_pdfium_empty_text_when_fallback_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+    fallback_text: str,
+) -> None:
+    monkeypatch.setattr(
+        document_extractor_node,
+        "_read_pdf_text_with_pdfium",
+        lambda _file_content: "\n  ",
+    )
+    monkeypatch.setattr(
+        document_extractor_node,
+        "_read_pdf_text_with_pypdf",
+        lambda _file_content: fallback_text,
+    )
+
+    extracted = document_extractor_node._extract_text_from_pdf(_PDF_BYTES)
+
+    assert extracted == "\n  "
+
+
+def test_extract_text_from_pdf_keeps_pdfium_empty_text_when_fallback_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def raise_fallback_error(_file_content: bytes) -> str:
+        msg = "cannot parse fallback"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(
+        document_extractor_node,
+        "_read_pdf_text_with_pdfium",
+        lambda _file_content: "\n  ",
+    )
+    monkeypatch.setattr(
+        document_extractor_node,
+        "_read_pdf_text_with_pypdf",
+        raise_fallback_error,
+    )
+
+    extracted = document_extractor_node._extract_text_from_pdf(_PDF_BYTES)
+
+    assert extracted == "\n  "
+
+
+def test_extract_text_from_pdf_closes_reader_when_fallback_page_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Page:
+        def extract_text(self) -> str:
+            msg = "bad page"
+            raise RuntimeError(msg)
+
+    class Reader:
+        def __init__(self) -> None:
+            self.pages = [Page()]
+
+        def close(self) -> None:
+            events.append("reader.close")
+
+    events: list[str] = []
+
+    monkeypatch.setattr(
+        document_extractor_node,
+        "_read_pdf_text_with_pdfium",
+        lambda _file_content: "\n  ",
+    )
+    monkeypatch.setattr(
+        document_extractor_node.pypdf,
+        "PdfReader",
+        lambda *_args, **_kwargs: Reader(),
+    )
+
+    extracted = document_extractor_node._extract_text_from_pdf(_PDF_BYTES)
+
+    assert extracted == "\n  "
+    assert events == ["reader.close"]
+
+
+def test_read_pdf_text_with_pdfium_closes_resources_when_text_page_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Page:
+        def get_textpage(self) -> None:
+            events.append("page.get_textpage")
+            msg = "missing text page"
+            raise RuntimeError(msg)
+
+        def close(self) -> None:
+            events.append("page.close")
+
+    class Document:
+        def __enter__(self) -> Self:
+            events.append("document.enter")
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            events.append("document.close")
+
+        def __iter__(self) -> Any:
+            events.append("document.iter")
+            return iter([Page()])
+
+    events: list[str] = []
+
+    monkeypatch.setattr(
+        document_extractor_node.pypdfium2,
+        "PdfDocument",
+        lambda *_args, **_kwargs: Document(),
+    )
+
+    with pytest.raises(RuntimeError, match="missing text page"):
+        document_extractor_node._read_pdf_text_with_pdfium(_PDF_BYTES)
+
+    assert events == [
+        "document.enter",
+        "document.iter",
+        "page.get_textpage",
+        "page.close",
+        "document.close",
+    ]
 
 
 def test_excel_file_to_markdown_skips_invalid_sheet() -> None:

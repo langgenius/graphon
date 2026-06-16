@@ -17,6 +17,7 @@ dependencies = [
     'pandas[excel]>=2.1',
     'pydantic>=2.7',
     'pydantic-extra-types>=2',
+    'pypdf>=6.14.2',
     'pypdfium2>=5',
     'python-docx>=1.2',
     'pyyaml>=6',
