@@ -11,6 +11,8 @@ from graphon.file.tool_file_parser import (
     set_tool_file_manager_factory,
 )
 
+_pytestmark = pytest.mark.usefixtures("_reset_tool_file_manager_factory_registry")
+
 
 class _RegistryHarness:
     def __init__(self) -> None:
@@ -28,7 +30,7 @@ class _RegistryHarness:
         self._factory = factory
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _reset_tool_file_manager_factory_registry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

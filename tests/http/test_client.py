@@ -40,6 +40,8 @@ from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
 from ..helpers import build_graph_init_params, build_variable_pool
 
+_pytestmark = pytest.mark.usefixtures("_restore_default_http_client")
+
 
 class _ToolFileManager:
     def create_file_by_raw(
@@ -116,7 +118,7 @@ def _build_runtime_state() -> GraphRuntimeState:
     )
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _restore_default_http_client() -> Generator[None, None, None]:
     default_http_client = get_default_http_client()
     yield
