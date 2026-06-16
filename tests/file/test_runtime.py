@@ -13,8 +13,10 @@ from graphon.file.runtime import (
     set_workflow_file_runtime,
 )
 
+_pytestmark = pytest.mark.usefixtures("_reset_workflow_file_runtime_registry")
 
-@pytest.fixture(autouse=True)
+
+@pytest.fixture
 def _reset_workflow_file_runtime_registry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

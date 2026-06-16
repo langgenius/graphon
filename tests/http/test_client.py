@@ -40,6 +40,8 @@ from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
 from ..helpers import build_graph_init_params, build_variable_pool
 
+_pytestmark = pytest.mark.usefixtures("_restore_default_http_client")
+
 
 class _ToolFileManager:
     def create_file_by_raw(
@@ -116,7 +118,7 @@ def _build_runtime_state() -> GraphRuntimeState:
     )
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _restore_default_http_client() -> Generator[None, None, None]:
     default_http_client = get_default_http_client()
     yield
@@ -188,6 +190,17 @@ def test_http_response_raise_for_status_uses_library_error() -> None:
 
     with pytest.raises(HttpStatusError):
         response.raise_for_status()
+
+
+def test_http_headers_get_accepts_non_string_key() -> None:
+    response = HttpResponse(
+        status_code=HTTPStatus.OK,
+        headers={"Content-Type": "text/plain"},
+    )
+
+    assert response.headers.get(object()) is None
+    assert response.headers.get(1, "fallback") == "fallback"
+    assert 1 not in response.headers
 
 
 def test_http_response_text_prefers_charset_from_content_type(
