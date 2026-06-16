@@ -958,6 +958,43 @@ def test_reasoning_event_dispatches_to_graph_event() -> None:
     assert graph_event.is_final is True
 
 
+def test_run_forwards_streaming_reasoning_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Regression: _yield_run_completion must forward StreamReasoningEvent through
+    # the full _run() path. Without it the separated-mode reasoning the streaming
+    # invoke emits is silently dropped before reaching the graph layer, leaving the
+    # chatflow "thinking" panel dark even though the producer/dispatch sides work.
+    node = _build_llm_node()
+    _stub_simple_prompt(monkeypatch, node)
+    monkeypatch.setattr(
+        "graphon.nodes.llm.node.LLMNode.invoke_llm",
+        lambda **_: LLMNode.handle_invoke_result(
+            invoke_result=_stream_results(_stream_chunk("<think>plan</think>answer")),
+            file_saver=MagicMock(),
+            file_outputs=[],
+            node_id="llm",
+            model_instance=cast(
+                LLMProtocol,
+                MagicMock(is_structured_output_parse_error=lambda _error: False),
+            ),
+            reasoning_format="separated",
+        ),
+    )
+
+    events = list(node._run())
+
+    reasoning = [e for e in events if isinstance(e, StreamReasoningEvent)]
+    assert "".join(e.chunk for e in reasoning) == "plan"
+    assert sum(e.is_final for e in reasoning) == 1
+    assert reasoning[-1].is_final
+
+    completed = next(e for e in events if isinstance(e, StreamCompletedEvent))
+    assert completed.node_run_result.status == WorkflowNodeExecutionStatus.SUCCEEDED
+    assert completed.node_run_result.outputs["text"] == "answer"
+    assert completed.node_run_result.outputs["reasoning_content"] == "plan"
+
+
 def _normalize_like_split_reasoning(text: str) -> str:
     # Mirror split_reasoning()'s whitespace handling: collapse blank-line runs + strip.
     return re.sub(r"\n\s*\n", "\n\n", text).strip()

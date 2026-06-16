@@ -383,7 +383,10 @@ class LLMNode(Node[LLMNodeData]):
         structured_output: LLMStructuredOutput | None = None
 
         for event in generator:
-            if isinstance(event, StreamChunkEvent | ModelPollingProgressEvent):
+            if isinstance(
+                event,
+                StreamChunkEvent | StreamReasoningEvent | ModelPollingProgressEvent,
+            ):
                 yield event
                 continue
 
