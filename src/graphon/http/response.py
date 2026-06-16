@@ -3,7 +3,7 @@ from __future__ import annotations
 import email.message
 from collections.abc import Iterator, Mapping
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, overload
 
 import charset_normalizer
 
@@ -29,7 +29,21 @@ class HttpHeaders(Mapping[str, str]):
     def __len__(self) -> int:
         return len(self._values)
 
-    def get(self, key: str, default: Any = None) -> str | Any:
+    def __contains__(self, key: object) -> bool:
+        return isinstance(key, str) and key.lower() in self._values
+
+    @overload
+    def get(self, key: object, /) -> str | None: ...
+
+    @overload
+    def get(self, key: object, default: str, /) -> str: ...
+
+    @overload
+    def get[T](self, key: object, default: T, /) -> str | T: ...
+
+    def get[T](self, key: object, default: T | None = None, /) -> str | T | None:
+        if not isinstance(key, str):
+            return default
         return self._values.get(key.lower(), ("", default))[1]
 
 
