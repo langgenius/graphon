@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any, Protocol, runtime_checkable
 
 from graphon.model_runtime.protocols.provider_runtime import ModelProviderRuntime
@@ -20,6 +20,7 @@ class TTSModelRuntime(ModelProviderRuntime, Protocol):
         credentials: dict[str, Any],
         content_text: str,
         voice: str,
+        invocation_context: Mapping[str, object] | None = None,
     ) -> Iterable[bytes]: ...
 
     @abstractmethod

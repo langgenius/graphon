@@ -284,6 +284,7 @@ def _invoke_llm_via_runtime(
     tools: list[PromptMessageTool] | None,
     stop: Sequence[str] | None,
     stream: bool,
+    invocation_context: Mapping[str, object] | None,
 ) -> LLMResult | Generator[LLMResultChunk, None, None]:
     return llm_model.model_runtime.invoke_llm(
         provider=provider,
@@ -294,6 +295,7 @@ def _invoke_llm_via_runtime(
         tools=tools,
         stop=stop,
         stream=stream,
+        invocation_context=invocation_context,
     )
 
 
@@ -312,6 +314,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
         stop: list[str] | None = None,
         stream: bool = True,
         callbacks: list[Callback] | None = None,
+        invocation_context: Mapping[str, object] | None = None,
     ) -> LLMResult | Generator[LLMResultChunk, None, None]:
         """Invoke the large language model and optionally stream result chunks."""
         # validate and filter model parameters
@@ -334,6 +337,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
             tools=tools,
             stop=stop,
             stream=stream,
+            invocation_context=invocation_context,
             callbacks=callbacks,
         )
 
@@ -350,6 +354,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
                 tools=tools,
                 stop=stop,
                 stream=stream,
+                invocation_context=invocation_context,
             )
 
             if not stream:
@@ -368,6 +373,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
                 tools=tools,
                 stop=stop,
                 stream=stream,
+                invocation_context=invocation_context,
                 callbacks=callbacks,
             )
 
@@ -383,6 +389,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
                 tools=tools,
                 stop=stop,
                 stream=stream,
+                invocation_context=invocation_context,
                 callbacks=callbacks,
             )
         if isinstance(result, LLMResult):
@@ -395,6 +402,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
                 tools=tools,
                 stop=stop,
                 stream=stream,
+                invocation_context=invocation_context,
                 callbacks=callbacks,
             )
             # Following https://github.com/langgenius/dify/issues/17799,

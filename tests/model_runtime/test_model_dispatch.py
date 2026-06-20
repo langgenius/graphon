@@ -158,8 +158,10 @@ class _LLMRuntimeStub(_ProviderRuntimeStub):
         tools: list[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         stream: bool,
+        invocation_context: Mapping[str, object] | None = None,
     ) -> LLMResult | Generator[LLMResultChunk, None, None]:
         _ = provider, credentials, model_parameters, tools, stop, stream
+        _ = invocation_context
         return LLMResult(
             model=model,
             prompt_messages=list(prompt_messages),
@@ -227,9 +229,10 @@ class _StreamingLLMRuntimeStub(_LLMRuntimeStub):
         tools: list[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         stream: bool,
+        invocation_context: Mapping[str, object] | None = None,
     ) -> Generator[LLMResultChunk, None, None]:
         _ = provider, model, credentials, model_parameters, prompt_messages
-        _ = tools, stop, stream
+        _ = tools, stop, stream, invocation_context
         yield from self._chunks
         if self._fail_after_chunks:
             msg = "stream failed"
@@ -378,8 +381,9 @@ class _EmbeddingRuntimeStub(_ProviderRuntimeStub):
         credentials: dict[str, Any],
         texts: list[str],
         input_type: EmbeddingInputType,
+        invocation_context: Mapping[str, object] | None = None,
     ) -> EmbeddingResult:
-        _ = provider, model, credentials, texts, input_type
+        _ = provider, model, credentials, texts, input_type, invocation_context
         return EmbeddingResult(
             model=model,
             embeddings=[[0.1, 0.2]],
@@ -402,8 +406,9 @@ class _EmbeddingRuntimeStub(_ProviderRuntimeStub):
         credentials: dict[str, Any],
         documents: list[dict[str, Any]],
         input_type: EmbeddingInputType,
+        invocation_context: Mapping[str, object] | None = None,
     ) -> EmbeddingResult:
-        _ = provider, model, credentials, documents, input_type
+        _ = provider, model, credentials, documents, input_type, invocation_context
         return EmbeddingResult(
             model=model,
             embeddings=[[0.1, 0.2]],
@@ -439,8 +444,9 @@ class _TTSRuntimeStub(_ProviderRuntimeStub):
         credentials: dict[str, Any],
         content_text: str,
         voice: str,
+        invocation_context: Mapping[str, object] | None = None,
     ) -> list[bytes]:
-        _ = provider, model, credentials, content_text, voice
+        _ = provider, model, credentials, content_text, voice, invocation_context
         return [b"audio"]
 
     def get_tts_model_voices(
@@ -463,8 +469,9 @@ class _ModerationRuntimeStub(_ProviderRuntimeStub):
         model: str,
         credentials: dict[str, Any],
         text: str,
+        invocation_context: Mapping[str, object] | None = None,
     ) -> bool:
-        _ = provider, model, credentials, text
+        _ = provider, model, credentials, text, invocation_context
         return True
 
 
@@ -479,8 +486,9 @@ class _RerankRuntimeStub(_ProviderRuntimeStub):
         docs: list[str],
         score_threshold: float | None,
         top_n: int | None,
+        invocation_context: Mapping[str, object] | None = None,
     ) -> RerankResult:
-        _ = provider, credentials, query, score_threshold, top_n
+        _ = provider, credentials, query, score_threshold, top_n, invocation_context
         return RerankResult(
             model=model,
             docs=[RerankDocument(index=0, text=docs[0], score=0.9)],
@@ -496,8 +504,9 @@ class _RerankRuntimeStub(_ProviderRuntimeStub):
         docs: list[MultimodalRerankInput],
         score_threshold: float | None,
         top_n: int | None,
+        invocation_context: Mapping[str, object] | None = None,
     ) -> RerankResult:
-        _ = provider, credentials, query, score_threshold, top_n
+        _ = provider, credentials, query, score_threshold, top_n, invocation_context
         return RerankResult(
             model=model,
             docs=[RerankDocument(index=0, text=docs[0]["content"], score=0.9)],
@@ -512,8 +521,9 @@ class _SpeechToTextRuntimeStub(_ProviderRuntimeStub):
         model: str,
         credentials: dict[str, Any],
         file: IO[bytes],
+        invocation_context: Mapping[str, object] | None = None,
     ) -> str:
-        _ = provider, model, credentials, file
+        _ = provider, model, credentials, file, invocation_context
         return "transcript"
 
 
@@ -841,3 +851,82 @@ def test_speech_to_text_model_accepts_speech_only_runtime_surface() -> None:
         )
         == "transcript"
     )
+
+
+class _InvocationContextRecordingLLMRuntimeStub(_LLMRuntimeStub):
+    def __init__(self) -> None:
+        super().__init__()
+        self.received_invocation_contexts: list[Mapping[str, object] | None] = []
+
+    def invoke_llm(
+        self,
+        *,
+        provider: str,
+        model: str,
+        credentials: dict[str, Any],
+        model_parameters: dict[str, Any],
+        prompt_messages: Sequence[PromptMessage],
+        tools: list[PromptMessageTool] | None,
+        stop: Sequence[str] | None,
+        stream: bool,
+        invocation_context: Mapping[str, object] | None = None,
+    ) -> LLMResult | Generator[LLMResultChunk, None, None]:
+        self.received_invocation_contexts.append(invocation_context)
+        return super().invoke_llm(
+            provider=provider,
+            model=model,
+            credentials=credentials,
+            model_parameters=model_parameters,
+            prompt_messages=prompt_messages,
+            tools=tools,
+            stop=stop,
+            stream=stream,
+            invocation_context=invocation_context,
+        )
+
+
+def test_large_language_model_forwards_invocation_context_to_runtime() -> None:
+    provider = ProviderEntity(
+        provider="test-provider",
+        label=I18nObject(en_US="Test Provider"),
+        supported_model_types=[ModelType.LLM],
+        configurate_methods=[],
+    )
+    stub = _InvocationContextRecordingLLMRuntimeStub()
+    model = LargeLanguageModel(
+        provider_schema=provider,
+        model_runtime=cast("LLMModelRuntime", stub),
+    )
+
+    model.invoke(
+        model="fake-chat",
+        credentials={},
+        prompt_messages=[UserPromptMessage(content="hello")],
+        stream=False,
+        invocation_context={"app_id": "app-123"},
+    )
+
+    assert stub.received_invocation_contexts == [{"app_id": "app-123"}]
+
+
+def test_large_language_model_defaults_invocation_context_to_none() -> None:
+    provider = ProviderEntity(
+        provider="test-provider",
+        label=I18nObject(en_US="Test Provider"),
+        supported_model_types=[ModelType.LLM],
+        configurate_methods=[],
+    )
+    stub = _InvocationContextRecordingLLMRuntimeStub()
+    model = LargeLanguageModel(
+        provider_schema=provider,
+        model_runtime=cast("LLMModelRuntime", stub),
+    )
+
+    model.invoke(
+        model="fake-chat",
+        credentials={},
+        prompt_messages=[UserPromptMessage(content="hello")],
+        stream=False,
+    )
+
+    assert stub.received_invocation_contexts == [None]

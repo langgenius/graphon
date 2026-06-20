@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from typing import IO
 
 from graphon.model_runtime.entities.model_entities import ModelType
@@ -12,7 +13,13 @@ class Speech2TextModel(AIModel[SpeechToTextModelRuntime]):
 
     model_type: ModelType = ModelType.SPEECH2TEXT
 
-    def invoke(self, model: str, credentials: dict, file: IO[bytes]) -> str:
+    def invoke(
+        self,
+        model: str,
+        credentials: dict,
+        file: IO[bytes],
+        invocation_context: Mapping[str, object] | None = None,
+    ) -> str:
         """Invoke the speech-to-text model and return the transcribed text."""
         try:
             return self.model_runtime.invoke_speech_to_text(
@@ -20,6 +27,7 @@ class Speech2TextModel(AIModel[SpeechToTextModelRuntime]):
                 model=model,
                 credentials=credentials,
                 file=file,
+                invocation_context=invocation_context,
             )
         except Exception as e:
             raise self._transform_invoke_error(e) from e

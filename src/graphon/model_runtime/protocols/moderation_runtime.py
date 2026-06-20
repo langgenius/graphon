@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+from collections.abc import Mapping
 from typing import Any, Protocol, runtime_checkable
 
 from graphon.model_runtime.protocols.provider_runtime import ModelProviderRuntime
@@ -18,4 +19,5 @@ class ModerationModelRuntime(ModelProviderRuntime, Protocol):
         model: str,
         credentials: dict[str, Any],
         text: str,
+        invocation_context: Mapping[str, object] | None = None,
     ) -> bool: ...
