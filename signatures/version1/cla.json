@@ -95,6 +95,14 @@
       "created_at": "2026-06-16T09:50:26Z",
       "repoId": 1189279581,
       "pullRequestNo": 189
+    },
+    {
+      "name": "ryuta-kobayashi-ug",
+      "id": 208769722,
+      "comment_id": 4756796221,
+      "created_at": "2026-06-20T07:01:55Z",
+      "repoId": 1189279581,
+      "pullRequestNo": 191
     }
   ]
 }
