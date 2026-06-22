@@ -8,12 +8,12 @@ import pytest
 
 from graphon.entities.pause_reason import HitlRequired
 from graphon.graph_events.node import NodeRunPauseRequestedEvent, NodeRunSucceededEvent
-from graphon.nodes.human_input.entities import HumanInputNodeData
-from graphon.nodes.human_input.hitl import (
+from graphon.nodes.human_input.entities import (
     Completed,
     Expired,
     HITLContext,
     HITLDecision,
+    HumanInputNodeData,
     PauseRequested,
 )
 from graphon.nodes.human_input.human_input_node import HumanInputNode

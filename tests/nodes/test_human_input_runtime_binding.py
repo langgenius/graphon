@@ -3,8 +3,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from time import perf_counter
 
-from graphon.nodes.human_input.entities import HumanInputNodeData
-from graphon.nodes.human_input.hitl import HITLContext, HITLDecision, PauseRequested
+from graphon.nodes.human_input.entities import (
+    HITLContext,
+    HITLDecision,
+    HumanInputNodeData,
+    PauseRequested,
+)
 from graphon.nodes.human_input.human_input_node import HumanInputNode
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
