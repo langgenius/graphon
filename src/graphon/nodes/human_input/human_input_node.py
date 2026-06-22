@@ -16,8 +16,14 @@ from graphon.nodes.base.node import Node
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.variables.segments import Segment
 
-from .entities import HumanInputNodeData
-from .hitl import Completed, Expired, HITLCallback, HITLContext, PauseRequested
+from .entities import (
+    Completed,
+    Expired,
+    HITLCallback,
+    HITLContext,
+    HumanInputNodeData,
+    PauseRequested,
+)
 
 _WORKFLOW_EXECUTION_ID_KEYS = ("workflow_execution_id", "workflow_run_id")
 _WORKFLOW_EXECUTION_ID_SELECTORS = (
