@@ -63,6 +63,7 @@ from graphon.nodes.base.entities import VariableSelector
 from graphon.nodes.base.node import Node
 from graphon.nodes.base.variable_template_parser import VariableTemplateParser
 from graphon.nodes.llm.reasoning import (
+    FilterPiece,
     ThinkStreamFilter,
     extract_stream_reasoning,
     split_reasoning,
@@ -883,18 +884,25 @@ class LLMNode(Node[LLMNodeData]):
 
         # Flush held text, then mark the reasoning stream finished (separated mode).
         if state.text_filter is not None:
-            final = state.text_filter.finalize()
-            if final.text:
-                yield StreamChunkEvent(
-                    selector=[node_id, "text"],
-                    chunk=final.text,
-                    is_final=False,
+            final_pieces = state.text_filter.finalize()
+            has_final_reasoning = False
+            for index, piece in enumerate(final_pieces):
+                is_final_reasoning = (
+                    piece.kind == "reasoning" and index == len(final_pieces) - 1
                 )
-            if final.reasoning:
-                state.reasoning_started = True
-                yield StreamReasoningEvent(chunk=final.reasoning, is_final=True)
-            elif state.reasoning_started:
-                yield StreamReasoningEvent(chunk="", is_final=True)
+                has_final_reasoning = has_final_reasoning or is_final_reasoning
+                yield from LLMNode._yield_filter_piece(
+                    piece=piece,
+                    state=state,
+                    node_id=node_id,
+                    is_final=is_final_reasoning,
+                )
+            if state.reasoning_started and not has_final_reasoning:
+                yield StreamReasoningEvent(
+                    selector=LLMNode._reasoning_selector(node_id),
+                    chunk="",
+                    is_final=True,
+                )
 
         # Extract reasoning content from <think> tags in the main text
         full_text = state.full_text_buffer.getvalue()
@@ -1008,16 +1016,41 @@ class LLMNode(Node[LLMNodeData]):
             return
 
         # "separated": split <think> reasoning off the answer onto its own channel.
-        filtered = state.text_filter.feed(text_part)
-        if filtered.text:
-            yield StreamChunkEvent(
-                selector=[node_id, "text"],
-                chunk=filtered.text,
-                is_final=False,
+        for piece in state.text_filter.feed(text_part):
+            yield from LLMNode._yield_filter_piece(
+                piece=piece,
+                state=state,
+                node_id=node_id,
             )
-        if filtered.reasoning:
-            state.reasoning_started = True
-            yield StreamReasoningEvent(chunk=filtered.reasoning)
+
+    @staticmethod
+    def _yield_filter_piece(
+        *,
+        piece: FilterPiece,
+        state: _StreamingInvokeState,
+        node_id: str,
+        is_final: bool = False,
+    ) -> Generator[StreamChunkEvent | StreamReasoningEvent, None, None]:
+        match piece.kind:
+            case "text":
+                yield StreamChunkEvent(
+                    selector=[node_id, "text"],
+                    chunk=piece.chunk,
+                    is_final=False,
+                )
+            case "reasoning":
+                state.reasoning_started = True
+                yield StreamReasoningEvent(
+                    selector=LLMNode._reasoning_selector(node_id),
+                    chunk=piece.chunk,
+                    is_final=is_final,
+                )
+            case _:
+                assert_never(piece.kind)
+
+    @staticmethod
+    def _reasoning_selector(node_id: str) -> list[str]:
+        return [node_id, "reasoning_content"]
 
     @staticmethod
     def _update_streaming_metadata(

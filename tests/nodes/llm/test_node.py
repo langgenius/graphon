@@ -894,6 +894,24 @@ def test_separated_stream_emits_reasoning_chunks() -> None:
 
     assert "".join(e.chunk for e in reasoning) == "plan"
     assert [e.is_final for e in reasoning] == [False, True]
+    assert {tuple(e.selector) for e in reasoning} == {("llm", "reasoning_content")}
+
+
+def test_separated_stream_preserves_reasoning_text_order_within_delta() -> None:
+    events = [
+        event
+        for event in _collect_stream_events(
+            ["<think>plan</think>answer"],
+            reasoning_format="separated",
+        )
+        if isinstance(event, StreamChunkEvent | StreamReasoningEvent)
+    ]
+
+    assert [(type(event), event.chunk, event.is_final) for event in events] == [
+        (StreamReasoningEvent, "plan", False),
+        (StreamChunkEvent, "answer", False),
+        (StreamReasoningEvent, "", True),
+    ]
 
 
 def test_separated_stream_reasoning_split_across_chunks() -> None:
@@ -948,12 +966,17 @@ def test_separated_stream_without_think_emits_no_reasoning_events() -> None:
 
 def test_reasoning_event_dispatches_to_graph_event() -> None:
     node = _build_llm_node()
-    reasoning_event = StreamReasoningEvent(chunk="thinking", is_final=True)
+    reasoning_event = StreamReasoningEvent(
+        selector=["other", "reasoning_content"],
+        chunk="thinking",
+        is_final=True,
+    )
 
     graph_event = node._dispatch(reasoning_event)
 
     assert isinstance(graph_event, NodeRunReasoningChunkEvent)
     assert graph_event.node_id == "llm"
+    assert graph_event.selector == ["llm", "reasoning_content"]
     assert graph_event.chunk == "thinking"
     assert graph_event.is_final is True
 
@@ -986,6 +1009,7 @@ def test_run_forwards_streaming_reasoning_events(
 
     reasoning = [e for e in events if isinstance(e, StreamReasoningEvent)]
     assert "".join(e.chunk for e in reasoning) == "plan"
+    assert {tuple(e.selector) for e in reasoning} == {("llm", "reasoning_content")}
     assert sum(e.is_final for e in reasoning) == 1
     assert reasoning[-1].is_final
 

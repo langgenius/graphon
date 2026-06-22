@@ -14,6 +14,7 @@ from graphon.graph_events.base import GraphEngineEvent
 from graphon.graph_events.graph import GraphRunStartedEvent
 from graphon.graph_events.node import (
     NodeRunExceptionEvent,
+    NodeRunReasoningChunkEvent,
     NodeRunStartedEvent,
     NodeRunStreamChunkEvent,
     NodeRunSucceededEvent,
@@ -259,6 +260,8 @@ class ResponseStreamFilter:
                 output = [event]
             case NodeRunStreamChunkEvent():
                 output = self._handle_stream_chunk(event)
+            case NodeRunReasoningChunkEvent():
+                output = self._handle_reasoning_chunk(event)
             case GraphEdgeTakenEvent():
                 output = self._handle_edge_taken(event.edge_id)
             case GraphEdgeSkippedEvent():
@@ -550,6 +553,61 @@ class ResponseStreamFilter:
         if self._pass_unmatched_chunks:
             return [event]
         return []
+
+    def _handle_reasoning_chunk(
+        self,
+        event: NodeRunReasoningChunkEvent,
+    ) -> list[GraphEngineEvent]:
+        if self._is_reasoning_visible(event):
+            return [event]
+        return []
+
+    def _is_reasoning_visible(self, event: NodeRunReasoningChunkEvent) -> bool:
+        return (
+            self._has_valid_reasoning_selector(event)
+            and self._has_runnable_reasoning_source(event.node_id)
+            and self._is_reasoning_referenced_by_reached_session(event)
+        )
+
+    @staticmethod
+    def _has_valid_reasoning_selector(event: NodeRunReasoningChunkEvent) -> bool:
+        return tuple(event.selector) == (event.node_id, "reasoning_content")
+
+    def _has_runnable_reasoning_source(self, node_id: NodeID) -> bool:
+        source_node = self._bound_graph.nodes.get(node_id)
+        return bool(source_node and source_node.state != NodeState.SKIPPED)
+
+    def _is_reasoning_referenced_by_reached_session(
+        self,
+        event: NodeRunReasoningChunkEvent,
+    ) -> bool:
+        reasoning_key = tuple(event.selector)
+        companion_text_key = (event.node_id, "text")
+        return any(
+            self._session_references_reasoning_source(
+                session,
+                selector_prefixes={reasoning_key, companion_text_key},
+            )
+            for session in self._reached_sessions()
+        )
+
+    def _reached_sessions(self) -> tuple[ResponseSession, ...]:
+        sessions: list[ResponseSession] = []
+        if self._active_session is not None:
+            sessions.append(self._active_session)
+        sessions.extend(self._waiting_sessions)
+        return tuple(sessions)
+
+    @staticmethod
+    def _session_references_reasoning_source(
+        session: ResponseSession,
+        selector_prefixes: set[Selector],
+    ) -> bool:
+        return any(
+            isinstance(segment, VariableSegment)
+            and tuple(segment.selector[:2]) in selector_prefixes
+            for segment in session.template.segments
+        )
 
     def _get_or_create_execution_id(self, node_id: NodeID) -> str:
         if node_id not in self._node_execution_ids:

@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from graphon import graph_events, node_events
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType
 from graphon.graph_engine.event_management.event_handlers import EventHandler
 from graphon.graph_events.node import (
@@ -64,6 +65,7 @@ def test_event_handler_collects_reasoning_chunk_without_warning(
         id="run-1",
         node_id="node-1",
         node_type=BuiltinNodeTypes.CODE,
+        selector=["node-1", "reasoning_content"],
         chunk="thinking",
         is_final=False,
     )
@@ -73,6 +75,12 @@ def test_event_handler_collects_reasoning_chunk_without_warning(
 
     event_collector.collect.assert_called_once_with(chunk)
     assert "Unhandled event type" not in caplog.text
+
+
+def test_reasoning_events_are_exported_from_package_roots() -> None:
+    assert graph_events.NodeRunReasoningChunkEvent is NodeRunReasoningChunkEvent
+    assert "NodeRunReasoningChunkEvent" in graph_events.__all__
+    assert "StreamReasoningEvent" in node_events.__all__
 
 
 def test_event_handler_collects_traversal_events_before_node_success() -> None:

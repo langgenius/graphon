@@ -853,6 +853,7 @@ class Node[NodeDataT: BaseNodeData](
             id=self.execution_id,
             node_id=self._node_id,
             node_type=self.node_type,
+            selector=[self._node_id, "reasoning_content"],
             chunk=event.chunk,
             is_final=event.is_final,
         )
