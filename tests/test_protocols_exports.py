@@ -32,11 +32,7 @@ from graphon.nodes.protocols import (
     FileReferenceFactoryProtocol,
     ToolFileManagerProtocol,
 )
-from graphon.nodes.runtime import (
-    HumanInputFormStateProtocol,
-    HumanInputNodeRuntimeProtocol,
-    ToolNodeRuntimeProtocol,
-)
+from graphon.nodes.runtime import ToolNodeRuntimeProtocol
 from graphon.protocols import CodeExecutorProtocol as PublicCodeExecutorProtocol
 from graphon.protocols import (
     CredentialsProvider as PublicCredentialsProvider,
@@ -50,12 +46,6 @@ from graphon.protocols import (
 from graphon.protocols import GraphValidationRule as PublicGraphValidationRule
 from graphon.protocols import HttpClientProtocol as PublicHttpClientProtocol
 from graphon.protocols import HttpResponseProtocol as PublicHttpResponseProtocol
-from graphon.protocols import (
-    HumanInputFormStateProtocol as PublicHumanInputFormStateProtocol,
-)
-from graphon.protocols import (
-    HumanInputNodeRuntimeProtocol as PublicHumanInputNodeRuntimeProtocol,
-)
 from graphon.protocols import LLMModelRuntime as PublicLLMModelRuntime
 from graphon.protocols import (
     LLMPollingCapableProtocol as PublicLLMPollingCapableProtocol,
@@ -126,8 +116,6 @@ def test_public_protocol_exports_match_canonical_definitions() -> None:
     assert PublicToolFileManagerProtocol is ToolFileManagerProtocol
     assert PublicFileReferenceFactoryProtocol is FileReferenceFactoryProtocol
     assert PublicToolNodeRuntimeProtocol is ToolNodeRuntimeProtocol
-    assert PublicHumanInputNodeRuntimeProtocol is HumanInputNodeRuntimeProtocol
-    assert PublicHumanInputFormStateProtocol is HumanInputFormStateProtocol
     assert PublicReadOnlyVariablePool is ReadOnlyVariablePool
     assert PublicReadOnlyGraphRuntimeState is ReadOnlyGraphRuntimeState
     assert PublicVariableLoader is VariableLoader
@@ -142,8 +130,6 @@ def test_public_protocol_package_exports_are_stable() -> None:
         "GraphValidationRule",
         "HttpClientProtocol",
         "HttpResponseProtocol",
-        "HumanInputFormStateProtocol",
-        "HumanInputNodeRuntimeProtocol",
         "LLMModelRuntime",
         "LLMPollingCapableProtocol",
         "LLMProtocol",

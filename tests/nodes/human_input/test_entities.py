@@ -1,247 +1,60 @@
-from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel
+from graphon.entities.base_node_data import BaseNodeData
+from graphon.nodes.human_input.entities import HumanInputNodeData
+from graphon.nodes.human_input.human_input_node import HumanInputNode
 
-from graphon.nodes.base.entities import VariableSelector
-from graphon.nodes.human_input.entities import (
-    FormDefinition,
-    HumanInputNodeData,
-    ParagraphInputConfig,
-    StringSource,
-    UserActionConfig,
-)
-from graphon.nodes.human_input.enums import (
-    ButtonStyle,
-    FormInputType,
-    TimeoutUnit,
-    ValueSourceType,
-)
-
-_FORM_INPUTS_JSON_PAYLOAD = [
-    {
-        "type": "paragraph",
-        "output_variable_name": "name",
-        "default": {
-            "type": "constant",
-            "selector": [],
-            "value": "Alice",
-        },
-    },
-    {
-        "type": "paragraph",
-        "output_variable_name": "bio",
-        "default": {
-            "type": "variable",
-            "selector": ["start", "bio"],
-            "value": "",
-        },
-    },
-]
-
-_USER_ACTIONS_JSON_PAYLOAD = [
-    {
-        "id": "approve",
-        "title": "Approve",
-        "button_style": "primary",
-    },
-    {
-        "id": "reject",
-        "title": "Reject",
-        "button_style": "ghost",
-    },
-]
-
-
-class _FormInputHolder(BaseModel):
-    form_input: ParagraphInputConfig
-
-
-class TestHumanInputNodeDataDeserialization:
-    def test_model_validate_accepts_current_form_input_payload(self) -> None:
-        payload: dict[str, Any] = {
-            "type": "human-input",
-            "title": "Collect Input",
-            "form_content": "Name: {{#$output.name#}}",
-            "inputs": _FORM_INPUTS_JSON_PAYLOAD,
-            "user_actions": _USER_ACTIONS_JSON_PAYLOAD,
-            "timeout": 3,
-            "timeout_unit": "day",
+_LEGACY_HUMAN_INPUT_PAYLOAD: dict[str, Any] = {
+    "type": "human-input",
+    "title": "Collect Input",
+    "form_content": "Name: {{#$output.name#}}",
+    "inputs": [
+        {
+            "type": "paragraph",
+            "output_variable_name": "name",
+            "default": {
+                "type": "constant",
+                "selector": [],
+                "value": "Alice",
+            },
         }
-
-        restored = HumanInputNodeData.model_validate(payload)
-
-        assert restored.type == "human-input"
-        assert restored.title == "Collect Input"
-        assert restored.form_content == "Name: {{#$output.name#}}"
-        assert len(restored.inputs) == 2
-        assert isinstance(restored.inputs[0], ParagraphInputConfig)
-        assert restored.inputs[0].type == FormInputType.PARAGRAPH
-        assert restored.inputs[0].output_variable_name == "name"
-        assert restored.inputs[0].default is not None
-        assert restored.inputs[0].default.type == ValueSourceType.CONSTANT
-        assert restored.inputs[0].default.selector == []
-        assert restored.inputs[0].default.value == "Alice"
-
-        assert isinstance(restored.inputs[1], ParagraphInputConfig)
-
-        assert restored.inputs[1].type == FormInputType.PARAGRAPH
-        assert restored.inputs[1].default is not None
-        assert restored.inputs[1].default.type == ValueSourceType.VARIABLE
-        assert restored.inputs[1].default.selector == ["start", "bio"]
-        assert [action.id for action in restored.user_actions] == ["approve", "reject"]
-        assert [action.button_style.value for action in restored.user_actions] == [
-            "primary",
-            "ghost",
-        ]
-        assert restored.timeout == 3
-        assert restored.timeout_unit == TimeoutUnit.DAY
-
-
-class TestFormDefinitionDeserialization:
-    def test_model_validate_accepts_current_form_input_payload(self) -> None:
-        payload: dict[str, Any] = {
-            "form_content": "Name: {{#$output.name#}}",
-            "inputs": _FORM_INPUTS_JSON_PAYLOAD,
-            "user_actions": _USER_ACTIONS_JSON_PAYLOAD,
-            "rendered_content": "Name: Alice",
-            "expiration_time": "2026-04-19T12:00:00Z",
-            "default_values": {"bio": "Graph runtime"},
-            "node_title": "Collect Input",
-            "display_in_ui": True,
+    ],
+    "user_actions": [
+        {
+            "id": "approve",
+            "title": "Approve",
+            "button_style": "primary",
         }
-
-        restored = FormDefinition.model_validate(payload)
-
-        assert restored.form_content == "Name: {{#$output.name#}}"
-        assert restored.rendered_content == "Name: Alice"
-        assert len(restored.inputs) == 2
-
-        assert isinstance(restored.inputs[0], ParagraphInputConfig)
-        assert restored.inputs[0].type == FormInputType.PARAGRAPH
-        assert restored.inputs[0].default is not None
-        assert restored.inputs[0].default.type == ValueSourceType.CONSTANT
-        assert restored.inputs[0].default.value == "Alice"
-
-        assert isinstance(restored.inputs[1], ParagraphInputConfig)
-        assert restored.inputs[1].type == FormInputType.PARAGRAPH
-        assert restored.inputs[1].default is not None
-        assert restored.inputs[1].default.selector == ["start", "bio"]
-        assert [action.id for action in restored.user_actions] == ["approve", "reject"]
-        assert restored.default_values == {"bio": "Graph runtime"}
-        assert restored.node_title == "Collect Input"
-        assert restored.display_in_ui is True
-        assert restored.expiration_time == datetime(2026, 4, 19, 12, 0, tzinfo=UTC)
+    ],
+    "timeout": 3,
+    "timeout_unit": "day",
+}
 
 
-class TestFormInputRoundTrip:
-    def test_paragraph_roundtrip_in_wrapper_model(self) -> None:
-        original = _FormInputHolder(
-            form_input=ParagraphInputConfig(
-                type=FormInputType.PARAGRAPH,
-                output_variable_name="bio",
-                default=StringSource(
-                    type=ValueSourceType.VARIABLE,
-                    selector=("start", "bio"),
-                ),
-            )
-        )
+def test_human_input_node_data_keeps_legacy_payload_fields_as_extras() -> None:
+    restored = HumanInputNodeData.model_validate(_LEGACY_HUMAN_INPUT_PAYLOAD)
 
-        payload = original.model_dump(mode="json")
-        restored = _FormInputHolder.model_validate(payload)
-
-        assert payload == {
-            "form_input": {
-                "type": "paragraph",
-                "output_variable_name": "bio",
-                "default": {
-                    "type": "variable",
-                    "selector": ["start", "bio"],
-                    "value": "",
-                },
-            }
-        }
-        assert restored.form_input.type == FormInputType.PARAGRAPH
-        assert restored.form_input.output_variable_name == "bio"
-        assert restored.form_input.default is not None
-        assert restored.form_input.default.type == ValueSourceType.VARIABLE
-        assert restored.form_input.default.selector == ["start", "bio"]
-        assert restored.form_input.default.value == ""
+    assert restored.type == "human-input"
+    assert restored.title == "Collect Input"
+    assert restored.get("form_content") == "Name: {{#$output.name#}}"
+    assert restored.get("inputs") == _LEGACY_HUMAN_INPUT_PAYLOAD["inputs"]
+    assert restored.get("user_actions") == _LEGACY_HUMAN_INPUT_PAYLOAD["user_actions"]
+    assert restored.get("timeout") == 3
+    assert restored.get("timeout_unit") == "day"
+    assert restored.get("missing", "fallback") == "fallback"
 
 
-class TestHumanInputNodeDataVariableSelectorMapping:
-    def test_extract_variable_mapping_preserves_current_paragraph_input_behavior(
-        self,
-    ) -> None:
-        node_data = HumanInputNodeData(
-            title="Collect Input",
-            form_content=(
-                "Profile: {{#start.user.name#}} "
-                "Query: {{#sys.query#}} "
-                "Output: {{#$output.answer#}}"
-            ),
-            inputs=[
-                ParagraphInputConfig(
-                    output_variable_name="notes",
-                ),
-                ParagraphInputConfig(
-                    output_variable_name="summary",
-                    default=StringSource(
-                        type=ValueSourceType.CONSTANT,
-                        value="Pinned summary",
-                    ),
-                ),
-                ParagraphInputConfig(
-                    output_variable_name="bio",
-                    default=StringSource(
-                        type=ValueSourceType.VARIABLE,
-                        selector=("input", "profile", "bio"),
-                    ),
-                ),
-            ],
-        )
+def test_human_input_node_validation_preserves_legacy_extras_from_base_node_data() -> (
+    None
+):
+    shared_node_data = BaseNodeData.model_validate(_LEGACY_HUMAN_INPUT_PAYLOAD)
 
-        mapping = node_data.extract_variable_selector_to_variable_mapping("human-node")
+    restored = HumanInputNode.validate_node_data(shared_node_data)
 
-        assert mapping == {
-            "human-node.#start.user#": ["start", "user"],
-            "human-node.#sys.query#": ["sys", "query"],
-            "human-node.#input.profile.bio#": ("input", "profile", "bio"),
-        }
-
-    def test_extract_variable_mapping_ignores_short_template_selectors(
-        self,
-        monkeypatch: Any,
-    ) -> None:
-        def _extract_short_selector(_self: Any) -> list[VariableSelector]:
-            return [
-                VariableSelector(
-                    variable="#start#",
-                    value_selector=["start"],
-                )
-            ]
-
-        monkeypatch.setattr(
-            "graphon.nodes.human_input.entities.VariableTemplateParser.extract_variable_selectors",
-            _extract_short_selector,
-        )
-
-        node_data = HumanInputNodeData(
-            title="Collect Input",
-            form_content="ignored",
-            inputs=[],
-        )
-
-        mapping = node_data.extract_variable_selector_to_variable_mapping("human-node")
-
-        assert mapping == {}
-
-
-def test_user_action_title_accepts_long_business_value() -> None:
-    action = UserActionConfig(
-        id="approve",
-        title="card_visa_enterprise_001_long_value",
-        button_style=ButtonStyle.DEFAULT,
-    )
-
-    assert action.title == "card_visa_enterprise_001_long_value"
+    assert isinstance(restored, HumanInputNodeData)
+    assert restored.title == "Collect Input"
+    assert restored.get("form_content") == _LEGACY_HUMAN_INPUT_PAYLOAD["form_content"]
+    assert restored.get("inputs") == _LEGACY_HUMAN_INPUT_PAYLOAD["inputs"]
+    assert restored.get("user_actions") == _LEGACY_HUMAN_INPUT_PAYLOAD["user_actions"]
+    assert restored.get("timeout") == _LEGACY_HUMAN_INPUT_PAYLOAD["timeout"]
+    assert restored.get("timeout_unit") == _LEGACY_HUMAN_INPUT_PAYLOAD["timeout_unit"]

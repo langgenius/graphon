@@ -1,536 +1,144 @@
-from collections.abc import Mapping
-from datetime import UTC, datetime, timedelta
-from time import perf_counter
-from typing import Any
+from __future__ import annotations
 
-from graphon.file import File, FileTransferMethod, FileType
-from graphon.graph_events.node import (
-    NodeRunHumanInputFormFilledEvent,
-    NodeRunSucceededEvent,
-)
-from graphon.node_events import HumanInputFormTimeoutEvent, StreamCompletedEvent
+from collections.abc import Callable
+from time import perf_counter
+from typing import cast
+
+import pytest
+
+from graphon.entities.pause_reason import HitlRequired
+from graphon.graph_events.node import NodeRunPauseRequestedEvent, NodeRunSucceededEvent
 from graphon.nodes.human_input.entities import (
-    FileInputConfig,
-    FileListInputConfig,
-    FormInputConfig,
+    Completed,
+    Expired,
+    HITLContext,
+    HITLDecision,
     HumanInputNodeData,
-    ParagraphInputConfig,
-    StringSource,
-    UserActionConfig,
-)
-from graphon.nodes.human_input.enums import (
-    HumanInputFormStatus,
-    ValueSourceType,
+    PauseRequested,
 )
 from graphon.nodes.human_input.human_input_node import HumanInputNode
-from graphon.nodes.protocols import FileReferenceFactoryProtocol
-from graphon.nodes.runtime import (
-    HumanInputFormStateProtocol,
-    HumanInputNodeRuntimeProtocol,
-)
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
-from graphon.variables.segments import (
-    ArrayFileSegment,
-    FileSegment,
-    Segment,
-    StringSegment,
-)
+from graphon.variables.segments import StringSegment
 
 from ...helpers import build_graph_init_params, build_variable_pool
 
 
-class _RuntimeStub(HumanInputNodeRuntimeProtocol):
-    def get_form(
-        self,
-        *,
-        node_id: str,
-    ) -> HumanInputFormStateProtocol | None:
-        _ = node_id
-        return None
-
-    def create_form(
-        self,
-        *,
-        node_id: str,
-        node_data: HumanInputNodeData,
-        rendered_content: str,
-        resolved_default_values: Mapping[str, Any],
-    ) -> HumanInputFormStateProtocol:
-        _ = node_id, node_data, rendered_content, resolved_default_values
-        msg = "create_form should not be called in resolve_default_values tests"
-        raise AssertionError(msg)
-
-
-class _FileReferenceFactory(FileReferenceFactoryProtocol):
-    def build_from_mapping(self, *, mapping: Mapping[str, Any]) -> File:
-        return File(
-            file_id=mapping.get("id"),
-            file_type=FileType(mapping["type"]),
-            transfer_method=FileTransferMethod(mapping["transfer_method"]),
-            remote_url=mapping.get("remote_url"),
-            related_id=mapping.get("related_id"),
-            filename=mapping.get("filename"),
-            extension=mapping.get("extension"),
-            mime_type=mapping.get("mime_type"),
-            size=mapping.get("size", -1),
-        )
-
-
 def _build_node(
+    callback: Callable[[HITLContext], HITLDecision],
     *,
-    inputs: list[FormInputConfig],
-    variables: tuple[tuple[tuple[str, ...], Any], ...] = (),
+    workflow_execution_id: str | None = "workflow-exec-1",
 ) -> HumanInputNode:
-    runtime_state = GraphRuntimeState(
-        variable_pool=build_variable_pool(variables=variables),
-        start_at=perf_counter(),
-    )
+    run_context = {}
+    if workflow_execution_id is not None:
+        run_context["workflow_execution_id"] = workflow_execution_id
+
     return HumanInputNode(
         node_id="human-node",
-        data=HumanInputNodeData(
-            title="Collect Input",
-            form_content="Profile",
-            inputs=inputs,
-        ),
+        data=HumanInputNodeData(title="Collect Input"),
         graph_init_params=build_graph_init_params(
             graph_config={"nodes": [], "edges": []},
+            run_context=run_context,
         ),
-        graph_runtime_state=runtime_state,
-        runtime=_RuntimeStub(),
-        file_reference_factory=_FileReferenceFactory(),
+        graph_runtime_state=GraphRuntimeState(
+            variable_pool=build_variable_pool(),
+            start_at=perf_counter(),
+        ),
+        hitl_callback=callback,
     )
 
 
-class TestHumanInputNodeResolveDefaultValues:
-    def test_resolve_default_values_skips_absent_constant_and_missing_defaults(
-        self,
-    ) -> None:
-        node = _build_node(
-            inputs=[
-                ParagraphInputConfig(output_variable_name="without_default"),
-                ParagraphInputConfig(
-                    output_variable_name="constant_default",
-                    default=StringSource(
-                        type=ValueSourceType.CONSTANT,
-                        value="Pinned text",
-                    ),
-                ),
-                ParagraphInputConfig(
-                    output_variable_name="missing_default",
-                    default=StringSource(
-                        type=ValueSourceType.VARIABLE,
-                        selector=("start", "missing"),
-                    ),
-                ),
-                ParagraphInputConfig(
-                    output_variable_name="resolved_default",
-                    default=StringSource(
-                        type=ValueSourceType.VARIABLE,
-                        selector=("start", "profile"),
-                    ),
-                ),
-            ],
-            variables=(
-                (
-                    ("start", "profile"),
-                    {
-                        "headline": "Graph runtime",
-                        "tags": ["human-input", 3],
-                    },
-                ),
-            ),
+def test_human_input_pause_uses_callback_context_and_minimal_pause_reason() -> None:
+    captured_contexts: list[HITLContext] = []
+
+    def callback(ctx: HITLContext) -> HITLDecision:
+        captured_contexts.append(ctx)
+        return PauseRequested(session_id="session-1")
+
+    events = list(_build_node(callback).run())
+    paused = next(
+        event for event in events if isinstance(event, NodeRunPauseRequestedEvent)
+    )
+
+    assert captured_contexts == [
+        HITLContext(
+            workflow_execution_id="workflow-exec-1",
+            node_id="human-node",
+            node_title="Collect Input",
+            variable_pool=captured_contexts[0].variable_pool,
+        )
+    ]
+    assert paused.reason == HitlRequired(
+        session_id="session-1",
+        node_id="human-node",
+        node_title="Collect Input",
+    )
+    assert paused.reason.model_dump(mode="json") == {
+        "TYPE": "hitl_required",
+        "session_id": "session-1",
+        "node_id": "human-node",
+        "node_title": "Collect Input",
+    }
+
+
+def test_human_input_completed_decision_finishes_on_selected_handle() -> None:
+    inputs = {"name": StringSegment(value="Alice")}
+    outputs = {
+        "name": StringSegment(value="Alice"),
+        "approval": StringSegment(value="approved"),
+    }
+
+    def callback(ctx: HITLContext) -> HITLDecision:
+        _ = ctx
+        return Completed(
+            selected_handle="approve",
+            inputs=inputs,
+            outputs=outputs,
         )
 
-        resolved = node.resolve_default_values()
-
-        assert resolved == {
-            "resolved_default": {
-                "headline": "Graph runtime",
-                "tags": ["human-input", 3],
-            }
-        }
-
-
-class _SubmittedFormStub(HumanInputFormStateProtocol):
-    @property
-    def id(self) -> str:
-        return "form-1"
-
-    @property
-    def rendered_content(self) -> str:
-        return "Attachment submitted"
-
-    @property
-    def selected_action_id(self) -> str | None:
-        return "approve"
-
-    @property
-    def submitted_data(self) -> Mapping[str, Any] | None:
-        return {
-            "attachment": {
-                "id": "file-1",
-                "type": FileType.DOCUMENT,
-                "transfer_method": FileTransferMethod.LOCAL_FILE,
-                "related_id": "upload-1",
-                "filename": "resume.pdf",
-                "extension": ".pdf",
-                "mime_type": "application/pdf",
-                "size": 128,
-            },
-            "attachments": [
-                {
-                    "id": "file-2",
-                    "type": FileType.DOCUMENT,
-                    "transfer_method": FileTransferMethod.LOCAL_FILE,
-                    "related_id": "upload-2",
-                    "filename": "a.pdf",
-                    "extension": ".pdf",
-                    "mime_type": "application/pdf",
-                    "size": 64,
-                },
-            ],
-        }
-
-    @property
-    def submitted(self) -> bool:
-        return True
-
-    @property
-    def status(self) -> HumanInputFormStatus:
-        return HumanInputFormStatus.SUBMITTED
-
-    @property
-    def expiration_time(self) -> datetime:
-        return (datetime.now(UTC) + timedelta(hours=1)).replace(tzinfo=None)
-
-
-class _ResumeRuntimeStub(_RuntimeStub):
-    def get_form(
-        self,
-        *,
-        node_id: str,
-    ) -> HumanInputFormStateProtocol | None:
-        _ = node_id
-        return _SubmittedFormStub()
-
-
-class _SubmittedTextFormStub(HumanInputFormStateProtocol):
-    @property
-    def id(self) -> str:
-        return "form-2"
-
-    @property
-    def rendered_content(self) -> str:
-        return "Name: {{#$output.name#}}"
-
-    @property
-    def selected_action_id(self) -> str | None:
-        return "approve"
-
-    @property
-    def submitted_data(self) -> Mapping[str, Any] | None:
-        return {
-            "name": "Alice",
-            "unexpected": "discard from event",
-        }
-
-    @property
-    def submitted(self) -> bool:
-        return True
-
-    @property
-    def status(self) -> HumanInputFormStatus:
-        return HumanInputFormStatus.SUBMITTED
-
-    @property
-    def expiration_time(self) -> datetime:
-        return (datetime.now(UTC) + timedelta(hours=1)).replace(tzinfo=None)
-
-
-class _ResumeTextRuntimeStub(_RuntimeStub):
-    def get_form(
-        self,
-        *,
-        node_id: str,
-    ) -> HumanInputFormStateProtocol | None:
-        _ = node_id
-        return _SubmittedTextFormStub()
-
-
-class _TimedOutFormStub(HumanInputFormStateProtocol):
-    @property
-    def id(self) -> str:
-        return "form-timeout"
-
-    @property
-    def rendered_content(self) -> str:
-        return "Timed out content"
-
-    @property
-    def selected_action_id(self) -> str | None:
-        return None
-
-    @property
-    def submitted_data(self) -> Mapping[str, Any] | None:
-        return None
-
-    @property
-    def submitted(self) -> bool:
-        return False
-
-    @property
-    def status(self) -> HumanInputFormStatus:
-        return HumanInputFormStatus.TIMEOUT
-
-    @property
-    def expiration_time(self) -> datetime:
-        return (datetime.now(UTC) - timedelta(hours=1)).replace(tzinfo=None)
-
-
-class _TimeoutRuntimeStub(_RuntimeStub):
-    def get_form(
-        self,
-        *,
-        node_id: str,
-    ) -> HumanInputFormStateProtocol | None:
-        _ = node_id
-        return _TimedOutFormStub()
-
-
-def test_human_input_resume_emits_runtime_file_segments() -> None:
-    runtime_state = GraphRuntimeState(
-        variable_pool=build_variable_pool(variables=()),
-        start_at=perf_counter(),
-    )
-    node = HumanInputNode(
-        node_id="human-node",
-        data=HumanInputNodeData(
-            title="Collect Input",
-            form_content="Attachment submitted",
-            inputs=[
-                FileInputConfig(output_variable_name="attachment"),
-                FileListInputConfig(
-                    output_variable_name="attachments",
-                    number_limits=1,
-                ),
-            ],
-            user_actions=[UserActionConfig(id="approve", title="Approve")],
-        ),
-        graph_init_params=build_graph_init_params(
-            graph_config={"nodes": [], "edges": []},
-        ),
-        graph_runtime_state=runtime_state,
-        runtime=_ResumeRuntimeStub(),
-        file_reference_factory=_FileReferenceFactory(),
-    )
-
-    events = list(node.run())
-    filled_event = next(
-        event for event in events if isinstance(event, NodeRunHumanInputFormFilledEvent)
-    )
-    result = events[-1]
-
-    assert isinstance(filled_event.submitted_data["attachment"], FileSegment)
-    assert isinstance(filled_event.submitted_data["attachments"], ArrayFileSegment)
-    assert isinstance(result, NodeRunSucceededEvent)
-    assert all(
-        isinstance(value, Segment) for value in result.node_run_result.outputs.values()
-    )
-    assert isinstance(result.node_run_result.outputs["attachment"], FileSegment)
-    assert isinstance(result.node_run_result.outputs["attachments"], ArrayFileSegment)
-    assert isinstance(result.node_run_result.outputs["__action_id"], StringSegment)
-    assert isinstance(
-        result.node_run_result.outputs["__rendered_content"],
-        StringSegment,
-    )
-
-
-def test_human_input_resume_filters_unknown_fields_from_outputs() -> None:
-    runtime_state = GraphRuntimeState(
-        variable_pool=build_variable_pool(variables=()),
-        start_at=perf_counter(),
-    )
-    node = HumanInputNode(
-        node_id="human-node",
-        data=HumanInputNodeData(
-            title="Collect Input",
-            form_content="Name: {{#$output.name#}}",
-            inputs=[
-                ParagraphInputConfig(output_variable_name="name"),
-            ],
-            user_actions=[UserActionConfig(id="approve", title="Approve")],
-        ),
-        graph_init_params=build_graph_init_params(
-            graph_config={"nodes": [], "edges": []},
-        ),
-        graph_runtime_state=runtime_state,
-        runtime=_ResumeTextRuntimeStub(),
-        file_reference_factory=_FileReferenceFactory(),
-    )
-
-    events = list(node.run())
-    filled_event = next(
-        event for event in events if isinstance(event, NodeRunHumanInputFormFilledEvent)
-    )
-    result = events[-1]
-
-    assert isinstance(result, NodeRunSucceededEvent)
-    assert all(
-        isinstance(value, Segment) for value in result.node_run_result.outputs.values()
-    )
-    assert set(result.node_run_result.outputs) == {
-        "name",
-        "__action_id",
-        "__action_value",
-        "__rendered_content",
-    }
-    assert isinstance(result.node_run_result.outputs["name"], StringSegment)
-
-    assert set(filled_event.submitted_data) == {"name"}
-    assert filled_event.submitted_data["name"] == result.node_run_result.outputs["name"]
-    assert filled_event.rendered_content == "Name: Alice"
-
-
-def test_human_input_resume_adds_special_outputs_separately() -> None:
-    runtime_state = GraphRuntimeState(
-        variable_pool=build_variable_pool(variables=()),
-        start_at=perf_counter(),
-    )
-    node = HumanInputNode(
-        node_id="human-node",
-        data=HumanInputNodeData(
-            title="Collect Input",
-            form_content="Name: {{#$output.name#}}",
-            inputs=[
-                ParagraphInputConfig(output_variable_name="name"),
-            ],
-            user_actions=[UserActionConfig(id="approve", title="Approve")],
-        ),
-        graph_init_params=build_graph_init_params(
-            graph_config={"nodes": [], "edges": []},
-        ),
-        graph_runtime_state=runtime_state,
-        runtime=_ResumeTextRuntimeStub(),
-        file_reference_factory=_FileReferenceFactory(),
-    )
-
-    events = list(node.run())
-    result = events[-1]
-
-    assert isinstance(result, NodeRunSucceededEvent)
-    assert result.node_run_result.outputs["__action_id"] == StringSegment(
-        value="approve",
-    )
-    assert result.node_run_result.outputs["__rendered_content"] == StringSegment(
-        value="Name: Alice",
-    )
-
-
-def test_human_input_timeout_adds_special_outputs_separately() -> None:
-    runtime_state = GraphRuntimeState(
-        variable_pool=build_variable_pool(variables=()),
-        start_at=perf_counter(),
-    )
-    node = HumanInputNode(
-        node_id="human-node",
-        data=HumanInputNodeData(
-            title="Collect Input",
-            form_content="Name: {{#$output.name#}}",
-            inputs=[
-                ParagraphInputConfig(output_variable_name="name"),
-            ],
-            user_actions=[UserActionConfig(id="approve", title="Approve")],
-        ),
-        graph_init_params=build_graph_init_params(
-            graph_config={"nodes": [], "edges": []},
-        ),
-        graph_runtime_state=runtime_state,
-        runtime=_TimeoutRuntimeStub(),
-        file_reference_factory=_FileReferenceFactory(),
-    )
-
-    events = list(node.run())
-    result = events[-1]
-
-    assert isinstance(result, NodeRunSucceededEvent)
-    assert result.node_run_result.outputs == {
-        "__action_id": StringSegment(value=""),
-        "__action_value": StringSegment(value=""),
-        "__rendered_content": StringSegment(value="Timed out content"),
-    }
-
-
-def test_human_input_submission_emits_action_value_outputs() -> None:
-
-    runtime_state = GraphRuntimeState(
-        variable_pool=build_variable_pool(variables=()),
-        start_at=perf_counter(),
-    )
-    node = HumanInputNode(
-        node_id="human-node",
-        data=HumanInputNodeData(
-            title="Collect Input",
-            form_content="Name: {{#$output.name#}}",
-            inputs=[
-                ParagraphInputConfig(output_variable_name="name"),
-            ],
-            user_actions=[UserActionConfig(id="approve", title="Approve")],
-        ),
-        graph_init_params=build_graph_init_params(
-            graph_config={"nodes": [], "edges": []},
-        ),
-        graph_runtime_state=runtime_state,
-        runtime=_ResumeRuntimeStub(),
-        file_reference_factory=_FileReferenceFactory(),
-    )
-
-    events = list(node._run())
+    events = list(_build_node(callback).run())
     completed = next(
-        event for event in events if isinstance(event, StreamCompletedEvent)
+        event for event in events if isinstance(event, NodeRunSucceededEvent)
     )
 
-    assert completed.node_run_result.outputs["__action_id"] == StringSegment(
-        value="approve"
-    )
-    assert completed.node_run_result.outputs["__action_value"] == StringSegment(
-        value="Approve"
-    )
+    assert completed.node_run_result.inputs == inputs
+    assert completed.node_run_result.outputs == outputs
+    assert completed.node_run_result.edge_source_handle == "approve"
 
 
-def test_human_input_timeout_emits_empty_action_value() -> None:
+def test_human_input_expired_decision_finishes_on_timeout_handle() -> None:
+    outputs = {"reason": StringSegment(value="expired")}
 
-    runtime_state = GraphRuntimeState(
-        variable_pool=build_variable_pool(variables=()),
-        start_at=perf_counter(),
-    )
-    node = HumanInputNode(
-        node_id="human-node",
-        data=HumanInputNodeData(
-            title="Collect Input",
-            form_content="Name: {{#$output.name#}}",
-            inputs=[
-                ParagraphInputConfig(output_variable_name="name"),
-            ],
-            user_actions=[
-                UserActionConfig(
-                    id="approve", title="card_visa_enterprise_001_long_value"
-                )
-            ],
-        ),
-        graph_init_params=build_graph_init_params(
-            graph_config={"nodes": [], "edges": []},
-        ),
-        graph_runtime_state=runtime_state,
-        runtime=_TimeoutRuntimeStub(),
-        file_reference_factory=_FileReferenceFactory(),
-    )
-    events = list(node._run())
+    def callback(ctx: HITLContext) -> HITLDecision:
+        _ = ctx
+        return Expired(selected_handle="timeout", outputs=outputs)
 
-    assert any(isinstance(event, HumanInputFormTimeoutEvent) for event in events)
+    events = list(_build_node(callback).run())
     completed = next(
-        event for event in events if isinstance(event, StreamCompletedEvent)
+        event for event in events if isinstance(event, NodeRunSucceededEvent)
     )
-    assert completed.node_run_result.outputs["__action_id"] == StringSegment(value="")
-    assert completed.node_run_result.outputs["__action_value"] == StringSegment(
-        value=""
-    )
+
+    assert completed.node_run_result.inputs == {}
+    assert completed.node_run_result.outputs == outputs
+    assert completed.node_run_result.edge_source_handle == "timeout"
+
+
+def test_human_input_requires_workflow_execution_id() -> None:
+    def callback(ctx: HITLContext) -> HITLDecision:
+        _ = ctx
+        return PauseRequested(session_id="session-1")
+
+    node = _build_node(callback, workflow_execution_id=None)
+
+    with pytest.raises(ValueError, match="workflow_execution_id is required"):
+        list(node._run())
+
+
+def test_human_input_rejects_unknown_hitl_decision() -> None:
+    def callback(ctx: HITLContext) -> HITLDecision:
+        _ = ctx
+        return cast(HITLDecision, object())
+
+    node = _build_node(callback)
+
+    with pytest.raises(AssertionError, match="unsupported HITL decision"):
+        list(node._run())

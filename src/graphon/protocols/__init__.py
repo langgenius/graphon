@@ -31,11 +31,7 @@ from graphon.nodes.protocols import (
     FileReferenceFactoryProtocol,
     ToolFileManagerProtocol,
 )
-from graphon.nodes.runtime import (
-    HumanInputFormStateProtocol,
-    HumanInputNodeRuntimeProtocol,
-    ToolNodeRuntimeProtocol,
-)
+from graphon.nodes.runtime import ToolNodeRuntimeProtocol
 from graphon.runtime.graph_runtime_state_protocol import (
     ReadOnlyGraphRuntimeState,
     ReadOnlyVariablePool,
@@ -50,8 +46,6 @@ __all__ = [
     "GraphValidationRule",
     "HttpClientProtocol",
     "HttpResponseProtocol",
-    "HumanInputFormStateProtocol",
-    "HumanInputNodeRuntimeProtocol",
     "LLMModelRuntime",
     "LLMPollingCapableProtocol",
     "LLMProtocol",

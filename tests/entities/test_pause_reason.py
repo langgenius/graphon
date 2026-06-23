@@ -1,17 +1,13 @@
+import json
 from typing import Any
 
 import pytest
 from pydantic import BaseModel, ValidationError
 
 from graphon.entities.pause_reason import (
-    HumanInputRequired,
+    HitlRequired,
     PauseReason,
     SchedulingPause,
-)
-from graphon.nodes.human_input.entities import ParagraphInputConfig
-from graphon.nodes.human_input.enums import (
-    FormInputType,
-    ValueSourceType,
 )
 
 
@@ -26,20 +22,18 @@ class TestPauseReasonDiscriminator:
             pytest.param(
                 {
                     "reason": {
-                        "TYPE": "human_input_required",
-                        "form_id": "form_id",
-                        "form_content": "form_content",
+                        "TYPE": "hitl_required",
+                        "session_id": "session-1",
                         "node_id": "node_id",
                         "node_title": "node_title",
                     },
                 },
-                HumanInputRequired(
-                    form_id="form_id",
-                    form_content="form_content",
+                HitlRequired(
+                    session_id="session-1",
                     node_id="node_id",
                     node_title="node_title",
                 ),
-                id="HumanInputRequired",
+                id="HitlRequired",
             ),
             pytest.param(
                 {
@@ -64,9 +58,8 @@ class TestPauseReasonDiscriminator:
     @pytest.mark.parametrize(
         "reason",
         [
-            HumanInputRequired(
-                form_id="form_id",
-                form_content="form_content",
+            HitlRequired(
+                session_id="session-1",
                 node_id="node_id",
                 node_title="node_title",
             ),
@@ -86,73 +79,58 @@ class TestPauseReasonDiscriminator:
         with pytest.raises(ValidationError):
             _Holder.model_validate({"reason": {"TYPE": "UNKNOWN"}})
 
-    def test_human_input_required_model_validate_accepts_current_form_input_payload(
+    def test_hitl_required_rejects_form_payload(self) -> None:
+        with pytest.raises(ValidationError):
+            _Holder.model_validate({
+                "reason": {
+                    "TYPE": "hitl_required",
+                    "session_id": "session-1",
+                    "node_id": "node_id",
+                    "node_title": "node_title",
+                    "form_content": "form_content",
+                    "inputs": [],
+                    "actions": [],
+                }
+            })
+
+    def test_legacy_human_input_required_json_can_be_restored_via_pause_reason(
         self,
     ) -> None:
-
-        form_inputs_json = [
-            {
-                "type": "paragraph",
-                "output_variable_name": "name",
-                "default": {
-                    "type": "constant",
-                    "selector": [],
-                    "value": "Alice",
-                },
-            },
-            {
-                "type": "paragraph",
-                "output_variable_name": "bio",
-                "default": {
-                    "type": "variable",
-                    "selector": ["start", "bio"],
-                    "value": "",
-                },
-            },
-        ]
-
-        actions_json = [
-            {
-                "id": "approve",
-                "title": "Approve",
-                "button_style": "primary",
-            }
-        ]
-        payload = {
+        payload = json.dumps({
             "reason": {
                 "TYPE": "human_input_required",
-                "form_id": "form_id",
+                "form_id": "form-1",
                 "form_content": "form_content",
-                "inputs": form_inputs_json,
-                "actions": actions_json,
+                "inputs": [
+                    {
+                        "type": "paragraph",
+                        "output_variable_name": "name",
+                    }
+                ],
+                "actions": [
+                    {
+                        "id": "approve",
+                        "title": "Approve",
+                        "button_style": "primary",
+                    }
+                ],
                 "node_id": "node_id",
                 "node_title": "node_title",
                 "resolved_default_values": {"name": "Alice"},
             }
+        })
+
+        holder = _Holder.model_validate_json(payload)
+
+        assert isinstance(holder.reason, HitlRequired)
+        assert holder.reason.TYPE == "hitl_required"
+        assert holder.reason.session_id == "form-1"
+        assert holder.reason.node_id == "node_id"
+        assert holder.reason.node_title == "node_title"
+        assert holder.reason.__pydantic_extra__ is None
+        assert holder.reason.model_dump() == {
+            "TYPE": "hitl_required",
+            "session_id": "form-1",
+            "node_id": "node_id",
+            "node_title": "node_title",
         }
-
-        restored = _Holder.model_validate(payload)
-        restored_reason = restored.reason
-        assert isinstance(restored_reason, HumanInputRequired)
-        assert restored_reason.form_id == "form_id"
-        assert restored_reason.form_content == "form_content"
-        assert restored_reason.node_id == "node_id"
-        assert restored_reason.node_title == "node_title"
-        assert len(restored_reason.inputs) == 2
-
-        assert isinstance(restored_reason.inputs[0], ParagraphInputConfig)
-        assert restored_reason.inputs[0].type == FormInputType.PARAGRAPH
-        assert restored_reason.inputs[0].output_variable_name == "name"
-        assert restored_reason.inputs[0].default is not None
-        assert restored_reason.inputs[0].default.type == ValueSourceType.CONSTANT
-        assert restored_reason.inputs[0].default.value == "Alice"
-
-        assert isinstance(restored_reason.inputs[1], ParagraphInputConfig)
-        assert restored_reason.inputs[1].type == FormInputType.PARAGRAPH
-        assert restored_reason.inputs[1].default is not None
-        assert restored_reason.inputs[1].default.type == ValueSourceType.VARIABLE
-        assert restored_reason.inputs[1].default.selector == ["start", "bio"]
-        assert restored_reason.inputs[1].default.value == ""
-        assert [action.id for action in restored_reason.actions] == ["approve"]
-        assert restored_reason.actions[0].button_style.value == "primary"
-        assert restored_reason.resolved_default_values == {"name": "Alice"}

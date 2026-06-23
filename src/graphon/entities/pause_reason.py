@@ -1,42 +1,28 @@
-from collections.abc import Mapping
 from enum import StrEnum, auto
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal, cast
 
-from pydantic import BaseModel, Field
-
-from graphon.nodes.human_input.entities import FormInputConfig, UserActionConfig
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 
 class PauseReasonType(StrEnum):
-    HUMAN_INPUT_REQUIRED = auto()
+    # Legacy value for compatibility purpose, DO NOT USE.
+
+    # LEGACY `human_input_required` pause reasons are normalized
+    # into `HitlRequired`, and `form_id` are mapped to `session_id`
+    # when deserializing.
+    LEGACY_HUMAN_INPUT_REQUIRED = "human_input_required"
+
+    HITL_REQUIRED = auto()
     SCHEDULED_PAUSE = auto()
 
 
-class HumanInputRequired(BaseModel):
-    TYPE: Literal[PauseReasonType.HUMAN_INPUT_REQUIRED] = (
-        PauseReasonType.HUMAN_INPUT_REQUIRED
-    )
-    form_id: str
-    form_content: str
-    inputs: list[FormInputConfig] = Field(default_factory=list[FormInputConfig])
-    actions: list[UserActionConfig] = Field(default_factory=list[UserActionConfig])
+class HitlRequired(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    TYPE: Literal[PauseReasonType.HITL_REQUIRED] = PauseReasonType.HITL_REQUIRED
+    session_id: str
     node_id: str
     node_title: str
-
-    # The `resolved_default_values` stores the resolved values of variable
-    # defaults. It's a mapping from `output_variable_name` to their
-    # resolved values.
-    #
-    # For example, the form contains an input with output variable name `name`
-    # and placeholder type `VARIABLE`, its selector is ["start", "name"].
-    # When the HumanInputNode is executed, the corresponding value of
-    # variable `start.name` in the variable pool is `John`.
-    # Thus, the resolved value of the output variable `name` is `John`. The
-    # `resolved_default_values` is `{"name": "John"}`.
-    #
-    # Only form inputs with default value type `VARIABLE` will be resolved
-    # and stored in `resolved_default_values`.
-    resolved_default_values: Mapping[str, Any] = Field(default_factory=dict)
 
 
 class SchedulingPause(BaseModel):
@@ -45,7 +31,47 @@ class SchedulingPause(BaseModel):
     message: str
 
 
+class _LegacyHumanInputRequired(BaseModel):
+    """
+    This model serves as documentation purpose. DO NOT USE.
+    """
+
+    TYPE: Literal[PauseReasonType.LEGACY_HUMAN_INPUT_REQUIRED] = (
+        PauseReasonType.LEGACY_HUMAN_INPUT_REQUIRED
+    )
+    form_id: str
+    # the following fields are intentionally kept in text form
+    # for documentation purpose only.
+    #
+    # form_content: str
+    # inputs: list[FormInputConfig] = Field(default_factory=list[FormInputConfig])
+    # actions: list[UserActionConfig] = Field(default_factory=list[UserActionConfig])
+    # resolved_default_values: Mapping[str, Any] = Field(default_factory=dict)
+
+
+def _decode_pause_reason(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+
+    payload = cast(dict[str, object], value)
+
+    if payload.get("TYPE") != PauseReasonType.LEGACY_HUMAN_INPUT_REQUIRED:
+        return value
+
+    canonical_reason: dict[str, object] = {
+        "TYPE": PauseReasonType.HITL_REQUIRED,
+    }
+    if "form_id" in payload:
+        canonical_reason["session_id"] = payload["form_id"]
+    if "node_id" in payload:
+        canonical_reason["node_id"] = payload["node_id"]
+    if "node_title" in payload:
+        canonical_reason["node_title"] = payload["node_title"]
+    return canonical_reason
+
+
 type PauseReason = Annotated[
-    HumanInputRequired | SchedulingPause,
+    HitlRequired | SchedulingPause,
     Field(discriminator="TYPE"),
+    BeforeValidator(_decode_pause_reason),
 ]
