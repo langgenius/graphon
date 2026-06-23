@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 import pytest
@@ -91,3 +92,45 @@ class TestPauseReasonDiscriminator:
                     "actions": [],
                 }
             })
+
+    def test_legacy_human_input_required_json_can_be_restored_via_pause_reason(
+        self,
+    ) -> None:
+        payload = json.dumps({
+            "reason": {
+                "TYPE": "human_input_required",
+                "form_id": "form-1",
+                "form_content": "form_content",
+                "inputs": [
+                    {
+                        "type": "paragraph",
+                        "output_variable_name": "name",
+                    }
+                ],
+                "actions": [
+                    {
+                        "id": "approve",
+                        "title": "Approve",
+                        "button_style": "primary",
+                    }
+                ],
+                "node_id": "node_id",
+                "node_title": "node_title",
+                "resolved_default_values": {"name": "Alice"},
+            }
+        })
+
+        holder = _Holder.model_validate_json(payload)
+
+        assert isinstance(holder.reason, HitlRequired)
+        assert holder.reason.TYPE == "hitl_required"
+        assert holder.reason.session_id == "form-1"
+        assert holder.reason.node_id == "node_id"
+        assert holder.reason.node_title == "node_title"
+        assert holder.reason.__pydantic_extra__ is None
+        assert holder.reason.model_dump() == {
+            "TYPE": "hitl_required",
+            "session_id": "form-1",
+            "node_id": "node_id",
+            "node_title": "node_title",
+        }
