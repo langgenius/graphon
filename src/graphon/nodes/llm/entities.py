@@ -84,15 +84,14 @@ class LLMNodeData(BaseNodeData):
             """
             Strategy for handling model reasoning output.
 
-            separated: Return clean text (without <think> tags) + reasoning_content
-                      field. Recommended for new workflows. Enables safe
-                      downstream parsing and workflow variable access:
-                      {{#node_id.reasoning_content#}}
+            separated: Return clean text (without <think> tags) plus final
+                      reasoning_content. Answer-visible LLM nodes can also emit
+                      a filtered reasoning stream for live thinking panels. The
+                      live stream is raw and may differ from the normalized final
+                      reasoning_content field.
 
-            tagged   : Return original text (with <think> tags) + reasoning_content
-                      field. Maintains full backward compatibility while still
-                      providing reasoning_content for workflow automation.
-                      Frontend thinking panels work as before.
+            tagged   : Return original text with <think> tags. Does not produce
+                      separate reasoning_content or reasoning stream events.
             """
         ),
     )

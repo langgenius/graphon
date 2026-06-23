@@ -12,7 +12,10 @@ from graphon.enums import WorkflowNodeExecutionStatus
 from graphon.file import helpers as file_helpers
 from graphon.file.enums import FileTransferMethod, FileType
 from graphon.file.models import File
-from graphon.graph_events.node import NodeRunModelPollingProgressEvent
+from graphon.graph_events.node import (
+    NodeRunModelPollingProgressEvent,
+    NodeRunReasoningChunkEvent,
+)
 from graphon.model_runtime.entities.llm_entities import (
     LLMPollingConfig,
     LLMPollingResult,
@@ -30,11 +33,13 @@ from graphon.model_runtime.entities.message_entities import (
     VideoPromptMessageContent,
 )
 from graphon.model_runtime.entities.model_entities import ModelFeature
+from graphon.node_events.base import NodeEventBase
 from graphon.node_events.node import (
     ModelInvokeCompletedEvent,
     ModelPollingProgressEvent,
     StreamChunkEvent,
     StreamCompletedEvent,
+    StreamReasoningEvent,
 )
 from graphon.nodes.llm import LLMNode, LLMNodeData
 from graphon.nodes.llm.exc import LLMNodeError
@@ -725,23 +730,34 @@ def test_polling_progress_event_dispatches_to_graph_event() -> None:
     assert graph_event.attempt == 2
 
 
-def _run_stream(
+def _collect_stream_events(
     parts: Sequence[str],
     *,
     reasoning_format: Literal["separated", "tagged"],
-) -> tuple[list[str], ModelInvokeCompletedEvent]:
-    """Stream ``parts`` through the LLM node and return (chunks, completion)."""
+) -> list[NodeEventBase]:
+    """Stream ``parts`` through the LLM node and return every emitted event."""
     model = MagicMock(is_structured_output_parse_error=lambda _error: False)
-    events = list(
-        LLMNode.handle_invoke_result(
+    return [
+        event
+        for event in LLMNode.handle_invoke_result(
             invoke_result=_stream_results(*[_stream_chunk(part) for part in parts]),
             file_saver=MagicMock(),
             file_outputs=[],
             node_id="llm",
             model_instance=cast(LLMProtocol, model),
             reasoning_format=reasoning_format,
-        ),
-    )
+        )
+        if isinstance(event, NodeEventBase)
+    ]
+
+
+def _run_stream(
+    parts: Sequence[str],
+    *,
+    reasoning_format: Literal["separated", "tagged"],
+) -> tuple[list[str], ModelInvokeCompletedEvent]:
+    """Stream ``parts`` and return (clean text chunks, completion)."""
+    events = _collect_stream_events(parts, reasoning_format=reasoning_format)
     chunks = [e.chunk for e in events if isinstance(e, StreamChunkEvent)]
     completed = next(e for e in events if isinstance(e, ModelInvokeCompletedEvent))
     return chunks, completed
@@ -862,6 +878,145 @@ def test_tagged_stream_keeps_think_tags_unchanged() -> None:
     assert "".join(chunks) == "<think>plan</think>answer"
     assert completed.text == "<think>plan</think>answer"
     assert completed.reasoning_content == ""
+
+
+def _reasoning_chunks(
+    parts: Sequence[str],
+    *,
+    reasoning_format: Literal["separated", "tagged"] = "separated",
+) -> list[StreamReasoningEvent]:
+    events = _collect_stream_events(parts, reasoning_format=reasoning_format)
+    return [e for e in events if isinstance(e, StreamReasoningEvent)]
+
+
+def test_separated_stream_emits_reasoning_chunks() -> None:
+    reasoning = _reasoning_chunks(["<think>plan</think>answer"])
+
+    assert "".join(e.chunk for e in reasoning) == "plan"
+    assert [e.is_final for e in reasoning] == [False, True]
+    assert {tuple(e.selector) for e in reasoning} == {("llm", "reasoning_content")}
+
+
+def test_separated_stream_preserves_reasoning_text_order_within_delta() -> None:
+    events = [
+        event
+        for event in _collect_stream_events(
+            ["<think>plan</think>answer"],
+            reasoning_format="separated",
+        )
+        if isinstance(event, StreamChunkEvent | StreamReasoningEvent)
+    ]
+
+    assert [(type(event), event.chunk, event.is_final) for event in events] == [
+        (StreamReasoningEvent, "plan", False),
+        (StreamChunkEvent, "answer", False),
+        (StreamReasoningEvent, "", True),
+    ]
+
+
+def test_separated_stream_reasoning_split_across_chunks() -> None:
+    reasoning = _reasoning_chunks(["<thi", "nk>plan</thi", "nk>ans", "wer"])
+
+    assert "".join(e.chunk for e in reasoning) == "plan"
+    assert reasoning[-1].is_final
+    assert sum(e.is_final for e in reasoning) == 1
+
+
+def test_separated_stream_emits_single_terminal_reasoning_marker() -> None:
+    reasoning = _reasoning_chunks(["<think>a</think>X<think>b</think>Y"])
+
+    # Live stream concatenates the blocks without split_reasoning()'s "\n" join.
+    assert "".join(e.chunk for e in reasoning) == "ab"
+    finals = [i for i, e in enumerate(reasoning) if e.is_final]
+    assert finals == [len(reasoning) - 1]
+
+
+def test_separated_stream_truncated_reasoning_marks_final() -> None:
+    reasoning = _reasoning_chunks(["hi<think>tail"])
+
+    assert "".join(e.chunk for e in reasoning) == "tail"
+    assert reasoning[-1].is_final
+    assert sum(e.is_final for e in reasoning) == 1
+
+
+def test_separated_stream_flushes_held_partial_close_as_final_reasoning() -> None:
+    # Stream ends mid "</thi": the residual is flushed as the final reasoning event.
+    reasoning = _reasoning_chunks(["<think>ab</thi"])
+
+    assert "".join(e.chunk for e in reasoning) == "ab</thi"
+    assert reasoning[-1].is_final
+    assert reasoning[-1].chunk == "</thi"
+    assert sum(e.is_final for e in reasoning) == 1
+
+
+def test_tagged_stream_emits_no_reasoning_events() -> None:
+    reasoning = _reasoning_chunks(
+        ["<think>plan</think>answer"],
+        reasoning_format="tagged",
+    )
+
+    assert reasoning == []
+
+
+def test_separated_stream_without_think_emits_no_reasoning_events() -> None:
+    reasoning = _reasoning_chunks(["plain ", "answer"])
+
+    assert reasoning == []
+
+
+def test_reasoning_event_dispatches_to_graph_event() -> None:
+    node = _build_llm_node()
+    reasoning_event = StreamReasoningEvent(
+        selector=["other", "reasoning_content"],
+        chunk="thinking",
+        is_final=True,
+    )
+
+    graph_event = node._dispatch(reasoning_event)
+
+    assert isinstance(graph_event, NodeRunReasoningChunkEvent)
+    assert graph_event.node_id == "llm"
+    assert graph_event.selector == ["llm", "reasoning_content"]
+    assert graph_event.chunk == "thinking"
+    assert graph_event.is_final is True
+
+
+def test_run_forwards_streaming_reasoning_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Regression: _yield_run_completion must forward StreamReasoningEvent through
+    # the full _run() path. Without it the separated-mode reasoning the streaming
+    # invoke emits is silently dropped before reaching the graph layer, leaving the
+    # chatflow "thinking" panel dark even though the producer/dispatch sides work.
+    node = _build_llm_node()
+    _stub_simple_prompt(monkeypatch, node)
+    monkeypatch.setattr(
+        "graphon.nodes.llm.node.LLMNode.invoke_llm",
+        lambda **_: LLMNode.handle_invoke_result(
+            invoke_result=_stream_results(_stream_chunk("<think>plan</think>answer")),
+            file_saver=MagicMock(),
+            file_outputs=[],
+            node_id="llm",
+            model_instance=cast(
+                LLMProtocol,
+                MagicMock(is_structured_output_parse_error=lambda _error: False),
+            ),
+            reasoning_format="separated",
+        ),
+    )
+
+    events = list(node._run())
+
+    reasoning = [e for e in events if isinstance(e, StreamReasoningEvent)]
+    assert "".join(e.chunk for e in reasoning) == "plan"
+    assert {tuple(e.selector) for e in reasoning} == {("llm", "reasoning_content")}
+    assert sum(e.is_final for e in reasoning) == 1
+    assert reasoning[-1].is_final
+
+    completed = next(e for e in events if isinstance(e, StreamCompletedEvent))
+    assert completed.node_run_result.status == WorkflowNodeExecutionStatus.SUCCEEDED
+    assert completed.node_run_result.outputs["text"] == "answer"
+    assert completed.node_run_result.outputs["reasoning_content"] == "plan"
 
 
 def _normalize_like_split_reasoning(text: str) -> str:

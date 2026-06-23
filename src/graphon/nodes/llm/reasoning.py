@@ -14,7 +14,17 @@ that reasoning so the two code paths stay consistent:
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Literal
+
+
+@dataclass(frozen=True)
+class FilterPiece:
+    """One ordered piece split by :class:`ThinkStreamFilter`."""
+
+    kind: Literal["text", "reasoning"]
+    chunk: str
+
 
 # Complete <think>...</think> blocks (attrs, case-insensitive, multiline).
 _THINK_OPEN_ATTR_MAX_CHARS = 512
@@ -57,46 +67,68 @@ class ThinkStreamFilter:
         self._hold = ""
         self._seen_clean = False
 
-    def feed(self, text_part: str) -> str:
-        """Return the clean text that is safe to emit for this chunk."""
-        out_parts: list[str] = []
+    def feed(self, text_part: str) -> list[FilterPiece]:
+        """Return ordered clean-text and reasoning pieces from this chunk."""
+        pieces: list[FilterPiece] = []
         work = self._hold + text_part
         self._hold = ""
         while work:
             if not self._inside_think:
                 match = _THINK_OPEN_RE.search(work)
                 if match:
-                    out_parts.append(work[: match.start()])
+                    self._append_text_piece(pieces, work[: match.start()])
                     self._inside_think = True
                     work = work[match.end() :]
                     continue
                 keep = self._open_suffix_len(work)
                 if keep:
-                    out_parts.append(work[:-keep])
+                    self._append_text_piece(pieces, work[:-keep])
                     self._hold = work[-keep:]
                 else:
-                    out_parts.append(work)
+                    self._append_text_piece(pieces, work)
                 work = ""
             else:
                 match = _THINK_CLOSE_RE.search(work)
                 if match:
+                    self._append_reasoning_piece(pieces, work[: match.start()])
                     self._inside_think = False
                     work = work[match.end() :]
                     continue
                 keep = self._close_suffix_len(work)
-                self._hold = work[-keep:] if keep else ""
+                if keep:
+                    self._append_reasoning_piece(pieces, work[:-keep])
+                    self._hold = work[-keep:]
+                else:
+                    self._append_reasoning_piece(pieces, work)
                 work = ""
-        return self._strip_leading("".join(out_parts))
+        return pieces
 
-    def finalize(self) -> str:
+    def finalize(self) -> list[FilterPiece]:
         """Flush whatever is safe to emit once the stream ends."""
-        if self._inside_think:
-            # Unclosed <think>: drop truncated reasoning, never leak.
-            self._hold = ""
-            return ""
         remainder = self._hold
         self._hold = ""
-        return self._strip_leading(remainder)
+        if self._inside_think:
+            # Unclosed <think>: held bytes are truncated reasoning, not text.
+            return [FilterPiece(kind="reasoning", chunk=remainder)] if remainder else []
+        clean = self._strip_leading(remainder)
+        return [FilterPiece(kind="text", chunk=clean)] if clean else []
+
+    def _append_text_piece(
+        self,
+        pieces: list[FilterPiece],
+        clean: str,
+    ) -> None:
+        clean = self._strip_leading(clean)
+        if clean:
+            pieces.append(FilterPiece(kind="text", chunk=clean))
+
+    @staticmethod
+    def _append_reasoning_piece(
+        pieces: list[FilterPiece],
+        reasoning: str,
+    ) -> None:
+        if reasoning:
+            pieces.append(FilterPiece(kind="reasoning", chunk=reasoning))
 
     def _strip_leading(self, clean: str) -> str:
         # Mirror split_reasoning()'s leading strip (reasoning-first models).

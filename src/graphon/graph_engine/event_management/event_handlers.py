@@ -26,6 +26,7 @@ from graphon.graph_events.node import (
     NodeRunFailedEvent,
     NodeRunModelPollingProgressEvent,
     NodeRunPauseRequestedEvent,
+    NodeRunReasoningChunkEvent,
     NodeRunRetrieverResourceEvent,
     NodeRunRetryEvent,
     NodeRunStartedEvent,
@@ -122,6 +123,7 @@ class EventHandler:
             | NodeRunAgentLogEvent
             | NodeRunModelPollingProgressEvent
             | NodeRunRetrieverResourceEvent
+            | NodeRunReasoningChunkEvent
         ),
     ) -> None:
         self._event_collector.collect(event)

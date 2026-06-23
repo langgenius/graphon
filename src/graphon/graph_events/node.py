@@ -35,6 +35,30 @@ class NodeRunStreamChunkEvent(GraphNodeEventBase):
     )
 
 
+class NodeRunReasoningChunkEvent(GraphNodeEventBase):
+    """Graph-level lift of :class:`StreamReasoningEvent`.
+
+    The selector identifies the source and lets response filters enforce
+    visibility. It is not a normal answer stream and must not be buffered into
+    answer text. Chunks are raw live deltas, so appending them is not guaranteed
+    to equal the normalized final ``reasoning_content`` value. A run that
+    streamed reasoning may finish with an empty ``is_final=True`` marker.
+    """
+
+    selector: Sequence[str] = Field(
+        ...,
+        description=(
+            "selector identifying the reasoning source "
+            "(e.g., ['nodeA', 'reasoning_content'])"
+        ),
+    )
+    chunk: str = Field(..., description="the reasoning chunk content")
+    is_final: bool = Field(
+        default=False,
+        description="indicates if this is the last reasoning chunk for the node run",
+    )
+
+
 class NodeRunModelPollingProgressEvent(GraphNodeEventBase):
     attempt: int = Field(..., ge=0, description="polling check attempt count")
     last_checked_at: datetime = Field(..., description="last polling check time")

@@ -1,19 +1,48 @@
 """Unit tests for graphon.nodes.llm.reasoning (pure, node-independent)."""
 
-from graphon.nodes.llm.reasoning import ThinkStreamFilter, split_reasoning
+from graphon.nodes.llm.reasoning import FilterPiece, ThinkStreamFilter, split_reasoning
+
+
+def _feed_pieces(parts: list[str]) -> list[FilterPiece]:
+    flt = ThinkStreamFilter()
+    pieces: list[FilterPiece] = []
+    for part in parts:
+        pieces.extend(flt.feed(part))
+    pieces.extend(flt.finalize())
+    return pieces
 
 
 def _feed_all(parts: list[str]) -> str:
-    flt = ThinkStreamFilter()
-    out = "".join(flt.feed(part) for part in parts)
-    return out + flt.finalize()
+    return "".join(piece.chunk for piece in _feed_pieces(parts) if piece.kind == "text")
+
+
+def _feed_all_reasoning(parts: list[str]) -> str:
+    return "".join(
+        piece.chunk for piece in _feed_pieces(parts) if piece.kind == "reasoning"
+    )
 
 
 def test_filter_strips_single_block() -> None:
     flt = ThinkStreamFilter()
 
-    assert flt.feed("<think>x</think>y") == "y"
-    assert flt.finalize() == ""
+    pieces = flt.feed("<think>x</think>y")
+    assert pieces == [
+        FilterPiece(kind="reasoning", chunk="x"),
+        FilterPiece(kind="text", chunk="y"),
+    ]
+    assert flt.finalize() == []
+
+
+def test_filter_preserves_piece_order_with_interleaved_text() -> None:
+    flt = ThinkStreamFilter()
+
+    pieces = flt.feed("a<think>b</think>c")
+
+    assert pieces == [
+        FilterPiece(kind="text", chunk="a"),
+        FilterPiece(kind="reasoning", chunk="b"),
+        FilterPiece(kind="text", chunk="c"),
+    ]
 
 
 def test_filter_passes_through_non_think_angle_brackets() -> None:
@@ -114,8 +143,8 @@ def test_filter_releases_overlong_partial_open_tag_as_literal() -> None:
 def test_filter_handles_empty_input() -> None:
     flt = ThinkStreamFilter()
 
-    assert flt.feed("") == ""
-    assert flt.finalize() == ""
+    assert flt.feed("") == []
+    assert flt.finalize() == []
 
 
 def test_filter_emits_nothing_for_reasoning_only_output() -> None:
@@ -149,3 +178,55 @@ def test_split_reasoning_keeps_malformed_open_tag_with_nested_bracket() -> None:
 
     assert clean == text
     assert reasoning == ""
+
+
+def test_filter_streams_reasoning_of_single_block() -> None:
+    assert _feed_all_reasoning(["<think>plan</think>answer"]) == "plan"
+
+
+def test_filter_streams_reasoning_split_across_chunks() -> None:
+    assert _feed_all_reasoning(["<thi", "nk>plan</thi", "nk>ans", "wer"]) == "plan"
+
+
+def test_filter_streams_reasoning_with_tag_attributes() -> None:
+    assert _feed_all_reasoning(['<think foo="x">p</think>hi']) == "p"
+
+
+def test_filter_streams_reasoning_of_multiple_blocks_concatenated() -> None:
+    # Live stream concatenates without the "\n" join split_reasoning applies.
+    assert _feed_all_reasoning(["<think>a</think>X<think>b</think>Y"]) == "ab"
+
+
+def test_filter_streams_unclosed_trailing_reasoning_on_finalize() -> None:
+    # Behavior change vs #171: truncated reasoning is handed out, not dropped.
+    flt = ThinkStreamFilter()
+
+    pieces = flt.feed("hi<think>tail")
+    assert pieces == [
+        FilterPiece(kind="text", chunk="hi"),
+        FilterPiece(kind="reasoning", chunk="tail"),
+    ]
+    assert flt.finalize() == []
+
+
+def test_filter_streams_reasoning_held_partial_close_on_finalize() -> None:
+    # A partial "</thi" held when the stream ends is truncated reasoning.
+    flt = ThinkStreamFilter()
+
+    assert flt.feed("<think>ab</thi") == [FilterPiece(kind="reasoning", chunk="ab")]
+    assert flt.finalize() == [FilterPiece(kind="reasoning", chunk="</thi")]
+
+
+def test_filter_streams_reasoning_across_false_partial_close() -> None:
+    # "</thi" that grows into "</this" stays reasoning, content after too.
+    assert _feed_all_reasoning(["<think>a</thi", "s b</think>c"]) == "a</this b"
+    assert _feed_all(["<think>a</thi", "s b</think>c"]) == "c"
+
+
+def test_filter_streams_no_reasoning_without_think() -> None:
+    assert _feed_all_reasoning(["plain ", "text"]) == ""
+
+
+def test_filter_streams_reasoning_only_output() -> None:
+    assert _feed_all_reasoning(["<think>just reasoning</think>"]) == "just reasoning"
+    assert _feed_all(["<think>just reasoning</think>"]) == ""

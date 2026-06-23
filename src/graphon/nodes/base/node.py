@@ -40,6 +40,7 @@ from graphon.graph_events.node import (
     NodeRunHumanInputFormTimeoutEvent,
     NodeRunModelPollingProgressEvent,
     NodeRunPauseRequestedEvent,
+    NodeRunReasoningChunkEvent,
     NodeRunRetrieverResourceEvent,
     NodeRunStartedEvent,
     NodeRunStreamChunkEvent,
@@ -71,6 +72,7 @@ from graphon.node_events.node import (
     RunRetrieverResourceEvent,
     StreamChunkEvent,
     StreamCompletedEvent,
+    StreamReasoningEvent,
     VariableUpdatedEvent,
 )
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
@@ -841,6 +843,17 @@ class Node[NodeDataT: BaseNodeData](
             node_id=self._node_id,
             node_type=self.node_type,
             selector=event.selector,
+            chunk=event.chunk,
+            is_final=event.is_final,
+        )
+
+    @_dispatch.register
+    def _(self, event: StreamReasoningEvent) -> NodeRunReasoningChunkEvent:
+        return NodeRunReasoningChunkEvent(
+            id=self.execution_id,
+            node_id=self._node_id,
+            node_type=self.node_type,
+            selector=[self._node_id, "reasoning_content"],
             chunk=event.chunk,
             is_final=event.is_final,
         )

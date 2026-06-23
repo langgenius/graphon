@@ -12,6 +12,7 @@ from graphon.filters import (
 )
 from graphon.graph_events.graph import GraphRunStartedEvent
 from graphon.graph_events.node import (
+    NodeRunReasoningChunkEvent,
     NodeRunRetryEvent,
     NodeRunStartedEvent,
     NodeRunStreamChunkEvent,
@@ -188,6 +189,251 @@ def _stream_chunk(
         chunk=chunk,
         is_final=is_final,
     )
+
+
+def _reasoning_chunk(
+    chunk: str,
+    *,
+    run_id: str = "source-run",
+    source_id: str = "source",
+    selector: Sequence[str] | None = None,
+    is_final: bool = False,
+) -> NodeRunReasoningChunkEvent:
+    return NodeRunReasoningChunkEvent(
+        id=run_id,
+        node_id=source_id,
+        node_type=BuiltinNodeTypes.CODE,
+        selector=list(selector or [source_id, "reasoning_content"]),
+        chunk=chunk,
+        is_final=is_final,
+    )
+
+
+def test_response_stream_filter_passes_answer_visible_reasoning_chunk() -> None:
+    graph = _variable_response_graph(selector=["source", "text"])
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+    reasoning = _reasoning_chunk("thinking...")
+
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    output = list(event_filter.on_event(reasoning))
+
+    assert output == [reasoning]
+    assert output[0] is reasoning
+    assert not event_filter._stream_buffers.has_events(reasoning.selector)
+
+
+def test_response_stream_filter_passes_reasoning_for_text_selector_prefix() -> None:
+    graph = _variable_response_graph(selector=["source", "text", "summary"])
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+    reasoning = _reasoning_chunk("thinking...")
+
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    output = list(event_filter.on_event(reasoning))
+
+    assert output == [reasoning]
+    assert output[0] is reasoning
+    assert not event_filter._stream_buffers.has_events(reasoning.selector)
+
+
+def test_response_stream_filter_passes_explicit_reasoning_reference() -> None:
+    graph = _variable_response_graph(selector=["source", "reasoning_content"])
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+    reasoning = _reasoning_chunk("thinking...")
+
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    output = list(event_filter.on_event(reasoning))
+
+    assert output == [reasoning]
+    assert output[0] is reasoning
+    assert not event_filter._stream_buffers.has_events(reasoning.selector)
+
+
+def test_response_stream_filter_filters_unreferenced_reasoning_chunk() -> None:
+    graph = _variable_response_graph()
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    assert list(event_filter.on_event(_reasoning_chunk("thinking..."))) == []
+
+
+def test_response_stream_filter_filters_unmatched_reasoning_when_enabled() -> None:
+    graph = _variable_response_graph()
+    event_filter = ResponseStreamFilter(pass_unmatched_chunks=True)
+    event_filter.initialize(_context(graph))
+    reasoning = _reasoning_chunk("thinking...")
+
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    assert list(event_filter.on_event(reasoning)) == []
+
+
+def test_response_stream_filter_passes_visible_final_reasoning_marker() -> None:
+    graph = _variable_response_graph(selector=["source", "text"])
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+    marker = _reasoning_chunk("", is_final=True)
+
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    output = list(event_filter.on_event(marker))
+
+    assert output == [marker]
+    assert marker.is_final is True
+    assert not event_filter._stream_buffers.has_events(marker.selector)
+
+
+def test_response_stream_filter_filters_reasoning_before_branch_is_reached() -> None:
+    branch = _TestNode("branch", execution_type=NodeExecutionType.BRANCH)
+    source = _TestNode("source")
+    answer = _TestNode(
+        "answer",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template(segments=[VariableSegment(selector=["source", "text"])]),
+    )
+    graph = _TestGraph(
+        nodes={"branch": branch, "source": source, "answer": answer},
+        edges={
+            "branch-source": _TestEdge("branch-source", "branch", "source"),
+            "source-answer": _TestEdge("source-answer", "source", "answer"),
+        },
+        root_node_id="branch",
+    )
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+    reasoning = _reasoning_chunk("thinking...")
+
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    assert list(event_filter.on_event(reasoning)) == []
+    edge_output = list(
+        event_filter.on_event(
+            GraphEdgeTakenEvent(
+                edge_id="branch-source",
+                source_node_id="branch",
+                target_node_id="source",
+                source_handle="success",
+            )
+        )
+    )
+    assert edge_output == []
+    assert list(event_filter.on_event(reasoning)) == [reasoning]
+
+
+def test_response_stream_filter_filters_reasoning_from_skipped_merge_branch() -> None:
+    branch = _TestNode("branch", execution_type=NodeExecutionType.BRANCH)
+    chosen = _TestNode("chosen")
+    skipped = _TestNode("skipped")
+    skipped.state = NodeState.SKIPPED
+    answer = _TestNode(
+        "answer",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template(
+            segments=[
+                VariableSegment(selector=["chosen", "text"]),
+                VariableSegment(selector=["skipped", "text"]),
+            ],
+        ),
+    )
+    graph = _TestGraph(
+        nodes={
+            "branch": branch,
+            "chosen": chosen,
+            "skipped": skipped,
+            "answer": answer,
+        },
+        edges={
+            "branch-chosen": _TestEdge("branch-chosen", "branch", "chosen"),
+            "chosen-answer": _TestEdge("chosen-answer", "chosen", "answer"),
+            "branch-skipped": _TestEdge("branch-skipped", "branch", "skipped"),
+            "skipped-answer": _TestEdge("skipped-answer", "skipped", "answer"),
+        },
+        root_node_id="branch",
+    )
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+    chosen_reasoning = _reasoning_chunk("selected", source_id="chosen")
+    skipped_reasoning = _reasoning_chunk("hidden", source_id="skipped")
+
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    list(
+        event_filter.on_event(
+            GraphEdgeTakenEvent(
+                edge_id="branch-chosen",
+                source_node_id="branch",
+                target_node_id="chosen",
+                source_handle="success",
+            )
+        )
+    )
+
+    assert list(event_filter.on_event(chosen_reasoning)) == [chosen_reasoning]
+    assert list(event_filter.on_event(skipped_reasoning)) == []
+
+
+def test_response_stream_filter_passes_reasoning_for_waiting_session() -> None:
+    source = _TestNode("source")
+    active_answer = _TestNode(
+        "active-answer",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template(segments=[VariableSegment(selector=["missing", "value"])]),
+    )
+    waiting_answer = _TestNode(
+        "waiting-answer",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template(segments=[VariableSegment(selector=["source", "text"])]),
+    )
+    graph = _TestGraph(
+        nodes={
+            "source": source,
+            "active-answer": active_answer,
+            "waiting-answer": waiting_answer,
+        },
+        edges={
+            "source-active": _TestEdge("source-active", "source", "active-answer"),
+            "source-waiting": _TestEdge("source-waiting", "source", "waiting-answer"),
+        },
+        root_node_id="source",
+    )
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+    reasoning = _reasoning_chunk("waiting")
+
+    list(event_filter.on_event(GraphRunStartedEvent()))
+
+    assert list(event_filter.on_event(reasoning)) == [reasoning]
+
+
+def test_response_stream_filter_filters_mismatched_reasoning_selector() -> None:
+    graph = _variable_response_graph(
+        source_id="visible",
+        selector=["visible", "reasoning_content"],
+    )
+    event_filter = ResponseStreamFilter(pass_unmatched_chunks=True)
+    event_filter.initialize(_context(graph))
+    reasoning = _reasoning_chunk(
+        "borrowed",
+        source_id="hidden",
+        selector=["visible", "reasoning_content"],
+    )
+
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    assert list(event_filter.on_event(reasoning)) == []
+
+
+def test_response_stream_filter_restores_reasoning_visibility() -> None:
+    graph = _variable_response_graph(selector=["source", "text"])
+    context = _context(graph)
+    first_filter = ResponseStreamFilter()
+    first_filter.initialize(context)
+    list(first_filter.on_event(GraphRunStartedEvent()))
+
+    restored_filter = ResponseStreamFilter()
+    restored_filter.initialize(context)
+    restored_filter.loads(first_filter.dumps())
+    reasoning = _reasoning_chunk("resumed")
+
+    assert list(restored_filter.on_event(reasoning)) == [reasoning]
 
 
 def test_response_stream_filter_emits_text_segments_when_session_starts() -> None:

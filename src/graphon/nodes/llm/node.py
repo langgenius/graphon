@@ -57,11 +57,13 @@ from graphon.node_events.node import (
     RunRetrieverResourceEvent,
     StreamChunkEvent,
     StreamCompletedEvent,
+    StreamReasoningEvent,
 )
 from graphon.nodes.base.entities import VariableSelector
 from graphon.nodes.base.node import Node
 from graphon.nodes.base.variable_template_parser import VariableTemplateParser
 from graphon.nodes.llm.reasoning import (
+    FilterPiece,
     ThinkStreamFilter,
     extract_stream_reasoning,
     split_reasoning,
@@ -136,6 +138,8 @@ class _StreamingInvokeState:
     structured_output: dict[str, Any] | None = None
     # None in "tagged" mode (stream raw tokens); a filter in "separated" mode.
     text_filter: ThinkStreamFilter | None = None
+    # Set once reasoning has streamed, to emit one terminal marker at stream end.
+    reasoning_started: bool = False
 
 
 class LLMNode(Node[LLMNodeData]):
@@ -380,7 +384,10 @@ class LLMNode(Node[LLMNodeData]):
         structured_output: LLMStructuredOutput | None = None
 
         for event in generator:
-            if isinstance(event, StreamChunkEvent | ModelPollingProgressEvent):
+            if isinstance(
+                event,
+                StreamChunkEvent | StreamReasoningEvent | ModelPollingProgressEvent,
+            ):
                 yield event
                 continue
 
@@ -875,14 +882,26 @@ class LLMNode(Node[LLMNodeData]):
                 raise LLMNodeError(msg) from e
             raise
 
-        # Flush any clean text the filter was still holding (separated mode).
+        # Flush held text, then mark the reasoning stream finished (separated mode).
         if state.text_filter is not None:
-            remainder = state.text_filter.finalize()
-            if remainder:
-                yield StreamChunkEvent(
-                    selector=[node_id, "text"],
-                    chunk=remainder,
-                    is_final=False,
+            final_pieces = state.text_filter.finalize()
+            has_final_reasoning = False
+            for index, piece in enumerate(final_pieces):
+                is_final_reasoning = (
+                    piece.kind == "reasoning" and index == len(final_pieces) - 1
+                )
+                has_final_reasoning = has_final_reasoning or is_final_reasoning
+                yield from LLMNode._yield_filter_piece(
+                    piece=piece,
+                    state=state,
+                    node_id=node_id,
+                    is_final=is_final_reasoning,
+                )
+            if state.reasoning_started and not has_final_reasoning:
+                yield StreamReasoningEvent(
+                    selector=LLMNode._reasoning_selector(node_id),
+                    chunk="",
+                    is_final=True,
                 )
 
         # Extract reasoning content from <think> tags in the main text
@@ -959,28 +978,26 @@ class LLMNode(Node[LLMNodeData]):
         file_saver: LLMFileSaver,
         file_outputs: list[File],
         node_id: str,
-    ) -> Generator[StreamChunkEvent, None, None]:
+    ) -> Generator[StreamChunkEvent | StreamReasoningEvent, None, None]:
         text_parts = LLMNode._save_multimodal_output_and_convert_result_to_markdown(
             contents=result.delta.message.content,
             file_saver=file_saver,
             file_outputs=file_outputs,
         )
         for text_part in text_parts:
-            event = LLMNode._build_stream_text_event(
+            yield from LLMNode._build_stream_text_events(
                 text_part=text_part,
                 state=state,
                 node_id=node_id,
             )
-            if event is not None:
-                yield event
 
     @staticmethod
-    def _build_stream_text_event(
+    def _build_stream_text_events(
         *,
         text_part: str,
         state: _StreamingInvokeState,
         node_id: str,
-    ) -> StreamChunkEvent | None:
+    ) -> Generator[StreamChunkEvent | StreamReasoningEvent, None, None]:
         if text_part and not state.has_content:
             state.first_token_time = time.perf_counter()
             state.has_content = True
@@ -989,23 +1006,51 @@ class LLMNode(Node[LLMNodeData]):
         # reasoning extraction still sees the full output.
         state.full_text_buffer.write(text_part)
 
-        # "tagged" (no filter): stream the raw token unchanged.
+        # "tagged" (no filter): stream the raw token unchanged, no reasoning.
         if state.text_filter is None:
-            return StreamChunkEvent(
+            yield StreamChunkEvent(
                 selector=[node_id, "text"],
                 chunk=text_part,
                 is_final=False,
             )
+            return
 
-        # "separated": strip <think> reasoning before it reaches the selector.
-        chunk = state.text_filter.feed(text_part)
-        if not chunk:
-            return None
-        return StreamChunkEvent(
-            selector=[node_id, "text"],
-            chunk=chunk,
-            is_final=False,
-        )
+        # "separated": split <think> reasoning off the answer onto its own channel.
+        for piece in state.text_filter.feed(text_part):
+            yield from LLMNode._yield_filter_piece(
+                piece=piece,
+                state=state,
+                node_id=node_id,
+            )
+
+    @staticmethod
+    def _yield_filter_piece(
+        *,
+        piece: FilterPiece,
+        state: _StreamingInvokeState,
+        node_id: str,
+        is_final: bool = False,
+    ) -> Generator[StreamChunkEvent | StreamReasoningEvent, None, None]:
+        match piece.kind:
+            case "text":
+                yield StreamChunkEvent(
+                    selector=[node_id, "text"],
+                    chunk=piece.chunk,
+                    is_final=False,
+                )
+            case "reasoning":
+                state.reasoning_started = True
+                yield StreamReasoningEvent(
+                    selector=LLMNode._reasoning_selector(node_id),
+                    chunk=piece.chunk,
+                    is_final=is_final,
+                )
+            case _:
+                assert_never(piece.kind)
+
+    @staticmethod
+    def _reasoning_selector(node_id: str) -> list[str]:
+        return [node_id, "reasoning_content"]
 
     @staticmethod
     def _update_streaming_metadata(
