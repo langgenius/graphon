@@ -1,6 +1,6 @@
 [project]
 name = 'graphon'
-version = "0.5.3"
+version = '0.6.0'
 description = 'Graph execution engine for agentic AI workflows.'
 readme = 'README.md'
 license = 'Apache-2.0'
@@ -89,7 +89,7 @@ ignore-one-line-docstrings = true
 ]
 
 [tool.ty.environment]
-python-platform = "linux"
+python-platform = 'linux'
 
 [tool.pytest]
 minversion = '9.0'
