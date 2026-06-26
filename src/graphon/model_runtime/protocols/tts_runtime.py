@@ -20,7 +20,7 @@ class TTSModelRuntime(ModelProviderRuntime, Protocol):
         credentials: dict[str, Any],
         content_text: str,
         voice: str,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> Iterable[bytes]: ...
 
     @abstractmethod

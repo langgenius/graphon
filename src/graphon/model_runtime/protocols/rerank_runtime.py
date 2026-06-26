@@ -26,7 +26,7 @@ class RerankModelRuntime(ModelProviderRuntime, Protocol):
         docs: list[str],
         score_threshold: float | None,
         top_n: int | None,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> RerankResult: ...
 
     @abstractmethod
@@ -40,5 +40,5 @@ class RerankModelRuntime(ModelProviderRuntime, Protocol):
         docs: list[MultimodalRerankInput],
         score_threshold: float | None,
         top_n: int | None,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> RerankResult: ...

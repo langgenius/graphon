@@ -18,7 +18,8 @@ class Speech2TextModel(AIModel[SpeechToTextModelRuntime]):
         model: str,
         credentials: dict,
         file: IO[bytes],
-        invocation_context: Mapping[str, object] | None = None,
+        *,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> str:
         """Invoke the speech-to-text model and return the transcribed text."""
         try:
@@ -27,7 +28,7 @@ class Speech2TextModel(AIModel[SpeechToTextModelRuntime]):
                 model=model,
                 credentials=credentials,
                 file=file,
-                invocation_context=invocation_context,
+                request_metadata=request_metadata,
             )
         except Exception as e:
             raise self._transform_invoke_error(e) from e

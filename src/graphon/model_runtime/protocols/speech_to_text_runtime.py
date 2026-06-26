@@ -19,5 +19,5 @@ class SpeechToTextModelRuntime(ModelProviderRuntime, Protocol):
         model: str,
         credentials: dict[str, Any],
         file: IO[bytes],
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> str: ...

@@ -1,3 +1,4 @@
+import inspect
 from collections.abc import Generator, Mapping, Sequence
 from decimal import Decimal
 from io import BytesIO
@@ -158,10 +159,10 @@ class _LLMRuntimeStub(_ProviderRuntimeStub):
         tools: list[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         stream: bool,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> LLMResult | Generator[LLMResultChunk, None, None]:
         _ = provider, credentials, model_parameters, tools, stop, stream
-        _ = invocation_context
+        _ = request_metadata
         return LLMResult(
             model=model,
             prompt_messages=list(prompt_messages),
@@ -229,10 +230,10 @@ class _StreamingLLMRuntimeStub(_LLMRuntimeStub):
         tools: list[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         stream: bool,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> Generator[LLMResultChunk, None, None]:
         _ = provider, model, credentials, model_parameters, prompt_messages
-        _ = tools, stop, stream, invocation_context
+        _ = tools, stop, stream, request_metadata
         yield from self._chunks
         if self._fail_after_chunks:
             msg = "stream failed"
@@ -254,7 +255,7 @@ class _RecordingCallback(Callback):
         stop: Sequence[str] | None = None,
         stream: bool = True,
         user: str | None = None,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> None:
         _ = (
             llm_instance,
@@ -266,7 +267,7 @@ class _RecordingCallback(Callback):
             stop,
             stream,
             user,
-            invocation_context,
+            request_metadata,
         )
 
     def on_new_chunk(
@@ -281,7 +282,7 @@ class _RecordingCallback(Callback):
         stop: Sequence[str] | None = None,
         stream: bool = True,
         user: str | None = None,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> None:
         _ = (
             llm_instance,
@@ -294,7 +295,7 @@ class _RecordingCallback(Callback):
             stop,
             stream,
             user,
-            invocation_context,
+            request_metadata,
         )
 
     def on_after_invoke(
@@ -309,7 +310,7 @@ class _RecordingCallback(Callback):
         stop: Sequence[str] | None = None,
         stream: bool = True,
         user: str | None = None,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> None:
         _ = (
             llm_instance,
@@ -321,7 +322,7 @@ class _RecordingCallback(Callback):
             stop,
             stream,
             user,
-            invocation_context,
+            request_metadata,
         )
         self.after_results.append(result)
 
@@ -337,7 +338,7 @@ class _RecordingCallback(Callback):
         stop: Sequence[str] | None = None,
         stream: bool = True,
         user: str | None = None,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> None:
         _ = (
             llm_instance,
@@ -350,7 +351,7 @@ class _RecordingCallback(Callback):
             stop,
             stream,
             user,
-            invocation_context,
+            request_metadata,
         )
 
 
@@ -381,9 +382,9 @@ class _EmbeddingRuntimeStub(_ProviderRuntimeStub):
         credentials: dict[str, Any],
         texts: list[str],
         input_type: EmbeddingInputType,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> EmbeddingResult:
-        _ = provider, model, credentials, texts, input_type, invocation_context
+        _ = provider, model, credentials, texts, input_type, request_metadata
         return EmbeddingResult(
             model=model,
             embeddings=[[0.1, 0.2]],
@@ -406,9 +407,9 @@ class _EmbeddingRuntimeStub(_ProviderRuntimeStub):
         credentials: dict[str, Any],
         documents: list[dict[str, Any]],
         input_type: EmbeddingInputType,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> EmbeddingResult:
-        _ = provider, model, credentials, documents, input_type, invocation_context
+        _ = provider, model, credentials, documents, input_type, request_metadata
         return EmbeddingResult(
             model=model,
             embeddings=[[0.1, 0.2]],
@@ -444,9 +445,9 @@ class _TTSRuntimeStub(_ProviderRuntimeStub):
         credentials: dict[str, Any],
         content_text: str,
         voice: str,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> list[bytes]:
-        _ = provider, model, credentials, content_text, voice, invocation_context
+        _ = provider, model, credentials, content_text, voice, request_metadata
         return [b"audio"]
 
     def get_tts_model_voices(
@@ -469,9 +470,9 @@ class _ModerationRuntimeStub(_ProviderRuntimeStub):
         model: str,
         credentials: dict[str, Any],
         text: str,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> bool:
-        _ = provider, model, credentials, text, invocation_context
+        _ = provider, model, credentials, text, request_metadata
         return True
 
 
@@ -486,9 +487,9 @@ class _RerankRuntimeStub(_ProviderRuntimeStub):
         docs: list[str],
         score_threshold: float | None,
         top_n: int | None,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> RerankResult:
-        _ = provider, credentials, query, score_threshold, top_n, invocation_context
+        _ = provider, credentials, query, score_threshold, top_n, request_metadata
         return RerankResult(
             model=model,
             docs=[RerankDocument(index=0, text=docs[0], score=0.9)],
@@ -504,9 +505,9 @@ class _RerankRuntimeStub(_ProviderRuntimeStub):
         docs: list[MultimodalRerankInput],
         score_threshold: float | None,
         top_n: int | None,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> RerankResult:
-        _ = provider, credentials, query, score_threshold, top_n, invocation_context
+        _ = provider, credentials, query, score_threshold, top_n, request_metadata
         return RerankResult(
             model=model,
             docs=[RerankDocument(index=0, text=docs[0]["content"], score=0.9)],
@@ -521,9 +522,9 @@ class _SpeechToTextRuntimeStub(_ProviderRuntimeStub):
         model: str,
         credentials: dict[str, Any],
         file: IO[bytes],
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> str:
-        _ = provider, model, credentials, file, invocation_context
+        _ = provider, model, credentials, file, request_metadata
         return "transcript"
 
 
@@ -853,10 +854,10 @@ def test_speech_to_text_model_accepts_speech_only_runtime_surface() -> None:
     )
 
 
-class _InvocationContextRecordingLLMRuntimeStub(_LLMRuntimeStub):
+class _RequestMetadataRecordingLLMRuntimeStub(_LLMRuntimeStub):
     def __init__(self) -> None:
         super().__init__()
-        self.received_invocation_contexts: list[Mapping[str, object] | None] = []
+        self.received_request_metadata: list[Mapping[str, object] | None] = []
 
     def invoke_llm(
         self,
@@ -869,9 +870,9 @@ class _InvocationContextRecordingLLMRuntimeStub(_LLMRuntimeStub):
         tools: list[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         stream: bool,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> LLMResult | Generator[LLMResultChunk, None, None]:
-        self.received_invocation_contexts.append(invocation_context)
+        self.received_request_metadata.append(request_metadata)
         return super().invoke_llm(
             provider=provider,
             model=model,
@@ -881,18 +882,18 @@ class _InvocationContextRecordingLLMRuntimeStub(_LLMRuntimeStub):
             tools=tools,
             stop=stop,
             stream=stream,
-            invocation_context=invocation_context,
+            request_metadata=request_metadata,
         )
 
 
-def test_large_language_model_forwards_invocation_context_to_runtime() -> None:
+def test_large_language_model_forwards_request_metadata_to_runtime() -> None:
     provider = ProviderEntity(
         provider="test-provider",
         label=I18nObject(en_US="Test Provider"),
         supported_model_types=[ModelType.LLM],
         configurate_methods=[],
     )
-    stub = _InvocationContextRecordingLLMRuntimeStub()
+    stub = _RequestMetadataRecordingLLMRuntimeStub()
     model = LargeLanguageModel(
         provider_schema=provider,
         model_runtime=cast("LLMModelRuntime", stub),
@@ -903,20 +904,20 @@ def test_large_language_model_forwards_invocation_context_to_runtime() -> None:
         credentials={},
         prompt_messages=[UserPromptMessage(content="hello")],
         stream=False,
-        invocation_context={"app_id": "app-123"},
+        request_metadata={"app_id": "app-123"},
     )
 
-    assert stub.received_invocation_contexts == [{"app_id": "app-123"}]
+    assert stub.received_request_metadata == [{"app_id": "app-123"}]
 
 
-def test_large_language_model_defaults_invocation_context_to_none() -> None:
+def test_large_language_model_defaults_request_metadata_to_none() -> None:
     provider = ProviderEntity(
         provider="test-provider",
         label=I18nObject(en_US="Test Provider"),
         supported_model_types=[ModelType.LLM],
         configurate_methods=[],
     )
-    stub = _InvocationContextRecordingLLMRuntimeStub()
+    stub = _RequestMetadataRecordingLLMRuntimeStub()
     model = LargeLanguageModel(
         provider_schema=provider,
         model_runtime=cast("LLMModelRuntime", stub),
@@ -929,4 +930,20 @@ def test_large_language_model_defaults_invocation_context_to_none() -> None:
         stream=False,
     )
 
-    assert stub.received_invocation_contexts == [None]
+    assert stub.received_request_metadata == [None]
+
+
+def test_request_metadata_is_keyword_only_on_public_model_surfaces() -> None:
+    surfaces = (
+        LargeLanguageModel.invoke,
+        TextEmbeddingModel.invoke,
+        RerankModel.invoke,
+        RerankModel.invoke_multimodal_rerank,
+        TTSModel.invoke,
+        Speech2TextModel.invoke,
+        ModerationModel.invoke,
+    )
+
+    for surface in surfaces:
+        parameter = inspect.signature(surface).parameters["request_metadata"]
+        assert parameter.kind is inspect.Parameter.KEYWORD_ONLY

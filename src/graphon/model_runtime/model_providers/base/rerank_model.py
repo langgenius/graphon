@@ -22,7 +22,8 @@ class RerankModel(AIModel[RerankModelRuntime]):
         docs: list[str],
         score_threshold: float | None = None,
         top_n: int | None = None,
-        invocation_context: Mapping[str, object] | None = None,
+        *,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> RerankResult:
         """Invoke the rerank model for text inputs."""
         try:
@@ -34,7 +35,7 @@ class RerankModel(AIModel[RerankModelRuntime]):
                 docs=docs,
                 score_threshold=score_threshold,
                 top_n=top_n,
-                invocation_context=invocation_context,
+                request_metadata=request_metadata,
             )
         except Exception as e:
             raise self._transform_invoke_error(e) from e
@@ -47,7 +48,8 @@ class RerankModel(AIModel[RerankModelRuntime]):
         docs: list[MultimodalRerankInput],
         score_threshold: float | None = None,
         top_n: int | None = None,
-        invocation_context: Mapping[str, object] | None = None,
+        *,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> RerankResult:
         """Invoke the rerank model for multimodal inputs."""
         try:
@@ -59,7 +61,7 @@ class RerankModel(AIModel[RerankModelRuntime]):
                 docs=docs,
                 score_threshold=score_threshold,
                 top_n=top_n,
-                invocation_context=invocation_context,
+                request_metadata=request_metadata,
             )
         except Exception as e:
             raise self._transform_invoke_error(e) from e

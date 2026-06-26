@@ -34,7 +34,7 @@ class LLMModelRuntime(ModelProviderRuntime, Protocol):
         tools: list[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         stream: Literal[False],
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> LLMResult: ...
 
     @overload
@@ -49,7 +49,7 @@ class LLMModelRuntime(ModelProviderRuntime, Protocol):
         tools: list[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         stream: Literal[True],
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> Generator[LLMResultChunk, None, None]: ...
 
     @abstractmethod
@@ -64,7 +64,7 @@ class LLMModelRuntime(ModelProviderRuntime, Protocol):
         tools: list[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         stream: bool,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> LLMResult | Generator[LLMResultChunk, None, None]: ...
 
     @overload

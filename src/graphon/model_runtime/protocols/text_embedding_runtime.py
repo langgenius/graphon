@@ -24,7 +24,7 @@ class TextEmbeddingModelRuntime(ModelProviderRuntime, Protocol):
         credentials: dict[str, Any],
         texts: list[str],
         input_type: EmbeddingInputType,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> EmbeddingResult: ...
 
     @abstractmethod
@@ -36,7 +36,7 @@ class TextEmbeddingModelRuntime(ModelProviderRuntime, Protocol):
         credentials: dict[str, Any],
         documents: list[dict[str, Any]],
         input_type: EmbeddingInputType,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> EmbeddingResult: ...
 
     @abstractmethod

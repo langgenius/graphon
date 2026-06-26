@@ -28,7 +28,7 @@ class LoggingCallback(Callback):
         stop: Sequence[str] | None = None,
         stream: bool = True,
         user: str | None = None,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> None:
         """Before invoke callback
 
@@ -41,7 +41,7 @@ class LoggingCallback(Callback):
         :param stop: stop words
         :param stream: is stream response
         :param user: optional end-user identifier for the invocation
-        :param invocation_context: opaque request metadata for the current invocation
+        :param request_metadata: opaque metadata for the current request
         """
         self.print_text("\n[on_llm_before_invoke]\n", color="blue")
         self.print_text(f"Model: {model}\n", color="blue")
@@ -61,9 +61,9 @@ class LoggingCallback(Callback):
         if user:
             self.print_text(f"User: {user}\n", color="blue")
 
-        if invocation_context:
+        if request_metadata:
             self.print_text(
-                f"Invocation context: {dict(invocation_context)}\n",
+                f"Request metadata: {dict(request_metadata)}\n",
                 color="blue",
             )
 
@@ -91,7 +91,7 @@ class LoggingCallback(Callback):
         stop: Sequence[str] | None = None,
         stream: bool = True,
         user: str | None = None,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> None:
         """On new chunk callback
 
@@ -104,9 +104,9 @@ class LoggingCallback(Callback):
         :param tools: tools for tool calling
         :param stop: stop words
         :param stream: is stream response
-        :param invocation_context: opaque request metadata for the current invocation
+        :param request_metadata: opaque metadata for the current request
         """
-        _ = user, invocation_context
+        _ = user, request_metadata
         if isinstance(chunk.delta.message.content, str):
             sys.stdout.write(chunk.delta.message.content)
             sys.stdout.flush()
@@ -124,7 +124,7 @@ class LoggingCallback(Callback):
         stop: Sequence[str] | None = None,
         stream: bool = True,
         user: str | None = None,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> None:
         """After invoke callback
 
@@ -137,9 +137,9 @@ class LoggingCallback(Callback):
         :param tools: tools for tool calling
         :param stop: stop words
         :param stream: is stream response
-        :param invocation_context: opaque request metadata for the current invocation
+        :param request_metadata: opaque metadata for the current request
         """
-        _ = user, invocation_context
+        _ = user, request_metadata
         self.print_text("\n[on_llm_after_invoke]\n", color="yellow")
         self.print_text(f"Content: {result.message.content}\n", color="yellow")
 
@@ -173,7 +173,7 @@ class LoggingCallback(Callback):
         stop: Sequence[str] | None = None,
         stream: bool = True,
         user: str | None = None,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> None:
         """Invoke error callback
 
@@ -186,8 +186,8 @@ class LoggingCallback(Callback):
         :param tools: tools for tool calling
         :param stop: stop words
         :param stream: is stream response
-        :param invocation_context: opaque request metadata for the current invocation
+        :param request_metadata: opaque metadata for the current request
         """
-        _ = user, invocation_context
+        _ = user, request_metadata
         self.print_text("\n[on_llm_invoke_error]\n", color="red")
         logger.error("LLM invoke failed: %s", ex, exc_info=ex)

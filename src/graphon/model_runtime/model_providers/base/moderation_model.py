@@ -18,7 +18,8 @@ class ModerationModel(AIModel[ModerationModelRuntime]):
         model: str,
         credentials: dict,
         text: str,
-        invocation_context: Mapping[str, object] | None = None,
+        *,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> bool:
         """Invoke the moderation model and return whether the text is unsafe."""
         self.started_at = time.perf_counter()
@@ -29,7 +30,7 @@ class ModerationModel(AIModel[ModerationModelRuntime]):
                 model=model,
                 credentials=credentials,
                 text=text,
-                invocation_context=invocation_context,
+                request_metadata=request_metadata,
             )
         except Exception as e:
             raise self._transform_invoke_error(e) from e

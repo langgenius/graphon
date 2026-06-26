@@ -19,5 +19,5 @@ class ModerationModelRuntime(ModelProviderRuntime, Protocol):
         model: str,
         credentials: dict[str, Any],
         text: str,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> bool: ...

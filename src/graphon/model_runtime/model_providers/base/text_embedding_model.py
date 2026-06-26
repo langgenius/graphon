@@ -24,7 +24,8 @@ class TextEmbeddingModel(AIModel[TextEmbeddingModelRuntime]):
         texts: list[str] | None = None,
         multimodel_documents: list[dict[str, Any]] | None = None,
         input_type: EmbeddingInputType = EmbeddingInputType.DOCUMENT,
-        invocation_context: Mapping[str, object] | None = None,
+        *,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> EmbeddingResult:
         """Invoke text or multimodal embedding generation for the provided inputs."""
         if not texts and not multimodel_documents:
@@ -39,7 +40,7 @@ class TextEmbeddingModel(AIModel[TextEmbeddingModelRuntime]):
                     credentials=credentials,
                     texts=texts,
                     input_type=input_type,
-                    invocation_context=invocation_context,
+                    request_metadata=request_metadata,
                 )
             except Exception as e:
                 raise self._transform_invoke_error(e) from e
@@ -55,7 +56,7 @@ class TextEmbeddingModel(AIModel[TextEmbeddingModelRuntime]):
                 credentials=credentials,
                 documents=multimodel_documents,
                 input_type=input_type,
-                invocation_context=invocation_context,
+                request_metadata=request_metadata,
             )
         except Exception as e:
             raise self._transform_invoke_error(e) from e
