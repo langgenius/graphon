@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+from collections.abc import Mapping
 from typing import IO, Any, Protocol, runtime_checkable
 
 from graphon.model_runtime.protocols.provider_runtime import ModelProviderRuntime
@@ -18,4 +19,5 @@ class SpeechToTextModelRuntime(ModelProviderRuntime, Protocol):
         model: str,
         credentials: dict[str, Any],
         file: IO[bytes],
+        request_metadata: Mapping[str, object] | None = None,
     ) -> str: ...

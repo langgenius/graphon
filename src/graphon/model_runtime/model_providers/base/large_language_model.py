@@ -284,6 +284,7 @@ def _invoke_llm_via_runtime(
     tools: list[PromptMessageTool] | None,
     stop: Sequence[str] | None,
     stream: bool,
+    request_metadata: Mapping[str, object] | None,
 ) -> LLMResult | Generator[LLMResultChunk, None, None]:
     return llm_model.model_runtime.invoke_llm(
         provider=provider,
@@ -294,6 +295,7 @@ def _invoke_llm_via_runtime(
         tools=tools,
         stop=stop,
         stream=stream,
+        request_metadata=request_metadata,
     )
 
 
@@ -312,6 +314,8 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
         stop: list[str] | None = None,
         stream: bool = True,
         callbacks: list[Callback] | None = None,
+        *,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> LLMResult | Generator[LLMResultChunk, None, None]:
         """Invoke the large language model and optionally stream result chunks."""
         # validate and filter model parameters
@@ -334,6 +338,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
             tools=tools,
             stop=stop,
             stream=stream,
+            request_metadata=request_metadata,
             callbacks=callbacks,
         )
 
@@ -350,6 +355,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
                 tools=tools,
                 stop=stop,
                 stream=stream,
+                request_metadata=request_metadata,
             )
 
             if not stream:
@@ -368,6 +374,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
                 tools=tools,
                 stop=stop,
                 stream=stream,
+                request_metadata=request_metadata,
                 callbacks=callbacks,
             )
 
@@ -383,6 +390,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
                 tools=tools,
                 stop=stop,
                 stream=stream,
+                request_metadata=request_metadata,
                 callbacks=callbacks,
             )
         if isinstance(result, LLMResult):
@@ -395,6 +403,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
                 tools=tools,
                 stop=stop,
                 stream=stream,
+                request_metadata=request_metadata,
                 callbacks=callbacks,
             )
             # Following https://github.com/langgenius/dify/issues/17799,
@@ -415,7 +424,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
         tools: list[PromptMessageTool] | None = None,
         stop: Sequence[str] | None = None,
         stream: bool = True,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
         callbacks: list[Callback] | None = None,
     ) -> Generator[LLMResultChunk, None, None]:
         """Stream runtime result chunks through callbacks and bookkeeping hooks."""
@@ -433,7 +442,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
                 tools=tools,
                 stop=stop,
                 stream=stream,
-                invocation_context=invocation_context,
+                request_metadata=request_metadata,
                 callbacks=callbacks,
             )
         except Exception as e:
@@ -450,7 +459,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
             tools=tools,
             stop=stop,
             stream=stream,
-            invocation_context=invocation_context,
+            request_metadata=request_metadata,
             callbacks=callbacks,
         )
 
@@ -466,7 +475,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
         tools: list[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         stream: bool,
-        invocation_context: Mapping[str, object] | None,
+        request_metadata: Mapping[str, object] | None,
         callbacks: list[Callback],
     ) -> Generator[LLMResultChunk, None, None]:
         for chunk in result:
@@ -486,7 +495,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
                 tools=tools,
                 stop=stop,
                 stream=stream,
-                invocation_context=invocation_context,
+                request_metadata=request_metadata,
                 callbacks=callbacks,
             )
             accumulator.consume(chunk)
@@ -558,7 +567,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
         tools: list[PromptMessageTool] | None = None,
         stop: Sequence[str] | None = None,
         stream: bool = True,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
         callbacks: list[Callback] | None = None,
     ) -> None:
         """Trigger before invoke callbacks
@@ -570,7 +579,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
         :param tools: tools for tool calling
         :param stop: stop words
         :param stream: is stream response
-        :param invocation_context: opaque request metadata for the current invocation
+        :param request_metadata: opaque metadata for the current request
         :param callbacks: callbacks
         """
         _run_callbacks(
@@ -585,7 +594,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
                 tools=tools,
                 stop=stop,
                 stream=stream,
-                invocation_context=invocation_context,
+                request_metadata=request_metadata,
             ),
         )
 
@@ -599,7 +608,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
         tools: list[PromptMessageTool] | None = None,
         stop: Sequence[str] | None = None,
         stream: bool = True,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
         callbacks: list[Callback] | None = None,
     ) -> None:
         """Trigger new chunk callbacks
@@ -612,7 +621,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
         :param tools: tools for tool calling
         :param stop: stop words
         :param stream: is stream response
-        :param invocation_context: opaque request metadata for the current invocation
+        :param request_metadata: opaque metadata for the current request
         """
         _run_callbacks(
             callbacks,
@@ -627,7 +636,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
                 tools=tools,
                 stop=stop,
                 stream=stream,
-                invocation_context=invocation_context,
+                request_metadata=request_metadata,
             ),
         )
 
@@ -641,7 +650,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
         tools: list[PromptMessageTool] | None = None,
         stop: Sequence[str] | None = None,
         stream: bool = True,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
         callbacks: list[Callback] | None = None,
     ) -> None:
         """Trigger after invoke callbacks
@@ -654,7 +663,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
         :param tools: tools for tool calling
         :param stop: stop words
         :param stream: is stream response
-        :param invocation_context: opaque request metadata for the current invocation
+        :param request_metadata: opaque metadata for the current request
         :param callbacks: callbacks
         """
         _run_callbacks(
@@ -670,7 +679,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
                 tools=tools,
                 stop=stop,
                 stream=stream,
-                invocation_context=invocation_context,
+                request_metadata=request_metadata,
             ),
         )
 
@@ -684,7 +693,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
         tools: list[PromptMessageTool] | None = None,
         stop: Sequence[str] | None = None,
         stream: bool = True,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
         callbacks: list[Callback] | None = None,
     ) -> None:
         """Trigger invoke error callbacks
@@ -697,7 +706,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
         :param tools: tools for tool calling
         :param stop: stop words
         :param stream: is stream response
-        :param invocation_context: opaque request metadata for the current invocation
+        :param request_metadata: opaque metadata for the current request
         :param callbacks: callbacks
         """
         _run_callbacks(
@@ -713,6 +722,6 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
                 tools=tools,
                 stop=stop,
                 stream=stream,
-                invocation_context=invocation_context,
+                request_metadata=request_metadata,
             ),
         )

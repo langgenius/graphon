@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from collections.abc import Generator, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from typing import Any, Literal, Protocol, overload, runtime_checkable
 
 from graphon.model_runtime.entities.llm_entities import (
@@ -34,6 +34,7 @@ class LLMModelRuntime(ModelProviderRuntime, Protocol):
         tools: list[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         stream: Literal[False],
+        request_metadata: Mapping[str, object] | None = None,
     ) -> LLMResult: ...
 
     @overload
@@ -48,6 +49,7 @@ class LLMModelRuntime(ModelProviderRuntime, Protocol):
         tools: list[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         stream: Literal[True],
+        request_metadata: Mapping[str, object] | None = None,
     ) -> Generator[LLMResultChunk, None, None]: ...
 
     @abstractmethod
@@ -62,6 +64,7 @@ class LLMModelRuntime(ModelProviderRuntime, Protocol):
         tools: list[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         stream: bool,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> LLMResult | Generator[LLMResultChunk, None, None]: ...
 
     @overload

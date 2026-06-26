@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+from collections.abc import Mapping
 from typing import Any, Protocol, runtime_checkable
 
 from graphon.model_runtime.entities.rerank_entities import (
@@ -25,6 +26,7 @@ class RerankModelRuntime(ModelProviderRuntime, Protocol):
         docs: list[str],
         score_threshold: float | None,
         top_n: int | None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> RerankResult: ...
 
     @abstractmethod
@@ -38,4 +40,5 @@ class RerankModelRuntime(ModelProviderRuntime, Protocol):
         docs: list[MultimodalRerankInput],
         score_threshold: float | None,
         top_n: int | None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> RerankResult: ...

@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from graphon.model_runtime.entities.model_entities import ModelType
@@ -20,6 +20,8 @@ class TTSModel(AIModel[TTSModelRuntime]):
         credentials: dict,
         content_text: str,
         voice: str,
+        *,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> Iterable[bytes]:
         """Invoke the TTS model and return an audio byte stream."""
         try:
@@ -29,6 +31,7 @@ class TTSModel(AIModel[TTSModelRuntime]):
                 credentials=credentials,
                 content_text=content_text,
                 voice=voice,
+                request_metadata=request_metadata,
             )
         except Exception as e:
             raise self._transform_invoke_error(e) from e

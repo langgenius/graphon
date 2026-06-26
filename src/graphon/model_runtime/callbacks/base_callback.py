@@ -37,7 +37,7 @@ class Callback(ABC):
         stop: Sequence[str] | None = None,
         stream: bool = True,
         user: str | None = None,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> None:
         """Before invoke callback
 
@@ -50,7 +50,7 @@ class Callback(ABC):
         :param stop: stop words
         :param stream: is stream response
         :param user: optional end-user identifier for the invocation
-        :param invocation_context: opaque request metadata for the current invocation
+        :param request_metadata: opaque metadata for the current request
         """
         raise NotImplementedError
 
@@ -67,7 +67,7 @@ class Callback(ABC):
         stop: Sequence[str] | None = None,
         stream: bool = True,
         user: str | None = None,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> None:
         """On new chunk callback
 
@@ -81,7 +81,7 @@ class Callback(ABC):
         :param stop: stop words
         :param stream: is stream response
         :param user: optional end-user identifier for the invocation
-        :param invocation_context: opaque request metadata for the current invocation
+        :param request_metadata: opaque metadata for the current request
         """
         raise NotImplementedError
 
@@ -98,7 +98,7 @@ class Callback(ABC):
         stop: Sequence[str] | None = None,
         stream: bool = True,
         user: str | None = None,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> None:
         """After invoke callback
 
@@ -112,7 +112,7 @@ class Callback(ABC):
         :param stop: stop words
         :param stream: is stream response
         :param user: optional end-user identifier for the invocation
-        :param invocation_context: opaque request metadata for the current invocation
+        :param request_metadata: opaque metadata for the current request
         """
         raise NotImplementedError
 
@@ -129,7 +129,7 @@ class Callback(ABC):
         stop: Sequence[str] | None = None,
         stream: bool = True,
         user: str | None = None,
-        invocation_context: Mapping[str, object] | None = None,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> None:
         """Invoke error callback
 
@@ -143,7 +143,7 @@ class Callback(ABC):
         :param stop: stop words
         :param stream: is stream response
         :param user: optional end-user identifier for the invocation
-        :param invocation_context: opaque request metadata for the current invocation
+        :param request_metadata: opaque metadata for the current request
         """
         raise NotImplementedError
 

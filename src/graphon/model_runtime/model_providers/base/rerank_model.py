@@ -1,3 +1,5 @@
+from collections.abc import Mapping
+
 from graphon.model_runtime.entities.model_entities import ModelType
 from graphon.model_runtime.entities.rerank_entities import (
     MultimodalRerankInput,
@@ -20,6 +22,8 @@ class RerankModel(AIModel[RerankModelRuntime]):
         docs: list[str],
         score_threshold: float | None = None,
         top_n: int | None = None,
+        *,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> RerankResult:
         """Invoke the rerank model for text inputs."""
         try:
@@ -31,6 +35,7 @@ class RerankModel(AIModel[RerankModelRuntime]):
                 docs=docs,
                 score_threshold=score_threshold,
                 top_n=top_n,
+                request_metadata=request_metadata,
             )
         except Exception as e:
             raise self._transform_invoke_error(e) from e
@@ -43,6 +48,8 @@ class RerankModel(AIModel[RerankModelRuntime]):
         docs: list[MultimodalRerankInput],
         score_threshold: float | None = None,
         top_n: int | None = None,
+        *,
+        request_metadata: Mapping[str, object] | None = None,
     ) -> RerankResult:
         """Invoke the rerank model for multimodal inputs."""
         try:
@@ -54,6 +61,7 @@ class RerankModel(AIModel[RerankModelRuntime]):
                 docs=docs,
                 score_threshold=score_threshold,
                 top_n=top_n,
+                request_metadata=request_metadata,
             )
         except Exception as e:
             raise self._transform_invoke_error(e) from e
