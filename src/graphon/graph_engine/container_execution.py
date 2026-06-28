@@ -4,42 +4,35 @@ from __future__ import annotations
 
 import contextlib
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import final
 
 from graphon.enums import (
     BuiltinNodeTypes,
-    NodeExecutionType,
     WorkflowNodeExecutionMetadataKey,
     WorkflowNodeExecutionStatus,
 )
 from graphon.graph_events.base import GraphNodeEventBase
-from graphon.graph_events.iteration import (
-    NodeRunIterationFailedEvent,
-    NodeRunIterationNextEvent,
-    NodeRunIterationStartedEvent,
-    NodeRunIterationSucceededEvent,
-)
-from graphon.graph_events.loop import (
-    NodeRunLoopFailedEvent,
-    NodeRunLoopNextEvent,
-    NodeRunLoopStartedEvent,
-    NodeRunLoopSucceededEvent,
-)
 from graphon.graph_events.node import (
     NodeRunFailedEvent,
-    NodeRunStartedEvent,
     NodeRunSucceededEvent,
 )
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.node_events.base import NodeRunResult
-from graphon.nodes.iteration.entities import ErrorHandleMode
-from graphon.nodes.iteration.exc import (
-    InvalidIteratorValueError,
-    IteratorVariableNotFoundError,
-    StartNodeIdNotFoundError,
+from graphon.nodes.container_effects import (
+    ContainerAwaitRequest,
+    IterationExecutionFailed,
+    IterationExecutionSucceeded,
+    IterationFrameRequest,
+    IterationFramesRequested,
+    LoopExecutionFailed,
+    LoopExecutionSucceeded,
+    LoopFrameCompleted,
+    LoopFrameRequest,
 )
+from graphon.nodes.iteration.entities import ErrorHandleMode
 from graphon.nodes.iteration.iteration_node import IterationNode
 from graphon.nodes.loop.entities import LoopCompletedReason
 from graphon.nodes.loop.loop_node import LoopNode
@@ -48,14 +41,15 @@ from graphon.runtime.graph_runtime_state import (
     GraphRuntimeState,
 )
 from graphon.utils.condition.processor import ConditionProcessor
-from graphon.variables.segments import ArrayAnySegment, ArraySegment, NoneSegment
 
-from .entities.tasks import TaskEvent
 from .frames import ExecutionFrame, FrameRegistry
+from .ready_queue import ResumeTask
 
 
 @dataclass(slots=True)
 class _LoopRunContext:
+    # Suspended parent node invocation waiting for loop progress or completion.
+    invocation_id: str
     # Frame that owns the loop container node.
     parent_frame_id: str
     # Loop container node id in the parent frame.
@@ -95,6 +89,8 @@ class _LoopFrameContext:
 
 @dataclass(slots=True)
 class _IterationRunContext:
+    # Suspended parent node invocation waiting for iteration progress/completion.
+    invocation_id: str
     # Frame that owns the iteration container node.
     parent_frame_id: str
     # Iteration container node id in the parent frame.
@@ -117,6 +113,16 @@ class _IterationRunContext:
     scheduled_count: int
     # Number of iteration frames that have completed.
     completed_count: int
+    # Whether a resume task has already been queued for this invocation.
+    resume_pending: bool
+    # Maximum active child frames requested by the node.
+    parallel_nums: int
+    # Variable selector used to read each child frame's output.
+    output_selector: Sequence[str]
+    # Error behavior requested by the iteration node.
+    error_handle_mode: ErrorHandleMode
+    # Whether output list values should be flattened in the final result.
+    flatten_output: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,20 +203,30 @@ class ContainerExecution:
             return event.node_type != BuiltinNodeTypes.ITERATION_START
         return event.node_type != BuiltinNodeTypes.LOOP_START
 
-    def enter_from_started_event(
+    def start_container_await(
         self,
         *,
-        frame: ExecutionFrame,
-        event: NodeRunStartedEvent,
-    ) -> list[GraphNodeEventBase]:
-        node = frame.graph.nodes[event.node_id]
-        if node.execution_type != NodeExecutionType.CONTAINER:
-            return []
-        if isinstance(node, LoopNode):
-            return self._enter_loop(frame=frame, event=event, node=node)
-        if isinstance(node, IterationNode):
-            return self._enter_iteration(frame=frame, event=event, node=node)
-        return []
+        frame_id: str,
+        node_id: str,
+        invocation_id: str,
+        request: ContainerAwaitRequest,
+    ) -> None:
+        parent_frame = self._frame_registry.get(frame_id)
+        match request:
+            case LoopFrameRequest():
+                self._start_loop_request(
+                    parent_frame=parent_frame,
+                    node_id=node_id,
+                    invocation_id=invocation_id,
+                    request=request,
+                )
+            case IterationFrameRequest():
+                self._start_iteration_request(
+                    parent_frame=parent_frame,
+                    node_id=node_id,
+                    invocation_id=invocation_id,
+                    request=request,
+                )
 
     def record_frame_failure(
         self,
@@ -226,78 +242,71 @@ class ContainerExecution:
             return True
         return False
 
-    def complete_frame(self, frame: ExecutionFrame) -> list[TaskEvent]:
-        iteration_events = self._complete_iteration_frame(frame)
-        if iteration_events:
-            return iteration_events
+    def complete_frame(self, frame: ExecutionFrame) -> None:
+        if self._complete_iteration_frame(frame):
+            return
+        self._complete_loop_frame(frame)
 
-        return self._complete_loop_frame(frame)
-
-    def _enter_loop(
+    def _start_loop_request(
         self,
         *,
-        frame: ExecutionFrame,
-        event: NodeRunStartedEvent,
-        node: LoopNode,
-    ) -> list[GraphNodeEventBase]:
-        loop_count = node.node_data.loop_count
-        inputs: dict[str, object] = {"loop_count": loop_count}
-        root_node_id, loop_variable_selectors, loop_node_ids = node.initialize_loop_run(
-            inputs=inputs
-        )
-        started_at = datetime.now(UTC).replace(tzinfo=None)
-        started_event = NodeRunLoopStartedEvent(
-            id=event.id,
-            node_id=event.node_id,
-            node_type=event.node_type,
-            node_title=node.node_data.title,
-            start_at=started_at,
-            inputs=inputs,
-            metadata={"loop_length": loop_count},
-        )
-        run_context = _LoopRunContext(
-            parent_frame_id=frame.frame_id,
-            loop_node_id=event.node_id,
-            loop_execution_id=event.id,
-            inputs=inputs,
-            started_at=started_at,
-            loop_count=loop_count,
-            root_node_id=root_node_id,
-            loop_variable_selectors=loop_variable_selectors,
-            loop_node_ids=loop_node_ids,
-            duration_map={},
-            variable_map={},
-            usage=LLMUsage.empty_usage(),
-            completed_count=0,
-            reached_break=False,
-        )
-        self._loop_runs[event.id] = run_context
-        if self._loop_break_conditions_reached(
-            frame=frame,
-            node=node,
-            suppress_errors=True,
-        ):
-            run_context.reached_break = True
-            return [
-                started_event,
-                *[
-                    task_event.event
-                    for task_event in self._complete_loop(
-                        parent_frame=frame,
+        parent_frame: ExecutionFrame,
+        node_id: str,
+        invocation_id: str,
+        request: LoopFrameRequest,
+    ) -> None:
+        node = parent_frame.graph.nodes[node_id]
+        if not isinstance(node, LoopNode):
+            msg = f"node {node_id} cannot handle loop await requests"
+            raise TypeError(msg)
+        loop_execution_id = node.execution_id
+        run_context = self._loop_runs.get(loop_execution_id)
+        if run_context is None:
+            run_context = _LoopRunContext(
+                invocation_id=invocation_id,
+                parent_frame_id=parent_frame.frame_id,
+                loop_node_id=node_id,
+                loop_execution_id=loop_execution_id,
+                inputs=dict(request.inputs),
+                started_at=request.started_at,
+                loop_count=request.loop_count,
+                root_node_id=request.root_node_id,
+                loop_variable_selectors={
+                    key: list(value)
+                    for key, value in request.loop_variable_selectors.items()
+                },
+                loop_node_ids=set(request.loop_node_ids),
+                duration_map={},
+                variable_map={},
+                usage=LLMUsage.empty_usage(),
+                completed_count=0,
+                reached_break=False,
+            )
+            self._loop_runs[loop_execution_id] = run_context
+            if self._loop_break_conditions_reached(
+                frame=parent_frame,
+                node=node,
+                suppress_errors=True,
+            ):
+                run_context.reached_break = True
+                self._enqueue_container_result(
+                    parent_frame=parent_frame,
+                    invocation_id=run_context.invocation_id,
+                    result=self._complete_loop(
                         node=node,
                         run_context=run_context,
                         steps=0,
-                    )
-                ],
-            ]
+                    ),
+                )
+                return
+        else:
+            run_context.invocation_id = invocation_id
 
         self._start_loop_frame(
-            parent_frame=frame,
+            parent_frame=parent_frame,
             run_context=run_context,
-            index=0,
+            index=request.index,
         )
-
-        return [started_event]
 
     def _start_loop_frame(
         self,
@@ -336,19 +345,19 @@ class ContainerExecution:
             node_id=run_context.root_node_id,
         )
 
-    def _complete_loop_frame(self, frame: ExecutionFrame) -> list[TaskEvent]:
+    def _complete_loop_frame(self, frame: ExecutionFrame) -> bool:
         frame_context = self._loop_frames.get(frame.frame_id)
         if frame_context is None:
-            return []
+            return False
         if not frame.state_manager.is_execution_complete():
-            return []
+            return True
 
         self._loop_frames.pop(frame.frame_id)
         run_context = self._loop_runs[frame_context.loop_execution_id]
         parent_frame = self._frame_registry.get(run_context.parent_frame_id)
         node = parent_frame.graph.nodes[run_context.loop_node_id]
         if not isinstance(node, LoopNode):
-            return []
+            return True
 
         self._complete_loop_step(
             frame=frame,
@@ -359,12 +368,12 @@ class ContainerExecution:
         )
         if frame.frame_id in self._loop_frame_failures:
             error = self._loop_frame_failures.pop(frame.frame_id)
-            return self._fail_loop(
+            self._enqueue_container_result(
                 parent_frame=parent_frame,
-                node=node,
-                run_context=run_context,
-                error=error,
+                invocation_id=run_context.invocation_id,
+                result=self._fail_loop(run_context=run_context, error=error),
             )
+            return True
 
         if frame.frame_id in self._loop_break_frames:
             self._loop_break_frames.remove(frame.frame_id)
@@ -380,32 +389,25 @@ class ContainerExecution:
             run_context.reached_break
             or run_context.completed_count >= run_context.loop_count
         ):
-            return self._complete_loop(
+            self._enqueue_container_result(
                 parent_frame=parent_frame,
-                node=node,
-                run_context=run_context,
-                steps=run_context.loop_count,
+                invocation_id=run_context.invocation_id,
+                result=self._complete_loop(
+                    node=node,
+                    run_context=run_context,
+                    steps=run_context.loop_count,
+                ),
             )
+            return True
 
         next_index = run_context.completed_count
-        self._start_loop_frame(
-            parent_frame=parent_frame,
-            run_context=run_context,
-            index=next_index,
-        )
-        return [
-            TaskEvent(
-                frame_id=parent_frame.frame_id,
-                event=NodeRunLoopNextEvent(
-                    id=run_context.loop_execution_id,
-                    node_id=run_context.loop_node_id,
-                    node_type=node.node_type,
-                    node_title=node.node_data.title,
-                    index=next_index,
-                    pre_loop_output=node.node_data.outputs,
-                ),
+        parent_frame.graph_runtime_state.ready_queue.put(
+            ResumeTask(
+                invocation_id=run_context.invocation_id,
+                result=LoopFrameCompleted(next_index=next_index),
             ),
-        ]
+        )
+        return True
 
     def _complete_loop_step(
         self,
@@ -441,11 +443,10 @@ class ContainerExecution:
     def _complete_loop(
         self,
         *,
-        parent_frame: ExecutionFrame,
         node: LoopNode,
         run_context: _LoopRunContext,
         steps: int,
-    ) -> list[TaskEvent]:
+    ) -> LoopExecutionSucceeded:
         self._loop_runs.pop(run_context.loop_execution_id)
         metadata = self._loop_metadata(run_context)
         loop_metadata = self._event_metadata(metadata)
@@ -454,85 +455,62 @@ class ContainerExecution:
             if run_context.reached_break
             else LoopCompletedReason.LOOP_COMPLETED.value
         )
-        return [
-            TaskEvent(
-                frame_id=parent_frame.frame_id,
-                event=NodeRunLoopSucceededEvent(
-                    id=run_context.loop_execution_id,
-                    node_id=run_context.loop_node_id,
-                    node_type=node.node_type,
-                    node_title=node.node_data.title,
-                    start_at=run_context.started_at,
-                    inputs=run_context.inputs,
-                    outputs=node.node_data.outputs,
-                    metadata=loop_metadata,
-                    steps=steps,
-                ),
+        return LoopExecutionSucceeded(
+            started_at=run_context.started_at,
+            inputs=run_context.inputs,
+            outputs=node.node_data.outputs,
+            metadata=loop_metadata,
+            steps=steps,
+            node_run_result=NodeRunResult(
+                status=WorkflowNodeExecutionStatus.SUCCEEDED,
+                metadata=metadata,
+                outputs=node.node_data.outputs,
+                inputs=run_context.inputs,
+                llm_usage=run_context.usage,
             ),
-            TaskEvent(
-                frame_id=parent_frame.frame_id,
-                event=NodeRunSucceededEvent(
-                    id=run_context.loop_execution_id,
-                    node_id=run_context.loop_node_id,
-                    node_type=node.node_type,
-                    start_at=run_context.started_at,
-                    finished_at=datetime.now(UTC).replace(tzinfo=None),
-                    node_run_result=NodeRunResult(
-                        status=WorkflowNodeExecutionStatus.SUCCEEDED,
-                        metadata=metadata,
-                        outputs=node.node_data.outputs,
-                        inputs=run_context.inputs,
-                        llm_usage=run_context.usage,
-                    ),
-                ),
-            ),
-        ]
+        )
 
     def _fail_loop(
         self,
         *,
-        parent_frame: ExecutionFrame,
-        node: LoopNode,
         run_context: _LoopRunContext,
         error: str,
-    ) -> list[TaskEvent]:
+    ) -> LoopExecutionFailed:
         self._loop_runs.pop(run_context.loop_execution_id)
         metadata = self._loop_metadata(run_context)
         loop_metadata = self._event_metadata(metadata)
         loop_metadata[WorkflowNodeExecutionMetadataKey.COMPLETED_REASON.value] = "error"
-        return [
-            TaskEvent(
-                frame_id=parent_frame.frame_id,
-                event=NodeRunLoopFailedEvent(
-                    id=run_context.loop_execution_id,
-                    node_id=run_context.loop_node_id,
-                    node_type=node.node_type,
-                    node_title=node.node_data.title,
-                    start_at=run_context.started_at,
-                    inputs=run_context.inputs,
-                    metadata=loop_metadata,
-                    steps=run_context.loop_count,
-                    error=error,
-                ),
+        return LoopExecutionFailed(
+            started_at=run_context.started_at,
+            inputs=run_context.inputs,
+            outputs={},
+            metadata=loop_metadata,
+            steps=run_context.loop_count,
+            error=error,
+            node_run_result=NodeRunResult(
+                status=WorkflowNodeExecutionStatus.FAILED,
+                error=error,
+                metadata=metadata,
+                llm_usage=run_context.usage,
             ),
-            TaskEvent(
-                frame_id=parent_frame.frame_id,
-                event=NodeRunFailedEvent(
-                    id=run_context.loop_execution_id,
-                    node_id=run_context.loop_node_id,
-                    node_type=node.node_type,
-                    start_at=run_context.started_at,
-                    finished_at=datetime.now(UTC).replace(tzinfo=None),
-                    error=error,
-                    node_run_result=NodeRunResult(
-                        status=WorkflowNodeExecutionStatus.FAILED,
-                        error=error,
-                        metadata=metadata,
-                        llm_usage=run_context.usage,
-                    ),
-                ),
-            ),
-        ]
+        )
+
+    def _enqueue_container_result(
+        self,
+        *,
+        parent_frame: ExecutionFrame,
+        invocation_id: str,
+        result: (
+            LoopExecutionSucceeded
+            | LoopExecutionFailed
+            | IterationExecutionSucceeded
+            | IterationExecutionFailed
+            | IterationFramesRequested
+        ),
+    ) -> None:
+        parent_frame.graph_runtime_state.ready_queue.put(
+            ResumeTask(invocation_id=invocation_id, result=result),
+        )
 
     def _loop_metadata(
         self,
@@ -608,124 +586,68 @@ class ContainerExecution:
         for node_id in loop_node_ids:
             frame.graph_runtime_state.variable_pool.remove([node_id])
 
-    def _enter_iteration(
+    def _start_iteration_request(
         self,
         *,
-        frame: ExecutionFrame,
-        event: NodeRunStartedEvent,
-        node: IterationNode,
-    ) -> list[GraphNodeEventBase]:
-        variable = frame.graph_runtime_state.variable_pool.get(
-            node.node_data.iterator_selector,
-        )
-        if variable is None:
-            msg = f"iterator variable {node.node_data.iterator_selector} not found"
-            raise IteratorVariableNotFoundError(msg)
-        if isinstance(variable, NoneSegment) or (
-            isinstance(variable, ArraySegment) and len(variable.value) == 0
-        ):
-            return self._complete_empty_iteration(frame=frame, event=event, node=node)
-        if not isinstance(variable, ArraySegment):
-            msg = f"invalid iterator value: {variable}, please provide a list."
-            raise InvalidIteratorValueError(msg)
-
-        iterator_value = variable.to_object()
-        if not isinstance(iterator_value, list):
-            msg = f"Invalid iterator value: {iterator_value}, please provide a list."
-            raise InvalidIteratorValueError(msg)
-
-        root_node_id = node.node_data.start_node_id
-        if not root_node_id:
-            msg = f"field start_node_id in iteration {event.node_id} not found"
-            raise StartNodeIdNotFoundError(msg)
-
-        started_at = datetime.now(UTC).replace(tzinfo=None)
-        inputs: dict[str, object] = {"iterator_selector": iterator_value}
-        run_context = _IterationRunContext(
-            parent_frame_id=frame.frame_id,
-            iteration_node_id=event.node_id,
-            iteration_execution_id=event.id,
-            items=tuple(iterator_value),
-            inputs=inputs,
-            started_at=started_at,
-            outputs={},
-            duration_map={},
-            usage=LLMUsage.empty_usage(),
-            scheduled_count=0,
-            completed_count=0,
-        )
-        self._iteration_runs[event.id] = run_context
-
-        events: list[GraphNodeEventBase] = [
-            NodeRunIterationStartedEvent(
-                id=event.id,
-                node_id=event.node_id,
-                node_type=event.node_type,
-                node_title=node.node_data.title,
-                start_at=started_at,
-                inputs=inputs,
-                metadata={"iteration_length": len(iterator_value)},
-            ),
-        ]
-        initial_frame_count = 1
-        if node.node_data.is_parallel:
-            initial_frame_count = min(
-                max(node.node_data.parallel_nums, 1),
-                len(run_context.items),
+        parent_frame: ExecutionFrame,
+        node_id: str,
+        invocation_id: str,
+        request: IterationFrameRequest,
+    ) -> None:
+        node = parent_frame.graph.nodes[node_id]
+        if not isinstance(node, IterationNode):
+            msg = f"node {node_id} cannot handle iteration await requests"
+            raise TypeError(msg)
+        iteration_execution_id = node.execution_id
+        run_context = self._iteration_runs.get(iteration_execution_id)
+        if run_context is None:
+            run_context = _IterationRunContext(
+                invocation_id=invocation_id,
+                parent_frame_id=parent_frame.frame_id,
+                iteration_node_id=node_id,
+                iteration_execution_id=iteration_execution_id,
+                items=request.items,
+                inputs=dict(request.inputs),
+                started_at=request.started_at,
+                outputs={},
+                duration_map={},
+                usage=LLMUsage.empty_usage(),
+                scheduled_count=0,
+                completed_count=0,
+                resume_pending=False,
+                parallel_nums=request.parallel_nums,
+                output_selector=list(request.output_selector),
+                error_handle_mode=request.error_handle_mode,
+                flatten_output=request.flatten_output,
             )
-        events.extend(
-            self._schedule_iteration_frame(
-                parent_frame=frame,
-                node=node,
-                run_context=run_context,
-                root_node_id=root_node_id,
-            )
-            for _ in range(initial_frame_count)
-        )
-        return events
-
-    def _complete_empty_iteration(
-        self,
-        *,
-        frame: ExecutionFrame,
-        event: NodeRunStartedEvent,
-        node: IterationNode,
-    ) -> list[GraphNodeEventBase]:
-        variable = frame.graph_runtime_state.variable_pool.get(
-            node.node_data.iterator_selector,
-        )
-        if isinstance(variable, ArraySegment):
-            output = variable.model_copy(update={"value": []})
+            self._iteration_runs[iteration_execution_id] = run_context
         else:
-            output = ArrayAnySegment(value=[])
-        outputs = {"output": output}
-        return [
-            NodeRunSucceededEvent(
-                id=event.id,
-                node_id=event.node_id,
-                node_type=event.node_type,
-                start_at=event.start_at,
-                finished_at=datetime.now(UTC).replace(tzinfo=None),
-                node_run_result=NodeRunResult(
-                    status=WorkflowNodeExecutionStatus.SUCCEEDED,
-                    outputs=outputs,
-                ),
-            ),
-        ]
+            run_context.invocation_id = invocation_id
+            run_context.resume_pending = False
 
-    def _complete_iteration_frame(self, frame: ExecutionFrame) -> list[TaskEvent]:
+        for index in request.indexes:
+            self._start_iteration_frame(
+                parent_frame=parent_frame,
+                run_context=run_context,
+                index=index,
+                root_node_id=request.root_node_id,
+            )
+            run_context.scheduled_count = max(run_context.scheduled_count, index + 1)
+        self._request_iteration_frames(
+            parent_frame=parent_frame,
+            run_context=run_context,
+        )
+
+    def _complete_iteration_frame(self, frame: ExecutionFrame) -> bool:
         frame_context = self._iteration_frames.get(frame.frame_id)
         if frame_context is None:
-            return []
+            return False
         if not frame.state_manager.is_execution_complete():
-            return []
+            return True
 
         self._iteration_frames.pop(frame.frame_id)
         run_context = self._iteration_runs[frame_context.iteration_execution_id]
         parent_frame = self._frame_registry.get(run_context.parent_frame_id)
-        node = parent_frame.graph.nodes[run_context.iteration_node_id]
-        if not isinstance(node, IterationNode):
-            return []
 
         if frame.frame_id in self._iteration_frame_failures:
             error = self._iteration_frame_failures.pop(frame.frame_id)
@@ -733,13 +655,12 @@ class ContainerExecution:
                 frame=frame,
                 frame_context=frame_context,
                 parent_frame=parent_frame,
-                node=node,
                 run_context=run_context,
                 error=error,
             )
 
         result = frame.graph_runtime_state.variable_pool.get(
-            node.node_data.output_selector,
+            run_context.output_selector,
         )
         run_context.outputs[frame_context.iteration_index] = (
             None if result is None else result.to_object()
@@ -752,7 +673,6 @@ class ContainerExecution:
 
         return self._continue_or_complete_iteration(
             parent_frame=parent_frame,
-            node=node,
             run_context=run_context,
             last_frame=frame,
         )
@@ -763,23 +683,22 @@ class ContainerExecution:
         frame: ExecutionFrame,
         frame_context: _IterationFrameContext,
         parent_frame: ExecutionFrame,
-        node: IterationNode,
         run_context: _IterationRunContext,
         error: str,
-    ) -> list[TaskEvent]:
+    ) -> bool:
         self._complete_iteration_step(
             frame=frame,
             frame_context=frame_context,
             run_context=run_context,
         )
-        match node.node_data.error_handle_mode:
+        match run_context.error_handle_mode:
             case ErrorHandleMode.TERMINATED:
-                return self._fail_iteration(
+                self._enqueue_container_result(
                     parent_frame=parent_frame,
-                    node=node,
-                    run_context=run_context,
-                    error=error,
+                    invocation_id=run_context.invocation_id,
+                    result=self._fail_iteration(run_context=run_context, error=error),
                 )
+                return True
             case ErrorHandleMode.CONTINUE_ON_ERROR:
                 run_context.outputs[frame_context.iteration_index] = None
             case ErrorHandleMode.REMOVE_ABNORMAL_OUTPUT:
@@ -787,7 +706,6 @@ class ContainerExecution:
 
         return self._continue_or_complete_iteration(
             parent_frame=parent_frame,
-            node=node,
             run_context=run_context,
             last_frame=frame,
         )
@@ -809,34 +727,58 @@ class ContainerExecution:
         self,
         *,
         parent_frame: ExecutionFrame,
-        node: IterationNode,
         run_context: _IterationRunContext,
         last_frame: ExecutionFrame,
-    ) -> list[TaskEvent]:
-        if run_context.scheduled_count < len(run_context.items):
-            root_node_id = node.node_data.start_node_id
-            if not root_node_id:
-                msg = (
-                    "field start_node_id in iteration "
-                    f"{run_context.iteration_node_id} not found"
-                )
-                raise StartNodeIdNotFoundError(msg)
-            next_event = self._schedule_iteration_frame(
-                parent_frame=parent_frame,
-                run_context=run_context,
-                node=node,
-                root_node_id=root_node_id,
+    ) -> bool:
+        if run_context.completed_count >= len(run_context.items):
+            parent_frame.graph_runtime_state.merge_response_outputs(
+                last_frame.graph_runtime_state.outputs,
             )
-            return [TaskEvent(frame_id=parent_frame.frame_id, event=next_event)]
+            self._enqueue_container_result(
+                parent_frame=parent_frame,
+                invocation_id=run_context.invocation_id,
+                result=self._complete_iteration(run_context),
+            )
+            return True
 
-        if run_context.completed_count < len(run_context.items):
-            return []
+        self._request_iteration_frames(
+            parent_frame=parent_frame,
+            run_context=run_context,
+        )
+        return True
 
+    def _request_iteration_frames(
+        self,
+        *,
+        parent_frame: ExecutionFrame,
+        run_context: _IterationRunContext,
+    ) -> None:
+        if run_context.resume_pending:
+            return
+        if run_context.scheduled_count >= len(run_context.items):
+            return
+        active_count = run_context.scheduled_count - run_context.completed_count
+        capacity = max(run_context.parallel_nums - active_count, 0)
+        if capacity == 0:
+            return
+        end_index = min(len(run_context.items), run_context.scheduled_count + capacity)
+        indexes = tuple(range(run_context.scheduled_count, end_index))
+        run_context.resume_pending = True
+        self._enqueue_container_result(
+            parent_frame=parent_frame,
+            invocation_id=run_context.invocation_id,
+            result=IterationFramesRequested(indexes=indexes),
+        )
+
+    def _complete_iteration(
+        self,
+        run_context: _IterationRunContext,
+    ) -> IterationExecutionSucceeded:
         self._iteration_runs.pop(run_context.iteration_execution_id)
         outputs = {
             "output": self._flatten_outputs_if_needed(
                 self._ordered_iteration_outputs(run_context),
-                flatten_output=node.node_data.flatten_output,
+                flatten_output=run_context.flatten_output,
             ),
         }
         metadata: dict[WorkflowNodeExecutionMetadataKey, object] = {
@@ -851,57 +793,32 @@ class ContainerExecution:
                 run_context.duration_map
             ),
         }
-        event_metadata = self._event_metadata(metadata)
-        parent_frame.graph_runtime_state.merge_response_outputs(
-            last_frame.graph_runtime_state.outputs,
+        return IterationExecutionSucceeded(
+            started_at=run_context.started_at,
+            inputs=run_context.inputs,
+            outputs=outputs,
+            metadata=self._event_metadata(metadata),
+            steps=len(run_context.items),
+            node_run_result=NodeRunResult(
+                status=WorkflowNodeExecutionStatus.SUCCEEDED,
+                metadata=metadata,
+                outputs=outputs,
+                inputs=run_context.inputs,
+                llm_usage=run_context.usage,
+            ),
         )
-        return [
-            TaskEvent(
-                frame_id=parent_frame.frame_id,
-                event=NodeRunIterationSucceededEvent(
-                    id=run_context.iteration_execution_id,
-                    node_id=run_context.iteration_node_id,
-                    node_type=node.node_type,
-                    node_title=node.node_data.title,
-                    start_at=run_context.started_at,
-                    inputs=run_context.inputs,
-                    outputs=outputs,
-                    metadata=event_metadata,
-                    steps=len(run_context.items),
-                ),
-            ),
-            TaskEvent(
-                frame_id=parent_frame.frame_id,
-                event=NodeRunSucceededEvent(
-                    id=run_context.iteration_execution_id,
-                    node_id=run_context.iteration_node_id,
-                    node_type=node.node_type,
-                    start_at=run_context.started_at,
-                    finished_at=datetime.now(UTC).replace(tzinfo=None),
-                    node_run_result=NodeRunResult(
-                        status=WorkflowNodeExecutionStatus.SUCCEEDED,
-                        metadata=metadata,
-                        outputs=outputs,
-                        inputs=run_context.inputs,
-                        llm_usage=run_context.usage,
-                    ),
-                ),
-            ),
-        ]
 
     def _fail_iteration(
         self,
         *,
-        parent_frame: ExecutionFrame,
-        node: IterationNode,
         run_context: _IterationRunContext,
         error: str,
-    ) -> list[TaskEvent]:
+    ) -> IterationExecutionFailed:
         self._iteration_runs.pop(run_context.iteration_execution_id)
         outputs = {
             "output": self._flatten_outputs_if_needed(
                 self._ordered_iteration_outputs(run_context),
-                flatten_output=node.node_data.flatten_output,
+                flatten_output=run_context.flatten_output,
             ),
         }
         metadata: dict[WorkflowNodeExecutionMetadataKey, object] = {
@@ -916,64 +833,19 @@ class ContainerExecution:
                 run_context.duration_map
             ),
         }
-        event_metadata = self._event_metadata(metadata)
-        return [
-            TaskEvent(
-                frame_id=parent_frame.frame_id,
-                event=NodeRunIterationFailedEvent(
-                    id=run_context.iteration_execution_id,
-                    node_id=run_context.iteration_node_id,
-                    node_type=node.node_type,
-                    node_title=node.node_data.title,
-                    start_at=run_context.started_at,
-                    inputs=run_context.inputs,
-                    outputs=outputs,
-                    metadata=event_metadata,
-                    steps=len(run_context.items),
-                    error=error,
-                ),
+        return IterationExecutionFailed(
+            started_at=run_context.started_at,
+            inputs=run_context.inputs,
+            outputs=outputs,
+            metadata=self._event_metadata(metadata),
+            steps=len(run_context.items),
+            error=error,
+            node_run_result=NodeRunResult(
+                status=WorkflowNodeExecutionStatus.FAILED,
+                error=error,
+                metadata=metadata,
+                llm_usage=run_context.usage,
             ),
-            TaskEvent(
-                frame_id=parent_frame.frame_id,
-                event=NodeRunFailedEvent(
-                    id=run_context.iteration_execution_id,
-                    node_id=run_context.iteration_node_id,
-                    node_type=node.node_type,
-                    start_at=run_context.started_at,
-                    finished_at=datetime.now(UTC).replace(tzinfo=None),
-                    error=error,
-                    node_run_result=NodeRunResult(
-                        status=WorkflowNodeExecutionStatus.FAILED,
-                        error=error,
-                        metadata=metadata,
-                        llm_usage=run_context.usage,
-                    ),
-                ),
-            ),
-        ]
-
-    def _schedule_iteration_frame(
-        self,
-        *,
-        parent_frame: ExecutionFrame,
-        node: IterationNode,
-        run_context: _IterationRunContext,
-        root_node_id: str,
-    ) -> NodeRunIterationNextEvent:
-        index = run_context.scheduled_count
-        self._start_iteration_frame(
-            parent_frame=parent_frame,
-            run_context=run_context,
-            index=index,
-            root_node_id=root_node_id,
-        )
-        run_context.scheduled_count += 1
-        return NodeRunIterationNextEvent(
-            id=run_context.iteration_execution_id,
-            node_id=run_context.iteration_node_id,
-            node_type=node.node_type,
-            node_title=node.node_data.title,
-            index=index,
         )
 
     def _start_iteration_frame(

@@ -39,6 +39,7 @@ from .command_processing import (
     UpdateVariablesCommandHandler,
 )
 from .config import GraphEngineConfig
+from .container_execution import ContainerExecution
 from .entities.commands import AbortCommand, PauseCommand, UpdateVariablesCommand
 from .entities.tasks import TaskEvent
 from .error_handler import ErrorHandler
@@ -207,6 +208,11 @@ class GraphEngine:
         )
 
         # === Worker Pool Setup ===
+        self._container_execution = ContainerExecution(
+            frame_registry=self._frame_registry,
+            graph_execution=self._graph_execution,
+        )
+
         # Create worker pool for parallel node execution
         self._worker_pool = WorkerPool(
             ready_queue=self._ready_queue,
@@ -216,6 +222,7 @@ class GraphEngine:
             layers=self._layers,
             execution_context=self._graph_runtime_state.execution_context,
             config=self._config,
+            container_execution=self._container_execution,
         )
 
         # === Orchestration ===
@@ -233,6 +240,7 @@ class GraphEngine:
             graph_execution=self._graph_execution,
             event_collector=self._event_manager,
             frame_registry=self._frame_registry,
+            container_execution=self._container_execution,
         )
 
         # Dispatches events and manages execution flow

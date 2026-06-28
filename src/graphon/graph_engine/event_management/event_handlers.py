@@ -57,6 +57,7 @@ class EventHandler:
         graph_execution: GraphExecutionProtocol,
         event_collector: EventManager,
         frame_registry: FrameRegistry,
+        container_execution: ContainerExecution,
     ) -> None:
         """Initialize the event handler registry.
 
@@ -64,15 +65,13 @@ class EventHandler:
             graph_execution: Graph execution aggregate
             event_collector: Event manager for collecting events
             frame_registry: Registry of frame-local execution collaborators
+            container_execution: Engine-owned container frame coordinator
 
         """
         self._graph_execution = graph_execution
         self._event_collector = event_collector
         self._frame_registry = frame_registry
-        self._container_execution = ContainerExecution(
-            frame_registry=frame_registry,
-            graph_execution=graph_execution,
-        )
+        self._container_execution = container_execution
 
     def dispatch(self, task_event: TaskEvent) -> None:
         """Handle any task-scoped node event.
@@ -84,8 +83,7 @@ class EventHandler:
         event = task_event.event
         self._dispatch_event(frame_id=task_event.frame_id, event=event)
         frame = self._frame_registry.get(task_event.frame_id)
-        for completion_event in self._container_execution.complete_frame(frame):
-            self.dispatch(completion_event)
+        self._container_execution.complete_frame(frame)
 
     def _dispatch_event(self, *, frame_id: str, event: GraphNodeEventBase) -> None:
         frame = self._frame_registry.get(frame_id)
@@ -147,22 +145,6 @@ class EventHandler:
         # Collect the event only for the first attempt; retries remain silent
         if is_initial_attempt:
             self._collect(frame=frame, event=event)
-        for container_event in self._container_execution.enter_from_started_event(
-            frame=frame,
-            event=event,
-        ):
-            if isinstance(
-                container_event,
-                (
-                    NodeRunExceptionEvent,
-                    NodeRunFailedEvent,
-                    NodeRunPauseRequestedEvent,
-                    NodeRunSucceededEvent,
-                ),
-            ):
-                self._dispatch_event(frame_id=frame.frame_id, event=container_event)
-            else:
-                self._event_collector.collect(container_event)
 
     @_dispatch.register
     def _(self, event: NodeRunStreamChunkEvent, *, frame: ExecutionFrame) -> None:

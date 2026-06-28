@@ -1,10 +1,26 @@
 import json
 import logging
-from collections.abc import Mapping, Sequence
-from typing import Any, NoReturn, assert_never, override
+from collections.abc import Generator, Mapping, Sequence
+from datetime import UTC, datetime
+from typing import Any, assert_never, override
 
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType
+from graphon.node_events.base import NodeEventBase
+from graphon.node_events.loop import (
+    LoopFailedEvent,
+    LoopNextEvent,
+    LoopStartedEvent,
+    LoopSucceededEvent,
+)
+from graphon.node_events.node import StreamCompletedEvent
 from graphon.nodes.base.node import Node
+from graphon.nodes.container_effects import (
+    ContainerRunResult,
+    LoopExecutionFailed,
+    LoopExecutionSucceeded,
+    LoopFrameCompleted,
+    LoopFrameRequest,
+)
 from graphon.nodes.loop.entities import LoopNodeData
 from graphon.variables.factory import (
     TypeMismatchError,
@@ -33,9 +49,65 @@ class LoopNode(Node[LoopNodeData]):
         return "1"
 
     @override
-    def _run(self) -> NoReturn:
-        msg = "Loop nodes are interpreted by GraphEngine."
-        raise RuntimeError(msg)
+    def _run(
+        self,
+    ) -> Generator[NodeEventBase | LoopFrameRequest, ContainerRunResult, None]:
+        loop_count = self.node_data.loop_count
+        inputs: dict[str, object] = {"loop_count": loop_count}
+        root_node_id, loop_variable_selectors, loop_node_ids = self.initialize_loop_run(
+            inputs=inputs,
+        )
+        started_at = datetime.now(UTC).replace(tzinfo=None)
+        yield LoopStartedEvent(
+            start_at=started_at,
+            inputs=inputs,
+            metadata={"loop_length": loop_count},
+        )
+        result = yield LoopFrameRequest(
+            started_at=started_at,
+            inputs=inputs,
+            loop_count=loop_count,
+            root_node_id=root_node_id,
+            loop_variable_selectors=loop_variable_selectors,
+            loop_node_ids=frozenset(loop_node_ids),
+            index=0,
+        )
+        while isinstance(result, LoopFrameCompleted):
+            yield LoopNextEvent(
+                index=result.next_index,
+                pre_loop_output=self.node_data.outputs,
+            )
+            result = yield LoopFrameRequest(
+                started_at=started_at,
+                inputs=inputs,
+                loop_count=loop_count,
+                root_node_id=root_node_id,
+                loop_variable_selectors=loop_variable_selectors,
+                loop_node_ids=frozenset(loop_node_ids),
+                index=result.next_index,
+            )
+
+        if isinstance(result, LoopExecutionSucceeded):
+            yield LoopSucceededEvent(
+                start_at=result.started_at,
+                inputs=result.inputs,
+                outputs=result.outputs,
+                metadata=result.metadata,
+                steps=result.steps,
+            )
+        elif isinstance(result, LoopExecutionFailed):
+            yield LoopFailedEvent(
+                start_at=result.started_at,
+                inputs=result.inputs,
+                outputs=result.outputs,
+                metadata=result.metadata,
+                steps=result.steps,
+                error=result.error,
+            )
+        else:
+            msg = f"Unsupported loop result {type(result).__name__}"
+            raise TypeError(msg)
+        yield StreamCompletedEvent(node_run_result=result.node_run_result)
 
     def initialize_loop_run(
         self,

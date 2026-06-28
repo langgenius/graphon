@@ -18,6 +18,7 @@ from graphon.enums import (
 )
 from graphon.graph.graph import Graph
 from graphon.graph_engine.command_channels.redis_channel import RedisChannel
+from graphon.graph_engine.container_execution import ContainerExecution
 from graphon.graph_engine.domain.graph_execution import GraphExecution
 from graphon.graph_engine.entities.commands import (
     AbortCommand,
@@ -40,26 +41,29 @@ from graphon.graph_engine.orchestration.execution_coordinator import (
 )
 from graphon.graph_engine.ready_queue.factory import create_ready_queue_from_state
 from graphon.graph_engine.ready_queue.in_memory import InMemoryReadyQueue
-from graphon.graph_engine.ready_queue.protocol import ReadyQueueState, ReadyTask
+from graphon.graph_engine.ready_queue.protocol import (
+    ReadyQueueState,
+    ResumeTask,
+    StartTask,
+)
+from graphon.graph_engine.suspended_invocations import SuspendedInvocationStore
 from graphon.graph_engine.worker import Worker
 from graphon.graph_events.base import GraphNodeEventBase
-from graphon.graph_events.iteration import (
-    NodeRunIterationNextEvent,
-    NodeRunIterationStartedEvent,
-    NodeRunIterationSucceededEvent,
-)
-from graphon.graph_events.loop import (
-    NodeRunLoopFailedEvent,
-    NodeRunLoopNextEvent,
-    NodeRunLoopStartedEvent,
-    NodeRunLoopSucceededEvent,
-)
 from graphon.graph_events.node import (
     NodeRunFailedEvent,
     NodeRunStartedEvent,
     NodeRunSucceededEvent,
 )
 from graphon.node_events.base import NodeRunResult
+from graphon.nodes.container_effects import (
+    IterationExecutionSucceeded,
+    IterationFrameRequest,
+    IterationFramesRequested,
+    LoopExecutionFailed,
+    LoopExecutionSucceeded,
+    LoopFrameCompleted,
+    LoopFrameRequest,
+)
 from graphon.nodes.iteration.entities import ErrorHandleMode
 from graphon.nodes.iteration.iteration_node import IterationNode
 from graphon.nodes.loop.loop_node import LoopNode
@@ -99,6 +103,120 @@ def _execution_frame(
         state_manager=cast(Any, state_manager or MagicMock()),
         edge_processor=cast(Any, resolved_edge_processor),
         error_handler=cast(Any, error_handler or MagicMock()),
+    )
+
+
+def _event_handler(
+    *,
+    graph_execution: object,
+    event_collector: object,
+    frame_registry: FrameRegistry,
+) -> EventHandler:
+    return EventHandler(
+        graph_execution=cast(Any, graph_execution),
+        event_collector=cast(EventManager, event_collector),
+        frame_registry=frame_registry,
+        container_execution=ContainerExecution(
+            frame_registry=frame_registry,
+            graph_execution=cast(Any, graph_execution),
+        ),
+    )
+
+
+def _event_handler_with_container(
+    *,
+    graph_execution: object,
+    event_collector: object,
+    frame_registry: FrameRegistry,
+) -> tuple[EventHandler, ContainerExecution]:
+    container_execution = ContainerExecution(
+        frame_registry=frame_registry,
+        graph_execution=cast(Any, graph_execution),
+    )
+    return (
+        EventHandler(
+            graph_execution=cast(Any, graph_execution),
+            event_collector=cast(EventManager, event_collector),
+            frame_registry=frame_registry,
+            container_execution=container_execution,
+        ),
+        container_execution,
+    )
+
+
+def _get_resume_task(ready_queue: InMemoryReadyQueue) -> ResumeTask:
+    task = ready_queue.get(timeout=0.01)
+    assert isinstance(task, ResumeTask)
+    return task
+
+
+def _start_loop_await(
+    container_execution: ContainerExecution,
+    *,
+    invocation_id: str,
+    index: int,
+    loop_count: int,
+) -> None:
+    container_execution.start_container_await(
+        frame_id="root",
+        node_id="loop",
+        invocation_id=invocation_id,
+        request=LoopFrameRequest(
+            started_at=datetime.now(UTC).replace(tzinfo=None),
+            inputs={"loop_count": loop_count},
+            loop_count=loop_count,
+            root_node_id="loop-start",
+            loop_variable_selectors={},
+            loop_node_ids=frozenset(),
+            index=index,
+        ),
+    )
+
+
+def _start_iteration_await(
+    container_execution: ContainerExecution,
+    *,
+    invocation_id: str,
+    indexes: tuple[int, ...],
+    items: tuple[object, ...],
+    error_handle_mode: ErrorHandleMode,
+    flatten_output: bool,
+    parallel_nums: int,
+) -> None:
+    container_execution.start_container_await(
+        frame_id="root",
+        node_id="iteration",
+        invocation_id=invocation_id,
+        request=IterationFrameRequest(
+            started_at=datetime.now(UTC).replace(tzinfo=None),
+            inputs={"iterator_selector": list(items)},
+            items=items,
+            root_node_id="iteration-start",
+            indexes=indexes,
+            output_selector=["answer", "text"],
+            error_handle_mode=error_handle_mode,
+            flatten_output=flatten_output,
+            parallel_nums=parallel_nums,
+        ),
+    )
+
+
+def _worker(
+    *,
+    ready_queue: InMemoryReadyQueue,
+    event_queue: queue.Queue[TaskEvent],
+    frame_registry: FrameRegistry,
+) -> Worker:
+    return Worker(
+        ready_queue=ready_queue,
+        event_queue=event_queue,
+        frame_registry=frame_registry,
+        layers=[],
+        suspended_invocations=SuspendedInvocationStore(),
+        container_execution=ContainerExecution(
+            frame_registry=frame_registry,
+            graph_execution=cast(Any, MagicMock()),
+        ),
     )
 
 
@@ -163,14 +281,14 @@ def test_create_ready_queue_from_state_restores_ready_tasks() -> None:
             type="InMemoryReadyQueue",
             version="1.0",
             items=[
-                ReadyTask(frame_id="root", node_id="start"),
-                ReadyTask(frame_id="iteration-0", node_id="answer"),
+                StartTask(frame_id="root", node_id="start"),
+                StartTask(frame_id="iteration-0", node_id="answer"),
             ],
         ),
     )
 
-    assert queue.get(timeout=0.01) == ReadyTask(frame_id="root", node_id="start")
-    assert queue.get(timeout=0.01) == ReadyTask(
+    assert queue.get(timeout=0.01) == StartTask(frame_id="root", node_id="start")
+    assert queue.get(timeout=0.01) == StartTask(
         frame_id="iteration-0",
         node_id="answer",
     )
@@ -185,7 +303,7 @@ def test_graph_state_manager_enqueues_ready_task_for_frame() -> None:
 
     manager.enqueue_node(frame_id="root", node_id="start")
 
-    assert ready_queue.get(timeout=0.01) == ReadyTask(
+    assert ready_queue.get(timeout=0.01) == StartTask(
         frame_id="root",
         node_id="start",
     )
@@ -203,13 +321,13 @@ def test_graph_state_manager_tracks_executing_tasks_by_frame() -> None:
 
     assert manager.get_executing_count() == 1
     assert manager.get_executing_nodes() == {
-        ReadyTask(frame_id="iteration-1", node_id="answer"),
+        StartTask(frame_id="iteration-1", node_id="answer"),
     }
 
 
 def test_graph_state_manager_completion_ignores_other_frame_queue_items() -> None:
     ready_queue = InMemoryReadyQueue()
-    ready_queue.put(ReadyTask(frame_id="other-frame", node_id="answer"))
+    ready_queue.put(StartTask(frame_id="other-frame", node_id="answer"))
     graph = SimpleNamespace(nodes={})
     manager = GraphStateManager(graph=cast(Graph, graph), ready_queue=ready_queue)
 
@@ -234,13 +352,13 @@ def test_graph_execution_tracks_node_executions_by_frame() -> None:
     assert first is not second
     assert (
         execution.node_executions[
-            ReadyTask(frame_id="iteration-0", node_id="answer")
+            StartTask(frame_id="iteration-0", node_id="answer")
         ].execution_id
         == first.execution_id
     )
     assert (
         execution.node_executions[
-            ReadyTask(frame_id="iteration-1", node_id="answer")
+            StartTask(frame_id="iteration-1", node_id="answer")
         ].execution_id
         == second.execution_id
     )
@@ -334,7 +452,7 @@ def test_worker_executes_node_from_ready_task() -> None:
             )
 
     ready_queue = InMemoryReadyQueue()
-    ready_queue.put(ReadyTask(frame_id="root", node_id="start"))
+    ready_queue.put(StartTask(frame_id="root", node_id="start"))
     event_queue = queue.Queue()
     graph = SimpleNamespace(nodes={"start": RunnableNode()})
     runtime_state = GraphRuntimeState(
@@ -351,11 +469,10 @@ def test_worker_executes_node_from_ready_task() -> None:
             graph_runtime_state=runtime_state,
         ),
     )
-    worker = Worker(
+    worker = _worker(
         ready_queue=ready_queue,
         event_queue=event_queue,
         frame_registry=frame_registry,
-        layers=[],
     )
 
     worker.start()
@@ -394,7 +511,7 @@ def test_worker_resolves_node_from_task_frame() -> None:
             )
 
     ready_queue = InMemoryReadyQueue()
-    ready_queue.put(ReadyTask(frame_id="child", node_id="answer"))
+    ready_queue.put(StartTask(frame_id="child", node_id="answer"))
     event_queue = queue.Queue()
     root_graph = SimpleNamespace(nodes={"answer": RunnableNode("answer", "Root")})
     child_graph = SimpleNamespace(nodes={"answer": RunnableNode("answer", "Child")})
@@ -420,11 +537,10 @@ def test_worker_resolves_node_from_task_frame() -> None:
             graph_runtime_state=runtime_state,
         ),
     )
-    worker = Worker(
+    worker = _worker(
         ready_queue=ready_queue,
         event_queue=event_queue,
         frame_registry=frame_registry,
-        layers=[],
     )
 
     worker.start()
@@ -462,7 +578,7 @@ def test_worker_binds_node_execution_id_from_task_frame() -> None:
             )
 
     ready_queue = InMemoryReadyQueue()
-    ready_queue.put(ReadyTask(frame_id="child", node_id="answer"))
+    ready_queue.put(StartTask(frame_id="child", node_id="answer"))
     event_queue = queue.Queue()
     graph_execution = GraphExecution(workflow_id="workflow")
     root_execution = graph_execution.get_or_create_node_execution(
@@ -488,11 +604,10 @@ def test_worker_binds_node_execution_id_from_task_frame() -> None:
             graph_runtime_state=runtime_state,
         ),
     )
-    worker = Worker(
+    worker = _worker(
         ready_queue=ready_queue,
         event_queue=event_queue,
         frame_registry=frame_registry,
-        layers=[],
     )
 
     worker.start()
@@ -508,7 +623,7 @@ def test_worker_binds_node_execution_id_from_task_frame() -> None:
     assert event.event.id == child_execution.execution_id
 
 
-def test_worker_container_task_only_emits_start_event() -> None:
+def test_worker_suspends_container_invocation_at_await_request() -> None:
     class ContainerNode:
         id = "loop"
         node_type = BuiltinNodeTypes.LOOP
@@ -516,33 +631,63 @@ def test_worker_container_task_only_emits_start_event() -> None:
         execution_id = "run-loop"
 
         def __init__(self) -> None:
-            self.body_was_consumed = False
+            self.await_was_reached = False
+            self.body_after_await_was_consumed = False
 
         def bind_execution_id(self, execution_id: str) -> None:
             self.execution_id = execution_id
 
-        def run(self) -> Generator[NodeRunStartedEvent, None, None]:
+        def run(
+            self,
+        ) -> Generator[GraphNodeEventBase | LoopFrameRequest, object, None]:
+            started_at = datetime.now(UTC).replace(tzinfo=None)
             yield NodeRunStartedEvent(
                 id=self.execution_id,
                 node_id=self.id,
                 node_type=self.node_type,
                 node_title="Loop",
-                start_at=datetime.now(UTC).replace(tzinfo=None),
+                start_at=started_at,
             )
-            self.body_was_consumed = True
-            msg = "container body must be interpreted by the engine"
-            raise AssertionError(msg)
+            self.await_was_reached = True
+            _ = yield LoopFrameRequest(
+                started_at=started_at,
+                inputs={"loop_count": 1},
+                loop_count=1,
+                root_node_id="loop-start",
+                loop_variable_selectors={},
+                loop_node_ids=frozenset(),
+                index=0,
+            )
+            self.body_after_await_was_consumed = True
+
+    class RecordingContainerExecution:
+        def __init__(self) -> None:
+            self.request: LoopFrameRequest
+
+        def start_container_await(
+            self,
+            *,
+            frame_id: str,
+            node_id: str,
+            invocation_id: str,
+            request: LoopFrameRequest,
+        ) -> None:
+            _ = invocation_id
+            assert frame_id == "root"
+            assert node_id == "loop"
+            self.request = request
 
     container_node = ContainerNode()
     ready_queue = InMemoryReadyQueue()
-    ready_queue.put(ReadyTask(frame_id="root", node_id="loop"))
+    ready_queue.put(StartTask(frame_id="root", node_id="loop"))
     event_queue = queue.Queue()
+    graph_execution = GraphExecution(workflow_id="workflow")
     graph = SimpleNamespace(nodes={"loop": container_node})
     runtime_state = GraphRuntimeState(
         variable_pool=VariablePool(),
         start_at=1,
         ready_queue=ready_queue,
-        graph_execution=GraphExecution(workflow_id="workflow"),
+        graph_execution=graph_execution,
     )
     frame_registry = FrameRegistry()
     frame_registry.register(
@@ -552,11 +697,14 @@ def test_worker_container_task_only_emits_start_event() -> None:
             graph_runtime_state=runtime_state,
         ),
     )
+    container_execution = RecordingContainerExecution()
     worker = Worker(
         ready_queue=ready_queue,
         event_queue=event_queue,
         frame_registry=frame_registry,
         layers=[],
+        suspended_invocations=SuspendedInvocationStore(),
+        container_execution=cast(ContainerExecution, container_execution),
     )
 
     worker.start()
@@ -569,7 +717,9 @@ def test_worker_container_task_only_emits_start_event() -> None:
     assert isinstance(event, TaskEvent)
     assert isinstance(event.event, NodeRunStartedEvent)
     assert event.event.node_id == "loop"
-    assert container_node.body_was_consumed is False
+    assert container_node.await_was_reached is True
+    assert container_node.body_after_await_was_consumed is False
+    assert container_execution.request.index == 0
 
 
 def test_dispatcher_preserves_task_event_for_dispatch() -> None:
@@ -649,7 +799,7 @@ def test_event_handler_dispatches_task_event_payload() -> None:
             graph_runtime_state=runtime_state,
         ),
     )
-    handler = EventHandler(
+    handler = _event_handler(
         graph_execution=graph_execution,
         event_collector=cast(EventManager, event_collector),
         frame_registry=frame_registry,
@@ -684,7 +834,7 @@ def test_event_handler_processes_tagged_child_frame_success_before_collecting() 
             edge_processor=edge_processor,
         ),
     )
-    handler = EventHandler(
+    handler = _event_handler(
         graph_execution=graph_execution,
         event_collector=cast(EventManager, event_collector),
         frame_registry=frame_registry,
@@ -731,7 +881,7 @@ def test_event_handler_processes_tagged_root_frame_success_before_collecting() -
             edge_processor=edge_processor,
         ),
     )
-    handler = EventHandler(
+    handler = _event_handler(
         graph_execution=graph_execution,
         event_collector=cast(EventManager, event_collector),
         frame_registry=frame_registry,
@@ -756,7 +906,7 @@ def test_event_handler_processes_tagged_root_frame_success_before_collecting() -
     event_collector.collect.assert_called_once_with(event)
 
 
-def test_event_handler_enters_loop_frame_from_container_start() -> None:
+def test_container_execution_starts_loop_frame_from_loop_await() -> None:
     graph_config = {
         "nodes": [
             {"id": "loop-start", "data": {"type": BuiltinNodeTypes.LOOP_START}},
@@ -781,6 +931,7 @@ def test_event_handler_enters_loop_frame_from_container_start() -> None:
         "logical_operator": "and",
         "outputs": {},
     })
+    loop_node.bind_execution_id("loop-run")
     loop_node.graph_runtime_state = runtime_state
     loop_node.graph_config = graph_config
     graph = SimpleNamespace(
@@ -798,25 +949,19 @@ def test_event_handler_enters_loop_frame_from_container_start() -> None:
             state_manager=state_manager,
         ),
     )
-    event_collector = MagicMock()
-    handler = EventHandler(
-        graph_execution=graph_execution,
-        event_collector=cast(EventManager, event_collector),
+    container_execution = ContainerExecution(
         frame_registry=frame_registry,
-    )
-    event = NodeRunStartedEvent(
-        id="loop-run",
-        node_id="loop",
-        node_type=BuiltinNodeTypes.LOOP,
-        node_title="Loop",
-        start_at=datetime.now(UTC).replace(tzinfo=None),
+        graph_execution=graph_execution,
     )
 
-    handler.dispatch(TaskEvent(frame_id="root", event=event))
+    _start_loop_await(
+        container_execution,
+        invocation_id="loop-invocation",
+        index=0,
+        loop_count=1,
+    )
 
-    collected_events = [call.args[0] for call in event_collector.collect.call_args_list]
-    assert any(isinstance(item, NodeRunLoopStartedEvent) for item in collected_events)
-    assert ready_queue.get(timeout=0.01) == ReadyTask(
+    assert ready_queue.get(timeout=0.01) == StartTask(
         frame_id="loop-run:loop:0",
         node_id="loop-start",
     )
@@ -847,6 +992,7 @@ def test_event_handler_suppresses_loop_start_events_inside_loop_frame() -> None:
         "logical_operator": "and",
         "outputs": {},
     })
+    loop_node.bind_execution_id("loop-run")
     loop_node.graph_runtime_state = runtime_state
     loop_node.graph_config = graph_config
     graph = SimpleNamespace(
@@ -863,19 +1009,17 @@ def test_event_handler_suppresses_loop_start_events_inside_loop_frame() -> None:
         ),
     )
     event_collector = MagicMock()
-    handler = EventHandler(
+    handler, container_execution = _event_handler_with_container(
         graph_execution=graph_execution,
         event_collector=cast(EventManager, event_collector),
         frame_registry=frame_registry,
     )
-    loop_started = NodeRunStartedEvent(
-        id="loop-run",
-        node_id="loop",
-        node_type=BuiltinNodeTypes.LOOP,
-        node_title="Loop",
-        start_at=datetime.now(UTC).replace(tzinfo=None),
+    _start_loop_await(
+        container_execution,
+        invocation_id="loop-invocation",
+        index=0,
+        loop_count=1,
     )
-    handler.dispatch(TaskEvent(frame_id="root", event=loop_started))
     _ = ready_queue.get(timeout=0.01)
     event_collector.collect.reset_mock()
 
@@ -904,12 +1048,9 @@ def test_event_handler_suppresses_loop_start_events_inside_loop_frame() -> None:
         if isinstance(call.args[0], GraphNodeEventBase)
     ]
     assert "loop-start" not in collected_node_ids
-    collected_events = [call.args[0] for call in event_collector.collect.call_args_list]
-    assert any(isinstance(item, NodeRunLoopSucceededEvent) for item in collected_events)
-    assert any(
-        isinstance(item, NodeRunSucceededEvent) and item.node_id == "loop"
-        for item in collected_events
-    )
+    resume_task = _get_resume_task(ready_queue)
+    assert isinstance(resume_task.result, LoopExecutionSucceeded)
+    assert resume_task.result.outputs["loop_round"] == 1
 
 
 def test_event_handler_runs_loop_frames_until_loop_count() -> None:
@@ -937,6 +1078,7 @@ def test_event_handler_runs_loop_frames_until_loop_count() -> None:
         "logical_operator": "and",
         "outputs": {},
     })
+    loop_node.bind_execution_id("loop-run")
     loop_node.graph_runtime_state = runtime_state
     loop_node.graph_config = graph_config
     graph = SimpleNamespace(
@@ -953,20 +1095,18 @@ def test_event_handler_runs_loop_frames_until_loop_count() -> None:
         ),
     )
     event_collector = MagicMock()
-    handler = EventHandler(
+    handler, container_execution = _event_handler_with_container(
         graph_execution=graph_execution,
         event_collector=cast(EventManager, event_collector),
         frame_registry=frame_registry,
     )
-    loop_started = NodeRunStartedEvent(
-        id="loop-run",
-        node_id="loop",
-        node_type=BuiltinNodeTypes.LOOP,
-        node_title="Loop",
-        start_at=datetime.now(UTC).replace(tzinfo=None),
+    _start_loop_await(
+        container_execution,
+        invocation_id="loop-invocation",
+        index=0,
+        loop_count=2,
     )
-    handler.dispatch(TaskEvent(frame_id="root", event=loop_started))
-    assert ready_queue.get(timeout=0.01) == ReadyTask(
+    assert ready_queue.get(timeout=0.01) == StartTask(
         frame_id="loop-run:loop:0",
         node_id="loop-start",
     )
@@ -981,7 +1121,16 @@ def test_event_handler_runs_loop_frames_until_loop_count() -> None:
     )
     handler.dispatch(TaskEvent(frame_id="loop-run:loop:0", event=first_succeeded))
 
-    assert ready_queue.get(timeout=0.01) == ReadyTask(
+    resume_task = _get_resume_task(ready_queue)
+    assert isinstance(resume_task.result, LoopFrameCompleted)
+    assert resume_task.result.next_index == 1
+    _start_loop_await(
+        container_execution,
+        invocation_id=resume_task.invocation_id,
+        index=resume_task.result.next_index,
+        loop_count=2,
+    )
+    assert ready_queue.get(timeout=0.01) == StartTask(
         frame_id="loop-run:loop:1",
         node_id="loop-start",
     )
@@ -995,15 +1144,9 @@ def test_event_handler_runs_loop_frames_until_loop_count() -> None:
     )
     handler.dispatch(TaskEvent(frame_id="loop-run:loop:1", event=second_succeeded))
 
-    collected_events = [call.args[0] for call in event_collector.collect.call_args_list]
-    assert any(
-        isinstance(item, NodeRunLoopNextEvent) and item.index == 1
-        for item in collected_events
-    )
-    assert any(
-        isinstance(item, NodeRunLoopSucceededEvent) and item.steps == 2
-        for item in collected_events
-    )
+    final_resume_task = _get_resume_task(ready_queue)
+    assert isinstance(final_resume_task.result, LoopExecutionSucceeded)
+    assert final_resume_task.result.steps == 2
     assert loop_node.node_data.outputs["loop_round"] == 2
 
 
@@ -1032,6 +1175,7 @@ def test_event_handler_converts_loop_child_failure_to_loop_failure() -> None:
         "logical_operator": "and",
         "outputs": {},
     })
+    loop_node.bind_execution_id("loop-run")
     loop_node.graph_runtime_state = runtime_state
     loop_node.graph_config = graph_config
     graph = SimpleNamespace(
@@ -1051,22 +1195,16 @@ def test_event_handler_converts_loop_child_failure_to_loop_failure() -> None:
         ),
     )
     event_collector = MagicMock()
-    handler = EventHandler(
+    handler, container_execution = _event_handler_with_container(
         graph_execution=graph_execution,
         event_collector=cast(EventManager, event_collector),
         frame_registry=frame_registry,
     )
-    handler.dispatch(
-        TaskEvent(
-            frame_id="root",
-            event=NodeRunStartedEvent(
-                id="loop-run",
-                node_id="loop",
-                node_type=BuiltinNodeTypes.LOOP,
-                node_title="Loop",
-                start_at=datetime.now(UTC).replace(tzinfo=None),
-            ),
-        ),
+    _start_loop_await(
+        container_execution,
+        invocation_id="loop-invocation",
+        index=0,
+        loop_count=2,
     )
     _ = ready_queue.get(timeout=0.01)
 
@@ -1085,19 +1223,13 @@ def test_event_handler_converts_loop_child_failure_to_loop_failure() -> None:
         ),
     )
 
-    collected_events = [call.args[0] for call in event_collector.collect.call_args_list]
-    assert any(
-        isinstance(item, NodeRunLoopFailedEvent) and item.node_id == "loop"
-        for item in collected_events
-    )
-    assert any(
-        isinstance(item, NodeRunFailedEvent) and item.node_id == "loop"
-        for item in collected_events
-    )
-    assert graph_execution.error_message == "loop bad"
+    resume_task = _get_resume_task(ready_queue)
+    assert isinstance(resume_task.result, LoopExecutionFailed)
+    assert resume_task.result.error == "loop bad"
+    assert graph_execution.has_error is False
 
 
-def test_event_handler_enters_iteration_frame_from_container_start() -> None:
+def test_container_execution_starts_iteration_frame_from_iteration_await() -> None:
     graph_config = {
         "nodes": [
             {
@@ -1127,6 +1259,7 @@ def test_event_handler_enters_iteration_frame_from_container_start() -> None:
         "error_handle_mode": ErrorHandleMode.TERMINATED,
         "is_parallel": False,
     })
+    iteration_node.bind_execution_id("iteration-run")
     iteration_node.graph_runtime_state = runtime_state
     iteration_node.graph_config = graph_config
     graph = SimpleNamespace(
@@ -1142,27 +1275,22 @@ def test_event_handler_enters_iteration_frame_from_container_start() -> None:
             graph_runtime_state=runtime_state,
         ),
     )
-    event_collector = MagicMock()
-    handler = EventHandler(
-        graph_execution=graph_execution,
-        event_collector=cast(EventManager, event_collector),
+    container_execution = ContainerExecution(
         frame_registry=frame_registry,
-    )
-    event = NodeRunStartedEvent(
-        id="iteration-run",
-        node_id="iteration",
-        node_type=BuiltinNodeTypes.ITERATION,
-        node_title="Iteration",
-        start_at=datetime.now(UTC).replace(tzinfo=None),
+        graph_execution=graph_execution,
     )
 
-    handler.dispatch(TaskEvent(frame_id="root", event=event))
-
-    collected_events = [call.args[0] for call in event_collector.collect.call_args_list]
-    assert any(
-        isinstance(item, NodeRunIterationStartedEvent) for item in collected_events
+    _start_iteration_await(
+        container_execution,
+        invocation_id="iteration-invocation",
+        indexes=(0,),
+        items=("a", "b"),
+        error_handle_mode=ErrorHandleMode.TERMINATED,
+        flatten_output=True,
+        parallel_nums=1,
     )
-    assert ready_queue.get(timeout=0.01) == ReadyTask(
+
+    assert ready_queue.get(timeout=0.01) == StartTask(
         frame_id="iteration-run:iteration:0",
         node_id="iteration-start",
     )
@@ -1213,6 +1341,7 @@ def test_event_handler_suppresses_iteration_start_and_aggregates_success() -> No
         "error_handle_mode": ErrorHandleMode.TERMINATED,
         "is_parallel": False,
     })
+    iteration_node.bind_execution_id("iteration-run")
     iteration_node.graph_runtime_state = runtime_state
     iteration_node.graph_config = graph_config
     graph = SimpleNamespace(
@@ -1229,19 +1358,20 @@ def test_event_handler_suppresses_iteration_start_and_aggregates_success() -> No
         ),
     )
     event_collector = MagicMock()
-    handler = EventHandler(
+    handler, container_execution = _event_handler_with_container(
         graph_execution=graph_execution,
         event_collector=cast(EventManager, event_collector),
         frame_registry=frame_registry,
     )
-    iteration_started = NodeRunStartedEvent(
-        id="iteration-run",
-        node_id="iteration",
-        node_type=BuiltinNodeTypes.ITERATION,
-        node_title="Iteration",
-        start_at=datetime.now(UTC).replace(tzinfo=None),
+    _start_iteration_await(
+        container_execution,
+        invocation_id="iteration-invocation",
+        indexes=(0,),
+        items=("a",),
+        error_handle_mode=ErrorHandleMode.TERMINATED,
+        flatten_output=True,
+        parallel_nums=1,
     )
-    handler.dispatch(TaskEvent(frame_id="root", event=iteration_started))
     _ = ready_queue.get(timeout=0.01)
     child_frame = frame_registry.get("iteration-run:iteration:0")
     child_frame.graph_runtime_state.variable_pool.add(
@@ -1275,20 +1405,9 @@ def test_event_handler_suppresses_iteration_start_and_aggregates_success() -> No
 
     collected_events = [call.args[0] for call in event_collector.collect.call_args_list]
     assert not any(item.node_id == "iteration-start" for item in collected_events)
-    assert any(
-        isinstance(item, NodeRunIterationSucceededEvent)
-        and item.outputs == {"output": ["done"]}
-        for item in collected_events
-    )
-    assert any(
-        isinstance(item, NodeRunSucceededEvent)
-        and item.node_id == "iteration"
-        and item.node_run_result.outputs == {"output": ["done"]}
-        for item in collected_events
-    )
-    assert _variable_value(runtime_state, ["iteration", "output"]) == [
-        "done",
-    ]
+    resume_task = _get_resume_task(ready_queue)
+    assert isinstance(resume_task.result, IterationExecutionSucceeded)
+    assert resume_task.result.outputs == {"output": ["done"]}
 
 
 def test_event_handler_runs_sequential_iteration_frames_in_order() -> None:  # noqa: PLR0914
@@ -1322,6 +1441,7 @@ def test_event_handler_runs_sequential_iteration_frames_in_order() -> None:  # n
         "error_handle_mode": ErrorHandleMode.TERMINATED,
         "is_parallel": False,
     })
+    iteration_node.bind_execution_id("iteration-run")
     iteration_node.graph_runtime_state = runtime_state
     iteration_node.graph_config = graph_config
     graph = SimpleNamespace(
@@ -1338,20 +1458,21 @@ def test_event_handler_runs_sequential_iteration_frames_in_order() -> None:  # n
         ),
     )
     event_collector = MagicMock()
-    handler = EventHandler(
+    handler, container_execution = _event_handler_with_container(
         graph_execution=graph_execution,
         event_collector=cast(EventManager, event_collector),
         frame_registry=frame_registry,
     )
-    iteration_started = NodeRunStartedEvent(
-        id="iteration-run",
-        node_id="iteration",
-        node_type=BuiltinNodeTypes.ITERATION,
-        node_title="Iteration",
-        start_at=datetime.now(UTC).replace(tzinfo=None),
+    _start_iteration_await(
+        container_execution,
+        invocation_id="iteration-invocation",
+        indexes=(0,),
+        items=("a", "b"),
+        error_handle_mode=ErrorHandleMode.TERMINATED,
+        flatten_output=True,
+        parallel_nums=1,
     )
-    handler.dispatch(TaskEvent(frame_id="root", event=iteration_started))
-    assert ready_queue.get(timeout=0.01) == ReadyTask(
+    assert ready_queue.get(timeout=0.01) == StartTask(
         frame_id="iteration-run:iteration:0",
         node_id="iteration-start",
     )
@@ -1370,7 +1491,19 @@ def test_event_handler_runs_sequential_iteration_frames_in_order() -> None:  # n
         TaskEvent(frame_id="iteration-run:iteration:0", event=first_child_succeeded),
     )
 
-    assert ready_queue.get(timeout=0.01) == ReadyTask(
+    resume_task = _get_resume_task(ready_queue)
+    assert isinstance(resume_task.result, IterationFramesRequested)
+    assert resume_task.result.indexes == (1,)
+    _start_iteration_await(
+        container_execution,
+        invocation_id=resume_task.invocation_id,
+        indexes=resume_task.result.indexes,
+        items=("a", "b"),
+        error_handle_mode=ErrorHandleMode.TERMINATED,
+        flatten_output=True,
+        parallel_nums=1,
+    )
+    assert ready_queue.get(timeout=0.01) == StartTask(
         frame_id="iteration-run:iteration:1",
         node_id="iteration-start",
     )
@@ -1399,13 +1532,6 @@ def test_event_handler_runs_sequential_iteration_frames_in_order() -> None:  # n
         TaskEvent(frame_id="iteration-run:iteration:1", event=second_child_succeeded),
     )
 
-    collected_events = [call.args[0] for call in event_collector.collect.call_args_list]
-    next_indices = [
-        item.index
-        for item in collected_events
-        if isinstance(item, NodeRunIterationNextEvent) and item.node_id == "iteration"
-    ]
-    assert next_indices == [0, 1]
     assert child_body_started.in_iteration_id == "iteration"
     assert (
         child_body_started.node_run_result.metadata[
@@ -1413,10 +1539,9 @@ def test_event_handler_runs_sequential_iteration_frames_in_order() -> None:  # n
         ]
         == 1
     )
-    assert _variable_value(runtime_state, ["iteration", "output"]) == [
-        "first",
-        "second",
-    ]
+    final_resume_task = _get_resume_task(ready_queue)
+    assert isinstance(final_resume_task.result, IterationExecutionSucceeded)
+    assert final_resume_task.result.outputs == {"output": ["first", "second"]}
 
 
 def test_event_handler_preserves_nested_iteration_outputs_when_flatten_disabled() -> (
@@ -1452,6 +1577,7 @@ def test_event_handler_preserves_nested_iteration_outputs_when_flatten_disabled(
         "is_parallel": False,
         "flatten_output": False,
     })
+    iteration_node.bind_execution_id("iteration-run")
     iteration_node.graph_runtime_state = runtime_state
     iteration_node.graph_config = graph_config
     graph = SimpleNamespace(
@@ -1467,23 +1593,21 @@ def test_event_handler_preserves_nested_iteration_outputs_when_flatten_disabled(
             graph_runtime_state=runtime_state,
         ),
     )
-    handler = EventHandler(
+    handler, container_execution = _event_handler_with_container(
         graph_execution=graph_execution,
         event_collector=cast(EventManager, MagicMock()),
         frame_registry=frame_registry,
     )
-    handler.dispatch(
-        TaskEvent(
-            frame_id="root",
-            event=NodeRunStartedEvent(
-                id="iteration-run",
-                node_id="iteration",
-                node_type=BuiltinNodeTypes.ITERATION,
-                node_title="Iteration",
-                start_at=datetime.now(UTC).replace(tzinfo=None),
-            ),
-        ),
+    _start_iteration_await(
+        container_execution,
+        invocation_id="iteration-invocation",
+        indexes=(0,),
+        items=("a", "b"),
+        error_handle_mode=ErrorHandleMode.TERMINATED,
+        flatten_output=False,
+        parallel_nums=1,
     )
+    _ = ready_queue.get(timeout=0.01)
 
     first_frame = frame_registry.get("iteration-run:iteration:0")
     first_frame.graph_runtime_state.variable_pool.add(["answer", "text"], ["first"])
@@ -1501,6 +1625,18 @@ def test_event_handler_preserves_nested_iteration_outputs_when_flatten_disabled(
         ),
     )
 
+    resume_task = _get_resume_task(ready_queue)
+    assert isinstance(resume_task.result, IterationFramesRequested)
+    _start_iteration_await(
+        container_execution,
+        invocation_id=resume_task.invocation_id,
+        indexes=resume_task.result.indexes,
+        items=("a", "b"),
+        error_handle_mode=ErrorHandleMode.TERMINATED,
+        flatten_output=False,
+        parallel_nums=1,
+    )
+    _ = ready_queue.get(timeout=0.01)
     second_frame = frame_registry.get("iteration-run:iteration:1")
     second_frame.graph_runtime_state.variable_pool.add(["answer", "text"], ["second"])
     handler.dispatch(
@@ -1517,13 +1653,15 @@ def test_event_handler_preserves_nested_iteration_outputs_when_flatten_disabled(
         ),
     )
 
-    assert _variable_value(runtime_state, ["iteration", "output"]) == [
+    final_resume_task = _get_resume_task(ready_queue)
+    assert isinstance(final_resume_task.result, IterationExecutionSucceeded)
+    assert final_resume_task.result.outputs["output"] == [
         ["first"],
         ["second"],
     ]
 
 
-def test_event_handler_completes_empty_iteration_through_parent_success_path() -> None:
+def test_event_handler_completes_empty_iteration_after_parent_success_event() -> None:
     ready_queue = InMemoryReadyQueue()
     variable_pool = VariablePool()
     variable_pool.add(["source", "items"], [])
@@ -1557,7 +1695,7 @@ def test_event_handler_completes_empty_iteration_through_parent_success_path() -
         ),
     )
     event_collector = MagicMock()
-    handler = EventHandler(
+    handler = _event_handler(
         graph_execution=graph_execution,
         event_collector=cast(EventManager, event_collector),
         frame_registry=frame_registry,
@@ -1569,8 +1707,17 @@ def test_event_handler_completes_empty_iteration_through_parent_success_path() -
         node_title="Iteration",
         start_at=datetime.now(UTC).replace(tzinfo=None),
     )
+    iteration_succeeded = NodeRunSucceededEvent(
+        id="iteration-run",
+        node_id="iteration",
+        node_type=BuiltinNodeTypes.ITERATION,
+        start_at=iteration_started.start_at,
+        finished_at=datetime.now(UTC).replace(tzinfo=None),
+        node_run_result=NodeRunResult(outputs={"output": []}),
+    )
 
     handler.dispatch(TaskEvent(frame_id="root", event=iteration_started))
+    handler.dispatch(TaskEvent(frame_id="root", event=iteration_succeeded))
 
     assert _variable_value(runtime_state, ["iteration", "output"]) == []
     state_manager.finish_execution.assert_called_once_with(
@@ -1614,6 +1761,7 @@ def test_event_handler_continues_iteration_after_child_frame_failure() -> None:
         "error_handle_mode": ErrorHandleMode.CONTINUE_ON_ERROR,
         "is_parallel": False,
     })
+    iteration_node.bind_execution_id("iteration-run")
     iteration_node.graph_runtime_state = runtime_state
     iteration_node.graph_config = graph_config
     graph = SimpleNamespace(
@@ -1630,24 +1778,21 @@ def test_event_handler_continues_iteration_after_child_frame_failure() -> None:
         ),
     )
     event_collector = MagicMock()
-    handler = EventHandler(
+    handler, container_execution = _event_handler_with_container(
         graph_execution=graph_execution,
         event_collector=cast(EventManager, event_collector),
         frame_registry=frame_registry,
     )
-    handler.dispatch(
-        TaskEvent(
-            frame_id="root",
-            event=NodeRunStartedEvent(
-                id="iteration-run",
-                node_id="iteration",
-                node_type=BuiltinNodeTypes.ITERATION,
-                node_title="Iteration",
-                start_at=datetime.now(UTC).replace(tzinfo=None),
-            ),
-        ),
+    _start_iteration_await(
+        container_execution,
+        invocation_id="iteration-invocation",
+        indexes=(0,),
+        items=("a", "b"),
+        error_handle_mode=ErrorHandleMode.CONTINUE_ON_ERROR,
+        flatten_output=True,
+        parallel_nums=1,
     )
-    assert ready_queue.get(timeout=0.01) == ReadyTask(
+    assert ready_queue.get(timeout=0.01) == StartTask(
         frame_id="iteration-run:iteration:0",
         node_id="iteration-start",
     )
@@ -1666,7 +1811,19 @@ def test_event_handler_continues_iteration_after_child_frame_failure() -> None:
     )
 
     assert graph_execution.has_error is False
-    assert ready_queue.get(timeout=0.01) == ReadyTask(
+    resume_task = _get_resume_task(ready_queue)
+    assert isinstance(resume_task.result, IterationFramesRequested)
+    assert resume_task.result.indexes == (1,)
+    _start_iteration_await(
+        container_execution,
+        invocation_id=resume_task.invocation_id,
+        indexes=resume_task.result.indexes,
+        items=("a", "b"),
+        error_handle_mode=ErrorHandleMode.CONTINUE_ON_ERROR,
+        flatten_output=True,
+        parallel_nums=1,
+    )
+    assert ready_queue.get(timeout=0.01) == StartTask(
         frame_id="iteration-run:iteration:1",
         node_id="iteration-start",
     )
@@ -1686,13 +1843,15 @@ def test_event_handler_continues_iteration_after_child_frame_failure() -> None:
         ),
     )
 
-    assert _variable_value(runtime_state, ["iteration", "output"]) == [
+    final_resume_task = _get_resume_task(ready_queue)
+    assert isinstance(final_resume_task.result, IterationExecutionSucceeded)
+    assert final_resume_task.result.outputs["output"] == [
         None,
         "ok",
     ]
 
 
-def test_event_handler_limits_parallel_iteration_and_preserves_output_order() -> None:
+def test_event_handler_limits_parallel_iteration_and_preserves_output_order() -> None:  # noqa: PLR0914
     graph_config = {
         "nodes": [
             {
@@ -1723,6 +1882,7 @@ def test_event_handler_limits_parallel_iteration_and_preserves_output_order() ->
         "is_parallel": True,
         "parallel_nums": 2,
     })
+    iteration_node.bind_execution_id("iteration-run")
     iteration_node.graph_runtime_state = runtime_state
     iteration_node.graph_config = graph_config
     graph = SimpleNamespace(
@@ -1739,30 +1899,27 @@ def test_event_handler_limits_parallel_iteration_and_preserves_output_order() ->
         ),
     )
     event_collector = MagicMock()
-    handler = EventHandler(
+    handler, container_execution = _event_handler_with_container(
         graph_execution=graph_execution,
         event_collector=cast(EventManager, event_collector),
         frame_registry=frame_registry,
     )
 
-    handler.dispatch(
-        TaskEvent(
-            frame_id="root",
-            event=NodeRunStartedEvent(
-                id="iteration-run",
-                node_id="iteration",
-                node_type=BuiltinNodeTypes.ITERATION,
-                node_title="Iteration",
-                start_at=datetime.now(UTC).replace(tzinfo=None),
-            ),
-        ),
+    _start_iteration_await(
+        container_execution,
+        invocation_id="iteration-invocation",
+        indexes=(0, 1),
+        items=("a", "b", "c"),
+        error_handle_mode=ErrorHandleMode.TERMINATED,
+        flatten_output=True,
+        parallel_nums=2,
     )
 
-    assert ready_queue.get(timeout=0.01) == ReadyTask(
+    assert ready_queue.get(timeout=0.01) == StartTask(
         frame_id="iteration-run:iteration:0",
         node_id="iteration-start",
     )
-    assert ready_queue.get(timeout=0.01) == ReadyTask(
+    assert ready_queue.get(timeout=0.01) == StartTask(
         frame_id="iteration-run:iteration:1",
         node_id="iteration-start",
     )
@@ -1783,7 +1940,20 @@ def test_event_handler_limits_parallel_iteration_and_preserves_output_order() ->
             ),
         ),
     )
-    assert ready_queue.get(timeout=0.01) == ReadyTask(
+
+    resume_task = _get_resume_task(ready_queue)
+    assert isinstance(resume_task.result, IterationFramesRequested)
+    assert resume_task.result.indexes == (2,)
+    _start_iteration_await(
+        container_execution,
+        invocation_id=resume_task.invocation_id,
+        indexes=resume_task.result.indexes,
+        items=("a", "b", "c"),
+        error_handle_mode=ErrorHandleMode.TERMINATED,
+        flatten_output=True,
+        parallel_nums=2,
+    )
+    assert ready_queue.get(timeout=0.01) == StartTask(
         frame_id="iteration-run:iteration:2",
         node_id="iteration-start",
     )
@@ -1820,7 +1990,9 @@ def test_event_handler_limits_parallel_iteration_and_preserves_output_order() ->
         ),
     )
 
-    assert _variable_value(runtime_state, ["iteration", "output"]) == [
+    final_resume_task = _get_resume_task(ready_queue)
+    assert isinstance(final_resume_task.result, IterationExecutionSucceeded)
+    assert final_resume_task.result.outputs["output"] == [
         "first",
         "second",
         "third",

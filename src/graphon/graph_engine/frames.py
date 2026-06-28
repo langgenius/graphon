@@ -14,7 +14,7 @@ from .error_handler import ErrorHandler
 from .graph_state_manager import GraphStateManager
 from .graph_traversal.edge_processor import EdgeProcessor
 from .graph_traversal.skip_propagator import SkipPropagator
-from .ready_queue import ROOT_FRAME_ID, ReadyTask
+from .ready_queue import ROOT_FRAME_ID, StartTask
 
 
 class RebindableNodeFactory(NodeFactory, Protocol):
@@ -46,7 +46,7 @@ class FrameRegistry:
     def get(self, frame_id: str) -> ExecutionFrame:
         return self._frames[frame_id]
 
-    def get_node(self, task: ReadyTask) -> Node:
+    def get_node(self, task: StartTask) -> Node:
         return self.get(task.frame_id).graph.nodes[task.node_id]
 
     def materialize_child_frame(
