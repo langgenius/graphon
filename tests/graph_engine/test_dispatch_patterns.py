@@ -1264,6 +1264,110 @@ def test_event_handler_runs_sequential_iteration_frames_in_order() -> None:  # n
     ]
 
 
+def test_event_handler_preserves_nested_iteration_outputs_when_flatten_disabled() -> (
+    None
+):
+    graph_config = {
+        "nodes": [
+            {
+                "id": "iteration-start",
+                "data": {"type": BuiltinNodeTypes.ITERATION_START},
+            },
+        ],
+        "edges": [],
+    }
+    ready_queue = InMemoryReadyQueue()
+    variable_pool = VariablePool()
+    variable_pool.add(["source", "items"], ["a", "b"])
+    graph_execution = GraphExecution(workflow_id="workflow")
+    runtime_state = GraphRuntimeState(
+        variable_pool=variable_pool,
+        start_at=1,
+        ready_queue=ready_queue,
+        graph_execution=graph_execution,
+    )
+    iteration_node = IterationNode.__new__(IterationNode)
+    iteration_node.init_node_identity("iteration")
+    iteration_node.init_node_data({
+        "type": "iteration",
+        "start_node_id": "iteration-start",
+        "iterator_selector": ["source", "items"],
+        "output_selector": ["answer", "text"],
+        "error_handle_mode": ErrorHandleMode.TERMINATED,
+        "is_parallel": False,
+        "flatten_output": False,
+    })
+    iteration_node.graph_runtime_state = runtime_state
+    iteration_node.graph_config = graph_config
+    graph = SimpleNamespace(
+        nodes={"iteration": iteration_node},
+        graph_config=graph_config,
+        node_factory=_FrameFactory(),
+    )
+    frame_registry = FrameRegistry()
+    frame_registry.register(
+        _execution_frame(
+            frame_id="root",
+            graph=cast(Graph, graph),
+            graph_runtime_state=runtime_state,
+        ),
+    )
+    handler = EventHandler(
+        graph_execution=graph_execution,
+        event_collector=cast(EventManager, MagicMock()),
+        frame_registry=frame_registry,
+    )
+    handler.dispatch(
+        TaskEvent(
+            frame_id="root",
+            event=NodeRunStartedEvent(
+                id="iteration-run",
+                node_id="iteration",
+                node_type=BuiltinNodeTypes.ITERATION,
+                node_title="Iteration",
+                start_at=datetime.now(UTC).replace(tzinfo=None),
+            ),
+        ),
+    )
+
+    first_frame = frame_registry.get("iteration-run:iteration:0")
+    first_frame.graph_runtime_state.variable_pool.add(["answer", "text"], ["first"])
+    handler.dispatch(
+        TaskEvent(
+            frame_id="iteration-run:iteration:0",
+            event=NodeRunSucceededEvent(
+                id="iteration-start-run-0",
+                node_id="iteration-start",
+                node_type=BuiltinNodeTypes.ITERATION_START,
+                start_at=datetime.now(UTC).replace(tzinfo=None),
+                finished_at=datetime.now(UTC).replace(tzinfo=None),
+                node_run_result=NodeRunResult(),
+            ),
+        ),
+    )
+
+    second_frame = frame_registry.get("iteration-run:iteration:1")
+    second_frame.graph_runtime_state.variable_pool.add(["answer", "text"], ["second"])
+    handler.dispatch(
+        TaskEvent(
+            frame_id="iteration-run:iteration:1",
+            event=NodeRunSucceededEvent(
+                id="iteration-start-run-1",
+                node_id="iteration-start",
+                node_type=BuiltinNodeTypes.ITERATION_START,
+                start_at=datetime.now(UTC).replace(tzinfo=None),
+                finished_at=datetime.now(UTC).replace(tzinfo=None),
+                node_run_result=NodeRunResult(),
+            ),
+        ),
+    )
+
+    assert _variable_value(runtime_state, ["iteration", "output"]) == [
+        ["first"],
+        ["second"],
+    ]
+
+
 def test_event_handler_completes_empty_iteration_through_parent_success_path() -> None:
     ready_queue = InMemoryReadyQueue()
     variable_pool = VariablePool()

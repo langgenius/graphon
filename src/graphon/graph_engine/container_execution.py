@@ -836,6 +836,7 @@ class ContainerExecution:
         outputs = {
             "output": self._flatten_outputs_if_needed(
                 self._ordered_iteration_outputs(run_context),
+                flatten_output=node.node_data.flatten_output,
             ),
         }
         metadata: dict[WorkflowNodeExecutionMetadataKey, object] = {
@@ -900,6 +901,7 @@ class ContainerExecution:
         outputs = {
             "output": self._flatten_outputs_if_needed(
                 self._ordered_iteration_outputs(run_context),
+                flatten_output=node.node_data.flatten_output,
             ),
         }
         metadata: dict[WorkflowNodeExecutionMetadataKey, object] = {
@@ -1016,7 +1018,14 @@ class ContainerExecution:
             node_id=root_node_id,
         )
 
-    def _flatten_outputs_if_needed(self, outputs: list[object]) -> list[object]:
+    def _flatten_outputs_if_needed(
+        self,
+        outputs: list[object],
+        *,
+        flatten_output: bool,
+    ) -> list[object]:
+        if not flatten_output:
+            return outputs
         non_empty_outputs = [output for output in outputs if output is not None]
         if not non_empty_outputs:
             return outputs
