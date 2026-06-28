@@ -56,19 +56,33 @@ from .frames import ExecutionFrame, FrameRegistry
 
 @dataclass(slots=True)
 class _LoopRunContext:
+    # Frame that owns the loop container node.
     parent_frame_id: str
+    # Loop container node id in the parent frame.
     loop_node_id: str
+    # Node execution id shared by loop lifecycle events.
     loop_execution_id: str
+    # Inputs shown on loop lifecycle events and node results.
     inputs: dict[str, object]
+    # Timestamp used for loop lifecycle events and duration calculation.
     started_at: datetime
+    # Maximum number of loop rounds configured on the node.
     loop_count: int
+    # First node id to schedule inside each loop frame.
     root_node_id: str
+    # Loop variable names mapped to their variable-pool selectors.
     loop_variable_selectors: dict[str, list[str]]
+    # Node ids inside the loop body whose variables reset before each round.
     loop_node_ids: set[str]
+    # Per-round elapsed seconds keyed by loop index.
     duration_map: dict[str, float]
+    # Per-round loop variable snapshots keyed by loop index.
     variable_map: dict[str, dict[str, object]]
+    # Aggregated LLM usage from completed loop frames.
     usage: LLMUsage
+    # Number of loop frames that have completed.
     completed_count: int
+    # Whether a break condition or loop-end node stopped the loop.
     reached_break: bool
 
 
@@ -81,16 +95,27 @@ class _LoopFrameContext:
 
 @dataclass(slots=True)
 class _IterationRunContext:
+    # Frame that owns the iteration container node.
     parent_frame_id: str
+    # Iteration container node id in the parent frame.
     iteration_node_id: str
+    # Node execution id shared by iteration lifecycle events.
     iteration_execution_id: str
+    # Immutable iterator values captured when the iteration starts.
     items: tuple[object, ...]
+    # Inputs shown on iteration lifecycle events and node results.
     inputs: dict[str, object]
+    # Timestamp used for iteration lifecycle events and duration calculation.
     started_at: datetime
+    # Per-item output values keyed by iteration index.
     outputs: dict[int, object]
+    # Per-item elapsed seconds keyed by iteration index.
     duration_map: dict[str, float]
+    # Aggregated LLM usage from completed iteration frames.
     usage: LLMUsage
+    # Number of iteration frames scheduled so far.
     scheduled_count: int
+    # Number of iteration frames that have completed.
     completed_count: int
 
 
