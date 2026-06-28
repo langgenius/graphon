@@ -601,6 +601,53 @@ def test_event_handler_processes_tagged_child_frame_success_before_collecting() 
     event_collector.collect.assert_called_once_with(event)
 
 
+def test_event_handler_processes_tagged_root_frame_success_before_collecting() -> None:
+    graph = MagicMock()
+    graph.nodes = {"child": MagicMock(execution_type=NodeExecutionType.EXECUTABLE)}
+    runtime_state = MagicMock()
+    runtime_state.variable_pool = MagicMock()
+    graph_execution = MagicMock()
+    graph_execution.get_or_create_node_execution.return_value = MagicMock()
+    graph_execution.is_paused = False
+    event_collector = MagicMock()
+    edge_processor = MagicMock()
+    edge_processor.process_node_success.return_value = (["next"], [])
+    state_manager = MagicMock()
+    frame_registry = FrameRegistry()
+    frame_registry.register(
+        _execution_frame(
+            frame_id="root",
+            graph=cast(Graph, graph),
+            graph_runtime_state=runtime_state,
+            state_manager=state_manager,
+            edge_processor=edge_processor,
+        ),
+    )
+    handler = EventHandler(
+        graph_execution=graph_execution,
+        event_collector=cast(EventManager, event_collector),
+        frame_registry=frame_registry,
+    )
+    event = NodeRunSucceededEvent(
+        id="run-child",
+        node_id="child",
+        node_type=BuiltinNodeTypes.CODE,
+        start_at=datetime.now(UTC).replace(tzinfo=None),
+        finished_at=datetime.now(UTC).replace(tzinfo=None),
+        node_run_result=NodeRunResult(outputs={"answer": "ok"}),
+        in_iteration_id="iteration",
+    )
+
+    handler.dispatch(TaskEvent(frame_id="root", event=event))
+
+    edge_processor.process_node_success.assert_called_once_with("child")
+    state_manager.enqueue_node.assert_called_once_with(
+        frame_id="root",
+        node_id="next",
+    )
+    event_collector.collect.assert_called_once_with(event)
+
+
 def test_event_handler_enters_loop_frame_from_container_start() -> None:
     graph_config = {
         "nodes": [

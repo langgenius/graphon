@@ -39,7 +39,6 @@ from graphon.runtime.graph_runtime_state import GraphExecutionProtocol
 from ..container_execution import ContainerExecution
 from ..entities.tasks import TaskEvent
 from ..frames import ExecutionFrame, FrameRegistry
-from ..ready_queue import ROOT_FRAME_ID
 from .event_manager import EventManager
 
 logger = logging.getLogger(__name__)
@@ -95,9 +94,6 @@ class EventHandler:
             self._dispatch(event, frame=frame)
             return None
 
-        if frame_id == ROOT_FRAME_ID and (event.in_loop_id or event.in_iteration_id):
-            self._event_collector.collect(event)
-            return None
         return self._dispatch(event, frame=frame)
 
     @singledispatchmethod
