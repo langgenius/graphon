@@ -128,10 +128,9 @@ class ToolNode(Node[ToolNodeData]):
                 or self.node_data.tool_node_version is not None
             ):
                 variable_pool = self.graph_runtime_state.variable_pool
-            node_execution_id = self.ensure_execution_id()
             tool_runtime = self._get_tool_runtime(
                 variable_pool=variable_pool,
-                node_execution_id=node_execution_id,
+                node_execution_id=self.execution_id,
             )
         except ToolNodeError as e:
             yield StreamCompletedEvent(

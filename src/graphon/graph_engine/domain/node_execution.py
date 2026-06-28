@@ -14,15 +14,14 @@ class NodeExecution:
     """
 
     node_id: str
+    execution_id: str
     state: NodeState = NodeState.UNKNOWN
     retry_count: int = 0
-    execution_id: str | None = None
     error: str | None = None
 
-    def mark_started(self, execution_id: str) -> None:
-        """Mark the node as started with an execution ID."""
+    def mark_started(self) -> None:
+        """Mark the node as started."""
         self.state = NodeState.TAKEN
-        self.execution_id = execution_id
 
     def mark_taken(self) -> None:
         """Mark the node as successfully completed."""

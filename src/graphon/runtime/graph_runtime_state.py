@@ -27,10 +27,10 @@ class NodeExecutionProtocol(Protocol):
 
     state: NodeState
     retry_count: int
-    execution_id: str | None
+    execution_id: str
 
     @abstractmethod
-    def mark_started(self, execution_id: str) -> None:
+    def mark_started(self) -> None:
         """Mark the node execution as started."""
         ...
 

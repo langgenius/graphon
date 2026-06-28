@@ -32,7 +32,7 @@ def _build_node(
     if workflow_execution_id is not None:
         run_context["workflow_execution_id"] = workflow_execution_id
 
-    return HumanInputNode(
+    node = HumanInputNode(
         node_id="human-node",
         data=HumanInputNodeData(title="Collect Input"),
         graph_init_params=build_graph_init_params(
@@ -45,6 +45,8 @@ def _build_node(
         ),
         hitl_callback=callback,
     )
+    node.bind_execution_id("human-run")
+    return node
 
 
 def test_human_input_pause_uses_callback_context_and_minimal_pause_reason() -> None:
