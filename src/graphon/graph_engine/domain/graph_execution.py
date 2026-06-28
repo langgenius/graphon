@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from importlib import import_module
 from typing import Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -30,7 +31,7 @@ class NodeExecutionState(BaseModel):
     node_id: str
     state: NodeState = Field(default=NodeState.UNKNOWN)
     retry_count: int = Field(default=0)
-    execution_id: str | None = Field(default=None)
+    execution_id: str
     error: str | None = Field(default=None)
 
 
@@ -162,7 +163,10 @@ class GraphExecution:
         """Get or create a node execution entity."""
         task = ReadyTask(frame_id=frame_id, node_id=node_id)
         if task not in self.node_executions:
-            self.node_executions[task] = NodeExecution(node_id=node_id)
+            self.node_executions[task] = NodeExecution(
+                node_id=node_id,
+                execution_id=str(uuid4()),
+            )
         return self.node_executions[task]
 
     @property

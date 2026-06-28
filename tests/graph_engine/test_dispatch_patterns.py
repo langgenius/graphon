@@ -228,22 +228,23 @@ def test_graph_execution_tracks_node_executions_by_frame() -> None:
         node_id="answer",
     )
 
-    first.mark_started("run-0")
-    second.mark_started("run-1")
+    first.mark_started()
+    second.mark_started()
 
     assert first is not second
     assert (
         execution.node_executions[
             ReadyTask(frame_id="iteration-0", node_id="answer")
         ].execution_id
-        == "run-0"
+        == first.execution_id
     )
     assert (
         execution.node_executions[
             ReadyTask(frame_id="iteration-1", node_id="answer")
         ].execution_id
-        == "run-1"
+        == second.execution_id
     )
+    assert first.execution_id != second.execution_id
 
 
 def test_frame_registry_materializes_child_frame_with_rebound_runtime() -> None:
@@ -320,8 +321,8 @@ def test_worker_executes_node_from_ready_task() -> None:
         execution_type = NodeExecutionType.EXECUTABLE
         execution_id = "run-1"
 
-        def ensure_execution_id(self) -> str:
-            return self.execution_id
+        def bind_execution_id(self, execution_id: str) -> None:
+            self.execution_id = execution_id
 
         def run(self) -> Generator[NodeRunStartedEvent, None, None]:
             yield NodeRunStartedEvent(
@@ -336,8 +337,20 @@ def test_worker_executes_node_from_ready_task() -> None:
     ready_queue.put(ReadyTask(frame_id="root", node_id="start"))
     event_queue = queue.Queue()
     graph = SimpleNamespace(nodes={"start": RunnableNode()})
+    runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=1,
+        ready_queue=ready_queue,
+        graph_execution=GraphExecution(workflow_id="workflow"),
+    )
     frame_registry = FrameRegistry()
-    frame_registry.register(_execution_frame(frame_id="root", graph=cast(Graph, graph)))
+    frame_registry.register(
+        _execution_frame(
+            frame_id="root",
+            graph=cast(Graph, graph),
+            graph_runtime_state=runtime_state,
+        ),
+    )
     worker = Worker(
         ready_queue=ready_queue,
         event_queue=event_queue,
@@ -368,8 +381,8 @@ def test_worker_resolves_node_from_task_frame() -> None:
             self.id = node_id
             self.title = title
 
-        def ensure_execution_id(self) -> str:
-            return self.execution_id
+        def bind_execution_id(self, execution_id: str) -> None:
+            self.execution_id = execution_id
 
         def run(self) -> Generator[NodeRunStartedEvent, None, None]:
             yield NodeRunStartedEvent(
@@ -385,12 +398,27 @@ def test_worker_resolves_node_from_task_frame() -> None:
     event_queue = queue.Queue()
     root_graph = SimpleNamespace(nodes={"answer": RunnableNode("answer", "Root")})
     child_graph = SimpleNamespace(nodes={"answer": RunnableNode("answer", "Child")})
+    graph_execution = GraphExecution(workflow_id="workflow")
+    runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=1,
+        ready_queue=ready_queue,
+        graph_execution=graph_execution,
+    )
     frame_registry = FrameRegistry()
     frame_registry.register(
-        _execution_frame(frame_id="root", graph=cast(Graph, root_graph)),
+        _execution_frame(
+            frame_id="root",
+            graph=cast(Graph, root_graph),
+            graph_runtime_state=runtime_state,
+        ),
     )
     frame_registry.register(
-        _execution_frame(frame_id="child", graph=cast(Graph, child_graph)),
+        _execution_frame(
+            frame_id="child",
+            graph=cast(Graph, child_graph),
+            graph_runtime_state=runtime_state,
+        ),
     )
     worker = Worker(
         ready_queue=ready_queue,
@@ -412,6 +440,74 @@ def test_worker_resolves_node_from_task_frame() -> None:
     assert event.event.node_title == "Child"
 
 
+def test_worker_binds_node_execution_id_from_task_frame() -> None:
+    class RunnableNode:
+        id = "answer"
+        node_type = BuiltinNodeTypes.CODE
+        execution_type = NodeExecutionType.EXECUTABLE
+
+        def __init__(self, execution_id: str) -> None:
+            self.execution_id = execution_id
+
+        def bind_execution_id(self, execution_id: str) -> None:
+            self.execution_id = execution_id
+
+        def run(self) -> Generator[NodeRunStartedEvent, None, None]:
+            yield NodeRunStartedEvent(
+                id=self.execution_id,
+                node_id=self.id,
+                node_type=self.node_type,
+                node_title="Answer",
+                start_at=datetime.now(UTC).replace(tzinfo=None),
+            )
+
+    ready_queue = InMemoryReadyQueue()
+    ready_queue.put(ReadyTask(frame_id="child", node_id="answer"))
+    event_queue = queue.Queue()
+    graph_execution = GraphExecution(workflow_id="workflow")
+    root_execution = graph_execution.get_or_create_node_execution(
+        frame_id="root",
+        node_id="answer",
+    )
+    child_execution = graph_execution.get_or_create_node_execution(
+        frame_id="child",
+        node_id="answer",
+    )
+    runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=1,
+        ready_queue=ready_queue,
+        graph_execution=graph_execution,
+    )
+    graph = SimpleNamespace(nodes={"answer": RunnableNode(root_execution.execution_id)})
+    frame_registry = FrameRegistry()
+    frame_registry.register(
+        _execution_frame(
+            frame_id="child",
+            graph=cast(Graph, graph),
+            graph_runtime_state=runtime_state,
+        ),
+    )
+    worker = Worker(
+        ready_queue=ready_queue,
+        event_queue=event_queue,
+        frame_registry=frame_registry,
+        layers=[],
+    )
+
+    worker.start()
+    try:
+        event = event_queue.get(timeout=1)
+    finally:
+        worker.stop()
+        worker.join(timeout=1)
+
+    assert isinstance(event, TaskEvent)
+    assert isinstance(event.event, NodeRunStartedEvent)
+    assert event.event.id != root_execution.execution_id
+    assert event.event.id == child_execution.execution_id
+
+
 def test_worker_container_task_only_emits_start_event() -> None:
     class ContainerNode:
         id = "loop"
@@ -422,8 +518,8 @@ def test_worker_container_task_only_emits_start_event() -> None:
         def __init__(self) -> None:
             self.body_was_consumed = False
 
-        def ensure_execution_id(self) -> str:
-            return self.execution_id
+        def bind_execution_id(self, execution_id: str) -> None:
+            self.execution_id = execution_id
 
         def run(self) -> Generator[NodeRunStartedEvent, None, None]:
             yield NodeRunStartedEvent(
@@ -442,8 +538,20 @@ def test_worker_container_task_only_emits_start_event() -> None:
     ready_queue.put(ReadyTask(frame_id="root", node_id="loop"))
     event_queue = queue.Queue()
     graph = SimpleNamespace(nodes={"loop": container_node})
+    runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=1,
+        ready_queue=ready_queue,
+        graph_execution=GraphExecution(workflow_id="workflow"),
+    )
     frame_registry = FrameRegistry()
-    frame_registry.register(_execution_frame(frame_id="root", graph=cast(Graph, graph)))
+    frame_registry.register(
+        _execution_frame(
+            frame_id="root",
+            graph=cast(Graph, graph),
+            graph_runtime_state=runtime_state,
+        ),
+    )
     worker = Worker(
         ready_queue=ready_queue,
         event_queue=event_queue,
@@ -549,7 +657,7 @@ def test_event_handler_dispatches_task_event_payload() -> None:
 
     handler.dispatch(TaskEvent(frame_id="root", event=event))
 
-    node_execution.mark_started.assert_called_once_with("run-1")
+    node_execution.mark_started.assert_called_once_with()
     runtime_state.increment_node_run_steps.assert_called_once_with()
     event_collector.collect.assert_called_once_with(event)
 

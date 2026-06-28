@@ -141,7 +141,7 @@ class EventHandler:
             node_id=event.node_id,
         )
         is_initial_attempt = node_execution.retry_count == 0
-        node_execution.mark_started(event.id)
+        node_execution.mark_started()
         frame.graph_runtime_state.increment_node_run_steps()
 
         # Collect the event only for the first attempt; retries remain silent

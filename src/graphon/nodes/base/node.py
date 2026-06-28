@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 from functools import singledispatchmethod
 from types import MappingProxyType
 from typing import Any, ClassVar, assert_never, get_args, get_origin
-from uuid import uuid4
 
 from graphon.entities.base_node_data import BaseNodeData, RetryConfig
 from graphon.entities.graph_config import NodeConfigDict, NodeConfigDictAdapter
@@ -361,17 +360,8 @@ class _NodeRuntimeMixin[NodeDataT: BaseNodeData]:
     def execution_id(self: Node[NodeDataT]) -> str:
         return self._node_execution_id
 
-    def ensure_execution_id(self: Node[NodeDataT]) -> str:
-        if self._node_execution_id:
-            return self._node_execution_id
-
-        resumed_execution_id = self._restore_execution_id_from_runtime_state()
-        if resumed_execution_id:
-            self._node_execution_id = resumed_execution_id
-            return self._node_execution_id
-
-        self._node_execution_id = str(uuid4())
-        return self._node_execution_id
+    def bind_execution_id(self: Node[NodeDataT], execution_id: str) -> None:
+        self._node_execution_id = execution_id
 
     def populate_start_event(
         self: Node[NodeDataT],
@@ -623,20 +613,6 @@ class Node[NodeDataT: BaseNodeData](
 
         self.post_init()
 
-    def _restore_execution_id_from_runtime_state(self) -> str | None:
-        node_executions = self.graph_runtime_state.graph_execution.node_executions
-        for task, candidate in node_executions.items():
-            if task.frame_id != "root" or task.node_id != self._node_id:
-                continue
-            node_execution = candidate
-            break
-        else:
-            return None
-        execution_id = node_execution.execution_id
-        if not execution_id:
-            return None
-        return str(execution_id)
-
     @abstractmethod
     def _run(
         self,
@@ -645,7 +621,10 @@ class Node[NodeDataT: BaseNodeData](
         raise NotImplementedError
 
     def run(self) -> Generator[GraphNodeEventBase, None, None]:
-        execution_id = self.ensure_execution_id()
+        execution_id = self.execution_id
+        if not execution_id:
+            msg = "node execution_id must be bound before run"
+            raise RuntimeError(msg)
         self._start_at = datetime.now(UTC).replace(tzinfo=None)
 
         # Create and push start event with required fields

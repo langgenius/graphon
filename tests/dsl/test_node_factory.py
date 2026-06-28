@@ -681,6 +681,7 @@ def test_variable_aggregator_node_from_dsl_runs_first_available_selector() -> No
         start_inputs={"candidate": "hello"},
     )
     node = engine.graph.nodes["node"]
+    node.bind_execution_id("node-run")
 
     success = _succeeded_event(list(node.run()))
 
@@ -694,6 +695,7 @@ def test_list_operator_node_from_dsl_runs_against_start_input_array() -> None:
         start_inputs={"items": ["first", "second"]},
     )
     node = engine.graph.nodes["node"]
+    node.bind_execution_id("node-run")
 
     success = _succeeded_event(list(node.run()))
 
@@ -708,6 +710,7 @@ def test_assigner_node_from_dsl_emits_variable_update() -> None:
     )
     engine.graph_runtime_state.variable_pool.add(["conversation", "topic"], "before")
     node = engine.graph.nodes["node"]
+    node.bind_execution_id("node-run")
 
     events = list(node.run())
 
@@ -781,6 +784,7 @@ def test_http_request_node_from_dsl_runs_text_request(
     )
     engine = loads(_graph_dsl_for_node(_http_request_data()))
     node = engine.graph.nodes["node"]
+    node.bind_execution_id("node-run")
 
     success = _succeeded_event(list(node.run()))
 
@@ -800,6 +804,7 @@ def test_http_request_node_from_dsl_fails_file_response_cleanly(
     )
     engine = loads(_graph_dsl_for_node(_http_request_data()))
     node = engine.graph.nodes["node"]
+    node.bind_execution_id("node-run")
 
     failed = _failed_event(list(node.run()))
 
@@ -821,6 +826,7 @@ def test_http_request_node_file_body_download_fails_cleanly() -> None:
         "data": [{"type": "file", "file": ["start", "file"]}],
     }
     node = factory.create_node(cast(NodeConfigDict, {"id": "node", "data": node_data}))
+    node.bind_execution_id("node-run")
 
     failed = _failed_event(list(node.run()))
 
@@ -862,6 +868,7 @@ def test_question_classifier_node_from_dsl_runs_with_slim_model(
         start_inputs={"query": "Where is my refund?"},
     )
     node = engine.graph.nodes["node"]
+    node.bind_execution_id("node-run")
 
     success = _succeeded_event(list(node.run()))
 
@@ -882,6 +889,7 @@ def test_parameter_extractor_node_from_dsl_runs_with_slim_model(
         start_inputs={"query": "Book a trip to Paris"},
     )
     node = engine.graph.nodes["node"]
+    node.bind_execution_id("node-run")
 
     success = _succeeded_event(list(node.run()))
 
@@ -917,6 +925,7 @@ def test_parameter_extractor_node_from_dsl_runs_function_call_with_slim_model(
         start_inputs={"query": "Book a trip to Berlin"},
     )
     node = engine.graph.nodes["node"]
+    node.bind_execution_id("node-run")
 
     success = _succeeded_event(list(node.run()))
 

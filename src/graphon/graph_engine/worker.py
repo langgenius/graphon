@@ -17,7 +17,7 @@ from graphon.enums import NodeExecutionType, WorkflowNodeExecutionStatus
 from graphon.graph_engine.entities.tasks import TaskEvent
 from graphon.graph_engine.frames import FrameRegistry
 from graphon.graph_engine.layers.base import GraphEngineLayer
-from graphon.graph_engine.ready_queue import ReadyQueue
+from graphon.graph_engine.ready_queue import ReadyQueue, ReadyTask
 from graphon.graph_events.base import GraphNodeEventBase
 from graphon.graph_events.node import (
     NodeRunFailedEvent,
@@ -109,7 +109,7 @@ class Worker(threading.Thread):
             node = self._frame_registry.get_node(task)
             try:
                 self._current_node_started_at = None
-                self._execute_node(frame_id=task.frame_id, node=node)
+                self._execute_node(task=task, node=node)
                 self._ready_queue.task_done()
             except Exception as e:
                 logger.exception(
@@ -129,14 +129,15 @@ class Worker(threading.Thread):
             finally:
                 self._current_node_started_at = None
 
-    def _execute_node(self, *, frame_id: str, node: Node) -> None:
+    def _execute_node(self, *, task: ReadyTask, node: Node) -> None:
         """Execute a single node and handle its events.
 
         Args:
             node: The node instance to execute
 
         """
-        node.ensure_execution_id()
+        self._bind_node_execution_id(task=task, node=node)
+        frame_id = task.frame_id
 
         context = self._execution_context
         if context is None:
@@ -164,6 +165,15 @@ class Worker(threading.Thread):
                 raise
             finally:
                 self._invoke_node_run_end_hooks(node, error, result_event)
+
+    def _bind_node_execution_id(self, *, task: ReadyTask, node: Node) -> None:
+        frame = self._frame_registry.get(task.frame_id)
+        graph_execution = frame.graph_runtime_state.graph_execution
+        node_execution = graph_execution.get_or_create_node_execution(
+            frame_id=task.frame_id,
+            node_id=task.node_id,
+        )
+        node.bind_execution_id(node_execution.execution_id)
 
     def _consume_container_start_event(self, *, frame_id: str, node: Node) -> None:
         node_events = node.run()
