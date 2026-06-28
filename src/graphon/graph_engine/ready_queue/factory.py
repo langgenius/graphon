@@ -4,17 +4,17 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from graphon.runtime.ready_queue import ReadyQueueProtocol
+from graphon.runtime.ready_queue import ReadyQueue
 
 from .in_memory import InMemoryReadyQueue
 from .protocol import ReadyQueueState
 
-_READY_QUEUE_BUILDERS: dict[str, tuple[Callable[[], ReadyQueueProtocol], str]] = {
+_READY_QUEUE_BUILDERS: dict[str, tuple[Callable[[], ReadyQueue], str]] = {
     "InMemoryReadyQueue": (InMemoryReadyQueue, "1.0"),
 }
 
 
-def create_ready_queue_from_state(state: ReadyQueueState) -> ReadyQueueProtocol:
+def create_ready_queue_from_state(state: ReadyQueueState) -> ReadyQueue:
     """Create a ready queue instance from a serialized state.
 
     Args:
