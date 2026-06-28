@@ -7,13 +7,13 @@ serialization capabilities for state storage.
 import queue
 from typing import final
 
-from graphon.runtime.ready_queue import ReadyQueueProtocol
+from graphon.runtime.ready_queue import ReadyQueue
 
 from .protocol import ReadyQueueState, ReadyTask
 
 
 @final
-class InMemoryReadyQueue(ReadyQueueProtocol):
+class InMemoryReadyQueue(ReadyQueue):
     """In-memory ready queue implementation with serialization support.
 
     This implementation uses Python's queue.Queue internally and provides

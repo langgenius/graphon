@@ -4,7 +4,7 @@ from abc import abstractmethod
 from typing import Any, Protocol
 
 
-class ReadyQueueProtocol(Protocol):
+class ReadyQueue(Protocol):
     """Structural interface required from ready queue implementations.
 
     Implementations may be in-memory or persistence-backed, but they must

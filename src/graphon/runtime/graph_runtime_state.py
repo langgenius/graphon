@@ -14,7 +14,7 @@ from pydantic_core import to_jsonable_python
 
 from graphon.enums import NodeExecutionType, NodeState, NodeType
 from graphon.model_runtime.entities.llm_entities import LLMUsage
-from graphon.runtime.ready_queue import ReadyQueueProtocol
+from graphon.runtime.ready_queue import ReadyQueue
 from graphon.runtime.variable_pool import VariablePool
 
 if TYPE_CHECKING:
@@ -374,13 +374,13 @@ class _GraphRuntimeBindings:
         self,
         *,
         runtime_state: GraphRuntimeState,
-        ready_queue: ReadyQueueProtocol | None = None,
+        ready_queue: ReadyQueue | None = None,
         graph_execution: GraphExecutionProtocol | None = None,
         execution_context: AbstractContextManager[object] | None = None,
     ) -> None:
         self._runtime_state = runtime_state
         self.graph: GraphProtocol | Graph | None = None
-        self.ready_queue: ReadyQueueProtocol | None = ready_queue
+        self.ready_queue: ReadyQueue | None = ready_queue
         self.graph_execution: GraphExecutionProtocol | None = graph_execution
         self.execution_context: AbstractContextManager[object] = (
             execution_context if execution_context is not None else nullcontext(None)
@@ -411,7 +411,7 @@ class _GraphRuntimeBindings:
         _ = self.get_ready_queue()
         _ = self.get_graph_execution()
 
-    def get_ready_queue(self) -> ReadyQueueProtocol:
+    def get_ready_queue(self) -> ReadyQueue:
         if self.ready_queue is None:
             self.ready_queue = self._runtime_state.create_ready_queue()
         return self.ready_queue
@@ -478,7 +478,7 @@ class GraphRuntimeState:  # noqa: PLR0904
         llm_usage: LLMUsage | None = None,
         outputs: dict[str, object] | None = None,
         node_run_steps: int = 0,
-        ready_queue: ReadyQueueProtocol | None = None,
+        ready_queue: ReadyQueue | None = None,
         graph_execution: GraphExecutionProtocol | None = None,
         graph: GraphProtocol | Graph | None = None,
         execution_context: AbstractContextManager[object] | None = None,
@@ -506,7 +506,7 @@ class GraphRuntimeState:  # noqa: PLR0904
         return self._execution_data.variable_pool
 
     @property
-    def ready_queue(self) -> ReadyQueueProtocol:
+    def ready_queue(self) -> ReadyQueue:
         return self._bindings.get_ready_queue()
 
     @property
@@ -675,7 +675,7 @@ class GraphRuntimeState:  # noqa: PLR0904
     # ------------------------------------------------------------------
     # Builders
     # ------------------------------------------------------------------
-    def create_ready_queue(self) -> ReadyQueueProtocol:
+    def create_ready_queue(self) -> ReadyQueue:
         """Create the ready queue collaborator used by this runtime state."""
         return self._build_ready_queue()
 
@@ -683,7 +683,7 @@ class GraphRuntimeState:  # noqa: PLR0904
         """Create the graph execution aggregate used by this runtime state."""
         return self._build_graph_execution()
 
-    def _build_ready_queue(self) -> ReadyQueueProtocol:
+    def _build_ready_queue(self) -> ReadyQueue:
         # Import lazily to avoid breaching architecture boundaries
         # enforced by import-linter.
         module = importlib.import_module("graphon.graph_engine.ready_queue")
