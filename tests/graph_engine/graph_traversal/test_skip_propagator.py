@@ -58,8 +58,14 @@ class TestSkipPropagator:
 
         propagator.propagate_skip_from_edge("edge_1")
 
-        mock_state_manager.enqueue_node.assert_called_once_with("node_2")
-        mock_state_manager.start_execution.assert_called_once_with("node_2")
+        mock_state_manager.enqueue_node.assert_called_once_with(
+            frame_id="root",
+            node_id="node_2",
+        )
+        mock_state_manager.start_execution.assert_called_once_with(
+            frame_id="root",
+            node_id="node_2",
+        )
         mock_state_manager.mark_node_skipped.assert_not_called()
 
     def test_propagate_skip_from_edge_with_all_skipped_propagates_to_node(self) -> None:

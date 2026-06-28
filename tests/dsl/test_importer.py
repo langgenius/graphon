@@ -249,8 +249,8 @@ def test_legacy_variable_assigner_remains_unsupported_by_default() -> None:
         "loop-end",
     ],
 )
-def test_container_nodes_remain_unsupported_by_default(node_type: str) -> None:
+def test_container_nodes_are_loadable_by_default(node_type: str) -> None:
     plan = inspect_dsl(_graph_dsl_for_node({"type": node_type}))
 
-    assert plan.load_status == LoadStatus.UNSUPPORTED
-    assert plan.load_reason == f"Unsupported node types: {node_type}"
+    assert plan.load_status == LoadStatus.LOADABLE
+    assert plan.load_reason is None

@@ -1,8 +1,20 @@
 """Serialized state models for GraphEngine ready queue implementations."""
 
 from collections.abc import Sequence
+from typing import Final
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+ROOT_FRAME_ID: Final = "root"
+
+
+class ReadyTask(BaseModel):
+    """A concrete interpreter task scheduled for execution."""
+
+    model_config = ConfigDict(frozen=True)
+
+    frame_id: str = Field(description="Execution frame that owns the task")
+    node_id: str = Field(description="Node to execute within the frame")
 
 
 class ReadyQueueState(BaseModel):
@@ -16,7 +28,7 @@ class ReadyQueueState(BaseModel):
         description="Queue implementation type (e.g., 'InMemoryReadyQueue')",
     )
     version: str = Field(description="Serialization format version")
-    items: Sequence[str] = Field(
+    items: Sequence[ReadyTask] = Field(
         default_factory=list,
-        description="List of node IDs in the queue",
+        description="List of ready tasks in the queue",
     )

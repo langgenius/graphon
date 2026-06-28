@@ -12,15 +12,3 @@ class InvalidIteratorValueError(IterationNodeError):
 
 class StartNodeIdNotFoundError(IterationNodeError):
     """Raised when the start node ID is not found."""
-
-
-class IterationGraphNotFoundError(IterationNodeError):
-    """Raised when the iteration graph is not found."""
-
-
-class IterationIndexNotFoundError(IterationNodeError):
-    """Raised when the iteration index is not found."""
-
-
-class ChildGraphAbortedError(IterationNodeError):
-    """Raised when a child graph aborts and the container must stop immediately."""

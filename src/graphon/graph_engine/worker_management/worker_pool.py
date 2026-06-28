@@ -11,8 +11,9 @@ from contextlib import AbstractContextManager
 from typing import final
 
 from graphon.graph.graph import Graph
-from graphon.graph_events.base import GraphNodeEventBase
-from graphon.runtime.ready_queue import ReadyQueueProtocol
+from graphon.graph_engine.entities.tasks import TaskEvent
+from graphon.graph_engine.frames import FrameRegistry
+from graphon.graph_engine.ready_queue import ReadyQueue
 
 from ..config import GraphEngineConfig
 from ..layers.base import GraphEngineLayer
@@ -33,9 +34,10 @@ class WorkerPool:
 
     def __init__(
         self,
-        ready_queue: ReadyQueueProtocol,
-        event_queue: queue.Queue[GraphNodeEventBase],
+        ready_queue: ReadyQueue,
+        event_queue: queue.Queue[TaskEvent],
         graph: Graph,
+        frame_registry: FrameRegistry,
         layers: list[GraphEngineLayer],
         config: GraphEngineConfig,
         execution_context: AbstractContextManager[object] | None = None,
@@ -46,6 +48,7 @@ class WorkerPool:
             ready_queue: Ready queue protocol for nodes ready for execution
             event_queue: Queue for worker events
             graph: The workflow graph
+            frame_registry: Registry containing frame-local graphs to execute
             layers: Graph engine layers for node execution hooks
             config: GraphEngine worker pool configuration
             execution_context: Optional execution context for context preservation
@@ -54,6 +57,7 @@ class WorkerPool:
         self._ready_queue = ready_queue
         self._event_queue = event_queue
         self._graph = graph
+        self._frame_registry = frame_registry
         self._execution_context = execution_context
         self._layers = layers
         self._config = config
@@ -135,7 +139,7 @@ class WorkerPool:
         worker = Worker(
             ready_queue=self._ready_queue,
             event_queue=self._event_queue,
-            graph=self._graph,
+            frame_registry=self._frame_registry,
             layers=self._layers,
             worker_id=worker_id,
             execution_context=self._execution_context,
