@@ -13,9 +13,11 @@ from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, datetime
 from typing import final, override
 
-from graphon.enums import WorkflowNodeExecutionStatus
-from graphon.graph.graph import Graph
+from graphon.enums import NodeExecutionType, WorkflowNodeExecutionStatus
+from graphon.graph_engine.entities.tasks import TaskEvent
+from graphon.graph_engine.frames import FrameRegistry
 from graphon.graph_engine.layers.base import GraphEngineLayer
+from graphon.graph_engine.ready_queue import ReadyQueue
 from graphon.graph_events.base import GraphNodeEventBase
 from graphon.graph_events.node import (
     NodeRunFailedEvent,
@@ -24,7 +26,6 @@ from graphon.graph_events.node import (
 )
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.node import Node
-from graphon.runtime.ready_queue import ReadyQueueProtocol
 
 logger = logging.getLogger(__name__)
 WORKER_IDLE_THRESHOLD_SECONDS = 0.2
@@ -41,9 +42,9 @@ class Worker(threading.Thread):
 
     def __init__(
         self,
-        ready_queue: ReadyQueueProtocol,
-        event_queue: queue.Queue[GraphNodeEventBase],
-        graph: Graph,
+        ready_queue: ReadyQueue,
+        event_queue: queue.Queue[TaskEvent],
+        frame_registry: FrameRegistry,
         layers: Sequence[GraphEngineLayer],
         worker_id: int = 0,
         execution_context: AbstractContextManager[object] | None = None,
@@ -52,8 +53,8 @@ class Worker(threading.Thread):
 
         Args:
             ready_queue: Ready queue containing node IDs ready for execution
-            event_queue: Queue for pushing execution events
-            graph: Graph containing nodes to execute
+            event_queue: Queue for pushing task-scoped execution events
+            frame_registry: Registry containing frame-local graphs to execute
             layers: Graph engine layers for node execution hooks
             worker_id: Unique identifier for this worker
             execution_context: Optional execution context for context preservation
@@ -62,7 +63,7 @@ class Worker(threading.Thread):
         super().__init__(name=f"GraphWorker-{worker_id}", daemon=True)
         self._ready_queue = ready_queue
         self._event_queue = event_queue
-        self._graph = graph
+        self._frame_registry = frame_registry
         self._worker_id = worker_id
         self._execution_context = execution_context
         self._stop_event = threading.Event()
@@ -100,32 +101,35 @@ class Worker(threading.Thread):
         while not self._stop_event.is_set():
             # Try to get a node ID from the ready queue (with timeout)
             try:
-                node_id = self._ready_queue.get(timeout=0.1)
+                task = self._ready_queue.get(timeout=0.1)
             except queue.Empty:
                 continue
 
             self._last_task_time = time.time()
-            node = self._graph.nodes[node_id]
+            node = self._frame_registry.get_node(task)
             try:
                 self._current_node_started_at = None
-                self._execute_node(node)
+                self._execute_node(frame_id=task.frame_id, node=node)
                 self._ready_queue.task_done()
             except Exception as e:
                 logger.exception(
                     "Worker failed while executing node %s",
-                    getattr(node, "id", node_id),
+                    node.id,
                 )
                 self._event_queue.put(
-                    self._build_fallback_failure_event(
-                        node,
-                        e,
-                        started_at=self._current_node_started_at,
-                    ),
+                    TaskEvent(
+                        frame_id=task.frame_id,
+                        event=self._build_fallback_failure_event(
+                            node,
+                            e,
+                            started_at=self._current_node_started_at,
+                        ),
+                    )
                 )
             finally:
                 self._current_node_started_at = None
 
-    def _execute_node(self, node: Node) -> None:
+    def _execute_node(self, *, frame_id: str, node: Node) -> None:
         """Execute a single node and handle its events.
 
         Args:
@@ -144,19 +148,48 @@ class Worker(threading.Thread):
         with context:
             self._invoke_node_run_start_hooks(node)
             try:
-                result_event = self._consume_node_events(node)
+                execution_type = node.execution_type
+                if execution_type == NodeExecutionType.CONTAINER:
+                    self._consume_container_start_event(
+                        frame_id=frame_id,
+                        node=node,
+                    )
+                else:
+                    result_event = self._consume_node_events(
+                        frame_id=frame_id,
+                        node=node,
+                    )
             except Exception as exc:
                 error = exc
                 raise
             finally:
                 self._invoke_node_run_end_hooks(node, error, result_event)
 
-    def _consume_node_events(self, node: Node) -> GraphNodeEventBase | None:
+    def _consume_container_start_event(self, *, frame_id: str, node: Node) -> None:
+        node_events = node.run()
+        try:
+            event = next(node_events)
+        finally:
+            node_events.close()
+
+        if not isinstance(event, NodeRunStartedEvent):
+            msg = f"Container node {node.id} did not emit a start event first."
+            raise TypeError(msg)
+        if event.id == node.execution_id:
+            self._current_node_started_at = event.start_at
+        self._event_queue.put(TaskEvent(frame_id=frame_id, event=event))
+
+    def _consume_node_events(
+        self,
+        *,
+        frame_id: str,
+        node: Node,
+    ) -> GraphNodeEventBase | None:
         result_event: GraphNodeEventBase | None = None
         for event in node.run():
             if isinstance(event, NodeRunStartedEvent) and event.id == node.execution_id:
                 self._current_node_started_at = event.start_at
-            self._event_queue.put(event)
+            self._event_queue.put(TaskEvent(frame_id=frame_id, event=event))
             if is_node_result_event(event):
                 result_event = event
         return result_event

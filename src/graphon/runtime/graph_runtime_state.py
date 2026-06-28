@@ -18,7 +18,6 @@ from graphon.runtime.ready_queue import ReadyQueueProtocol
 from graphon.runtime.variable_pool import VariablePool
 
 if TYPE_CHECKING:
-    from graphon.entities.graph_init_params import GraphInitParams
     from graphon.entities.pause_reason import PauseReason
     from graphon.graph.graph import Graph
 
@@ -70,8 +69,8 @@ class GraphExecutionProtocol(Protocol):
 
     @property
     @abstractmethod
-    def node_executions(self) -> Mapping[str, NodeExecutionProtocol]:
-        """Return the persisted node execution state keyed by node id."""
+    def node_executions(self) -> Mapping[Any, NodeExecutionProtocol]:
+        """Return the persisted node execution state keyed by ready task."""
         ...
 
     @abstractmethod
@@ -105,8 +104,13 @@ class GraphExecutionProtocol(Protocol):
         ...
 
     @abstractmethod
-    def get_or_create_node_execution(self, node_id: str) -> NodeExecutionProtocol:
-        """Return the execution entity for a node, creating it when needed."""
+    def get_or_create_node_execution(
+        self,
+        *,
+        frame_id: str,
+        node_id: str,
+    ) -> NodeExecutionProtocol:
+        """Return the execution entity for a task, creating it when needed."""
         ...
 
     @property
@@ -174,31 +178,6 @@ class GraphProtocol(Protocol):
 
     @abstractmethod
     def get_outgoing_edges(self, node_id: str) -> Sequence[EdgeProtocol]: ...
-
-
-class ChildGraphEngineBuilderProtocol(Protocol):
-    @abstractmethod
-    def build_child_engine(
-        self,
-        *,
-        workflow_id: str,
-        graph_init_params: GraphInitParams,
-        parent_graph_runtime_state: GraphRuntimeState,
-        root_node_id: str,
-        variable_pool: VariablePool | None = None,
-    ) -> Any: ...
-
-
-class ChildEngineError(ValueError):
-    """Base error type for child-engine creation failures."""
-
-
-class ChildEngineBuilderNotConfiguredError(ChildEngineError):
-    """Raised when child-engine creation is requested without a bound builder."""
-
-
-class ChildGraphNotFoundError(ChildEngineError):
-    """Raised when the requested child graph entry point cannot be resolved."""
 
 
 class _GraphStateSnapshot(BaseModel):
@@ -406,7 +385,6 @@ class _GraphRuntimeBindings:
         self.execution_context: AbstractContextManager[object] = (
             execution_context if execution_context is not None else nullcontext(None)
         )
-        self.child_engine_builder: ChildGraphEngineBuilderProtocol | None = None
 
     def attach_graph(
         self,
@@ -432,32 +410,6 @@ class _GraphRuntimeBindings:
 
         _ = self.get_ready_queue()
         _ = self.get_graph_execution()
-
-    def bind_child_engine_builder(
-        self,
-        builder: ChildGraphEngineBuilderProtocol,
-    ) -> None:
-        self.child_engine_builder = builder
-
-    def create_child_engine(
-        self,
-        *,
-        workflow_id: str,
-        graph_init_params: GraphInitParams,
-        root_node_id: str,
-        variable_pool: VariablePool | None = None,
-    ) -> Any:
-        if self.child_engine_builder is None:
-            msg = "Child engine builder is not configured."
-            raise ChildEngineBuilderNotConfiguredError(msg)
-
-        return self.child_engine_builder.build_child_engine(
-            workflow_id=workflow_id,
-            graph_init_params=graph_init_params,
-            parent_graph_runtime_state=self._runtime_state,
-            root_node_id=root_node_id,
-            variable_pool=variable_pool,
-        )
 
     def get_ready_queue(self) -> ReadyQueueProtocol:
         if self.ready_queue is None:
@@ -649,28 +601,6 @@ class GraphRuntimeState:  # noqa: PLR0904
     ) -> None:
         """Ensure core collaborators are initialized with the provided context."""
         self._bindings.configure(self._suspension_state, graph=graph)
-
-    def bind_child_engine_builder(
-        self,
-        builder: ChildGraphEngineBuilderProtocol,
-    ) -> None:
-        self._bindings.bind_child_engine_builder(builder)
-
-    def create_child_engine(
-        self,
-        *,
-        workflow_id: str,
-        graph_init_params: GraphInitParams,
-        root_node_id: str,
-        variable_pool: VariablePool | None = None,
-    ) -> Any:
-        """Create a child graph engine whose runtime state derives from this parent."""
-        return self._bindings.create_child_engine(
-            workflow_id=workflow_id,
-            graph_init_params=graph_init_params,
-            root_node_id=root_node_id,
-            variable_pool=variable_pool,
-        )
 
     def dumps(self) -> str:
         """Serialize runtime state into a JSON string."""

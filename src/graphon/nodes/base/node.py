@@ -512,7 +512,7 @@ class Node[NodeDataT: BaseNodeData](
         # but graphon itself should not know their module identities.
         # This prevents test helper subclasses from polluting the global registry and
         # accidentally overriding real node types (e.g., a test Answer node).
-        module_name = getattr(cls, "__module__", "")
+        module_name = cls.__module__
         # Only register concrete subclasses that define node_type and version()
         node_type = cls.node_type
         version = cls.version()
@@ -551,10 +551,7 @@ class Node[NodeDataT: BaseNodeData](
                       or not a BaseNodeData subtype).
 
         """
-        # __orig_bases__ contains the original generic bases before type erasure.
-        # For `class CodeNode(Node[CodeNodeData])`, this would be
-        # `(Node[CodeNodeData],)`.
-        for base in getattr(cls, "__orig_bases__", ()):
+        for base in cls.__orig_bases__:
             origin = get_origin(base)  # Returns `Node` for `Node[CodeNodeData]`
             if origin is Node:
                 args = get_args(
@@ -595,6 +592,7 @@ class Node[NodeDataT: BaseNodeData](
     # Global registry populated via __init_subclass__
     _registry: ClassVar[dict[NodeType, dict[str, type[Node]]]] = {}
     _registry_version: ClassVar[int] = 0
+    __orig_bases__: ClassVar[tuple[object, ...]] = ()
 
     def __init__(
         self,
@@ -626,15 +624,13 @@ class Node[NodeDataT: BaseNodeData](
         self.post_init()
 
     def _restore_execution_id_from_runtime_state(self) -> str | None:
-        graph_execution = self.graph_runtime_state.graph_execution
-        try:
-            node_executions = graph_execution.node_executions
-        except AttributeError:
-            return None
-        if not isinstance(node_executions, dict):
-            return None
-        node_execution = node_executions.get(self._node_id)
-        if node_execution is None:
+        node_executions = self.graph_runtime_state.graph_execution.node_executions
+        for task, candidate in node_executions.items():
+            if task.frame_id != "root" or task.node_id != self._node_id:
+                continue
+            node_execution = candidate
+            break
+        else:
             return None
         execution_id = node_execution.execution_id
         if not execution_id:

@@ -9,6 +9,7 @@ import pytest
 from graphon.enums import BuiltinNodeTypes
 from graphon.file.enums import FileTransferMethod, FileType
 from graphon.file.models import File
+from graphon.graph_engine.ready_queue import ReadyTask
 from graphon.graph_events.node import NodeRunFailedEvent, NodeRunSucceededEvent
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.node_events.node import StreamChunkEvent, StreamCompletedEvent
@@ -163,7 +164,10 @@ def _build_run_tool_node(
             Any,
             MagicMock(
                 node_executions={
-                    "node-1": MagicMock(execution_id="execution-from-runtime-state"),
+                    ReadyTask(
+                        frame_id="root",
+                        node_id="node-1",
+                    ): MagicMock(execution_id="execution-from-runtime-state"),
                 },
             ),
         ),
