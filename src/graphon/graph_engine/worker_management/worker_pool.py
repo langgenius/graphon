@@ -11,9 +11,11 @@ from contextlib import AbstractContextManager
 from typing import final
 
 from graphon.graph.graph import Graph
+from graphon.graph_engine.container_execution import ContainerExecution
 from graphon.graph_engine.entities.tasks import TaskEvent
 from graphon.graph_engine.frames import FrameRegistry
 from graphon.graph_engine.ready_queue import ReadyQueue
+from graphon.graph_engine.suspended_invocations import SuspendedInvocationStore
 
 from ..config import GraphEngineConfig
 from ..layers.base import GraphEngineLayer
@@ -40,6 +42,7 @@ class WorkerPool:
         frame_registry: FrameRegistry,
         layers: list[GraphEngineLayer],
         config: GraphEngineConfig,
+        container_execution: ContainerExecution,
         execution_context: AbstractContextManager[object] | None = None,
     ) -> None:
         """Initialize the simple worker pool.
@@ -51,6 +54,7 @@ class WorkerPool:
             frame_registry: Registry containing frame-local graphs to execute
             layers: Graph engine layers for node execution hooks
             config: GraphEngine worker pool configuration
+            container_execution: Engine-owned container frame coordinator
             execution_context: Optional execution context for context preservation
 
         """
@@ -69,6 +73,8 @@ class WorkerPool:
         self._running = False
 
         # No longer tracking worker states with callbacks to avoid lock contention
+        self._suspended_invocations = SuspendedInvocationStore()
+        self._container_execution = container_execution
 
     def start(self, initial_count: int | None = None) -> None:
         """Start the worker pool.
@@ -143,6 +149,8 @@ class WorkerPool:
             layers=self._layers,
             worker_id=worker_id,
             execution_context=self._execution_context,
+            suspended_invocations=self._suspended_invocations,
+            container_execution=self._container_execution,
         )
 
         worker.start()

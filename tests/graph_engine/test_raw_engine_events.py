@@ -7,6 +7,7 @@ import pytest
 
 from graphon import graph_events, node_events
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType
+from graphon.graph_engine.container_execution import ContainerExecution
 from graphon.graph_engine.entities.tasks import TaskEvent
 from graphon.graph_engine.event_management.event_handlers import EventHandler
 from graphon.graph_engine.frames import ExecutionFrame, FrameRegistry
@@ -45,9 +46,26 @@ def _root_frame(
     return frame_registry
 
 
+def _event_handler(
+    *,
+    graph_execution: object,
+    event_collector: object,
+    frame_registry: FrameRegistry,
+) -> EventHandler:
+    return EventHandler(
+        graph_execution=cast(Any, graph_execution),
+        event_collector=cast(Any, event_collector),
+        frame_registry=frame_registry,
+        container_execution=ContainerExecution(
+            frame_registry=frame_registry,
+            graph_execution=cast(Any, graph_execution),
+        ),
+    )
+
+
 def test_event_handler_collects_raw_stream_chunk_without_coordinator() -> None:
     event_collector = MagicMock()
-    handler = EventHandler(
+    handler = _event_handler(
         graph_execution=cast(Any, MagicMock()),
         event_collector=cast(Any, event_collector),
         frame_registry=_root_frame(
@@ -78,7 +96,7 @@ def test_event_handler_collects_reasoning_chunk_without_warning(
     # Reasoning chunks must hit the registered collect-only group, not the
     # default fallback that warns once per chunk.
     event_collector = MagicMock()
-    handler = EventHandler(
+    handler = _event_handler(
         graph_execution=cast(Any, MagicMock()),
         event_collector=cast(Any, event_collector),
         frame_registry=_root_frame(
@@ -129,7 +147,7 @@ def test_event_handler_collects_traversal_events_before_node_success() -> None:
     edge_processor = MagicMock()
     edge_processor.process_node_success.return_value = ([], [edge_event])
     state_manager = MagicMock()
-    handler = EventHandler(
+    handler = _event_handler(
         graph_execution=cast(Any, graph_execution),
         event_collector=cast(Any, event_collector),
         frame_registry=_root_frame(

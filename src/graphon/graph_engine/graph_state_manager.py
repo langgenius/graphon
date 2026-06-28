@@ -8,7 +8,7 @@ from graphon.enums import NodeState
 from graphon.graph.edge import Edge
 from graphon.graph.graph import Graph
 
-from .ready_queue import ReadyQueue, ReadyTask
+from .ready_queue import ReadyQueue, StartTask
 
 
 class EdgeStateAnalysis(TypedDict):
@@ -34,7 +34,7 @@ class GraphStateManager:
         self._lock = threading.RLock()
 
         # Execution tracking state
-        self._executing_tasks: set[ReadyTask] = set()
+        self._executing_tasks: set[StartTask] = set()
 
     # ============= Node State Operations =============
 
@@ -51,7 +51,7 @@ class GraphStateManager:
         """
         with self._lock:
             self._graph.nodes[node_id].state = NodeState.TAKEN
-            self._ready_queue.put(ReadyTask(frame_id=frame_id, node_id=node_id))
+            self._ready_queue.put(StartTask(frame_id=frame_id, node_id=node_id))
 
     def mark_node_skipped(self, node_id: str) -> None:
         """Mark a node as SKIPPED.
@@ -199,7 +199,7 @@ class GraphStateManager:
 
         """
         with self._lock:
-            self._executing_tasks.add(ReadyTask(frame_id=frame_id, node_id=node_id))
+            self._executing_tasks.add(StartTask(frame_id=frame_id, node_id=node_id))
 
     def finish_execution(self, *, frame_id: str, node_id: str) -> None:
         """Mark a task as no longer executing.
@@ -210,7 +210,7 @@ class GraphStateManager:
 
         """
         with self._lock:
-            self._executing_tasks.discard(ReadyTask(frame_id=frame_id, node_id=node_id))
+            self._executing_tasks.discard(StartTask(frame_id=frame_id, node_id=node_id))
 
     def is_executing(self, *, frame_id: str, node_id: str) -> bool:
         """Check if a task is currently executing.
@@ -225,7 +225,7 @@ class GraphStateManager:
         """
         with self._lock:
             return (
-                ReadyTask(frame_id=frame_id, node_id=node_id) in self._executing_tasks
+                StartTask(frame_id=frame_id, node_id=node_id) in self._executing_tasks
             )
 
     def get_executing_count(self) -> int:
@@ -240,7 +240,7 @@ class GraphStateManager:
         with self._lock:
             return len(self._executing_tasks)
 
-    def get_executing_nodes(self) -> set[ReadyTask]:
+    def get_executing_nodes(self) -> set[StartTask]:
         """Get a copy of the set of executing tasks.
 
         Returns:

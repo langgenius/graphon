@@ -9,7 +9,11 @@ import pytest
 from graphon.enums import BuiltinNodeTypes
 from graphon.file.enums import FileTransferMethod, FileType
 from graphon.file.models import File
-from graphon.graph_events.node import NodeRunFailedEvent, NodeRunSucceededEvent
+from graphon.graph_events.node import (
+    NodeRunFailedEvent,
+    NodeRunStartedEvent,
+    NodeRunSucceededEvent,
+)
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.node_events.node import StreamChunkEvent, StreamCompletedEvent
 from graphon.nodes.tool.entities import ToolNodeData, ToolProviderType
@@ -430,6 +434,7 @@ def test_run_passes_variable_pool_and_bound_execution_id_to_runtime(
         "node_execution_id": "bound-execution",
     }
     assert node.execution_id == "bound-execution"
+    assert isinstance(events[0], NodeRunStartedEvent)
     assert events[0].id == "bound-execution"
     assert isinstance(events[-1], NodeRunSucceededEvent)
 

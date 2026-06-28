@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from graphon.entities.pause_reason import PauseReason
 from graphon.enums import NodeState
-from graphon.graph_engine.ready_queue import ReadyTask
+from graphon.graph_engine.ready_queue import StartTask
 
 from .node_execution import NodeExecution
 
@@ -114,8 +114,8 @@ class GraphExecution:
     paused: bool = False
     pause_reasons: list[PauseReason] = field(default_factory=list)
     error: Exception | None = None
-    node_executions: dict[ReadyTask, NodeExecution] = field(
-        default_factory=dict[ReadyTask, NodeExecution],
+    node_executions: dict[StartTask, NodeExecution] = field(
+        default_factory=dict[StartTask, NodeExecution],
     )
     exceptions_count: int = 0
 
@@ -161,7 +161,7 @@ class GraphExecution:
         self, *, frame_id: str, node_id: str
     ) -> NodeExecution:
         """Get or create a node execution entity."""
-        task = ReadyTask(frame_id=frame_id, node_id=node_id)
+        task = StartTask(frame_id=frame_id, node_id=node_id)
         if task not in self.node_executions:
             self.node_executions[task] = NodeExecution(
                 node_id=node_id,
@@ -248,7 +248,7 @@ class GraphExecution:
         self.error = _deserialize_error(state.error)
         self.exceptions_count = state.exceptions_count
         self.node_executions = {
-            ReadyTask(frame_id=item.frame_id, node_id=item.node_id): NodeExecution(
+            StartTask(frame_id=item.frame_id, node_id=item.node_id): NodeExecution(
                 node_id=item.node_id,
                 state=item.state,
                 retry_count=item.retry_count,

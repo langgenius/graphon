@@ -7,7 +7,7 @@ from collections.abc import Generator, Mapping, Sequence
 from datetime import UTC, datetime
 from functools import singledispatchmethod
 from types import MappingProxyType
-from typing import Any, ClassVar, assert_never, get_args, get_origin
+from typing import Any, ClassVar, assert_never, cast, get_args, get_origin
 
 from graphon.entities.base_node_data import BaseNodeData, RetryConfig
 from graphon.entities.graph_config import NodeConfigDict, NodeConfigDictAdapter
@@ -74,9 +74,19 @@ from graphon.node_events.node import (
     StreamReasoningEvent,
     VariableUpdatedEvent,
 )
+from graphon.nodes.container_effects import ContainerAwaitRequest, ContainerRunResult
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
 _MISSING_RUN_CONTEXT_VALUE = object()
+_MISSING_SEND_VALUE = object()
+
+NodeRunEventGenerator = Generator[NodeEventBase | GraphNodeEventBase, None, None]
+ContainerRunEventGenerator = Generator[
+    NodeEventBase | GraphNodeEventBase | ContainerAwaitRequest,
+    ContainerRunResult,
+    None,
+]
+NodeRunOutcome = NodeRunResult | NodeRunEventGenerator | ContainerRunEventGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -616,11 +626,17 @@ class Node[NodeDataT: BaseNodeData](
     @abstractmethod
     def _run(
         self,
-    ) -> NodeRunResult | Generator[NodeEventBase | GraphNodeEventBase, None, None]:
+    ) -> NodeRunOutcome:
         """Run the node and return either a result object or an event stream."""
         raise NotImplementedError
 
-    def run(self) -> Generator[GraphNodeEventBase, None, None]:
+    def run(
+        self,
+    ) -> Generator[
+        GraphNodeEventBase | ContainerAwaitRequest,
+        ContainerRunResult,
+        None,
+    ]:
         execution_id = self.execution_id
         if not execution_id:
             msg = "node execution_id must be bound before run"
@@ -652,19 +668,36 @@ class Node[NodeDataT: BaseNodeData](
             logger.exception("Node %s failed to run", self._node_id)
             yield self._build_run_failed_event(e)
 
-    def _run_events(self) -> Generator[GraphNodeEventBase, None, None]:
+    def _run_events(
+        self,
+    ) -> Generator[
+        GraphNodeEventBase | ContainerAwaitRequest,
+        ContainerRunResult,
+        None,
+    ]:
         result = self._run()
         if isinstance(result, NodeRunResult):
             yield self._convert_node_run_result_to_graph_node_event(result)
             return
 
-        for event in result:
-            yield self._normalize_run_event(event)
+        send_value: object = _MISSING_SEND_VALUE
+        while True:
+            try:
+                event = (
+                    next(result)
+                    if send_value is _MISSING_SEND_VALUE
+                    else result.send(cast(Any, send_value))
+                )
+            except StopIteration:
+                return
+            send_value = yield self._normalize_run_event(event)
 
     def _normalize_run_event(
         self,
-        event: NodeEventBase | GraphNodeEventBase,
-    ) -> GraphNodeEventBase:
+        event: NodeEventBase | GraphNodeEventBase | ContainerAwaitRequest,
+    ) -> GraphNodeEventBase | ContainerAwaitRequest:
+        if isinstance(event, ContainerAwaitRequest):
+            return event
         if isinstance(event, NodeEventBase):
             return self._dispatch(event)
         if not event.in_iteration_id and not event.in_loop_id:
