@@ -1,5 +1,5 @@
 import queue
-from collections.abc import Generator
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -2243,7 +2243,7 @@ def test_iteration_frame_completion_updates_run_while_parent_resume_claimed() ->
         node_id="iteration-start",
     )
 
-    assert runtime_state.claim_container_run("iteration-invocation")
+    claimed_run = runtime_state.claim_container_run("iteration-invocation")
     sibling_frame = frame_registry.get("iteration-run:iteration:1")
     sibling_frame.graph_runtime_state.variable_pool.add(["answer", "text"], "second")
     sibling_frame.state_manager.finish_execution(
@@ -2259,6 +2259,25 @@ def test_iteration_frame_completion_updates_run_while_parent_resume_claimed() ->
     resume_task = _get_resume_task(ready_queue)
     assert isinstance(resume_task.result, IterationFramesRequested)
     assert resume_task.result.indexes == (2,)
+    runtime_state.update_container_run_phase_data(
+        "iteration-invocation",
+        {
+            "inputs": dict(
+                cast(Mapping[str, object], claimed_run.phase_data["inputs"]),
+            ),
+            "items": claimed_run.phase_data["items"],
+            "root_node_id": claimed_run.phase_data["root_node_id"],
+            "output_selector": list(
+                cast(Sequence[str], claimed_run.phase_data["output_selector"]),
+            ),
+            "error_handle_mode": claimed_run.phase_data["error_handle_mode"],
+            "flatten_output": claimed_run.phase_data["flatten_output"],
+            "parallel_nums": claimed_run.phase_data["parallel_nums"],
+        },
+    )
+    run_state = runtime_state.get_container_run("iteration-invocation")
+    assert run_state.phase_data["completed_count"] == 1
+    assert run_state.phase_data["outputs"] == {"1": "second"}
     runtime_state.release_container_run_claim("iteration-invocation")
     runtime_state.pop_container_run("iteration-invocation")
 

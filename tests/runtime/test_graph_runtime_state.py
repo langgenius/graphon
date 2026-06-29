@@ -326,6 +326,43 @@ class TestGraphRuntimeState:  # noqa: PLR0904
         assert state.pop_container_frame("exec-loop:loop:1") == frame
         assert not state.has_container_frame("exec-loop:loop:1")
 
+    def test_update_container_run_phase_data_preserves_live_claimed_state(self) -> None:
+        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+        run = ContainerRunState(
+            invocation_id="invocation-1",
+            kind="iteration",
+            frame_id="root",
+            node_id="iteration",
+            execution_id="exec-iteration",
+            started_at=datetime.fromtimestamp(1, UTC).replace(tzinfo=None),
+            phase_data={
+                "inputs": {"iterator_selector": ["a", "b"]},
+                "outputs": {"1": "second"},
+                "completed_count": 1,
+                "resume_pending": True,
+            },
+        )
+        state.put_container_run(run)
+        state.claim_container_run("invocation-1")
+
+        updated = state.update_container_run_phase_data(
+            "invocation-1",
+            {
+                "inputs": {"iterator_selector": ["a", "b", "c"]},
+                "resume_pending": False,
+            },
+        )
+
+        assert updated.phase_data == {
+            "inputs": {"iterator_selector": ["a", "b", "c"]},
+            "outputs": {"1": "second"},
+            "completed_count": 1,
+            "resume_pending": False,
+        }
+        with pytest.raises(RuntimeError, match="already claimed"):
+            state.claim_container_run("invocation-1")
+        assert state.pop_container_run("invocation-1") == updated
+
     def test_graph_execution_lazy_instantiation(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
 

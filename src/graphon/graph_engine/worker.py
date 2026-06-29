@@ -307,18 +307,22 @@ class Worker(threading.Thread):
                 ).graph_runtime_state
                 phase_data = _container_phase_data(event)
                 if previous_phase_data:
-                    phase_data = {**dict(previous_phase_data), **phase_data}
-                root_runtime_state.put_container_run(
-                    ContainerRunState(
-                        invocation_id=invocation_id,
-                        kind=event.kind,
-                        frame_id=frame_id,
-                        node_id=node_id,
-                        execution_id=node.execution_id,
-                        started_at=started_at,
-                        phase_data=phase_data,
+                    root_runtime_state.update_container_run_phase_data(
+                        invocation_id,
+                        phase_data,
                     )
-                )
+                else:
+                    root_runtime_state.put_container_run(
+                        ContainerRunState(
+                            invocation_id=invocation_id,
+                            kind=event.kind,
+                            frame_id=frame_id,
+                            node_id=node_id,
+                            execution_id=node.execution_id,
+                            started_at=started_at,
+                            phase_data=phase_data,
+                        )
+                    )
                 self._container_handlers[event.kind].start_await(
                     frame_id=frame_id,
                     node_id=node_id,

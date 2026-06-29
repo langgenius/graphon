@@ -732,6 +732,19 @@ class GraphRuntimeState:  # noqa: PLR0904
         with self._container_state_lock:
             return self._suspension_state.container_runs[invocation_id]
 
+    def update_container_run_phase_data(
+        self,
+        invocation_id: str,
+        updates: Mapping[str, object],
+    ) -> ContainerRunState:
+        with self._container_state_lock:
+            run = self._suspension_state.container_runs[invocation_id]
+            updated_run = run.model_copy(
+                update={"phase_data": {**dict(run.phase_data), **dict(updates)}},
+            )
+            self._suspension_state.container_runs[invocation_id] = updated_run
+            return updated_run
+
     def claim_container_run(self, invocation_id: str) -> ContainerRunState:
         with self._container_state_lock:
             if invocation_id in self._suspension_state.container_run_claims:
