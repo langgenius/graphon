@@ -167,7 +167,7 @@ class Worker(threading.Thread):
             self._execute_node(task=task, node=node)
             return
         root_runtime_state = self._frame_registry.get(ROOT_FRAME_ID).graph_runtime_state
-        run_state = root_runtime_state.pop_container_run(task.invocation_id)
+        run_state = root_runtime_state.claim_container_run(task.invocation_id)
         self._current_frame_id = run_state.frame_id
         node = self._frame_registry.get(run_state.frame_id).graph.nodes[
             run_state.node_id
@@ -175,12 +175,20 @@ class Worker(threading.Thread):
         node.bind_execution_id(run_state.execution_id)
         self._current_node = node
         self._current_node_started_at = run_state.started_at
-        self._resume_node(
-            invocation_id=task.invocation_id,
-            run_state=run_state,
-            node=node,
-            result=task.result,
-        )
+        try:
+            suspended = self._resume_node(
+                invocation_id=task.invocation_id,
+                run_state=run_state,
+                node=node,
+                result=task.result,
+            )
+        except Exception:
+            root_runtime_state.pop_container_run(task.invocation_id)
+            raise
+        if suspended:
+            root_runtime_state.release_container_run_claim(task.invocation_id)
+            return
+        root_runtime_state.pop_container_run(task.invocation_id)
 
     def _execute_node(self, *, task: StartTask, node: Node) -> None:
         """Execute a single node and handle its events.
@@ -229,7 +237,7 @@ class Worker(threading.Thread):
         run_state: ContainerRunState,
         node: Node,
         result: ContainerRunResult,
-    ) -> None:
+    ) -> bool:
         context = self._execution_context
         if context is None:
             context = nullcontext()
@@ -253,7 +261,7 @@ class Worker(threading.Thread):
                 )
                 if isinstance(outcome, _Suspended):
                     suspended = True
-                    return
+                    return True
                 result_event = outcome
             except Exception as exc:
                 error = exc
@@ -265,6 +273,7 @@ class Worker(threading.Thread):
                         error,
                         result_event,
                     )
+        return False
 
     def _bind_node_execution_id(self, *, task: StartTask, node: Node) -> None:
         frame = self._frame_registry.get(task.frame_id)

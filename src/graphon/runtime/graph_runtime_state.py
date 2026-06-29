@@ -294,6 +294,8 @@ class _GraphRuntimeSuspensionState:
     deferred_nodes: set[str] = field(default_factory=set)
     container_runs: dict[str, ContainerRunState] = field(default_factory=dict)
     container_frames: dict[str, ContainerFrameState] = field(default_factory=dict)
+    # Active worker claims are in-flight only; snapshots are stable-boundary state.
+    container_run_claims: set[str] = field(default_factory=set)
     pending_graph_node_states: dict[str, NodeState] | None = None
     pending_graph_edge_states: dict[str, NodeState] | None = None
 
@@ -324,6 +326,7 @@ class _GraphRuntimeSuspensionState:
         self.deferred_nodes = set(snapshot.deferred_nodes)
         self.container_runs = dict(snapshot.container_runs)
         self.container_frames = dict(snapshot.container_frames)
+        self.container_run_claims = set()
         self.pending_graph_node_states = snapshot.graph_node_states or None
         self.pending_graph_edge_states = snapshot.graph_edge_states or None
 
@@ -729,8 +732,22 @@ class GraphRuntimeState:  # noqa: PLR0904
         with self._container_state_lock:
             return self._suspension_state.container_runs[invocation_id]
 
+    def claim_container_run(self, invocation_id: str) -> ContainerRunState:
+        with self._container_state_lock:
+            if invocation_id in self._suspension_state.container_run_claims:
+                msg = f"container run {invocation_id} is already claimed"
+                raise RuntimeError(msg)
+            run = self._suspension_state.container_runs[invocation_id]
+            self._suspension_state.container_run_claims.add(invocation_id)
+            return run
+
+    def release_container_run_claim(self, invocation_id: str) -> None:
+        with self._container_state_lock:
+            self._suspension_state.container_run_claims.discard(invocation_id)
+
     def pop_container_run(self, invocation_id: str) -> ContainerRunState:
         with self._container_state_lock:
+            self._suspension_state.container_run_claims.discard(invocation_id)
             return self._suspension_state.container_runs.pop(invocation_id)
 
     def put_container_frame(self, frame: ContainerFrameState) -> None:

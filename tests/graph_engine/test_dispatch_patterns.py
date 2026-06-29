@@ -2173,6 +2173,96 @@ def test_event_handler_limits_parallel_iteration_and_preserves_output_order() ->
     ]
 
 
+def test_iteration_frame_completion_updates_run_while_parent_resume_claimed() -> None:
+    graph_config = {
+        "nodes": [
+            {
+                "id": "iteration-start",
+                "data": {"type": BuiltinNodeTypes.ITERATION_START},
+            },
+        ],
+        "edges": [],
+    }
+    ready_queue = InMemoryReadyQueue()
+    variable_pool = VariablePool()
+    variable_pool.add(["source", "items"], ["a", "b", "c"])
+    graph_execution = GraphExecution(workflow_id="workflow")
+    runtime_state = GraphRuntimeState(
+        variable_pool=variable_pool,
+        start_at=1,
+        ready_queue=ready_queue,
+        graph_execution=graph_execution,
+    )
+    iteration_node = IterationNode.__new__(IterationNode)
+    iteration_node.init_node_identity("iteration")
+    iteration_node.init_node_data({
+        "type": "iteration",
+        "start_node_id": "iteration-start",
+        "iterator_selector": ["source", "items"],
+        "output_selector": ["answer", "text"],
+        "error_handle_mode": ErrorHandleMode.TERMINATED,
+        "is_parallel": True,
+        "parallel_nums": 2,
+    })
+    iteration_node.bind_execution_id("iteration-run")
+    iteration_node.graph_runtime_state = runtime_state
+    iteration_node.graph_config = graph_config
+    graph = SimpleNamespace(
+        nodes={"iteration": iteration_node},
+        graph_config=graph_config,
+        node_factory=_FrameFactory(),
+    )
+    frame_registry = FrameRegistry()
+    frame_registry.register(
+        _execution_frame(
+            frame_id="root",
+            graph=cast(Graph, graph),
+            graph_runtime_state=runtime_state,
+        ),
+    )
+    container_handler = IterationContainerHandler(
+        frame_registry=frame_registry,
+        graph_execution=graph_execution,
+    )
+    _start_iteration_await(
+        container_handler,
+        runtime_state,
+        invocation_id="iteration-invocation",
+        indexes=(0, 1),
+        items=("a", "b", "c"),
+        error_handle_mode=ErrorHandleMode.TERMINATED,
+        flatten_output=True,
+        parallel_nums=2,
+    )
+    assert ready_queue.get(timeout=0.01) == StartTask(
+        frame_id="iteration-run:iteration:0",
+        node_id="iteration-start",
+    )
+    assert ready_queue.get(timeout=0.01) == StartTask(
+        frame_id="iteration-run:iteration:1",
+        node_id="iteration-start",
+    )
+
+    assert runtime_state.claim_container_run("iteration-invocation")
+    sibling_frame = frame_registry.get("iteration-run:iteration:1")
+    sibling_frame.graph_runtime_state.variable_pool.add(["answer", "text"], "second")
+    sibling_frame.state_manager.finish_execution(
+        frame_id=sibling_frame.frame_id,
+        node_id="iteration-start",
+    )
+
+    assert container_handler.complete_frame(sibling_frame) is True
+
+    run_state = runtime_state.get_container_run("iteration-invocation")
+    assert run_state.phase_data["completed_count"] == 1
+    assert run_state.phase_data["outputs"] == {"1": "second"}
+    resume_task = _get_resume_task(ready_queue)
+    assert isinstance(resume_task.result, IterationFramesRequested)
+    assert resume_task.result.indexes == (2,)
+    runtime_state.release_container_run_claim("iteration-invocation")
+    runtime_state.pop_container_run("iteration-invocation")
+
+
 @pytest.mark.parametrize(
     ("limit_type", "expected_reason"),
     [

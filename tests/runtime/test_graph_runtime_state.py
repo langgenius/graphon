@@ -1,6 +1,5 @@
 import json
 from datetime import UTC, datetime
-from threading import Thread
 from time import time
 from unittest.mock import MagicMock
 
@@ -279,7 +278,7 @@ class TestGraphRuntimeState:  # noqa: PLR0904
         assert runs == {"invocation-1": run}
         assert frames == {"exec-loop:loop:1": frame}
 
-    def test_container_runtime_state_thread_safe_claims(self) -> None:
+    def test_container_run_claim_release_and_pop_semantics(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
         run = ContainerRunState(
             invocation_id="invocation-1",
@@ -306,24 +305,23 @@ class TestGraphRuntimeState:  # noqa: PLR0904
             ),
         )
         state.put_container_run(run)
+
+        assert state.claim_container_run("invocation-1") == run
+        assert state.get_container_run("invocation-1") == run
+        with pytest.raises(RuntimeError, match="already claimed"):
+            state.claim_container_run("invocation-1")
+        updated = run.model_copy(update={"phase_data": {"index": 2}})
+        state.put_container_run(updated)
+        with pytest.raises(RuntimeError, match="already claimed"):
+            state.claim_container_run("invocation-1")
+        state.release_container_run_claim("invocation-1")
+        assert state.claim_container_run("invocation-1") == updated
+        assert state.pop_container_run("invocation-1") == updated
+        with pytest.raises(KeyError):
+            state.get_container_run("invocation-1")
+        with pytest.raises(KeyError):
+            state.claim_container_run("invocation-1")
         state.put_container_frame(frame)
-        claimed: list[ContainerRunState] = []
-        misses: list[str] = []
-
-        def pop_run() -> None:
-            try:
-                claimed.append(state.pop_container_run("invocation-1"))
-            except KeyError:
-                misses.append("miss")
-
-        threads = [Thread(target=pop_run) for _ in range(8)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join()
-
-        assert claimed == [run]
-        assert len(misses) == 7
         assert state.has_container_frame("exec-loop:loop:1")
         assert state.pop_container_frame("exec-loop:loop:1") == frame
         assert not state.has_container_frame("exec-loop:loop:1")
