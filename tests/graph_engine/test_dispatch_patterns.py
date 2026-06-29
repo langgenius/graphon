@@ -74,7 +74,11 @@ from graphon.nodes.container_effects import (
 from graphon.nodes.iteration.entities import ErrorHandleMode
 from graphon.nodes.iteration.iteration_node import IterationNode
 from graphon.nodes.loop.loop_node import LoopNode
-from graphon.runtime.container_state import ContainerFrameState, ContainerRunState
+from graphon.runtime.container_state import (
+    ContainerFrameState,
+    ContainerRunState,
+    FrameRuntimeData,
+)
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import StringSegment
@@ -730,6 +734,65 @@ def test_frame_registry_materializes_child_frame_with_rebound_runtime() -> None:
     assert child_frame.graph is not root_graph
     assert child_frame.graph.nodes["start"] is not root_graph.nodes["start"]
     assert child_frame.graph.nodes["start"].graph_runtime_state is child_runtime_state
+
+
+def test_frame_registry_materializes_child_frame_from_state() -> None:
+    graph_config = {
+        "nodes": [
+            {"id": "start", "data": {"type": BuiltinNodeTypes.ITERATION_START}},
+        ],
+        "edges": [],
+    }
+    ready_queue = InMemoryReadyQueue()
+    graph_execution = GraphExecution(workflow_id="workflow")
+    root_runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=1,
+        ready_queue=ready_queue,
+        graph_execution=graph_execution,
+    )
+    root_graph = Graph.init(
+        graph_config=graph_config,
+        node_factory=cast(Any, _FrameFactory()),
+        root_node_id="start",
+    )
+    frame_registry = FrameRegistry()
+    frame_registry.register(
+        _execution_frame(
+            frame_id="root",
+            graph=root_graph,
+            graph_runtime_state=root_runtime_state,
+        ),
+    )
+    variable_pool = VariablePool()
+    variable_pool.add(["child", "value"], "saved")
+    frame_state = ContainerFrameState(
+        frame_id="child-frame",
+        kind="iteration",
+        parent_invocation_id="iteration-invocation",
+        root_node_id="start",
+        runtime_data=FrameRuntimeData(
+            variable_pool=variable_pool,
+            outputs={"answer": "saved"},
+            node_run_steps=2,
+            graph_node_states={"start": NodeState.TAKEN},
+        ),
+    )
+
+    child_frame = frame_registry.materialize_child_frame_from_state(
+        frame_state,
+        graph_execution=graph_execution,
+        ready_queue=ready_queue,
+    )
+
+    assert frame_registry.has("child-frame")
+    assert child_frame.frame_id == "child-frame"
+    assert _variable_value(child_frame.graph_runtime_state, ["child", "value"]) == (
+        "saved"
+    )
+    assert child_frame.graph_runtime_state.outputs == {"answer": "saved"}
+    assert child_frame.graph_runtime_state.node_run_steps == 2
+    assert child_frame.graph.nodes["start"].state == NodeState.TAKEN
 
 
 def test_worker_executes_node_from_ready_task() -> None:

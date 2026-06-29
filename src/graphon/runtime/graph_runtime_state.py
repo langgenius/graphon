@@ -777,6 +777,10 @@ class GraphRuntimeState:  # noqa: PLR0904
         with self._container_state_lock:
             return self._suspension_state.container_frames[frame_id]
 
+    def container_frames(self) -> tuple[ContainerFrameState, ...]:
+        with self._container_state_lock:
+            return tuple(self._suspension_state.container_frames.values())
+
     def pop_container_frame(self, frame_id: str) -> ContainerFrameState:
         with self._container_state_lock:
             return self._suspension_state.container_frames.pop(frame_id)

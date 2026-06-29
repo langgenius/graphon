@@ -8,7 +8,12 @@ from typing import Protocol, cast, final
 
 from graphon.graph.graph import Graph, NodeFactory
 from graphon.nodes.base.node import Node
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.container_state import ContainerFrameState
+from graphon.runtime.graph_runtime_state import (
+    GraphExecutionProtocol,
+    GraphRuntimeState,
+)
+from graphon.runtime.ready_queue import ReadyQueue
 
 from .error_handler import ErrorHandler
 from .graph_state_manager import GraphStateManager
@@ -45,6 +50,9 @@ class FrameRegistry:
 
     def get(self, frame_id: str) -> ExecutionFrame:
         return self._frames[frame_id]
+
+    def has(self, frame_id: str) -> bool:
+        return frame_id in self._frames
 
     def get_node(self, task: StartTask) -> Node:
         return self.get(task.frame_id).graph.nodes[task.node_id]
@@ -97,4 +105,36 @@ class FrameRegistry:
             error_handler=ErrorHandler(graph, graph_runtime_state.graph_execution),
         )
         self.register(frame)
+        return frame
+
+    def materialize_child_frame_from_state(
+        self,
+        frame_state: ContainerFrameState,
+        *,
+        graph_execution: GraphExecutionProtocol,
+        ready_queue: ReadyQueue,
+    ) -> ExecutionFrame:
+        runtime_data = frame_state.runtime_data
+        graph_runtime_state = GraphRuntimeState(
+            variable_pool=runtime_data.variable_pool,
+            start_at=0.0,
+            llm_usage=runtime_data.llm_usage,
+            outputs=dict(runtime_data.outputs),
+            node_run_steps=runtime_data.node_run_steps,
+            ready_queue=ready_queue,
+            graph_execution=graph_execution,
+        )
+        frame = self.materialize_child_frame(
+            frame_id=frame_state.frame_id,
+            root_node_id=frame_state.root_node_id,
+            graph_runtime_state=graph_runtime_state,
+        )
+        for node_id, state in runtime_data.graph_node_states.items():
+            node = frame.graph.nodes.get(node_id)
+            if node is not None:
+                node.state = state
+        for edge_id, state in runtime_data.graph_edge_states.items():
+            edge = frame.graph.edges.get(edge_id)
+            if edge is not None:
+                edge.state = state
         return frame

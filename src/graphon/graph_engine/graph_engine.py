@@ -381,6 +381,15 @@ class GraphEngine:
 
     def _start_execution(self, *, resume: bool = False) -> None:
         """Start execution subsystems."""
+        if resume:
+            for frame_state in self._graph_runtime_state.container_frames():
+                if not self._frame_registry.has(frame_state.frame_id):
+                    self._frame_registry.materialize_child_frame_from_state(
+                        frame_state,
+                        graph_execution=self._graph_execution,
+                        ready_queue=self._ready_queue,
+                    )
+
         # Start worker pool (it calculates initial workers internally)
         self._worker_pool.start()
 
