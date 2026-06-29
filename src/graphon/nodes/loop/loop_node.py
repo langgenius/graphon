@@ -64,7 +64,6 @@ class LoopNode(Node[LoopNodeData]):
             metadata={"loop_length": loop_count},
         )
         result = yield LoopFrameRequest(
-            kind="loop",
             started_at=started_at,
             inputs=inputs,
             loop_count=loop_count,
@@ -79,7 +78,6 @@ class LoopNode(Node[LoopNodeData]):
                 pre_loop_output=self.node_data.outputs,
             )
             result = yield LoopFrameRequest(
-                kind="loop",
                 started_at=started_at,
                 inputs=inputs,
                 loop_count=loop_count,
@@ -124,7 +122,6 @@ class LoopNode(Node[LoopNodeData]):
                 pre_loop_output=self.node_data.outputs,
             )
             yield LoopFrameRequest(
-                kind="loop",
                 started_at=self._start_at,
                 inputs=cast(Mapping[str, object], phase_data["inputs"]),
                 loop_count=cast(int, phase_data["loop_count"]),

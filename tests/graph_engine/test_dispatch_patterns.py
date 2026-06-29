@@ -163,7 +163,6 @@ def _start_loop_await(
         node_id="loop",
         invocation_id=invocation_id,
         request=LoopFrameRequest(
-            kind="loop",
             started_at=datetime.now(UTC).replace(tzinfo=None),
             inputs={"loop_count": loop_count},
             loop_count=loop_count,
@@ -190,7 +189,6 @@ def _start_iteration_await(
         node_id="iteration",
         invocation_id=invocation_id,
         request=IterationFrameRequest(
-            kind="iteration",
             started_at=datetime.now(UTC).replace(tzinfo=None),
             inputs={"iterator_selector": list(items)},
             items=items,
@@ -664,7 +662,6 @@ def test_worker_suspends_container_invocation_at_await_request() -> None:
             )
             self.await_was_reached = True
             _ = yield LoopFrameRequest(
-                kind="loop",
                 started_at=started_at,
                 inputs={"loop_count": 1},
                 loop_count=1,

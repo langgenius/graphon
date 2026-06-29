@@ -96,7 +96,6 @@ class IterationNode(Node[IterationNodeData]):
         for index in indexes:
             yield IterationNextEvent(index=index)
         result = yield IterationFrameRequest(
-            kind="iteration",
             started_at=started_at,
             inputs=inputs,
             items=tuple(iterator_value),
@@ -111,7 +110,6 @@ class IterationNode(Node[IterationNodeData]):
             for index in result.indexes:
                 yield IterationNextEvent(index=index)
             result = yield IterationFrameRequest(
-                kind="iteration",
                 started_at=started_at,
                 inputs=inputs,
                 items=tuple(iterator_value),
@@ -156,7 +154,6 @@ class IterationNode(Node[IterationNodeData]):
             for index in result.indexes:
                 yield IterationNextEvent(index=index)
             yield IterationFrameRequest(
-                kind="iteration",
                 started_at=self._start_at,
                 inputs=cast(Mapping[str, object], phase_data["inputs"]),
                 items=cast(tuple[object, ...], phase_data["items"]),

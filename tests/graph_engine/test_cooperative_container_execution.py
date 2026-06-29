@@ -47,11 +47,13 @@ from graphon.nodes.container_effects import (
     LoopFrameCompleted,
     LoopFrameRequest,
 )
-from graphon.nodes.iteration.entities import ErrorHandleMode
+from graphon.nodes.iteration.entities import ErrorHandleMode, IterationNodeData
 from graphon.nodes.iteration.iteration_node import IterationNode
+from graphon.nodes.loop.entities import LoopNodeData
 from graphon.nodes.loop.loop_node import LoopNode
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.runtime.variable_pool import VariablePool
+from tests.helpers import build_graph_init_params
 
 
 def _execution_frame(
@@ -162,33 +164,45 @@ def test_ready_queue_drain_notifies_waiting_bounded_queue_producers() -> None:
 
 
 def _loop_node() -> LoopNode:
-    node = LoopNode.__new__(LoopNode)
-    node.init_node_identity("loop")
-    node.init_node_data({
-        "type": "loop",
-        "title": "Loop",
-        "loop_count": 3,
-        "start_node_id": "loop-start",
-        "break_conditions": [],
-        "logical_operator": "and",
-        "outputs": {"total": 1},
-    })
+    node = LoopNode(
+        node_id="loop",
+        data=LoopNodeData.model_validate({
+            "type": "loop",
+            "title": "Loop",
+            "loop_count": 3,
+            "start_node_id": "loop-start",
+            "break_conditions": [],
+            "logical_operator": "and",
+            "outputs": {"total": 1},
+        }),
+        graph_init_params=build_graph_init_params(),
+        graph_runtime_state=GraphRuntimeState(
+            variable_pool=VariablePool(),
+            start_at=1,
+        ),
+    )
     node.bind_execution_id("loop-run")
     return node
 
 
 def _iteration_node() -> IterationNode:
-    node = IterationNode.__new__(IterationNode)
-    node.init_node_identity("iteration")
-    node.init_node_data({
-        "type": "iteration",
-        "title": "Iteration",
-        "start_node_id": "iteration-start",
-        "iterator_selector": ["source", "items"],
-        "output_selector": ["answer", "text"],
-        "error_handle_mode": ErrorHandleMode.TERMINATED,
-        "is_parallel": False,
-    })
+    node = IterationNode(
+        node_id="iteration",
+        data=IterationNodeData.model_validate({
+            "type": "iteration",
+            "title": "Iteration",
+            "start_node_id": "iteration-start",
+            "iterator_selector": ["source", "items"],
+            "output_selector": ["answer", "text"],
+            "error_handle_mode": ErrorHandleMode.TERMINATED,
+            "is_parallel": False,
+        }),
+        graph_init_params=build_graph_init_params(),
+        graph_runtime_state=GraphRuntimeState(
+            variable_pool=VariablePool(),
+            start_at=1,
+        ),
+    )
     node.bind_execution_id("iteration-run")
     return node
 
@@ -301,7 +315,6 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
                 start_at=started_at,
             )
             result = yield LoopFrameRequest(
-                kind="loop",
                 started_at=started_at,
                 inputs={"loop_count": 1},
                 loop_count=1,
@@ -416,7 +429,6 @@ def test_worker_reports_resume_failure_on_suspended_invocation_frame() -> None:
         None,
     ]:
         _ = yield LoopFrameRequest(
-            kind="loop",
             started_at=started_at,
             inputs={"loop_count": 1},
             loop_count=1,

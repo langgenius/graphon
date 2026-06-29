@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Literal
 
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class LoopFrameRequest:
-    kind: Literal["loop"]
+    kind: Literal["loop"] = field(default="loop", init=False)
     started_at: datetime
     inputs: Mapping[str, object]
     loop_count: int
@@ -27,7 +27,7 @@ class LoopFrameRequest:
 
 @dataclass(frozen=True, slots=True)
 class IterationFrameRequest:
-    kind: Literal["iteration"]
+    kind: Literal["iteration"] = field(default="iteration", init=False)
     started_at: datetime
     inputs: Mapping[str, object]
     items: tuple[object, ...]
