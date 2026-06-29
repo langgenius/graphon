@@ -49,6 +49,9 @@ class FrameRegistry:
     def register(self, frame: ExecutionFrame) -> None:
         self._frames[frame.frame_id] = frame
 
+    def unregister(self, frame_id: str) -> None:
+        self._frames.pop(frame_id, None)
+
     def get(self, frame_id: str) -> ExecutionFrame:
         return self._frames[frame_id]
 
@@ -142,6 +145,7 @@ class FrameRegistry:
                 f"rebuilt graph: missing node ids={missing_node_ids}, "
                 f"missing edge ids={missing_edge_ids}"
             )
+            self.unregister(frame_state.frame_id)
             raise RuntimeError(msg)
 
         for node_id, state in runtime_data.graph_node_states.items():

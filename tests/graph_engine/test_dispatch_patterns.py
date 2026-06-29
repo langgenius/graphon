@@ -841,6 +841,7 @@ def test_frame_registry_rejects_frame_state_with_missing_graph_state_ids() -> No
             graph_execution=graph_execution,
             ready_queue=ready_queue,
         )
+    assert not frame_registry.has("child-frame")
 
 
 def test_frame_registry_copies_frame_runtime_data_from_state() -> None:
