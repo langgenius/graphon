@@ -19,7 +19,6 @@ from graphon.enums import (
 )
 from graphon.graph.graph import Graph
 from graphon.graph_engine.command_channels.redis_channel import RedisChannel
-from graphon.graph_engine.container_execution import ContainerExecution
 from graphon.graph_engine.container_handlers import ContainerHandler
 from graphon.graph_engine.domain.graph_execution import GraphExecution
 from graphon.graph_engine.entities.commands import (
@@ -33,6 +32,7 @@ from graphon.graph_engine.event_management.event_handlers import EventHandler
 from graphon.graph_engine.event_management.event_manager import EventManager
 from graphon.graph_engine.frames import ExecutionFrame, FrameRegistry
 from graphon.graph_engine.graph_state_manager import GraphStateManager
+from graphon.graph_engine.iteration_container_handler import IterationContainerHandler
 from graphon.graph_engine.layers.execution_limits import (
     ExecutionLimitsLayer,
     LimitType,
@@ -69,7 +69,7 @@ from graphon.nodes.container_effects import (
 from graphon.nodes.iteration.entities import ErrorHandleMode
 from graphon.nodes.iteration.iteration_node import IterationNode
 from graphon.nodes.loop.loop_node import LoopNode
-from graphon.runtime.container_state import ContainerRunState
+from graphon.runtime.container_state import ContainerFrameState, ContainerRunState
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import StringSegment
@@ -160,7 +160,7 @@ def _container_handlers(
             frame_registry=frame_registry,
             graph_execution=cast(Any, graph_execution),
         ),
-        "iteration": ContainerExecution(
+        "iteration": IterationContainerHandler(
             frame_registry=frame_registry,
             graph_execution=cast(Any, graph_execution),
         ),
@@ -221,6 +221,7 @@ def _start_loop_await(
 
 def _start_iteration_await(
     container_handler: ContainerHandler,
+    runtime_state: GraphRuntimeState,
     *,
     invocation_id: str,
     indexes: tuple[int, ...],
@@ -229,21 +230,45 @@ def _start_iteration_await(
     flatten_output: bool,
     parallel_nums: int,
 ) -> None:
+    request = IterationFrameRequest(
+        started_at=datetime.now(UTC).replace(tzinfo=None),
+        inputs={"iterator_selector": list(items)},
+        items=items,
+        root_node_id="iteration-start",
+        indexes=indexes,
+        output_selector=["answer", "text"],
+        error_handle_mode=error_handle_mode,
+        flatten_output=flatten_output,
+        parallel_nums=parallel_nums,
+    )
+    phase_data = {
+        "inputs": dict(request.inputs),
+        "items": request.items,
+        "root_node_id": request.root_node_id,
+        "output_selector": list(request.output_selector),
+        "error_handle_mode": request.error_handle_mode,
+        "flatten_output": request.flatten_output,
+        "parallel_nums": request.parallel_nums,
+    }
+    with suppress(KeyError):
+        existing_run_state = runtime_state.get_container_run(invocation_id)
+        phase_data = {**dict(existing_run_state.phase_data), **phase_data}
+    runtime_state.put_container_run(
+        ContainerRunState(
+            invocation_id=invocation_id,
+            kind="iteration",
+            frame_id="root",
+            node_id="iteration",
+            execution_id="iteration-run",
+            started_at=request.started_at,
+            phase_data=phase_data,
+        ),
+    )
     container_handler.start_await(
         frame_id="root",
         node_id="iteration",
         invocation_id=invocation_id,
-        request=IterationFrameRequest(
-            started_at=datetime.now(UTC).replace(tzinfo=None),
-            inputs={"iterator_selector": list(items)},
-            items=items,
-            root_node_id="iteration-start",
-            indexes=indexes,
-            output_selector=["answer", "text"],
-            error_handle_mode=error_handle_mode,
-            flatten_output=flatten_output,
-            parallel_nums=parallel_nums,
-        ),
+        request=request,
     )
 
 
@@ -1362,7 +1387,7 @@ def test_event_handler_converts_loop_child_failure_to_loop_failure() -> None:
     assert graph_execution.has_error is False
 
 
-def test_container_execution_starts_iteration_frame_from_iteration_await() -> None:
+def test_iteration_container_handler_starts_frame_from_iteration_await() -> None:
     graph_config = {
         "nodes": [
             {
@@ -1408,13 +1433,14 @@ def test_container_execution_starts_iteration_frame_from_iteration_await() -> No
             graph_runtime_state=runtime_state,
         ),
     )
-    container_execution = ContainerExecution(
+    container_handler = IterationContainerHandler(
         frame_registry=frame_registry,
         graph_execution=graph_execution,
     )
 
     _start_iteration_await(
-        container_execution,
+        container_handler,
+        runtime_state,
         invocation_id="iteration-invocation",
         indexes=(0,),
         items=("a", "b"),
@@ -1442,6 +1468,12 @@ def test_container_execution_starts_iteration_frame_from_iteration_await() -> No
         )
         == "a"
     )
+    frame_state = runtime_state.get_container_frame("iteration-run:iteration:0")
+    assert isinstance(frame_state, ContainerFrameState)
+    assert frame_state.kind == "iteration"
+    assert frame_state.phase_data["index"] == 0
+    run_state = runtime_state.get_container_run("iteration-invocation")
+    assert run_state.phase_data["scheduled_count"] == 1
 
 
 def test_event_handler_suppresses_iteration_start_and_aggregates_success() -> None:  # noqa: PLR0914
@@ -1498,6 +1530,7 @@ def test_event_handler_suppresses_iteration_start_and_aggregates_success() -> No
     )
     _start_iteration_await(
         container_handlers["iteration"],
+        runtime_state,
         invocation_id="iteration-invocation",
         indexes=(0,),
         items=("a",),
@@ -1598,6 +1631,7 @@ def test_event_handler_runs_sequential_iteration_frames_in_order() -> None:  # n
     )
     _start_iteration_await(
         container_handlers["iteration"],
+        runtime_state,
         invocation_id="iteration-invocation",
         indexes=(0,),
         items=("a", "b"),
@@ -1629,6 +1663,7 @@ def test_event_handler_runs_sequential_iteration_frames_in_order() -> None:  # n
     assert resume_task.result.indexes == (1,)
     _start_iteration_await(
         container_handlers["iteration"],
+        runtime_state,
         invocation_id=resume_task.invocation_id,
         indexes=resume_task.result.indexes,
         items=("a", "b"),
@@ -1733,6 +1768,7 @@ def test_event_handler_preserves_nested_iteration_outputs_when_flatten_disabled(
     )
     _start_iteration_await(
         container_handlers["iteration"],
+        runtime_state,
         invocation_id="iteration-invocation",
         indexes=(0,),
         items=("a", "b"),
@@ -1762,6 +1798,7 @@ def test_event_handler_preserves_nested_iteration_outputs_when_flatten_disabled(
     assert isinstance(resume_task.result, IterationFramesRequested)
     _start_iteration_await(
         container_handlers["iteration"],
+        runtime_state,
         invocation_id=resume_task.invocation_id,
         indexes=resume_task.result.indexes,
         items=("a", "b"),
@@ -1918,6 +1955,7 @@ def test_event_handler_continues_iteration_after_child_frame_failure() -> None:
     )
     _start_iteration_await(
         container_handlers["iteration"],
+        runtime_state,
         invocation_id="iteration-invocation",
         indexes=(0,),
         items=("a", "b"),
@@ -1949,6 +1987,7 @@ def test_event_handler_continues_iteration_after_child_frame_failure() -> None:
     assert resume_task.result.indexes == (1,)
     _start_iteration_await(
         container_handlers["iteration"],
+        runtime_state,
         invocation_id=resume_task.invocation_id,
         indexes=resume_task.result.indexes,
         items=("a", "b"),
@@ -2040,6 +2079,7 @@ def test_event_handler_limits_parallel_iteration_and_preserves_output_order() ->
 
     _start_iteration_await(
         container_handlers["iteration"],
+        runtime_state,
         invocation_id="iteration-invocation",
         indexes=(0, 1),
         items=("a", "b", "c"),
@@ -2079,6 +2119,7 @@ def test_event_handler_limits_parallel_iteration_and_preserves_output_order() ->
     assert resume_task.result.indexes == (2,)
     _start_iteration_await(
         container_handlers["iteration"],
+        runtime_state,
         invocation_id=resume_task.invocation_id,
         indexes=resume_task.result.indexes,
         items=("a", "b", "c"),

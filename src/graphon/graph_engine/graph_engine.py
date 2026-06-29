@@ -39,7 +39,6 @@ from .command_processing import (
     UpdateVariablesCommandHandler,
 )
 from .config import GraphEngineConfig
-from .container_execution import ContainerExecution
 from .container_handlers import ContainerHandler
 from .entities.commands import AbortCommand, PauseCommand, UpdateVariablesCommand
 from .entities.tasks import TaskEvent
@@ -48,6 +47,7 @@ from .event_management import EventHandler, EventManager
 from .frames import ExecutionFrame, FrameRegistry
 from .graph_state_manager import GraphStateManager
 from .graph_traversal import EdgeProcessor, SkipPropagator
+from .iteration_container_handler import IterationContainerHandler
 from .layers.base import GraphEngineLayer
 from .loop_container_handler import LoopContainerHandler
 from .orchestration import Dispatcher, ExecutionCoordinator
@@ -214,7 +214,7 @@ class GraphEngine:
             frame_registry=self._frame_registry,
             graph_execution=self._graph_execution,
         )
-        self._iteration_container_handler = ContainerExecution(
+        self._iteration_container_handler = IterationContainerHandler(
             frame_registry=self._frame_registry,
             graph_execution=self._graph_execution,
         )

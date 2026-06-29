@@ -19,6 +19,7 @@ from graphon.graph_engine.domain.graph_execution import GraphExecution
 from graphon.graph_engine.entities.tasks import TaskEvent
 from graphon.graph_engine.frames import ExecutionFrame, FrameRegistry
 from graphon.graph_engine.graph_state_manager import GraphStateManager
+from graphon.graph_engine.iteration_container_handler import IterationContainerHandler
 from graphon.graph_engine.layers.base import GraphEngineLayer
 from graphon.graph_engine.loop_container_handler import LoopContainerHandler
 from graphon.graph_engine.ready_queue.in_memory import InMemoryReadyQueue
@@ -28,7 +29,10 @@ from graphon.graph_engine.ready_queue.protocol import (
 )
 from graphon.graph_engine.worker import Worker
 from graphon.graph_events.base import GraphEngineEvent, GraphNodeEventBase
-from graphon.graph_events.iteration import NodeRunIterationNextEvent
+from graphon.graph_events.iteration import (
+    NodeRunIterationNextEvent,
+    NodeRunIterationSucceededEvent,
+)
 from graphon.graph_events.loop import (
     NodeRunLoopNextEvent,
     NodeRunLoopSucceededEvent,
@@ -41,6 +45,7 @@ from graphon.graph_events.node import (
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.container_effects import (
     ContainerRunResult,
+    IterationExecutionSucceeded,
     IterationFrameRequest,
     IterationFramesRequested,
     LoopExecutionSucceeded,
@@ -586,6 +591,138 @@ def test_worker_resumes_terminal_loop_result_from_loop_handler() -> None:
     assert node_succeeded.event.id == "loop-run"
     with pytest.raises(KeyError):
         runtime_state.get_container_run("loop-invocation")
+
+
+def test_worker_resumes_terminal_iteration_result_from_iteration_handler() -> None:
+    graph_config = {
+        "nodes": [
+            {
+                "id": "iteration-start",
+                "data": {"type": BuiltinNodeTypes.ITERATION_START},
+            },
+        ],
+        "edges": [],
+    }
+    ready_queue = InMemoryReadyQueue()
+    event_queue = queue.Queue()
+    graph_execution = GraphExecution(workflow_id="workflow")
+    runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=1,
+        ready_queue=ready_queue,
+        graph_execution=graph_execution,
+    )
+    iteration_node = IterationNode.__new__(IterationNode)
+    iteration_node.init_node_identity("iteration")
+    iteration_node.init_node_data({
+        "type": "iteration",
+        "title": "Iteration",
+        "start_node_id": "iteration-start",
+        "iterator_selector": ["source", "items"],
+        "output_selector": ["answer", "text"],
+        "error_handle_mode": ErrorHandleMode.TERMINATED,
+        "is_parallel": False,
+    })
+    iteration_node.bind_execution_id("iteration-run")
+    iteration_node.graph_runtime_state = runtime_state
+    iteration_node.graph_config = graph_config
+    graph = SimpleNamespace(
+        nodes={"iteration": iteration_node},
+        graph_config=graph_config,
+        node_factory=_FrameFactory(),
+    )
+    frame_registry = FrameRegistry()
+    frame_registry.register(
+        _execution_frame(
+            frame_id="root",
+            graph=cast(Graph, graph),
+            graph_runtime_state=runtime_state,
+        ),
+    )
+    request = IterationFrameRequest(
+        started_at=datetime.now(UTC).replace(tzinfo=None),
+        inputs={"iterator_selector": ["a"]},
+        items=("a",),
+        root_node_id="iteration-start",
+        indexes=(0,),
+        output_selector=["answer", "text"],
+        error_handle_mode=ErrorHandleMode.TERMINATED,
+        flatten_output=True,
+        parallel_nums=1,
+    )
+    runtime_state.put_container_run(
+        ContainerRunState(
+            invocation_id="iteration-invocation",
+            kind="iteration",
+            frame_id="root",
+            node_id="iteration",
+            execution_id="iteration-run",
+            started_at=request.started_at,
+            phase_data={
+                "inputs": dict(request.inputs),
+                "items": request.items,
+                "root_node_id": request.root_node_id,
+                "output_selector": list(request.output_selector),
+                "error_handle_mode": request.error_handle_mode,
+                "flatten_output": request.flatten_output,
+                "parallel_nums": request.parallel_nums,
+            },
+        ),
+    )
+    iteration_handler = IterationContainerHandler(
+        frame_registry=frame_registry,
+        graph_execution=graph_execution,
+    )
+    iteration_handler.start_await(
+        frame_id="root",
+        node_id="iteration",
+        invocation_id="iteration-invocation",
+        request=request,
+    )
+    assert ready_queue.get(timeout=0.01) == StartTask(
+        frame_id="iteration-run:iteration:0",
+        node_id="iteration-start",
+    )
+    child_frame = frame_registry.get("iteration-run:iteration:0")
+    child_frame.graph_runtime_state.variable_pool.add(["answer", "text"], "ok")
+    child_frame.state_manager.finish_execution(
+        frame_id=child_frame.frame_id,
+        node_id="iteration-start",
+    )
+
+    assert iteration_handler.complete_frame(child_frame) is True
+    with pytest.raises(KeyError):
+        runtime_state.get_container_frame("iteration-run:iteration:0")
+    resume_task = ready_queue.get(timeout=0.01)
+    assert isinstance(resume_task, ResumeTask)
+    assert isinstance(resume_task.result, IterationExecutionSucceeded)
+    ready_queue.put(resume_task)
+
+    worker = Worker(
+        ready_queue=ready_queue,
+        event_queue=event_queue,
+        frame_registry=frame_registry,
+        layers=[],
+        container_handlers={"iteration": iteration_handler},
+    )
+    worker.start()
+    try:
+        iteration_succeeded = event_queue.get(timeout=1)
+        node_succeeded = event_queue.get(timeout=1)
+    finally:
+        worker.stop()
+        worker.join(timeout=1)
+
+    assert isinstance(iteration_succeeded, TaskEvent)
+    assert isinstance(iteration_succeeded.event, NodeRunIterationSucceededEvent)
+    assert iteration_succeeded.event.id == "iteration-run"
+    assert iteration_succeeded.event.outputs == {"output": ["ok"]}
+    assert isinstance(node_succeeded, TaskEvent)
+    assert isinstance(node_succeeded.event, NodeRunSucceededEvent)
+    assert node_succeeded.event.id == "iteration-run"
+    assert node_succeeded.event.node_run_result.outputs == {"output": ["ok"]}
+    with pytest.raises(KeyError):
+        runtime_state.get_container_run("iteration-invocation")
 
 
 def test_worker_reports_resume_failure_on_suspended_invocation_frame() -> None:
