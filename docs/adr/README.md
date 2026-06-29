@@ -8,3 +8,5 @@ For the canonical ADR policy and workflow, see
 ## ADRs
 
 - [ADR 0001: Adopt Architecture Decision Records](0001-adopt-architecture-decision-records.md)
+- [ADR 0002: Define HITL Interface Boundary](0002-define-hitl-interface-boundary.md)
+- [ADR 0003: Define LLM Polling Execution Model](0003-define-llm-polling-execution-model.md)
