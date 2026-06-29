@@ -2,6 +2,7 @@ import queue
 from collections.abc import Generator
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from threading import Event, Thread
 from time import time
 from types import SimpleNamespace
 from typing import Any, ClassVar, cast
@@ -245,6 +246,17 @@ class _FrameFactory:
             str(node_config["id"]),
             cast(BuiltinNodeTypes, node_data["type"]),
         )
+
+
+class _BlockingStateManager:
+    def __init__(self) -> None:
+        self.entered = Event()
+        self.release = Event()
+
+    def is_execution_complete(self) -> bool:
+        self.entered.set()
+        assert self.release.wait(timeout=1)
+        return False
 
 
 @pytest.mark.parametrize(
@@ -1309,6 +1321,126 @@ def test_container_execution_starts_iteration_frame_from_iteration_await() -> No
         )
         == "a"
     )
+
+
+def test_container_execution_serializes_worker_and_dispatcher_mutations() -> None:  # noqa: PLR0914, PLR0915
+    graph_config = {
+        "nodes": [
+            {"id": "loop-start", "data": {"type": BuiltinNodeTypes.LOOP_START}},
+            {
+                "id": "iteration-start",
+                "data": {"type": BuiltinNodeTypes.ITERATION_START},
+            },
+        ],
+        "edges": [],
+    }
+    ready_queue = InMemoryReadyQueue()
+    graph_execution = GraphExecution(workflow_id="workflow")
+    runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=1,
+        ready_queue=ready_queue,
+        graph_execution=graph_execution,
+    )
+    loop_node = LoopNode.__new__(LoopNode)
+    loop_node.init_node_identity("loop")
+    loop_node.init_node_data({
+        "type": "loop",
+        "loop_count": 1,
+        "start_node_id": "loop-start",
+        "break_conditions": [],
+        "logical_operator": "and",
+        "outputs": {},
+    })
+    loop_node.bind_execution_id("loop-run")
+    loop_node.graph_runtime_state = runtime_state
+    loop_node.graph_config = graph_config
+    iteration_node = IterationNode.__new__(IterationNode)
+    iteration_node.init_node_identity("iteration")
+    iteration_node.init_node_data({
+        "type": "iteration",
+        "start_node_id": "iteration-start",
+        "iterator_selector": ["source", "items"],
+        "output_selector": ["answer", "text"],
+        "error_handle_mode": ErrorHandleMode.TERMINATED,
+        "is_parallel": False,
+    })
+    iteration_node.bind_execution_id("iteration-run")
+    iteration_node.graph_runtime_state = runtime_state
+    iteration_node.graph_config = graph_config
+    graph = SimpleNamespace(
+        nodes={"loop": loop_node, "iteration": iteration_node},
+        graph_config=graph_config,
+        node_factory=_FrameFactory(),
+    )
+    frame_registry = FrameRegistry()
+    frame_registry.register(
+        _execution_frame(
+            frame_id="root",
+            graph=cast(Graph, graph),
+            graph_runtime_state=runtime_state,
+        ),
+    )
+    container_execution = ContainerExecution(
+        frame_registry=frame_registry,
+        graph_execution=graph_execution,
+    )
+    _start_iteration_await(
+        container_execution,
+        invocation_id="iteration-invocation",
+        indexes=(0,),
+        items=("a",),
+        error_handle_mode=ErrorHandleMode.TERMINATED,
+        flatten_output=True,
+        parallel_nums=1,
+    )
+    iteration_task = ready_queue.get(timeout=0.01)
+    assert isinstance(iteration_task, StartTask)
+
+    child_frame = frame_registry.get(iteration_task.frame_id)
+    blocking_state_manager = _BlockingStateManager()
+    blocking_frame = ExecutionFrame(
+        frame_id=child_frame.frame_id,
+        graph=child_frame.graph,
+        graph_runtime_state=child_frame.graph_runtime_state,
+        state_manager=cast(GraphStateManager, blocking_state_manager),
+        edge_processor=child_frame.edge_processor,
+        error_handler=child_frame.error_handler,
+    )
+    frame_registry.register(blocking_frame)
+    errors: list[BaseException] = []
+
+    def complete_frame() -> None:
+        try:
+            container_execution.complete_frame(blocking_frame)
+        except (AssertionError, KeyError, RuntimeError, TypeError) as exc:
+            errors.append(exc)
+
+    def start_loop() -> None:
+        try:
+            _start_loop_await(
+                container_execution,
+                invocation_id="loop-invocation",
+                index=0,
+                loop_count=1,
+            )
+        except (AssertionError, KeyError, RuntimeError, TypeError) as exc:
+            errors.append(exc)
+
+    complete_thread = Thread(target=complete_frame)
+    start_thread = Thread(target=start_loop)
+    complete_thread.start()
+    assert blocking_state_manager.entered.wait(timeout=1)
+    start_thread.start()
+    start_thread.join(timeout=0.05)
+    try:
+        assert start_thread.is_alive()
+    finally:
+        blocking_state_manager.release.set()
+        complete_thread.join(timeout=1)
+        start_thread.join(timeout=1)
+
+    assert errors == []
 
 
 def test_event_handler_suppresses_iteration_start_and_aggregates_success() -> None:  # noqa: PLR0914

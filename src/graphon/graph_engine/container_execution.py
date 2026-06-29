@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import threading
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -149,6 +150,8 @@ class ContainerExecution:
         self._iteration_runs: dict[str, _IterationRunContext] = {}
         self._iteration_frames: dict[str, _IterationFrameContext] = {}
         self._iteration_frame_failures: dict[str, str] = {}
+        # ponytail: one lock; split by run id if bookkeeping becomes contended.
+        self._lock = threading.RLock()
 
     def prepare_frame_event(
         self,
@@ -156,40 +159,46 @@ class ContainerExecution:
         frame: ExecutionFrame,
         event: GraphNodeEventBase,
     ) -> None:
-        loop_context = self._loop_frames.get(frame.frame_id)
-        if loop_context is not None:
-            run_context = self._loop_runs[loop_context.loop_execution_id]
-            event.in_loop_id = run_context.loop_node_id
-            loop_metadata = {
-                WorkflowNodeExecutionMetadataKey.LOOP_ID: run_context.loop_node_id,
-                WorkflowNodeExecutionMetadataKey.LOOP_INDEX: loop_context.loop_index,
+        with self._lock:
+            loop_context = self._loop_frames.get(frame.frame_id)
+            if loop_context is not None:
+                run_context = self._loop_runs[loop_context.loop_execution_id]
+                event.in_loop_id = run_context.loop_node_id
+                loop_metadata = {
+                    WorkflowNodeExecutionMetadataKey.LOOP_ID: run_context.loop_node_id,
+                    WorkflowNodeExecutionMetadataKey.LOOP_INDEX: (
+                        loop_context.loop_index
+                    ),
+                }
+                current_metadata = event.node_run_result.metadata
+                if WorkflowNodeExecutionMetadataKey.LOOP_ID not in current_metadata:
+                    event.node_run_result.metadata = {
+                        **current_metadata,
+                        **loop_metadata,
+                    }
+                if (
+                    isinstance(event, NodeRunSucceededEvent)
+                    and event.node_type == BuiltinNodeTypes.LOOP_END
+                ):
+                    self._loop_break_frames.add(frame.frame_id)
+                return
+
+            iteration_context = self._iteration_frames.get(frame.frame_id)
+            if iteration_context is None:
+                return
+            run_context = self._iteration_runs[iteration_context.iteration_execution_id]
+            event.in_iteration_id = run_context.iteration_node_id
+            iter_metadata = {
+                WorkflowNodeExecutionMetadataKey.ITERATION_ID: (
+                    run_context.iteration_node_id
+                ),
+                WorkflowNodeExecutionMetadataKey.ITERATION_INDEX: (
+                    iteration_context.iteration_index
+                ),
             }
             current_metadata = event.node_run_result.metadata
-            if WorkflowNodeExecutionMetadataKey.LOOP_ID not in current_metadata:
-                event.node_run_result.metadata = {**current_metadata, **loop_metadata}
-            if (
-                isinstance(event, NodeRunSucceededEvent)
-                and event.node_type == BuiltinNodeTypes.LOOP_END
-            ):
-                self._loop_break_frames.add(frame.frame_id)
-            return
-
-        iteration_context = self._iteration_frames.get(frame.frame_id)
-        if iteration_context is None:
-            return
-        run_context = self._iteration_runs[iteration_context.iteration_execution_id]
-        event.in_iteration_id = run_context.iteration_node_id
-        iter_metadata = {
-            WorkflowNodeExecutionMetadataKey.ITERATION_ID: (
-                run_context.iteration_node_id
-            ),
-            WorkflowNodeExecutionMetadataKey.ITERATION_INDEX: (
-                iteration_context.iteration_index
-            ),
-        }
-        current_metadata = event.node_run_result.metadata
-        if WorkflowNodeExecutionMetadataKey.ITERATION_ID not in current_metadata:
-            event.node_run_result.metadata = {**current_metadata, **iter_metadata}
+            if WorkflowNodeExecutionMetadataKey.ITERATION_ID not in current_metadata:
+                event.node_run_result.metadata = {**current_metadata, **iter_metadata}
 
     def should_collect(
         self,
@@ -197,11 +206,12 @@ class ContainerExecution:
         frame: ExecutionFrame,
         event: GraphNodeEventBase,
     ) -> bool:
-        if frame.frame_id not in self._loop_frames:
-            if frame.frame_id not in self._iteration_frames:
-                return True
-            return event.node_type != BuiltinNodeTypes.ITERATION_START
-        return event.node_type != BuiltinNodeTypes.LOOP_START
+        with self._lock:
+            if frame.frame_id not in self._loop_frames:
+                if frame.frame_id not in self._iteration_frames:
+                    return True
+                return event.node_type != BuiltinNodeTypes.ITERATION_START
+            return event.node_type != BuiltinNodeTypes.LOOP_START
 
     def start_container_await(
         self,
@@ -211,22 +221,23 @@ class ContainerExecution:
         invocation_id: str,
         request: ContainerAwaitRequest,
     ) -> None:
-        parent_frame = self._frame_registry.get(frame_id)
-        match request:
-            case LoopFrameRequest():
-                self._start_loop_request(
-                    parent_frame=parent_frame,
-                    node_id=node_id,
-                    invocation_id=invocation_id,
-                    request=request,
-                )
-            case IterationFrameRequest():
-                self._start_iteration_request(
-                    parent_frame=parent_frame,
-                    node_id=node_id,
-                    invocation_id=invocation_id,
-                    request=request,
-                )
+        with self._lock:
+            parent_frame = self._frame_registry.get(frame_id)
+            match request:
+                case LoopFrameRequest():
+                    self._start_loop_request(
+                        parent_frame=parent_frame,
+                        node_id=node_id,
+                        invocation_id=invocation_id,
+                        request=request,
+                    )
+                case IterationFrameRequest():
+                    self._start_iteration_request(
+                        parent_frame=parent_frame,
+                        node_id=node_id,
+                        invocation_id=invocation_id,
+                        request=request,
+                    )
 
     def record_frame_failure(
         self,
@@ -234,18 +245,20 @@ class ContainerExecution:
         frame: ExecutionFrame,
         event: NodeRunFailedEvent,
     ) -> bool:
-        if frame.frame_id in self._loop_frames:
-            self._loop_frame_failures[frame.frame_id] = event.error
-            return True
-        if frame.frame_id in self._iteration_frames:
-            self._iteration_frame_failures[frame.frame_id] = event.error
-            return True
-        return False
+        with self._lock:
+            if frame.frame_id in self._loop_frames:
+                self._loop_frame_failures[frame.frame_id] = event.error
+                return True
+            if frame.frame_id in self._iteration_frames:
+                self._iteration_frame_failures[frame.frame_id] = event.error
+                return True
+            return False
 
     def complete_frame(self, frame: ExecutionFrame) -> None:
-        if self._complete_iteration_frame(frame):
-            return
-        self._complete_loop_frame(frame)
+        with self._lock:
+            if self._complete_iteration_frame(frame):
+                return
+            self._complete_loop_frame(frame)
 
     def _start_loop_request(
         self,
