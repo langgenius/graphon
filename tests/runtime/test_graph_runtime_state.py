@@ -194,6 +194,14 @@ class TestGraphRuntimeState:
         assert restored.drain_deferred_ready_tasks() == [first, second]
         assert restored.drain_deferred_ready_tasks() == []
 
+    def test_legacy_deferred_nodes_round_trip_until_scheduler_migrates(self) -> None:
+        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+        state.register_deferred_node("legacy-node")
+
+        restored = GraphRuntimeState.from_snapshot(state.dumps())
+
+        assert restored.consume_deferred_nodes() == ["legacy-node"]
+
     def test_graph_execution_lazy_instantiation(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
 

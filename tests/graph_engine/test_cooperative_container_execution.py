@@ -1,6 +1,7 @@
 import queue
 from collections.abc import Generator
 from datetime import UTC, datetime
+from threading import Event, Thread
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -116,6 +117,33 @@ def test_ready_queue_drain_returns_items_and_empties_queue() -> None:
     restored = InMemoryReadyQueue()
     restored.loads(queue_.dumps())
     assert restored.empty()
+
+
+def test_ready_queue_drain_notifies_waiting_bounded_queue_producers() -> None:
+    queue_ = InMemoryReadyQueue(maxsize=1)
+    first = StartTask(frame_id="root", node_id="a")
+    second = StartTask(frame_id="child", node_id="b")
+    put_done = Event()
+    queue_.put(first)
+
+    def put_waiting() -> None:
+        queue_.put(second)
+        put_done.set()
+
+    producer = Thread(target=put_waiting, daemon=True)
+    producer.start()
+    assert not put_done.wait(0.01)
+
+    drained = queue_.drain()
+    unblocked = put_done.wait(1)
+    if not unblocked:
+        with queue_._queue.not_full:
+            queue_._queue.not_full.notify_all()
+    producer.join(timeout=1)
+
+    assert drained == [first]
+    assert unblocked
+    assert queue_.get(timeout=0.01) == second
 
 
 def test_worker_suspends_and_resumes_container_invocation() -> None:

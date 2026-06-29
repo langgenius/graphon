@@ -85,6 +85,8 @@ class InMemoryReadyQueue(ReadyQueue):
             while self._queue.queue:
                 items.append(self._queue.queue.popleft())
             self._queue.unfinished_tasks -= len(items)
+            if items:
+                self._queue.not_full.notify_all()
             if self._queue.unfinished_tasks == 0:
                 self._queue.all_tasks_done.notify_all()
         return items

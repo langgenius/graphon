@@ -201,6 +201,7 @@ class _GraphRuntimeStateSnapshot:
     ready_queue_dump: str | None
     graph_execution_dump: str | None
     paused_nodes: tuple[str, ...]
+    deferred_nodes: tuple[str, ...]
     deferred_ready_tasks_dump: str
     graph_node_states: dict[str, NodeState]
     graph_edge_states: dict[str, NodeState]
@@ -314,7 +315,7 @@ class _GraphRuntimeSuspensionState:
 
     def apply_snapshot(self, snapshot: _GraphRuntimeStateSnapshot) -> None:
         self.paused_nodes = set(snapshot.paused_nodes)
-        self.deferred_nodes = set()
+        self.deferred_nodes = set(snapshot.deferred_nodes)
         self.pending_graph_node_states = snapshot.graph_node_states or None
         self.pending_graph_edge_states = snapshot.graph_edge_states or None
 
@@ -624,6 +625,7 @@ class GraphRuntimeState:  # noqa: PLR0904
             "ready_queue": self.ready_queue.dumps(),
             "graph_execution": self.graph_execution.dumps(),
             "paused_nodes": list(self._suspension_state.paused_nodes),
+            "deferred_nodes": list(self._suspension_state.deferred_nodes),
             "deferred_ready_tasks": self._bindings.get_deferred_ready_queue().dumps(),
         }
 
@@ -781,6 +783,7 @@ class GraphRuntimeState:  # noqa: PLR0904
             ready_queue_dump=payload.get("ready_queue"),
             graph_execution_dump=payload.get("graph_execution"),
             paused_nodes=tuple(map(str, payload.get("paused_nodes", []))),
+            deferred_nodes=tuple(map(str, payload.get("deferred_nodes", []))),
             deferred_ready_tasks_dump=str(
                 payload.get(
                     "deferred_ready_tasks",
