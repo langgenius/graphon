@@ -36,9 +36,10 @@ from graphon.graph_events.node import (
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.runtime.graph_runtime_state import GraphExecutionProtocol
 
-from ..container_execution import ContainerExecution
+from ..container_handlers import ContainerHandler
 from ..entities.tasks import TaskEvent
 from ..frames import ExecutionFrame, FrameRegistry
+from ..ready_queue import ROOT_FRAME_ID
 from .event_manager import EventManager
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ class EventHandler:
         graph_execution: GraphExecutionProtocol,
         event_collector: EventManager,
         frame_registry: FrameRegistry,
-        container_execution: ContainerExecution,
+        container_handlers: Mapping[str, ContainerHandler],
     ) -> None:
         """Initialize the event handler registry.
 
@@ -65,13 +66,13 @@ class EventHandler:
             graph_execution: Graph execution aggregate
             event_collector: Event manager for collecting events
             frame_registry: Registry of frame-local execution collaborators
-            container_execution: Engine-owned container frame coordinator
+            container_handlers: Engine-owned container frame handlers by kind
 
         """
         self._graph_execution = graph_execution
         self._event_collector = event_collector
         self._frame_registry = frame_registry
-        self._container_execution = container_execution
+        self._container_handlers = container_handlers
 
     def dispatch(self, task_event: TaskEvent) -> None:
         """Handle any task-scoped node event.
@@ -83,11 +84,15 @@ class EventHandler:
         event = task_event.event
         self._dispatch_event(frame_id=task_event.frame_id, event=event)
         frame = self._frame_registry.get(task_event.frame_id)
-        self._container_execution.complete_frame(frame)
+        handler = self._container_handler_for_frame(frame.frame_id)
+        if handler is not None:
+            handler.complete_frame(frame)
 
     def _dispatch_event(self, *, frame_id: str, event: GraphNodeEventBase) -> None:
         frame = self._frame_registry.get(frame_id)
-        self._container_execution.prepare_frame_event(frame=frame, event=event)
+        handler = self._container_handler_for_frame(frame_id)
+        if handler is not None:
+            handler.prepare_frame_event(frame=frame, event=event)
         if isinstance(event, NodeRunVariableUpdatedEvent):
             self._dispatch(event, frame=frame)
             return None
@@ -100,8 +105,13 @@ class EventHandler:
         logger.warning("Unhandled event type: %s", type(event).__name__)
 
     def _collect(self, *, frame: ExecutionFrame, event: GraphNodeEventBase) -> None:
-        if self._container_execution.should_collect(frame=frame, event=event):
-            self._event_collector.collect(event)
+        handler = self._container_handler_for_frame(frame.frame_id)
+        if handler is not None and not handler.should_collect(
+            frame=frame,
+            event=event,
+        ):
+            return
+        self._event_collector.collect(event)
 
     @_dispatch.register
     def _(
@@ -290,7 +300,8 @@ class EventHandler:
             # Process the resulting event (retry, exception, etc.)
             self._dispatch_event(frame_id=frame.frame_id, event=result)
         else:
-            if self._container_execution.record_frame_failure(
+            handler = self._container_handler_for_frame(frame.frame_id)
+            if handler is not None and handler.record_frame_failure(
                 frame=frame,
                 event=event,
             ):
@@ -457,3 +468,14 @@ class EventHandler:
     ) -> None:
         """Update response outputs for response nodes."""
         frame.graph_runtime_state.merge_response_outputs(outputs)
+
+    def _container_handler_for_frame(self, frame_id: str) -> ContainerHandler | None:
+        try:
+            root_frame = self._frame_registry.get(ROOT_FRAME_ID)
+        except KeyError:
+            return None
+        root_runtime_state = root_frame.graph_runtime_state
+        if not root_runtime_state.has_container_frame(frame_id):
+            return None
+        frame_state = root_runtime_state.get_container_frame(frame_id)
+        return self._container_handlers[frame_state.kind]

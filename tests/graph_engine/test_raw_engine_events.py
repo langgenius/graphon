@@ -7,7 +7,6 @@ import pytest
 
 from graphon import graph_events, node_events
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType
-from graphon.graph_engine.container_execution import ContainerExecution
 from graphon.graph_engine.entities.tasks import TaskEvent
 from graphon.graph_engine.event_management.event_handlers import EventHandler
 from graphon.graph_engine.frames import ExecutionFrame, FrameRegistry
@@ -32,6 +31,8 @@ def _root_frame(
     edge_processor: object,
     error_handler: object,
 ) -> FrameRegistry:
+    if isinstance(graph_runtime_state, MagicMock):
+        graph_runtime_state.has_container_frame.return_value = False
     frame_registry = FrameRegistry()
     frame_registry.register(
         ExecutionFrame(
@@ -56,10 +57,7 @@ def _event_handler(
         graph_execution=cast(Any, graph_execution),
         event_collector=cast(Any, event_collector),
         frame_registry=frame_registry,
-        container_execution=ContainerExecution(
-            frame_registry=frame_registry,
-            graph_execution=cast(Any, graph_execution),
-        ),
+        container_handlers={},
     )
 
 

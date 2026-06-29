@@ -13,7 +13,7 @@ from graphon.enums import (
     WorkflowNodeExecutionStatus,
 )
 from graphon.graph.graph import Graph
-from graphon.graph_engine.container_execution import ContainerExecution
+from graphon.graph_engine.container_handlers import ContainerHandler
 from graphon.graph_engine.domain.graph_execution import GraphExecution
 from graphon.graph_engine.entities.tasks import TaskEvent
 from graphon.graph_engine.frames import ExecutionFrame, FrameRegistry
@@ -350,12 +350,14 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
                 node_run_result=result.node_run_result,
             )
 
-    class RecordingContainerExecution:
+    class RecordingContainerHandler:
+        kind = "loop"
+
         def __init__(self) -> None:
             self.invocation_id = ""
             self.requests: list[LoopFrameRequest] = []
 
-        def start_container_await(
+        def start_await(
             self,
             *,
             frame_id: str,
@@ -387,14 +389,14 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
             graph_runtime_state=runtime_state,
         ),
     )
-    container_execution = RecordingContainerExecution()
+    container_handler = RecordingContainerHandler()
     layer = _RecordingLayer()
     worker = Worker(
         ready_queue=ready_queue,
         event_queue=event_queue,
         frame_registry=frame_registry,
         layers=[layer],
-        container_execution=cast(ContainerExecution, container_execution),
+        container_handlers={"loop": cast(ContainerHandler, container_handler)},
     )
 
     worker.start()
@@ -402,8 +404,8 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
         started = event_queue.get(timeout=1)
         assert isinstance(started, TaskEvent)
         assert isinstance(started.event, NodeRunStartedEvent)
-        assert len(container_execution.requests) == 1
-        run_state = runtime_state.get_container_run(container_execution.invocation_id)
+        assert len(container_handler.requests) == 1
+        run_state = runtime_state.get_container_run(container_handler.invocation_id)
         assert run_state.frame_id == "root"
         assert run_state.node_id == "loop"
         assert run_state.execution_id == started.event.id
@@ -419,7 +421,7 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
 
         ready_queue.put(
             ResumeTask(
-                invocation_id=container_execution.invocation_id,
+                invocation_id=container_handler.invocation_id,
                 result=LoopExecutionSucceeded(
                     started_at=started.event.start_at,
                     inputs={"loop_count": 1},
@@ -439,7 +441,7 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
     assert isinstance(succeeded.event, NodeRunSucceededEvent)
     assert succeeded.event.node_run_result.outputs == {"answer": "ok"}
     with pytest.raises(KeyError):
-        runtime_state.get_container_run(container_execution.invocation_id)
+        runtime_state.get_container_run(container_handler.invocation_id)
     assert layer.end_events == [succeeded.event]
 
 
@@ -529,7 +531,7 @@ def test_worker_reports_resume_failure_on_suspended_invocation_frame() -> None:
         event_queue=event_queue,
         frame_registry=frame_registry,
         layers=[],
-        container_execution=cast(ContainerExecution, SimpleNamespace()),
+        container_handlers={},
     )
 
     worker.start()

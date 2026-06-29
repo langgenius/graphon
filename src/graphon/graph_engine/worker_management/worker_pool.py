@@ -7,11 +7,12 @@ DynamicScaler, and WorkerFactory into a single class.
 import logging
 import queue
 import threading
+from collections.abc import Mapping
 from contextlib import AbstractContextManager
 from typing import final
 
 from graphon.graph.graph import Graph
-from graphon.graph_engine.container_execution import ContainerExecution
+from graphon.graph_engine.container_handlers import ContainerHandler
 from graphon.graph_engine.entities.tasks import TaskEvent
 from graphon.graph_engine.frames import FrameRegistry
 from graphon.graph_engine.ready_queue import ReadyQueue
@@ -41,7 +42,7 @@ class WorkerPool:
         frame_registry: FrameRegistry,
         layers: list[GraphEngineLayer],
         config: GraphEngineConfig,
-        container_execution: ContainerExecution,
+        container_handlers: Mapping[str, ContainerHandler],
         execution_context: AbstractContextManager[object] | None = None,
     ) -> None:
         """Initialize the simple worker pool.
@@ -53,7 +54,7 @@ class WorkerPool:
             frame_registry: Registry containing frame-local graphs to execute
             layers: Graph engine layers for node execution hooks
             config: GraphEngine worker pool configuration
-            container_execution: Engine-owned container frame coordinator
+            container_handlers: Engine-owned container frame handlers by kind
             execution_context: Optional execution context for context preservation
 
         """
@@ -72,7 +73,7 @@ class WorkerPool:
         self._running = False
 
         # No longer tracking worker states with callbacks to avoid lock contention
-        self._container_execution = container_execution
+        self._container_handlers = container_handlers
 
     def start(self, initial_count: int | None = None) -> None:
         """Start the worker pool.
@@ -147,7 +148,7 @@ class WorkerPool:
             layers=self._layers,
             worker_id=worker_id,
             execution_context=self._execution_context,
-            container_execution=self._container_execution,
+            container_handlers=self._container_handlers,
         )
 
         worker.start()

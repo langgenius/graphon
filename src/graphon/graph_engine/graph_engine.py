@@ -40,6 +40,7 @@ from .command_processing import (
 )
 from .config import GraphEngineConfig
 from .container_execution import ContainerExecution
+from .container_handlers import ContainerHandler
 from .entities.commands import AbortCommand, PauseCommand, UpdateVariablesCommand
 from .entities.tasks import TaskEvent
 from .error_handler import ErrorHandler
@@ -48,6 +49,7 @@ from .frames import ExecutionFrame, FrameRegistry
 from .graph_state_manager import GraphStateManager
 from .graph_traversal import EdgeProcessor, SkipPropagator
 from .layers.base import GraphEngineLayer
+from .loop_container_handler import LoopContainerHandler
 from .orchestration import Dispatcher, ExecutionCoordinator
 from .ready_queue import ROOT_FRAME_ID
 from .worker_management import WorkerPool
@@ -208,10 +210,18 @@ class GraphEngine:
         )
 
         # === Worker Pool Setup ===
-        self._container_execution = ContainerExecution(
+        self._loop_container_handler = LoopContainerHandler(
             frame_registry=self._frame_registry,
             graph_execution=self._graph_execution,
         )
+        self._iteration_container_handler = ContainerExecution(
+            frame_registry=self._frame_registry,
+            graph_execution=self._graph_execution,
+        )
+        self._container_handlers: dict[str, ContainerHandler] = {
+            "loop": self._loop_container_handler,
+            "iteration": self._iteration_container_handler,
+        }
 
         # Create worker pool for parallel node execution
         self._worker_pool = WorkerPool(
@@ -222,7 +232,7 @@ class GraphEngine:
             layers=self._layers,
             execution_context=self._graph_runtime_state.execution_context,
             config=self._config,
-            container_execution=self._container_execution,
+            container_handlers=self._container_handlers,
         )
 
         # === Orchestration ===
@@ -240,7 +250,7 @@ class GraphEngine:
             graph_execution=self._graph_execution,
             event_collector=self._event_manager,
             frame_registry=self._frame_registry,
-            container_execution=self._container_execution,
+            container_handlers=self._container_handlers,
         )
 
         # Dispatches events and manages execution flow

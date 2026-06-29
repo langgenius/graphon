@@ -8,14 +8,14 @@ import logging
 import queue
 import threading
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, datetime
 from typing import final, override
 from uuid import uuid4
 
 from graphon.enums import WorkflowNodeExecutionStatus
-from graphon.graph_engine.container_execution import ContainerExecution
+from graphon.graph_engine.container_handlers import ContainerHandler
 from graphon.graph_engine.entities.tasks import TaskEvent
 from graphon.graph_engine.frames import FrameRegistry
 from graphon.graph_engine.layers.base import GraphEngineLayer
@@ -66,7 +66,7 @@ class Worker(threading.Thread):
         event_queue: queue.Queue[TaskEvent],
         frame_registry: FrameRegistry,
         layers: Sequence[GraphEngineLayer],
-        container_execution: ContainerExecution,
+        container_handlers: Mapping[str, ContainerHandler],
         worker_id: int = 0,
         execution_context: AbstractContextManager[object] | None = None,
     ) -> None:
@@ -89,7 +89,7 @@ class Worker(threading.Thread):
         self._execution_context = execution_context
         self._stop_event = threading.Event()
         self._layers = layers if layers is not None else []
-        self._container_execution = container_execution
+        self._container_handlers = container_handlers
         self._last_task_time = time.time()
         self._current_node_started_at: datetime | None = None
         self._current_node: Node | None = None
@@ -209,6 +209,7 @@ class Worker(threading.Thread):
                     node_id=task.node_id,
                     node=node,
                     node_events=node.run(),
+                    previous_phase_data={},
                 )
                 if isinstance(outcome, _Suspended):
                     suspended = True
@@ -248,6 +249,7 @@ class Worker(threading.Thread):
                         result=result,
                         started_at=run_state.started_at,
                     ),
+                    previous_phase_data=run_state.phase_data,
                 )
                 if isinstance(outcome, _Suspended):
                     suspended = True
@@ -281,6 +283,7 @@ class Worker(threading.Thread):
         node_id: str,
         node: Node,
         node_events: NodeEventStream,
+        previous_phase_data: Mapping[str, object],
     ) -> GraphNodeEventBase | _Suspended | None:
         result_event: GraphNodeEventBase | None = None
         next_item = next(node_events)
@@ -293,6 +296,9 @@ class Worker(threading.Thread):
                 root_runtime_state = self._frame_registry.get(
                     ROOT_FRAME_ID,
                 ).graph_runtime_state
+                phase_data = _container_phase_data(event)
+                if previous_phase_data:
+                    phase_data = {**dict(previous_phase_data), **phase_data}
                 root_runtime_state.put_container_run(
                     ContainerRunState(
                         invocation_id=invocation_id,
@@ -301,10 +307,10 @@ class Worker(threading.Thread):
                         node_id=node_id,
                         execution_id=node.execution_id,
                         started_at=started_at,
-                        phase_data=_container_phase_data(event),
+                        phase_data=phase_data,
                     )
                 )
-                self._container_execution.start_container_await(
+                self._container_handlers[event.kind].start_await(
                     frame_id=frame_id,
                     node_id=node_id,
                     invocation_id=invocation_id,
