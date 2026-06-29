@@ -78,6 +78,17 @@ class InMemoryReadyQueue(ReadyQueue):
         """
         return self._queue.qsize()
 
+    def drain(self) -> list[ReadyTask]:
+        """Remove and return all queued tasks in FIFO order."""
+        items: list[ReadyTask] = []
+        with self._queue.mutex:
+            while self._queue.queue:
+                items.append(self._queue.queue.popleft())
+            self._queue.unfinished_tasks -= len(items)
+            if self._queue.unfinished_tasks == 0:
+                self._queue.all_tasks_done.notify_all()
+        return items
+
     def dumps(self) -> str:
         """Serialize the queue state to a JSON string for storage.
 
@@ -85,23 +96,8 @@ class InMemoryReadyQueue(ReadyQueue):
             A JSON string containing the serialized queue state
 
         """
-        # Extract all items from the queue without removing them
-        items: list[ReadyTask] = []
-        temp_items: list[ReadyTask] = []
-
-        # Drain the queue temporarily to get all items
-        while not self._queue.empty():
-            try:
-                item = self._queue.get_nowait()
-                temp_items.append(item)
-                items.append(item)
-            except queue.Empty:
-                break
-
-        # Put items back in the same order
-        for item in temp_items:
-            self._queue.put(item)
-
+        with self._queue.mutex:
+            items = list(self._queue.queue)
         state = ReadyQueueState(
             type="InMemoryReadyQueue",
             version="1.0",

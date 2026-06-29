@@ -73,6 +73,11 @@ class ReadyQueue(Protocol):
         ...
 
     @abstractmethod
+    def drain(self) -> list[Any]:
+        """Remove and return all pending items in FIFO order."""
+        ...
+
+    @abstractmethod
     def dumps(self) -> str:
         """Serialize the queue contents for persistence.
 

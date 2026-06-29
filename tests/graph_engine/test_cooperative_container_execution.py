@@ -104,6 +104,20 @@ def test_ready_queue_round_trips_start_and_resume_tasks() -> None:
     )
 
 
+def test_ready_queue_drain_returns_items_and_empties_queue() -> None:
+    queue_ = InMemoryReadyQueue()
+    first = StartTask(frame_id="root", node_id="a")
+    second = StartTask(frame_id="child", node_id="b")
+    queue_.put(first)
+    queue_.put(second)
+
+    assert queue_.drain() == [first, second]
+    assert queue_.empty()
+    restored = InMemoryReadyQueue()
+    restored.loads(queue_.dumps())
+    assert restored.empty()
+
+
 def test_worker_suspends_and_resumes_container_invocation() -> None:
     class ContainerNode:
         id = "loop"

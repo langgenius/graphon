@@ -201,7 +201,7 @@ class _GraphRuntimeStateSnapshot:
     ready_queue_dump: str | None
     graph_execution_dump: str | None
     paused_nodes: tuple[str, ...]
-    deferred_nodes: tuple[str, ...]
+    deferred_ready_tasks_dump: str
     graph_node_states: dict[str, NodeState]
     graph_edge_states: dict[str, NodeState]
 
@@ -314,7 +314,7 @@ class _GraphRuntimeSuspensionState:
 
     def apply_snapshot(self, snapshot: _GraphRuntimeStateSnapshot) -> None:
         self.paused_nodes = set(snapshot.paused_nodes)
-        self.deferred_nodes = set(snapshot.deferred_nodes)
+        self.deferred_nodes = set()
         self.pending_graph_node_states = snapshot.graph_node_states or None
         self.pending_graph_edge_states = snapshot.graph_edge_states or None
 
@@ -381,6 +381,7 @@ class _GraphRuntimeBindings:
         self._runtime_state = runtime_state
         self.graph: GraphProtocol | Graph | None = None
         self.ready_queue: ReadyQueue | None = ready_queue
+        self.deferred_ready_queue: ReadyQueue = runtime_state.create_ready_queue()
         self.graph_execution: GraphExecutionProtocol | None = graph_execution
         self.execution_context: AbstractContextManager[object] = (
             execution_context if execution_context is not None else nullcontext(None)
@@ -416,6 +417,9 @@ class _GraphRuntimeBindings:
             self.ready_queue = self._runtime_state.create_ready_queue()
         return self.ready_queue
 
+    def get_deferred_ready_queue(self) -> ReadyQueue:
+        return self.deferred_ready_queue
+
     def get_graph_execution(self) -> GraphExecutionProtocol:
         if self.graph_execution is None:
             self.graph_execution = self._runtime_state.create_graph_execution()
@@ -433,6 +437,11 @@ class _GraphRuntimeBindings:
             return
         self.ready_queue = self._runtime_state.create_ready_queue()
         self.ready_queue.loads(payload)
+
+    def restore_deferred_ready_queue(self, payload: str) -> None:
+        queue = self._runtime_state.create_ready_queue()
+        queue.loads(payload)
+        self.deferred_ready_queue = queue
 
     def restore_graph_execution(
         self,
@@ -615,7 +624,7 @@ class GraphRuntimeState:  # noqa: PLR0904
             "ready_queue": self.ready_queue.dumps(),
             "graph_execution": self.graph_execution.dumps(),
             "paused_nodes": list(self._suspension_state.paused_nodes),
-            "deferred_nodes": list(self._suspension_state.deferred_nodes),
+            "deferred_ready_tasks": self._bindings.get_deferred_ready_queue().dumps(),
         }
 
         snapshot["graph_state"] = self._suspension_state.snapshot_graph_state(
@@ -659,6 +668,25 @@ class GraphRuntimeState:  # noqa: PLR0904
     def consume_paused_nodes(self) -> list[str]:
         """Retrieve and clear the list of paused nodes awaiting resume."""
         return self._suspension_state.consume_paused_nodes()
+
+    def defer_ready_task(self, task: object) -> None:
+        self._bindings.get_deferred_ready_queue().put(task)
+
+    def defer_ready_tasks(self, tasks: Sequence[object]) -> None:
+        for task in tasks:
+            self.defer_ready_task(task)
+
+    def drain_deferred_ready_tasks(self) -> list[object]:
+        return self._bindings.get_deferred_ready_queue().drain()
+
+    def enqueue_ready_task(self, task: object) -> None:
+        if self.graph_execution.is_paused:
+            self.defer_ready_task(task)
+            return
+        self.ready_queue.put(task)
+
+    def drain_ready_tasks_to_deferred(self) -> None:
+        self.defer_ready_tasks(self.ready_queue.drain())
 
     def register_deferred_node(self, node_id: str) -> None:
         """Record a node that became ready during pause and should resume later."""
@@ -753,7 +781,12 @@ class GraphRuntimeState:  # noqa: PLR0904
             ready_queue_dump=payload.get("ready_queue"),
             graph_execution_dump=payload.get("graph_execution"),
             paused_nodes=tuple(map(str, payload.get("paused_nodes", []))),
-            deferred_nodes=tuple(map(str, payload.get("deferred_nodes", []))),
+            deferred_ready_tasks_dump=str(
+                payload.get(
+                    "deferred_ready_tasks",
+                    _empty_ready_queue_dump(),
+                ),
+            ),
             graph_node_states=graph_node_states,
             graph_edge_states=graph_edge_states,
         )
@@ -761,6 +794,9 @@ class GraphRuntimeState:  # noqa: PLR0904
     def _apply_snapshot(self, snapshot: _GraphRuntimeStateSnapshot) -> None:
         self._execution_data.apply_snapshot(snapshot)
         self._bindings.restore_ready_queue(snapshot.ready_queue_dump)
+        self._bindings.restore_deferred_ready_queue(
+            snapshot.deferred_ready_tasks_dump,
+        )
         self._bindings.restore_graph_execution(
             snapshot.graph_execution_dump,
             self._suspension_state,
@@ -784,3 +820,9 @@ def _coerce_graph_state_map(payload: Any, key: str) -> dict[str, NodeState]:
         except ValueError:
             continue
     return result
+
+
+def _empty_ready_queue_dump() -> str:
+    module = importlib.import_module("graphon.graph_engine.ready_queue")
+    queue_cls = module.InMemoryReadyQueue
+    return queue_cls().dumps()

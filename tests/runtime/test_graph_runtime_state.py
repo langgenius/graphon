@@ -182,6 +182,18 @@ class TestGraphRuntimeState:
 
         assert isinstance(queue, InMemoryReadyQueue)
 
+    def test_deferred_ready_tasks_round_trip_in_runtime_snapshot(self) -> None:
+        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+        first = StartTask(frame_id="root", node_id="a")
+        second = StartTask(frame_id="child", node_id="b")
+        state.defer_ready_task(first)
+        state.defer_ready_task(second)
+
+        restored = GraphRuntimeState.from_snapshot(state.dumps())
+
+        assert restored.drain_deferred_ready_tasks() == [first, second]
+        assert restored.drain_deferred_ready_tasks() == []
+
     def test_graph_execution_lazy_instantiation(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
 
