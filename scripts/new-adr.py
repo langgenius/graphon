@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 ADR_DIR = Path("docs/adr")
@@ -45,7 +45,7 @@ def render_adr(title: str, adr_id: str) -> str:
     return f"""# ADR {adr_id}: {title}
 
 - Status: Proposed
-- Date: {datetime.now(tz=UTC).date().isoformat()}
+- Date: {datetime.now(tz=timezone.utc).date().isoformat()}
 - Related PRs: N/A
 - Supersedes: N/A
 - Superseded by: N/A
@@ -78,16 +78,30 @@ future maintainers.
 
 def update_readme(readme_path: Path, filename: str, title: str) -> None:
     readme = readme_path.read_text(encoding="utf-8")
-    marker = "## Historical Backfill"
-    if marker not in readme:
+    marker = "## ADRs"
+    marker_index = readme.find(marker)
+    if marker_index == -1:
         msg = f"could not find '{marker}' in {readme_path}"
         raise ValueError(msg)
 
-    entry = f"- [{filename}]({filename}): {title}\n\n"
+    entry = f"- [{filename}]({filename}): {title}\n"
     if entry.strip() in readme:
         return
 
-    readme = readme.replace(marker, entry + marker, 1)
+    insert_at = readme.find("\n## ", marker_index + len(marker))
+    if insert_at == -1:
+        insert_at = len(readme)
+
+    section = readme[marker_index:insert_at]
+    if not section.endswith("\n"):
+        section += "\n"
+    if not section.endswith("\n\n"):
+        section += "\n"
+    updated_section = section + entry
+    if not updated_section.endswith("\n"):
+        updated_section += "\n"
+
+    readme = readme[:marker_index] + updated_section + readme[insert_at:]
     readme_path.write_text(readme, encoding="utf-8")
 
 

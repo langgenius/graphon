@@ -11,15 +11,16 @@ def write_adr_readme(tmp_path: Path) -> None:
     adr_dir = tmp_path / "docs" / "adr"
     adr_dir.mkdir(parents=True)
     (adr_dir / "README.md").write_text(
-        """# Architecture Decision Records
+        """# Architecture Decision Records Index
 
-## Current ADRs
+This directory stores Graphon's architecture decision records (ADRs).
+
+For the canonical ADR policy and workflow, see
+[ADR 0001](0001-existing.md).
+
+## ADRs
 
 - [0001-existing.md](0001-existing.md): existing decision
-
-## Historical Backfill
-
-- [backlog.md](backlog.md): grouped historical pull requests
 """,
         encoding="utf-8",
     )
@@ -68,6 +69,7 @@ def test_assigns_next_id_and_updates_readme(tmp_path: Path) -> None:
         "- [0002-add-polling-support.md](0002-add-polling-support.md): "
         "Add polling support"
     ) in readme
+    assert "backlog.md" not in readme
 
 
 def test_uses_explicit_id_when_provided(tmp_path: Path) -> None:
