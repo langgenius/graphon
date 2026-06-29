@@ -404,7 +404,6 @@ class LoopContainerHandler:
         run_state: ContainerRunState,
         steps: int,
     ) -> LoopExecutionSucceeded:
-        self._root_runtime_state().pop_container_run(run_state.invocation_id)
         metadata = self._loop_metadata(run_state)
         loop_metadata = self._event_metadata(metadata)
         loop_metadata[WorkflowNodeExecutionMetadataKey.COMPLETED_REASON.value] = (
@@ -433,7 +432,6 @@ class LoopContainerHandler:
         run_state: ContainerRunState,
         error: str,
     ) -> LoopExecutionFailed:
-        self._root_runtime_state().pop_container_run(run_state.invocation_id)
         metadata = self._loop_metadata(run_state)
         loop_metadata = self._event_metadata(metadata)
         loop_metadata[WorkflowNodeExecutionMetadataKey.COMPLETED_REASON.value] = "error"

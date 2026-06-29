@@ -10,6 +10,7 @@ import pytest
 from graphon.enums import (
     BuiltinNodeTypes,
     NodeExecutionType,
+    NodeState,
     WorkflowNodeExecutionStatus,
 )
 from graphon.graph.graph import Graph
@@ -19,6 +20,7 @@ from graphon.graph_engine.entities.tasks import TaskEvent
 from graphon.graph_engine.frames import ExecutionFrame, FrameRegistry
 from graphon.graph_engine.graph_state_manager import GraphStateManager
 from graphon.graph_engine.layers.base import GraphEngineLayer
+from graphon.graph_engine.loop_container_handler import LoopContainerHandler
 from graphon.graph_engine.ready_queue.in_memory import InMemoryReadyQueue
 from graphon.graph_engine.ready_queue.protocol import (
     ResumeTask,
@@ -96,6 +98,25 @@ class _RecordingLayer(GraphEngineLayer):
         _ = node
         _ = error
         self.end_events.append(result_event)
+
+
+class _FrameFactory:
+    def with_runtime_state(
+        self,
+        graph_runtime_state: GraphRuntimeState,
+    ) -> "_FrameFactory":
+        _ = graph_runtime_state
+        return self
+
+    def create_node(self, node_config: dict[str, object]) -> object:
+        node_data = cast(dict[str, object], node_config["data"])
+        return SimpleNamespace(
+            id=str(node_config["id"]),
+            node_type=cast(BuiltinNodeTypes, node_data["type"]),
+            execution_type=NodeExecutionType.EXECUTABLE,
+            error_strategy=None,
+            state=NodeState.UNKNOWN,
+        )
 
 
 def test_ready_queue_round_trips_start_and_resume_tasks() -> None:
@@ -443,6 +464,128 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
     with pytest.raises(KeyError):
         runtime_state.get_container_run(container_handler.invocation_id)
     assert layer.end_events == [succeeded.event]
+
+
+def test_worker_resumes_terminal_loop_result_from_loop_handler() -> None:
+    graph_config = {
+        "nodes": [
+            {"id": "loop-start", "data": {"type": BuiltinNodeTypes.LOOP_START}},
+        ],
+        "edges": [],
+    }
+    ready_queue = InMemoryReadyQueue()
+    event_queue = queue.Queue()
+    graph_execution = GraphExecution(workflow_id="workflow")
+    runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=1,
+        ready_queue=ready_queue,
+        graph_execution=graph_execution,
+    )
+    loop_node = LoopNode.__new__(LoopNode)
+    loop_node.init_node_identity("loop")
+    loop_node.init_node_data({
+        "type": "loop",
+        "title": "Loop",
+        "loop_count": 1,
+        "start_node_id": "loop-start",
+        "break_conditions": [],
+        "logical_operator": "and",
+        "outputs": {},
+    })
+    loop_node.bind_execution_id("loop-run")
+    loop_node.graph_runtime_state = runtime_state
+    loop_node.graph_config = graph_config
+    graph = SimpleNamespace(
+        nodes={"loop": loop_node},
+        graph_config=graph_config,
+        node_factory=_FrameFactory(),
+    )
+    frame_registry = FrameRegistry()
+    frame_registry.register(
+        _execution_frame(
+            frame_id="root",
+            graph=cast(Graph, graph),
+            graph_runtime_state=runtime_state,
+        ),
+    )
+    request = LoopFrameRequest(
+        started_at=datetime.now(UTC).replace(tzinfo=None),
+        inputs={"loop_count": 1},
+        loop_count=1,
+        root_node_id="loop-start",
+        loop_variable_selectors={},
+        loop_node_ids=frozenset(),
+        index=0,
+    )
+    runtime_state.put_container_run(
+        ContainerRunState(
+            invocation_id="loop-invocation",
+            kind="loop",
+            frame_id="root",
+            node_id="loop",
+            execution_id="loop-run",
+            started_at=request.started_at,
+            phase_data={
+                "inputs": dict(request.inputs),
+                "loop_count": request.loop_count,
+                "root_node_id": request.root_node_id,
+                "loop_variable_selectors": {},
+                "loop_node_ids": (),
+            },
+        ),
+    )
+    loop_handler = LoopContainerHandler(
+        frame_registry=frame_registry,
+        graph_execution=graph_execution,
+    )
+    loop_handler.start_await(
+        frame_id="root",
+        node_id="loop",
+        invocation_id="loop-invocation",
+        request=request,
+    )
+    assert ready_queue.get(timeout=0.01) == StartTask(
+        frame_id="loop-run:loop:0",
+        node_id="loop-start",
+    )
+    child_frame = frame_registry.get("loop-run:loop:0")
+    child_frame.state_manager.finish_execution(
+        frame_id=child_frame.frame_id,
+        node_id="loop-start",
+    )
+
+    assert loop_handler.complete_frame(child_frame) is True
+    with pytest.raises(KeyError):
+        runtime_state.get_container_frame("loop-run:loop:0")
+    resume_task = ready_queue.get(timeout=0.01)
+    assert isinstance(resume_task, ResumeTask)
+    assert isinstance(resume_task.result, LoopExecutionSucceeded)
+    ready_queue.put(resume_task)
+
+    worker = Worker(
+        ready_queue=ready_queue,
+        event_queue=event_queue,
+        frame_registry=frame_registry,
+        layers=[],
+        container_handlers={"loop": loop_handler},
+    )
+    worker.start()
+    try:
+        loop_succeeded = event_queue.get(timeout=1)
+        node_succeeded = event_queue.get(timeout=1)
+    finally:
+        worker.stop()
+        worker.join(timeout=1)
+
+    assert isinstance(loop_succeeded, TaskEvent)
+    assert isinstance(loop_succeeded.event, NodeRunLoopSucceededEvent)
+    assert loop_succeeded.event.id == "loop-run"
+    assert isinstance(node_succeeded, TaskEvent)
+    assert isinstance(node_succeeded.event, NodeRunSucceededEvent)
+    assert node_succeeded.event.id == "loop-run"
+    with pytest.raises(KeyError):
+        runtime_state.get_container_run("loop-invocation")
 
 
 def test_worker_reports_resume_failure_on_suspended_invocation_frame() -> None:
