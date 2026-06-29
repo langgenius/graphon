@@ -11,10 +11,17 @@
 
 Closes #
 
+## ADR
+
+See [`docs/adr/0001-adopt-architecture-decision-records.md`](../docs/adr/0001-adopt-architecture-decision-records.md)
+for the ADR policy and workflow. Record the relevant ADR path here, or `N/A`
+if ADR 0001 says none is needed:
+
 ## Summary
 
 ## Checklist
 
 - [ ] This pull request links the issue it resolves or advances
 - [ ] This pull request title follows Conventional Commits, and any breaking change is marked with `!`
+- [ ] I filled in the ADR field using ADR 0001 as the source of truth
 - [ ] If CLA Assistant prompted me, I signed [CLA.md](../CLA.md) in the pull request conversation
