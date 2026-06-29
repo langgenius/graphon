@@ -11,6 +11,7 @@ from graphon.graph_engine.domain.graph_execution import GraphExecution
 from graphon.graph_engine.entities.tasks import TaskEvent
 from graphon.graph_engine.frames import ExecutionFrame, FrameRegistry
 from graphon.graph_engine.graph_state_manager import GraphStateManager
+from graphon.graph_engine.layers.base import GraphEngineLayer
 from graphon.graph_engine.ready_queue.in_memory import InMemoryReadyQueue
 from graphon.graph_engine.ready_queue.protocol import (
     ResumeTask,
@@ -21,7 +22,7 @@ from graphon.graph_engine.suspended_invocations import (
     SuspendedInvocationStore,
 )
 from graphon.graph_engine.worker import Worker
-from graphon.graph_events.base import GraphNodeEventBase
+from graphon.graph_events.base import GraphEngineEvent, GraphNodeEventBase
 from graphon.graph_events.node import (
     NodeRunFailedEvent,
     NodeRunStartedEvent,
@@ -53,6 +54,31 @@ def _execution_frame(
         edge_processor=cast(Any, SimpleNamespace()),
         error_handler=cast(Any, SimpleNamespace()),
     )
+
+
+class _RecordingLayer(GraphEngineLayer):
+    def __init__(self) -> None:
+        super().__init__()
+        self.end_events: list[GraphNodeEventBase | None] = []
+
+    def on_graph_start(self) -> None:
+        return
+
+    def on_event(self, event: GraphEngineEvent) -> None:
+        _ = event
+
+    def on_graph_end(self, error: Exception | None) -> None:
+        _ = error
+
+    def on_node_run_end(
+        self,
+        node: object,
+        error: Exception | None,
+        result_event: GraphNodeEventBase | None = None,
+    ) -> None:
+        _ = node
+        _ = error
+        self.end_events.append(result_event)
 
 
 def test_ready_queue_round_trips_start_and_resume_tasks() -> None:
@@ -157,11 +183,12 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
     )
     suspended_invocations = SuspendedInvocationStore()
     container_execution = RecordingContainerExecution()
+    layer = _RecordingLayer()
     worker = Worker(
         ready_queue=ready_queue,
         event_queue=event_queue,
         frame_registry=frame_registry,
-        layers=[],
+        layers=[layer],
         suspended_invocations=suspended_invocations,
         container_execution=cast(ContainerExecution, container_execution),
     )
@@ -173,6 +200,7 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
         assert isinstance(started.event, NodeRunStartedEvent)
         assert len(container_execution.requests) == 1
         assert suspended_invocations.count == 1
+        assert layer.end_events == []
 
         ready_queue.put(
             ResumeTask(
@@ -196,6 +224,7 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
     assert isinstance(succeeded.event, NodeRunSucceededEvent)
     assert succeeded.event.node_run_result.outputs == {"answer": "ok"}
     assert suspended_invocations.count == 0
+    assert layer.end_events == [succeeded.event]
 
 
 def test_worker_reports_resume_failure_on_suspended_invocation_frame() -> None:

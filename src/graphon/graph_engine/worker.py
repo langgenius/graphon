@@ -202,6 +202,7 @@ class Worker(threading.Thread):
 
         error: Exception | None = None
         result_event: GraphNodeEventBase | None = None
+        suspended = False
 
         with context:
             self._invoke_node_run_start_hooks(node)
@@ -214,13 +215,15 @@ class Worker(threading.Thread):
                     node_events=node.run(),
                 )
                 if isinstance(outcome, _Suspended):
+                    suspended = True
                     return
                 result_event = outcome
             except Exception as exc:
                 error = exc
                 raise
             finally:
-                self._invoke_node_run_end_hooks(node, error, result_event)
+                if not suspended:
+                    self._invoke_node_run_end_hooks(node, error, result_event)
 
     def _resume_node(
         self,
@@ -235,6 +238,7 @@ class Worker(threading.Thread):
 
         error: Exception | None = None
         result_event: GraphNodeEventBase | None = None
+        suspended = False
         with context:
             try:
                 outcome = self._consume_node_events(
@@ -246,13 +250,19 @@ class Worker(threading.Thread):
                     resume_result=result,
                 )
                 if isinstance(outcome, _Suspended):
+                    suspended = True
                     return
                 result_event = outcome
             except Exception as exc:
                 error = exc
                 raise
             finally:
-                self._invoke_node_run_end_hooks(invocation.node, error, result_event)
+                if not suspended:
+                    self._invoke_node_run_end_hooks(
+                        invocation.node,
+                        error,
+                        result_event,
+                    )
 
     def _bind_node_execution_id(self, *, task: StartTask, node: Node) -> None:
         frame = self._frame_registry.get(task.frame_id)
