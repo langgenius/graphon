@@ -624,6 +624,7 @@ class GraphRuntimeState:  # noqa: PLR0904
 
     def dumps(self) -> str:
         """Serialize runtime state into a JSON string."""
+        container_runs, container_frames = self._copy_container_state()
         snapshot: dict[str, Any] = {
             "version": "1.0",
             "start_at": self._execution_data.start_at,
@@ -639,11 +640,11 @@ class GraphRuntimeState:  # noqa: PLR0904
             "deferred_ready_tasks": self._bindings.get_deferred_ready_queue().dumps(),
             "container_runs": {
                 key: value.model_dump(mode="json")
-                for key, value in self._suspension_state.container_runs.items()
+                for key, value in container_runs.items()
             },
             "container_frames": {
                 key: value.model_dump(mode="json")
-                for key, value in self._suspension_state.container_frames.items()
+                for key, value in container_frames.items()
             },
         }
 
@@ -747,6 +748,15 @@ class GraphRuntimeState:  # noqa: PLR0904
     def pop_container_frame(self, frame_id: str) -> ContainerFrameState:
         with self._container_state_lock:
             return self._suspension_state.container_frames.pop(frame_id)
+
+    def _copy_container_state(
+        self,
+    ) -> tuple[dict[str, ContainerRunState], dict[str, ContainerFrameState]]:
+        with self._container_state_lock:
+            return (
+                dict(self._suspension_state.container_runs),
+                dict(self._suspension_state.container_frames),
+            )
 
     # ------------------------------------------------------------------
     # Builders

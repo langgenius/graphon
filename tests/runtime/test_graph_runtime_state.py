@@ -243,6 +243,42 @@ class TestGraphRuntimeState:  # noqa: PLR0904
         assert restored.get_container_run("invocation-1") == run
         assert restored.get_container_frame("exec-loop:loop:1") == frame
 
+    def test_container_runtime_state_copy_is_stable_after_mutation(self) -> None:
+        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+        run = ContainerRunState(
+            invocation_id="invocation-1",
+            kind="loop",
+            frame_id="root",
+            node_id="loop",
+            execution_id="exec-loop",
+            started_at=datetime.fromtimestamp(1, UTC).replace(tzinfo=None),
+            phase_data={},
+        )
+        frame = ContainerFrameState(
+            frame_id="exec-loop:loop:1",
+            kind="loop",
+            parent_invocation_id="invocation-1",
+            root_node_id="loop-start",
+            phase_data={},
+            runtime_data=FrameRuntimeData(
+                variable_pool=VariablePool(),
+                outputs={},
+                llm_usage=LLMUsage.empty_usage(),
+                node_run_steps=0,
+                graph_node_states={},
+                graph_edge_states={},
+            ),
+        )
+        state.put_container_run(run)
+        state.put_container_frame(frame)
+
+        runs, frames = state._copy_container_state()
+        state.pop_container_run("invocation-1")
+        state.pop_container_frame("exec-loop:loop:1")
+
+        assert runs == {"invocation-1": run}
+        assert frames == {"exec-loop:loop:1": frame}
+
     def test_container_runtime_state_thread_safe_claims(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
         run = ContainerRunState(
