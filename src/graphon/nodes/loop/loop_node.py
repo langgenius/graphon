@@ -2,7 +2,7 @@ import json
 import logging
 from collections.abc import Generator, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any, assert_never, override
+from typing import Any, assert_never, cast, override
 
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType
 from graphon.node_events.base import NodeEventBase
@@ -64,6 +64,7 @@ class LoopNode(Node[LoopNodeData]):
             metadata={"loop_length": loop_count},
         )
         result = yield LoopFrameRequest(
+            kind="loop",
             started_at=started_at,
             inputs=inputs,
             loop_count=loop_count,
@@ -78,6 +79,7 @@ class LoopNode(Node[LoopNodeData]):
                 pre_loop_output=self.node_data.outputs,
             )
             result = yield LoopFrameRequest(
+                kind="loop",
                 started_at=started_at,
                 inputs=inputs,
                 loop_count=loop_count,
@@ -108,6 +110,61 @@ class LoopNode(Node[LoopNodeData]):
             msg = f"Unsupported loop result {type(result).__name__}"
             raise TypeError(msg)
         yield StreamCompletedEvent(node_run_result=result.node_run_result)
+
+    @override
+    def _resume_container_events(
+        self,
+        *,
+        phase_data: Mapping[str, object],
+        result: ContainerRunResult,
+    ) -> Generator[NodeEventBase | LoopFrameRequest, None, None]:
+        if isinstance(result, LoopFrameCompleted):
+            yield LoopNextEvent(
+                index=result.next_index,
+                pre_loop_output=self.node_data.outputs,
+            )
+            yield LoopFrameRequest(
+                kind="loop",
+                started_at=self._start_at,
+                inputs=cast(Mapping[str, object], phase_data["inputs"]),
+                loop_count=cast(int, phase_data["loop_count"]),
+                root_node_id=cast(str, phase_data["root_node_id"]),
+                loop_variable_selectors=cast(
+                    Mapping[str, Sequence[str]],
+                    phase_data["loop_variable_selectors"],
+                ),
+                loop_node_ids=frozenset(
+                    cast(Sequence[str], phase_data["loop_node_ids"]),
+                ),
+                index=result.next_index,
+            )
+            return
+
+        if isinstance(result, LoopExecutionSucceeded):
+            yield LoopSucceededEvent(
+                start_at=result.started_at,
+                inputs=result.inputs,
+                outputs=result.outputs,
+                metadata=result.metadata,
+                steps=result.steps,
+            )
+            yield StreamCompletedEvent(node_run_result=result.node_run_result)
+            return
+
+        if isinstance(result, LoopExecutionFailed):
+            yield LoopFailedEvent(
+                start_at=result.started_at,
+                inputs=result.inputs,
+                outputs=result.outputs,
+                metadata=result.metadata,
+                steps=result.steps,
+                error=result.error,
+            )
+            yield StreamCompletedEvent(node_run_result=result.node_run_result)
+            return
+
+        msg = f"Unsupported loop result {type(result).__name__}"
+        raise TypeError(msg)
 
     def initialize_loop_run(
         self,

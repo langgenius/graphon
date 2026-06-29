@@ -5,7 +5,11 @@ from threading import Event, Thread
 from types import SimpleNamespace
 from typing import Any, cast
 
-from graphon.enums import BuiltinNodeTypes, NodeExecutionType
+from graphon.enums import (
+    BuiltinNodeTypes,
+    NodeExecutionType,
+    WorkflowNodeExecutionStatus,
+)
 from graphon.graph.graph import Graph
 from graphon.graph_engine.container_execution import ContainerExecution
 from graphon.graph_engine.domain.graph_execution import GraphExecution
@@ -24,6 +28,11 @@ from graphon.graph_engine.suspended_invocations import (
 )
 from graphon.graph_engine.worker import Worker
 from graphon.graph_events.base import GraphEngineEvent, GraphNodeEventBase
+from graphon.graph_events.iteration import NodeRunIterationNextEvent
+from graphon.graph_events.loop import (
+    NodeRunLoopNextEvent,
+    NodeRunLoopSucceededEvent,
+)
 from graphon.graph_events.node import (
     NodeRunFailedEvent,
     NodeRunStartedEvent,
@@ -32,9 +41,15 @@ from graphon.graph_events.node import (
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.container_effects import (
     ContainerRunResult,
+    IterationFrameRequest,
+    IterationFramesRequested,
     LoopExecutionSucceeded,
+    LoopFrameCompleted,
     LoopFrameRequest,
 )
+from graphon.nodes.iteration.entities import ErrorHandleMode
+from graphon.nodes.iteration.iteration_node import IterationNode
+from graphon.nodes.loop.loop_node import LoopNode
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.runtime.variable_pool import VariablePool
 
@@ -146,6 +161,124 @@ def test_ready_queue_drain_notifies_waiting_bounded_queue_producers() -> None:
     assert queue_.get(timeout=0.01) == second
 
 
+def _loop_node() -> LoopNode:
+    node = LoopNode.__new__(LoopNode)
+    node.init_node_identity("loop")
+    node.init_node_data({
+        "type": "loop",
+        "title": "Loop",
+        "loop_count": 3,
+        "start_node_id": "loop-start",
+        "break_conditions": [],
+        "logical_operator": "and",
+        "outputs": {"total": 1},
+    })
+    node.bind_execution_id("loop-run")
+    return node
+
+
+def _iteration_node() -> IterationNode:
+    node = IterationNode.__new__(IterationNode)
+    node.init_node_identity("iteration")
+    node.init_node_data({
+        "type": "iteration",
+        "title": "Iteration",
+        "start_node_id": "iteration-start",
+        "iterator_selector": ["source", "items"],
+        "output_selector": ["answer", "text"],
+        "error_handle_mode": ErrorHandleMode.TERMINATED,
+        "is_parallel": False,
+    })
+    node.bind_execution_id("iteration-run")
+    return node
+
+
+def test_loop_resume_requests_next_frame_after_completed_frame() -> None:
+    started_at = datetime.now(UTC).replace(tzinfo=None)
+    events = list(
+        _loop_node().resume_container(
+            phase_data={
+                "inputs": {"loop_count": 3},
+                "loop_count": 3,
+                "root_node_id": "loop-start",
+                "loop_variable_selectors": {"acc": ["loop", "acc"]},
+                "loop_node_ids": frozenset({"loop-child"}),
+            },
+            result=LoopFrameCompleted(next_index=1),
+            started_at=started_at,
+        ),
+    )
+
+    assert len(events) == 2
+    assert isinstance(events[0], NodeRunLoopNextEvent)
+    assert events[0].id == "loop-run"
+    assert events[0].index == 1
+    assert events[0].pre_loop_output == {"total": 1}
+    assert isinstance(events[1], LoopFrameRequest)
+    assert events[1].kind == "loop"
+    assert events[1].index == 1
+    assert events[1].started_at == started_at
+
+
+def test_loop_resume_finishes_successful_execution() -> None:
+    started_at = datetime.now(UTC).replace(tzinfo=None)
+    events = list(
+        _loop_node().resume_container(
+            phase_data={},
+            result=LoopExecutionSucceeded(
+                started_at=started_at,
+                inputs={"loop_count": 3},
+                outputs={"answer": "ok"},
+                metadata={},
+                steps=3,
+                node_run_result=NodeRunResult(
+                    status=WorkflowNodeExecutionStatus.SUCCEEDED,
+                    outputs={"answer": "ok"},
+                ),
+            ),
+            started_at=started_at,
+        ),
+    )
+
+    assert len(events) == 2
+    assert isinstance(events[0], NodeRunLoopSucceededEvent)
+    assert events[0].id == "loop-run"
+    assert events[0].outputs == {"answer": "ok"}
+    assert isinstance(events[1], NodeRunSucceededEvent)
+    assert events[1].id == "loop-run"
+    assert events[1].node_run_result.outputs == {"answer": "ok"}
+
+
+def test_iteration_resume_requests_more_frames() -> None:
+    started_at = datetime.now(UTC).replace(tzinfo=None)
+    events = list(
+        _iteration_node().resume_container(
+            phase_data={
+                "inputs": {"iterator_selector": ["a", "b", "c"]},
+                "items": ("a", "b", "c"),
+                "root_node_id": "iteration-start",
+                "output_selector": ["answer", "text"],
+                "error_handle_mode": ErrorHandleMode.TERMINATED,
+                "flatten_output": True,
+                "parallel_nums": 2,
+            },
+            result=IterationFramesRequested(indexes=(1, 2)),
+            started_at=started_at,
+        ),
+    )
+
+    assert len(events) == 3
+    assert isinstance(events[0], NodeRunIterationNextEvent)
+    assert events[0].id == "iteration-run"
+    assert events[0].index == 1
+    assert isinstance(events[1], NodeRunIterationNextEvent)
+    assert events[1].index == 2
+    assert isinstance(events[2], IterationFrameRequest)
+    assert events[2].kind == "iteration"
+    assert events[2].indexes == (1, 2)
+    assert events[2].started_at == started_at
+
+
 def test_worker_suspends_and_resumes_container_invocation() -> None:
     class ContainerNode:
         id = "loop"
@@ -168,6 +301,7 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
                 start_at=started_at,
             )
             result = yield LoopFrameRequest(
+                kind="loop",
                 started_at=started_at,
                 inputs={"loop_count": 1},
                 loop_count=1,
@@ -282,6 +416,7 @@ def test_worker_reports_resume_failure_on_suspended_invocation_frame() -> None:
         None,
     ]:
         _ = yield LoopFrameRequest(
+            kind="loop",
             started_at=started_at,
             inputs={"loop_count": 1},
             loop_count=1,

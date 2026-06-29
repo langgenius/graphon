@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class LoopFrameRequest:
+    kind: Literal["loop"]
     started_at: datetime
     inputs: Mapping[str, object]
     loop_count: int
@@ -26,6 +27,7 @@ class LoopFrameRequest:
 
 @dataclass(frozen=True, slots=True)
 class IterationFrameRequest:
+    kind: Literal["iteration"]
     started_at: datetime
     inputs: Mapping[str, object]
     items: tuple[object, ...]

@@ -96,6 +96,7 @@ class IterationNode(Node[IterationNodeData]):
         for index in indexes:
             yield IterationNextEvent(index=index)
         result = yield IterationFrameRequest(
+            kind="iteration",
             started_at=started_at,
             inputs=inputs,
             items=tuple(iterator_value),
@@ -110,6 +111,7 @@ class IterationNode(Node[IterationNodeData]):
             for index in result.indexes:
                 yield IterationNextEvent(index=index)
             result = yield IterationFrameRequest(
+                kind="iteration",
                 started_at=started_at,
                 inputs=inputs,
                 items=tuple(iterator_value),
@@ -142,6 +144,59 @@ class IterationNode(Node[IterationNodeData]):
             msg = f"Unsupported iteration result {type(result).__name__}"
             raise TypeError(msg)
         yield StreamCompletedEvent(node_run_result=result.node_run_result)
+
+    @override
+    def _resume_container_events(
+        self,
+        *,
+        phase_data: Mapping[str, object],
+        result: ContainerRunResult,
+    ) -> Generator[NodeEventBase | IterationFrameRequest, None, None]:
+        if isinstance(result, IterationFramesRequested):
+            for index in result.indexes:
+                yield IterationNextEvent(index=index)
+            yield IterationFrameRequest(
+                kind="iteration",
+                started_at=self._start_at,
+                inputs=cast(Mapping[str, object], phase_data["inputs"]),
+                items=cast(tuple[object, ...], phase_data["items"]),
+                root_node_id=cast(str, phase_data["root_node_id"]),
+                indexes=result.indexes,
+                output_selector=cast(Sequence[str], phase_data["output_selector"]),
+                error_handle_mode=cast(
+                    ErrorHandleMode,
+                    phase_data["error_handle_mode"],
+                ),
+                flatten_output=cast(bool, phase_data["flatten_output"]),
+                parallel_nums=cast(int, phase_data["parallel_nums"]),
+            )
+            return
+
+        if isinstance(result, IterationExecutionSucceeded):
+            yield IterationSucceededEvent(
+                start_at=result.started_at,
+                inputs=result.inputs,
+                outputs=result.outputs,
+                metadata=result.metadata,
+                steps=result.steps,
+            )
+            yield StreamCompletedEvent(node_run_result=result.node_run_result)
+            return
+
+        if isinstance(result, IterationExecutionFailed):
+            yield IterationFailedEvent(
+                start_at=result.started_at,
+                inputs=result.inputs,
+                outputs=result.outputs,
+                metadata=result.metadata,
+                steps=result.steps,
+                error=result.error,
+            )
+            yield StreamCompletedEvent(node_run_result=result.node_run_result)
+            return
+
+        msg = f"Unsupported iteration result {type(result).__name__}"
+        raise TypeError(msg)
 
     def _resolve_iterator_value(self, variable: object) -> list[object]:
         if not isinstance(variable, ArraySegment):

@@ -692,6 +692,43 @@ class Node[NodeDataT: BaseNodeData](
                 return
             send_value = yield self._normalize_run_event(event)
 
+    def resume_container(
+        self,
+        *,
+        phase_data: Mapping[str, object],
+        result: ContainerRunResult,
+        started_at: datetime,
+    ) -> Generator[GraphNodeEventBase | ContainerAwaitRequest, None, None]:
+        execution_id = self.execution_id
+        if not execution_id:
+            msg = "node execution_id must be bound before resume"
+            raise RuntimeError(msg)
+        self._start_at = started_at
+        try:
+            for event in self._resume_container_events(
+                phase_data=phase_data,
+                result=result,
+            ):
+                yield self._normalize_run_event(event)
+        except Exception as e:
+            logger.exception("Node %s failed to resume", self._node_id)
+            yield self._build_run_failed_event(e)
+
+    def _resume_container_events(
+        self,
+        *,
+        phase_data: Mapping[str, object],
+        result: ContainerRunResult,
+    ) -> Generator[
+        NodeEventBase | GraphNodeEventBase | ContainerAwaitRequest,
+        None,
+        None,
+    ]:
+        _ = phase_data
+        _ = result
+        msg = f"Node {self._node_id} does not support container resume"
+        raise TypeError(msg)
+
     def _normalize_run_event(
         self,
         event: NodeEventBase | GraphNodeEventBase | ContainerAwaitRequest,
