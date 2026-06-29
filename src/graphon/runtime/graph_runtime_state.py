@@ -14,6 +14,7 @@ from pydantic_core import to_jsonable_python
 
 from graphon.enums import NodeExecutionType, NodeState, NodeType
 from graphon.model_runtime.entities.llm_entities import LLMUsage
+from graphon.runtime.container_state import ContainerFrameState, ContainerRunState
 from graphon.runtime.ready_queue import ReadyQueue
 from graphon.runtime.variable_pool import VariablePool
 
@@ -203,6 +204,8 @@ class _GraphRuntimeStateSnapshot:
     paused_nodes: tuple[str, ...]
     deferred_nodes: tuple[str, ...]
     deferred_ready_tasks_dump: str
+    container_runs: dict[str, ContainerRunState]
+    container_frames: dict[str, ContainerFrameState]
     graph_node_states: dict[str, NodeState]
     graph_edge_states: dict[str, NodeState]
 
@@ -288,6 +291,8 @@ class _GraphRuntimeSuspensionState:
     pending_graph_execution_workflow_id: str | None = None
     paused_nodes: set[str] = field(default_factory=set)
     deferred_nodes: set[str] = field(default_factory=set)
+    container_runs: dict[str, ContainerRunState] = field(default_factory=dict)
+    container_frames: dict[str, ContainerFrameState] = field(default_factory=dict)
     pending_graph_node_states: dict[str, NodeState] | None = None
     pending_graph_edge_states: dict[str, NodeState] | None = None
 
@@ -316,6 +321,8 @@ class _GraphRuntimeSuspensionState:
     def apply_snapshot(self, snapshot: _GraphRuntimeStateSnapshot) -> None:
         self.paused_nodes = set(snapshot.paused_nodes)
         self.deferred_nodes = set(snapshot.deferred_nodes)
+        self.container_runs = dict(snapshot.container_runs)
+        self.container_frames = dict(snapshot.container_frames)
         self.pending_graph_node_states = snapshot.graph_node_states or None
         self.pending_graph_edge_states = snapshot.graph_edge_states or None
 
@@ -627,6 +634,14 @@ class GraphRuntimeState:  # noqa: PLR0904
             "paused_nodes": list(self._suspension_state.paused_nodes),
             "deferred_nodes": list(self._suspension_state.deferred_nodes),
             "deferred_ready_tasks": self._bindings.get_deferred_ready_queue().dumps(),
+            "container_runs": {
+                key: value.model_dump(mode="json")
+                for key, value in self._suspension_state.container_runs.items()
+            },
+            "container_frames": {
+                key: value.model_dump(mode="json")
+                for key, value in self._suspension_state.container_frames.items()
+            },
         }
 
         snapshot["graph_state"] = self._suspension_state.snapshot_graph_state(
@@ -701,6 +716,27 @@ class GraphRuntimeState:  # noqa: PLR0904
     def consume_deferred_nodes(self) -> list[str]:
         """Retrieve and clear deferred nodes awaiting resume."""
         return self._suspension_state.consume_deferred_nodes()
+
+    def put_container_run(self, run: ContainerRunState) -> None:
+        self._suspension_state.container_runs[run.invocation_id] = run
+
+    def get_container_run(self, invocation_id: str) -> ContainerRunState:
+        return self._suspension_state.container_runs[invocation_id]
+
+    def pop_container_run(self, invocation_id: str) -> ContainerRunState:
+        return self._suspension_state.container_runs.pop(invocation_id)
+
+    def put_container_frame(self, frame: ContainerFrameState) -> None:
+        self._suspension_state.container_frames[frame.frame_id] = frame
+
+    def has_container_frame(self, frame_id: str) -> bool:
+        return frame_id in self._suspension_state.container_frames
+
+    def get_container_frame(self, frame_id: str) -> ContainerFrameState:
+        return self._suspension_state.container_frames[frame_id]
+
+    def pop_container_frame(self, frame_id: str) -> ContainerFrameState:
+        return self._suspension_state.container_frames.pop(frame_id)
 
     # ------------------------------------------------------------------
     # Builders
@@ -790,6 +826,14 @@ class GraphRuntimeState:  # noqa: PLR0904
                     _empty_ready_queue_dump(),
                 ),
             ),
+            container_runs={
+                str(key): ContainerRunState.model_validate(value)
+                for key, value in dict(payload.get("container_runs", {})).items()
+            },
+            container_frames={
+                str(key): ContainerFrameState.model_validate(value)
+                for key, value in dict(payload.get("container_frames", {})).items()
+            },
             graph_node_states=graph_node_states,
             graph_edge_states=graph_edge_states,
         )

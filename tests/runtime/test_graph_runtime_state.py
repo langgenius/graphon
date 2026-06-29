@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 from time import time
 from unittest.mock import MagicMock
 
@@ -9,6 +10,11 @@ from graphon.graph_engine.domain.graph_execution import GraphExecution
 from graphon.graph_engine.ready_queue.in_memory import InMemoryReadyQueue
 from graphon.graph_engine.ready_queue.protocol import StartTask
 from graphon.model_runtime.entities.llm_entities import LLMUsage
+from graphon.runtime.container_state import (
+    ContainerFrameState,
+    ContainerRunState,
+    FrameRuntimeData,
+)
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.runtime.read_only_wrappers import ReadOnlyGraphRuntimeStateWrapper
 from graphon.runtime.variable_pool import VariablePool
@@ -84,7 +90,7 @@ _HISTORICAL_FILE_SNAPSHOT_JSON_FROM_749751D_PARENT = (
 )
 
 
-class TestGraphRuntimeState:
+class TestGraphRuntimeState:  # noqa: PLR0904
     def test_execution_context_defaults_to_empty_context(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
 
@@ -201,6 +207,40 @@ class TestGraphRuntimeState:
         restored = GraphRuntimeState.from_snapshot(state.dumps())
 
         assert restored.consume_deferred_nodes() == ["legacy-node"]
+
+    def test_container_runtime_state_round_trips(self) -> None:
+        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+        run = ContainerRunState(
+            invocation_id="invocation-1",
+            kind="loop",
+            frame_id="root",
+            node_id="loop",
+            execution_id="exec-loop",
+            started_at=datetime.fromtimestamp(1, UTC).replace(tzinfo=None),
+            phase_data={"index": 1, "outputs": {"loop_round": 1}},
+        )
+        frame = ContainerFrameState(
+            frame_id="exec-loop:loop:1",
+            kind="loop",
+            parent_invocation_id="invocation-1",
+            root_node_id="loop-start",
+            phase_data={"index": 1},
+            runtime_data=FrameRuntimeData(
+                variable_pool=VariablePool(),
+                outputs={},
+                llm_usage=LLMUsage.empty_usage(),
+                node_run_steps=0,
+                graph_node_states={},
+                graph_edge_states={},
+            ),
+        )
+        state.put_container_run(run)
+        state.put_container_frame(frame)
+
+        restored = GraphRuntimeState.from_snapshot(state.dumps())
+
+        assert restored.get_container_run("invocation-1") == run
+        assert restored.get_container_frame("exec-loop:loop:1") == frame
 
     def test_graph_execution_lazy_instantiation(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
