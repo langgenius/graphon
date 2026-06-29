@@ -491,6 +491,42 @@ def test_pause_drains_ready_tasks_without_clearing_executing_tasks() -> None:
     worker_pool.stop.assert_not_called()
 
 
+def test_pause_drain_removes_only_drained_ready_tasks_from_executing() -> None:
+    ready_queue = InMemoryReadyQueue()
+    graph_execution = GraphExecution(workflow_id="workflow")
+    runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=0,
+        ready_queue=ready_queue,
+        graph_execution=graph_execution,
+    )
+    graph = SimpleNamespace(
+        nodes={
+            "active": SimpleNamespace(state=NodeState.UNKNOWN),
+            "queued": SimpleNamespace(state=NodeState.UNKNOWN),
+        }
+    )
+    manager = GraphStateManager(
+        graph=cast(Graph, graph),
+        graph_runtime_state=runtime_state,
+    )
+    active_task = StartTask(frame_id="root", node_id="active")
+    queued_task = StartTask(frame_id="root", node_id="queued")
+    assert manager.enqueue_node(frame_id="root", node_id="active") is True
+    manager.start_execution(frame_id="root", node_id="active")
+    assert manager.enqueue_node(frame_id="root", node_id="queued") is True
+    manager.start_execution(frame_id="root", node_id="queued")
+    assert ready_queue.get(timeout=0.01) == active_task
+
+    graph_execution.paused = True
+    manager.drain_ready_tasks_to_deferred()
+
+    assert runtime_state.drain_deferred_ready_tasks() == [queued_task]
+    assert manager.get_executing_nodes() == {active_task}
+    manager.finish_execution(frame_id="root", node_id="active")
+    assert manager.get_executing_count() == 0
+
+
 def test_worker_pool_drain_does_not_stop_worker_with_current_task() -> None:
     class WorkerStub:
         def __init__(self, *, has_current_task: bool) -> None:

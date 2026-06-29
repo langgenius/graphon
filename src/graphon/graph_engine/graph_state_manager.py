@@ -289,7 +289,10 @@ class GraphStateManager:
 
     def drain_ready_tasks_to_deferred(self) -> None:
         """Move all live ready tasks into the deferred ready queue."""
-        self._graph_runtime_state.drain_ready_tasks_to_deferred()
+        with self._lock:
+            for task in self._graph_runtime_state.drain_ready_tasks_to_deferred():
+                if isinstance(task, StartTask):
+                    self._executing_tasks.discard(task)
 
     def get_execution_stats(self) -> dict[str, int]:
         """Get execution statistics.

@@ -709,8 +709,10 @@ class GraphRuntimeState:  # noqa: PLR0904
             return
         self.ready_queue.put(task)
 
-    def drain_ready_tasks_to_deferred(self) -> None:
-        self.defer_ready_tasks(self.ready_queue.drain())
+    def drain_ready_tasks_to_deferred(self) -> list[object]:
+        tasks = self.ready_queue.drain()
+        self.defer_ready_tasks(tasks)
+        return tasks
 
     def register_deferred_node(self, node_id: str) -> None:
         """Record a node that became ready during pause and should resume later."""

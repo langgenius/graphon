@@ -200,6 +200,17 @@ class TestGraphRuntimeState:  # noqa: PLR0904
         assert restored.drain_deferred_ready_tasks() == [first, second]
         assert restored.drain_deferred_ready_tasks() == []
 
+    def test_drain_ready_tasks_to_deferred_returns_drained_tasks(self) -> None:
+        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+        first = StartTask(frame_id="root", node_id="a")
+        second = StartTask(frame_id="child", node_id="b")
+        state.ready_queue.put(first)
+        state.ready_queue.put(second)
+
+        assert state.drain_ready_tasks_to_deferred() == [first, second]
+        assert state.ready_queue.qsize() == 0
+        assert state.drain_deferred_ready_tasks() == [first, second]
+
     def test_legacy_deferred_nodes_round_trip_until_scheduler_migrates(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
         state.register_deferred_node("legacy-node")
