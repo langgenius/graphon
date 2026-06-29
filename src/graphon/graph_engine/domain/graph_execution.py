@@ -5,11 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from importlib import import_module
 from typing import Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
 from graphon.entities.pause_reason import PauseReason
 from graphon.enums import NodeState
+from graphon.graph_engine.ready_queue import StartTask
 
 from .node_execution import NodeExecution
 
@@ -25,10 +27,11 @@ class GraphExecutionErrorState(BaseModel):
 class NodeExecutionState(BaseModel):
     """Serializable representation of a node execution entity."""
 
+    frame_id: str
     node_id: str
     state: NodeState = Field(default=NodeState.UNKNOWN)
     retry_count: int = Field(default=0)
-    execution_id: str | None = Field(default=None)
+    execution_id: str
     error: str | None = Field(default=None)
 
 
@@ -67,7 +70,10 @@ def _resolve_exception_class(module_name: str, qualname: str) -> type[Exception]
     module = import_module(module_name)
     attr: object = module
     for part in qualname.split("."):
-        attr = getattr(attr, part)
+        try:
+            attr = vars(attr)[part]
+        except KeyError as exc:
+            raise AttributeError(part) from exc
 
     if isinstance(attr, type) and issubclass(attr, Exception):
         return attr
@@ -86,7 +92,7 @@ def _deserialize_error(state: GraphExecutionErrorState | None) -> Exception | No
         if state.message is None:
             return exception_class()
         return exception_class(state.message)
-    except (ImportError, AttributeError, TypeError, ValueError):
+    except (ImportError, AttributeError, KeyError, TypeError, ValueError):
         # Fallback to RuntimeError when reconstruction fails
         if state.message is None:
             return RuntimeError(state.qualname)
@@ -108,8 +114,8 @@ class GraphExecution:
     paused: bool = False
     pause_reasons: list[PauseReason] = field(default_factory=list)
     error: Exception | None = None
-    node_executions: dict[str, NodeExecution] = field(
-        default_factory=dict[str, NodeExecution],
+    node_executions: dict[StartTask, NodeExecution] = field(
+        default_factory=dict[StartTask, NodeExecution],
     )
     exceptions_count: int = 0
 
@@ -151,11 +157,17 @@ class GraphExecution:
         self.error = error
         self.completed = True
 
-    def get_or_create_node_execution(self, node_id: str) -> NodeExecution:
+    def get_or_create_node_execution(
+        self, *, frame_id: str, node_id: str
+    ) -> NodeExecution:
         """Get or create a node execution entity."""
-        if node_id not in self.node_executions:
-            self.node_executions[node_id] = NodeExecution(node_id=node_id)
-        return self.node_executions[node_id]
+        task = StartTask(frame_id=frame_id, node_id=node_id)
+        if task not in self.node_executions:
+            self.node_executions[task] = NodeExecution(
+                node_id=node_id,
+                execution_id=str(uuid4()),
+            )
+        return self.node_executions[task]
 
     @property
     def is_running(self) -> bool:
@@ -185,13 +197,17 @@ class GraphExecution:
         """Serialize the aggregate state into a JSON string."""
         node_states = [
             NodeExecutionState(
-                node_id=node_id,
+                frame_id=task.frame_id,
+                node_id=task.node_id,
                 state=node_execution.state,
                 retry_count=node_execution.retry_count,
                 execution_id=node_execution.execution_id,
                 error=node_execution.error,
             )
-            for node_id, node_execution in sorted(self.node_executions.items())
+            for task, node_execution in sorted(
+                self.node_executions.items(),
+                key=lambda item: (item[0].frame_id, item[0].node_id),
+            )
         ]
 
         state = GraphExecutionState(
@@ -232,7 +248,7 @@ class GraphExecution:
         self.error = _deserialize_error(state.error)
         self.exceptions_count = state.exceptions_count
         self.node_executions = {
-            item.node_id: NodeExecution(
+            StartTask(frame_id=item.frame_id, node_id=item.node_id): NodeExecution(
                 node_id=item.node_id,
                 state=item.state,
                 retry_count=item.retry_count,

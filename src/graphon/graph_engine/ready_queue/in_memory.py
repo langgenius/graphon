@@ -7,13 +7,13 @@ serialization capabilities for state storage.
 import queue
 from typing import final
 
-from graphon.runtime.ready_queue import ReadyQueueProtocol
+from graphon.runtime.ready_queue import ReadyQueue
 
-from .protocol import ReadyQueueState
+from .protocol import ReadyQueueState, ReadyTask
 
 
 @final
-class InMemoryReadyQueue(ReadyQueueProtocol):
+class InMemoryReadyQueue(ReadyQueue):
     """In-memory ready queue implementation with serialization support.
 
     This implementation uses Python's queue.Queue internally and provides
@@ -27,25 +27,25 @@ class InMemoryReadyQueue(ReadyQueueProtocol):
             maxsize: Maximum size of the queue (0 for unlimited)
 
         """
-        self._queue: queue.Queue[str] = queue.Queue(maxsize=maxsize)
+        self._queue: queue.Queue[ReadyTask] = queue.Queue(maxsize=maxsize)
 
-    def put(self, item: str) -> None:
-        """Add a node ID to the ready queue.
+    def put(self, item: ReadyTask) -> None:
+        """Add a task to the ready queue.
 
         Args:
-            item: The node ID to add to the queue
+            item: The task to add to the queue
 
         """
         self._queue.put(item)
 
-    def get(self, timeout: float | None = None) -> str:
-        """Retrieve and remove a node ID from the queue.
+    def get(self, timeout: float | None = None) -> ReadyTask:
+        """Retrieve and remove a task from the queue.
 
         Args:
             timeout: Maximum time to wait for an item (None for blocking)
 
         Returns:
-            The node ID retrieved from the queue
+            The task retrieved from the queue
 
         """
         if timeout is None:
@@ -86,8 +86,8 @@ class InMemoryReadyQueue(ReadyQueueProtocol):
 
         """
         # Extract all items from the queue without removing them
-        items: list[str] = []
-        temp_items: list[str] = []
+        items: list[ReadyTask] = []
+        temp_items: list[ReadyTask] = []
 
         # Drain the queue temporarily to get all items
         while not self._queue.empty():

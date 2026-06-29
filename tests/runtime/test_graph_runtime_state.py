@@ -7,6 +7,7 @@ import pytest
 from graphon.file import File, FileTransferMethod, FileType
 from graphon.graph_engine.domain.graph_execution import GraphExecution
 from graphon.graph_engine.ready_queue.in_memory import InMemoryReadyQueue
+from graphon.graph_engine.ready_queue.protocol import StartTask
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.runtime.read_only_wrappers import ReadOnlyGraphRuntimeStateWrapper
@@ -217,7 +218,7 @@ class TestGraphRuntimeState:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
         state.total_tokens = 5
         state.set_output("result", {"success": True})
-        state.ready_queue.put("node-1")
+        state.ready_queue.put(StartTask(frame_id="root", node_id="node-1"))
 
         wrapper = ReadOnlyGraphRuntimeStateWrapper(state)
 
@@ -243,7 +244,7 @@ class TestGraphRuntimeState:
             "latency": 0.5,
         })
         state.llm_usage = usage
-        state.ready_queue.put("node-A")
+        state.ready_queue.put(StartTask(frame_id="root", node_id="node-A"))
 
         graph_execution = state.graph_execution
         graph_execution.workflow_id = "wf-123"
@@ -259,7 +260,10 @@ class TestGraphRuntimeState:
         assert restored.get_output("final") == {"result": True}
         assert restored.llm_usage.total_tokens == usage.total_tokens
         assert restored.ready_queue.qsize() == 1
-        assert restored.ready_queue.get(timeout=0.01) == "node-A"
+        assert restored.ready_queue.get(timeout=0.01) == StartTask(
+            frame_id="root",
+            node_id="node-A",
+        )
 
         restored_segment = restored.variable_pool.get(("node1", "value"))
         assert restored_segment is not None
@@ -299,7 +303,7 @@ class TestGraphRuntimeState:
         state.total_tokens = 7
         state.node_run_steps = 2
         state.set_output("foo", "bar")
-        state.ready_queue.put("node-1")
+        state.ready_queue.put(StartTask(frame_id="root", node_id="node-1"))
 
         execution = state.graph_execution
         execution.workflow_id = "wf-456"
@@ -314,7 +318,10 @@ class TestGraphRuntimeState:
         assert restored.node_run_steps == 2
         assert restored.get_output("foo") == "bar"
         assert restored.ready_queue.qsize() == 1
-        assert restored.ready_queue.get(timeout=0.01) == "node-1"
+        assert restored.ready_queue.get(timeout=0.01) == StartTask(
+            frame_id="root",
+            node_id="node-1",
+        )
 
         restored_segment = restored.variable_pool.get(("node", "key"))
         assert restored_segment is not None

@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import final
 
+from graphon.graph_engine.entities.tasks import TaskEvent
 from graphon.graph_events.base import GraphNodeEventBase
 from graphon.graph_events.node import (
     NodeRunExceptionEvent,
@@ -29,7 +30,7 @@ class _DispatcherLoopOutcome:
 
 @dataclass(slots=True)
 class _DispatcherLifecycle:
-    event_queue: queue.Queue[GraphNodeEventBase]
+    event_queue: queue.Queue[TaskEvent]
     event_handler: EventHandler
     execution_coordinator: ExecutionCoordinator
     stop_event: threading.Event
@@ -74,15 +75,15 @@ class _DispatcherLifecycle:
 
     def _dispatch_next_event(self) -> None:
         try:
-            event = self.event_queue.get(timeout=0.1)
+            task_event = self.event_queue.get(timeout=0.1)
         except queue.Empty:
             self._process_commands()
             time.sleep(0.1)
             return
 
-        self.event_handler.dispatch(event)
+        self.event_handler.dispatch(task_event)
         self.event_queue.task_done()
-        self._process_commands(event)
+        self._process_commands(task_event.event)
 
     def _drain_after_exit(self, outcome: _DispatcherLoopOutcome) -> None:
         self._process_commands()
@@ -98,8 +99,8 @@ class _DispatcherLifecycle:
     def _drain_event_queue(self) -> None:
         while True:
             try:
-                event = self.event_queue.get(block=False)
-                self.event_handler.dispatch(event)
+                task_event = self.event_queue.get(block=False)
+                self.event_handler.dispatch(task_event)
                 self.event_queue.task_done()
             except queue.Empty:
                 break
@@ -107,10 +108,10 @@ class _DispatcherLifecycle:
     def _drain_events_until_idle(self) -> None:
         while not self.stop_event.is_set():
             try:
-                event = self.event_queue.get(timeout=0.1)
-                self.event_handler.dispatch(event)
+                task_event = self.event_queue.get(timeout=0.1)
+                self.event_handler.dispatch(task_event)
                 self.event_queue.task_done()
-                self._process_commands(event)
+                self._process_commands(task_event.event)
             except queue.Empty:
                 if not self.execution_coordinator.has_executing_nodes():
                     break
@@ -132,7 +133,7 @@ class Dispatcher:
 
     def __init__(
         self,
-        event_queue: queue.Queue[GraphNodeEventBase],
+        event_queue: queue.Queue[TaskEvent],
         event_handler: EventHandler,
         execution_coordinator: ExecutionCoordinator,
         event_emitter: EventManager | None = None,

@@ -7,8 +7,7 @@ from collections.abc import Generator, Mapping, Sequence
 from datetime import UTC, datetime
 from functools import singledispatchmethod
 from types import MappingProxyType
-from typing import Any, ClassVar, assert_never, get_args, get_origin
-from uuid import uuid4
+from typing import Any, ClassVar, assert_never, cast, get_args, get_origin
 
 from graphon.entities.base_node_data import BaseNodeData, RetryConfig
 from graphon.entities.graph_config import NodeConfigDict, NodeConfigDictAdapter
@@ -75,9 +74,19 @@ from graphon.node_events.node import (
     StreamReasoningEvent,
     VariableUpdatedEvent,
 )
+from graphon.nodes.container_effects import ContainerAwaitRequest, ContainerRunResult
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
 _MISSING_RUN_CONTEXT_VALUE = object()
+_MISSING_SEND_VALUE = object()
+
+NodeRunEventGenerator = Generator[NodeEventBase | GraphNodeEventBase, None, None]
+ContainerRunEventGenerator = Generator[
+    NodeEventBase | GraphNodeEventBase | ContainerAwaitRequest,
+    ContainerRunResult,
+    None,
+]
+NodeRunOutcome = NodeRunResult | NodeRunEventGenerator | ContainerRunEventGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -361,17 +370,8 @@ class _NodeRuntimeMixin[NodeDataT: BaseNodeData]:
     def execution_id(self: Node[NodeDataT]) -> str:
         return self._node_execution_id
 
-    def ensure_execution_id(self: Node[NodeDataT]) -> str:
-        if self._node_execution_id:
-            return self._node_execution_id
-
-        resumed_execution_id = self._restore_execution_id_from_runtime_state()
-        if resumed_execution_id:
-            self._node_execution_id = resumed_execution_id
-            return self._node_execution_id
-
-        self._node_execution_id = str(uuid4())
-        return self._node_execution_id
+    def bind_execution_id(self: Node[NodeDataT], execution_id: str) -> None:
+        self._node_execution_id = execution_id
 
     def populate_start_event(
         self: Node[NodeDataT],
@@ -512,7 +512,7 @@ class Node[NodeDataT: BaseNodeData](
         # but graphon itself should not know their module identities.
         # This prevents test helper subclasses from polluting the global registry and
         # accidentally overriding real node types (e.g., a test Answer node).
-        module_name = getattr(cls, "__module__", "")
+        module_name = cls.__module__
         # Only register concrete subclasses that define node_type and version()
         node_type = cls.node_type
         version = cls.version()
@@ -551,10 +551,7 @@ class Node[NodeDataT: BaseNodeData](
                       or not a BaseNodeData subtype).
 
         """
-        # __orig_bases__ contains the original generic bases before type erasure.
-        # For `class CodeNode(Node[CodeNodeData])`, this would be
-        # `(Node[CodeNodeData],)`.
-        for base in getattr(cls, "__orig_bases__", ()):
+        for base in cls.__orig_bases__:
             origin = get_origin(base)  # Returns `Node` for `Node[CodeNodeData]`
             if origin is Node:
                 args = get_args(
@@ -595,6 +592,7 @@ class Node[NodeDataT: BaseNodeData](
     # Global registry populated via __init_subclass__
     _registry: ClassVar[dict[NodeType, dict[str, type[Node]]]] = {}
     _registry_version: ClassVar[int] = 0
+    __orig_bases__: ClassVar[tuple[object, ...]] = ()
 
     def __init__(
         self,
@@ -625,31 +623,24 @@ class Node[NodeDataT: BaseNodeData](
 
         self.post_init()
 
-    def _restore_execution_id_from_runtime_state(self) -> str | None:
-        graph_execution = self.graph_runtime_state.graph_execution
-        try:
-            node_executions = graph_execution.node_executions
-        except AttributeError:
-            return None
-        if not isinstance(node_executions, dict):
-            return None
-        node_execution = node_executions.get(self._node_id)
-        if node_execution is None:
-            return None
-        execution_id = node_execution.execution_id
-        if not execution_id:
-            return None
-        return str(execution_id)
-
     @abstractmethod
     def _run(
         self,
-    ) -> NodeRunResult | Generator[NodeEventBase | GraphNodeEventBase, None, None]:
+    ) -> NodeRunOutcome:
         """Run the node and return either a result object or an event stream."""
         raise NotImplementedError
 
-    def run(self) -> Generator[GraphNodeEventBase, None, None]:
-        execution_id = self.ensure_execution_id()
+    def run(
+        self,
+    ) -> Generator[
+        GraphNodeEventBase | ContainerAwaitRequest,
+        ContainerRunResult,
+        None,
+    ]:
+        execution_id = self.execution_id
+        if not execution_id:
+            msg = "node execution_id must be bound before run"
+            raise RuntimeError(msg)
         self._start_at = datetime.now(UTC).replace(tzinfo=None)
 
         # Create and push start event with required fields
@@ -677,19 +668,36 @@ class Node[NodeDataT: BaseNodeData](
             logger.exception("Node %s failed to run", self._node_id)
             yield self._build_run_failed_event(e)
 
-    def _run_events(self) -> Generator[GraphNodeEventBase, None, None]:
+    def _run_events(
+        self,
+    ) -> Generator[
+        GraphNodeEventBase | ContainerAwaitRequest,
+        ContainerRunResult,
+        None,
+    ]:
         result = self._run()
         if isinstance(result, NodeRunResult):
             yield self._convert_node_run_result_to_graph_node_event(result)
             return
 
-        for event in result:
-            yield self._normalize_run_event(event)
+        send_value: object = _MISSING_SEND_VALUE
+        while True:
+            try:
+                event = (
+                    next(result)
+                    if send_value is _MISSING_SEND_VALUE
+                    else result.send(cast(Any, send_value))
+                )
+            except StopIteration:
+                return
+            send_value = yield self._normalize_run_event(event)
 
     def _normalize_run_event(
         self,
-        event: NodeEventBase | GraphNodeEventBase,
-    ) -> GraphNodeEventBase:
+        event: NodeEventBase | GraphNodeEventBase | ContainerAwaitRequest,
+    ) -> GraphNodeEventBase | ContainerAwaitRequest:
+        if isinstance(event, ContainerAwaitRequest):
+            return event
         if isinstance(event, NodeEventBase):
             return self._dispatch(event)
         if not event.in_iteration_id and not event.in_loop_id:

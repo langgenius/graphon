@@ -9,7 +9,11 @@ import pytest
 from graphon.enums import BuiltinNodeTypes
 from graphon.file.enums import FileTransferMethod, FileType
 from graphon.file.models import File
-from graphon.graph_events.node import NodeRunFailedEvent, NodeRunSucceededEvent
+from graphon.graph_events.node import (
+    NodeRunFailedEvent,
+    NodeRunStartedEvent,
+    NodeRunSucceededEvent,
+)
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.node_events.node import StreamChunkEvent, StreamCompletedEvent
 from graphon.nodes.tool.entities import ToolNodeData, ToolProviderType
@@ -147,6 +151,7 @@ def _build_tool_node() -> tuple[ToolNode, _StubToolRuntime, _StubToolFileManager
         tool_file_manager=cast(Any, tool_file_manager),
         runtime=cast(Any, runtime),
     )
+    node.bind_execution_id("tool-run")
     return node, runtime, tool_file_manager
 
 
@@ -156,18 +161,7 @@ def _build_run_tool_node(
     tool_node_version: str | None,
 ) -> tuple[ToolNode, object]:
     variable_pool = build_variable_pool(variables=[(["upstream", "answer"], "42")])
-    runtime_state = GraphRuntimeState(
-        variable_pool=variable_pool,
-        start_at=time(),
-        graph_execution=cast(
-            Any,
-            MagicMock(
-                node_executions={
-                    "node-1": MagicMock(execution_id="execution-from-runtime-state"),
-                },
-            ),
-        ),
-    )
+    runtime_state = GraphRuntimeState(variable_pool=variable_pool, start_at=time())
     node = ToolNode(
         node_id="node-1",
         data=_tool_node_data(tool_node_version=tool_node_version),
@@ -176,6 +170,7 @@ def _build_run_tool_node(
         tool_file_manager=cast(Any, _StubToolFileManager()),
         runtime=cast(Any, runtime),
     )
+    node.bind_execution_id("bound-execution")
     return node, variable_pool
 
 
@@ -419,7 +414,7 @@ def test_transform_message_rejects_non_file_payload_in_file_message() -> None:
         ("2", True),
     ],
 )
-def test_run_passes_variable_pool_and_restored_execution_id_to_runtime(
+def test_run_passes_variable_pool_and_bound_execution_id_to_runtime(
     *,
     tool_node_version: str | None,
     expects_variable_pool: bool,
@@ -436,10 +431,11 @@ def test_run_passes_variable_pool_and_restored_execution_id_to_runtime(
         "node_id": "node-1",
         "node_data": node.node_data,
         "variable_pool": variable_pool if expects_variable_pool else None,
-        "node_execution_id": "execution-from-runtime-state",
+        "node_execution_id": "bound-execution",
     }
-    assert node.execution_id == "execution-from-runtime-state"
-    assert events[0].id == "execution-from-runtime-state"
+    assert node.execution_id == "bound-execution"
+    assert isinstance(events[0], NodeRunStartedEvent)
+    assert events[0].id == "bound-execution"
     assert isinstance(events[-1], NodeRunSucceededEvent)
 
 

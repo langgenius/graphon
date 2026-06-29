@@ -6,8 +6,16 @@ from typing import Any, ClassVar, cast
 import pytest
 import yaml
 
+import graphon.dsl.node_factory as node_factory_module
+import graphon.nodes.http_request.node as http_request_node_module
 from graphon.dsl import loads
-from graphon.dsl.entities import DslCredentials
+from graphon.dsl.entities import (
+    DslCredentials,
+    DslDependency,
+    DslModelCredential,
+    DslSlimSettings,
+    PluginDependencyType,
+)
 from graphon.dsl.errors import DslError
 from graphon.dsl.node_factory import (
     SlimDslNodeFactory,
@@ -153,7 +161,7 @@ def _patch_fake_slim_llm(monkeypatch: pytest.MonkeyPatch) -> type[_FakeSlimLLM]:
     _FakeSlimLLM.responses = {}
     _FakeSlimLLM.features = []
     _FakeSlimLLM.tool_calls = {}
-    monkeypatch.setattr("graphon.dsl.node_factory.SlimLLM", _FakeSlimLLM)
+    monkeypatch.setitem(node_factory_module.__dict__, "SlimLLM", _FakeSlimLLM)
     return _FakeSlimLLM
 
 
@@ -466,6 +474,74 @@ def _parameter_extractor_data() -> dict[str, Any]:
     }
 
 
+def test_slim_dsl_node_factory_rebinds_graph_runtime_state() -> None:
+    graph_config = {
+        "nodes": [{"id": "start", "data": {"type": "start", "variables": []}}],
+        "edges": [],
+    }
+    graph_init_params = build_graph_init_params(graph_config=graph_config)
+    original_runtime_state = GraphRuntimeState(
+        variable_pool=build_variable_pool(variables=[(["start", "query"], "before")]),
+        start_at=1,
+    )
+    rebound_runtime_state = GraphRuntimeState(
+        variable_pool=build_variable_pool(variables=[(["start", "query"], "after")]),
+        start_at=2,
+    )
+    credentials = DslCredentials(
+        model_credentials=[
+            DslModelCredential(
+                provider="langgenius/openai/openai",
+                values={"api_key": "secret-key"},
+            ),
+        ],
+        slim=DslSlimSettings(
+            mode="remote",
+            plugin_folder=".slim/rebound-test",
+            daemon_addr="http://localhost:9901",
+            daemon_key="daemon-secret",
+            python_path="/usr/bin/python3",
+            uv_path="/usr/bin/uv",
+            python_env_init_timeout=33,
+            max_execution_timeout=44,
+            pip_mirror_url="https://mirror.example.com/simple",
+            pip_extra_args="--no-cache-dir",
+            marketplace_url="https://marketplace.example.com",
+            ignore_uv_lock=True,
+        ),
+    )
+    dependencies = [
+        DslDependency(
+            type=PluginDependencyType.MARKETPLACE,
+            plugin_unique_identifier=_OPENAI_PLUGIN_ID,
+        ),
+    ]
+    factory = SlimDslNodeFactory(
+        graph_config=graph_config,
+        graph_init_params=graph_init_params,
+        graph_runtime_state=original_runtime_state,
+        credentials=credentials,
+        dependencies=dependencies,
+    )
+
+    rebound_factory = factory.with_runtime_state(rebound_runtime_state)
+    node = rebound_factory.create_node(
+        cast(
+            NodeConfigDict,
+            {"id": "start", "data": {"type": "start", "variables": []}},
+        ),
+    )
+
+    assert rebound_factory is not factory
+    assert rebound_factory.graph_config is graph_config
+    assert rebound_factory.graph_init_params is graph_init_params
+    assert rebound_factory.credentials is credentials
+    assert rebound_factory.dependencies is dependencies
+    assert rebound_factory.graph_runtime_state is rebound_runtime_state
+    assert rebound_factory.slim_client_config == factory.slim_client_config
+    assert node.graph_runtime_state is rebound_runtime_state
+
+
 @pytest.mark.parametrize(
     ("node_data", "expected_type"),
     [
@@ -605,6 +681,7 @@ def test_variable_aggregator_node_from_dsl_runs_first_available_selector() -> No
         start_inputs={"candidate": "hello"},
     )
     node = engine.graph.nodes["node"]
+    node.bind_execution_id("node-run")
 
     success = _succeeded_event(list(node.run()))
 
@@ -618,6 +695,7 @@ def test_list_operator_node_from_dsl_runs_against_start_input_array() -> None:
         start_inputs={"items": ["first", "second"]},
     )
     node = engine.graph.nodes["node"]
+    node.bind_execution_id("node-run")
 
     success = _succeeded_event(list(node.run()))
 
@@ -632,6 +710,7 @@ def test_assigner_node_from_dsl_emits_variable_update() -> None:
     )
     engine.graph_runtime_state.variable_pool.add(["conversation", "topic"], "before")
     node = engine.graph.nodes["node"]
+    node.bind_execution_id("node-run")
 
     events = list(node.run())
 
@@ -698,12 +777,14 @@ def test_http_request_node_from_dsl_runs_text_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     http_client = _FakeHttpClient()
-    monkeypatch.setattr(
-        "graphon.nodes.http_request.node.get_http_client",
+    monkeypatch.setitem(
+        http_request_node_module.__dict__,
+        "get_http_client",
         lambda: http_client,
     )
     engine = loads(_graph_dsl_for_node(_http_request_data()))
     node = engine.graph.nodes["node"]
+    node.bind_execution_id("node-run")
 
     success = _succeeded_event(list(node.run()))
 
@@ -716,12 +797,14 @@ def test_http_request_node_from_dsl_fails_file_response_cleanly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     http_client = _FakeHttpClient(headers={"content-type": "image/png"}, content=b"png")
-    monkeypatch.setattr(
-        "graphon.nodes.http_request.node.get_http_client",
+    monkeypatch.setitem(
+        http_request_node_module.__dict__,
+        "get_http_client",
         lambda: http_client,
     )
     engine = loads(_graph_dsl_for_node(_http_request_data()))
     node = engine.graph.nodes["node"]
+    node.bind_execution_id("node-run")
 
     failed = _failed_event(list(node.run()))
 
@@ -743,6 +826,7 @@ def test_http_request_node_file_body_download_fails_cleanly() -> None:
         "data": [{"type": "file", "file": ["start", "file"]}],
     }
     node = factory.create_node(cast(NodeConfigDict, {"id": "node", "data": node_data}))
+    node.bind_execution_id("node-run")
 
     failed = _failed_event(list(node.run()))
 
@@ -784,6 +868,7 @@ def test_question_classifier_node_from_dsl_runs_with_slim_model(
         start_inputs={"query": "Where is my refund?"},
     )
     node = engine.graph.nodes["node"]
+    node.bind_execution_id("node-run")
 
     success = _succeeded_event(list(node.run()))
 
@@ -804,6 +889,7 @@ def test_parameter_extractor_node_from_dsl_runs_with_slim_model(
         start_inputs={"query": "Book a trip to Paris"},
     )
     node = engine.graph.nodes["node"]
+    node.bind_execution_id("node-run")
 
     success = _succeeded_event(list(node.run()))
 
@@ -839,6 +925,7 @@ def test_parameter_extractor_node_from_dsl_runs_function_call_with_slim_model(
         start_inputs={"query": "Book a trip to Berlin"},
     )
     node = engine.graph.nodes["node"]
+    node.bind_execution_id("node-run")
 
     success = _succeeded_event(list(node.run()))
 

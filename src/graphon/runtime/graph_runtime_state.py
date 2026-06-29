@@ -14,11 +14,10 @@ from pydantic_core import to_jsonable_python
 
 from graphon.enums import NodeExecutionType, NodeState, NodeType
 from graphon.model_runtime.entities.llm_entities import LLMUsage
-from graphon.runtime.ready_queue import ReadyQueueProtocol
+from graphon.runtime.ready_queue import ReadyQueue
 from graphon.runtime.variable_pool import VariablePool
 
 if TYPE_CHECKING:
-    from graphon.entities.graph_init_params import GraphInitParams
     from graphon.entities.pause_reason import PauseReason
     from graphon.graph.graph import Graph
 
@@ -28,10 +27,10 @@ class NodeExecutionProtocol(Protocol):
 
     state: NodeState
     retry_count: int
-    execution_id: str | None
+    execution_id: str
 
     @abstractmethod
-    def mark_started(self, execution_id: str) -> None:
+    def mark_started(self) -> None:
         """Mark the node execution as started."""
         ...
 
@@ -70,8 +69,8 @@ class GraphExecutionProtocol(Protocol):
 
     @property
     @abstractmethod
-    def node_executions(self) -> Mapping[str, NodeExecutionProtocol]:
-        """Return the persisted node execution state keyed by node id."""
+    def node_executions(self) -> Mapping[Any, NodeExecutionProtocol]:
+        """Return the persisted node execution state keyed by ready task."""
         ...
 
     @abstractmethod
@@ -105,8 +104,13 @@ class GraphExecutionProtocol(Protocol):
         ...
 
     @abstractmethod
-    def get_or_create_node_execution(self, node_id: str) -> NodeExecutionProtocol:
-        """Return the execution entity for a node, creating it when needed."""
+    def get_or_create_node_execution(
+        self,
+        *,
+        frame_id: str,
+        node_id: str,
+    ) -> NodeExecutionProtocol:
+        """Return the execution entity for a task, creating it when needed."""
         ...
 
     @property
@@ -174,31 +178,6 @@ class GraphProtocol(Protocol):
 
     @abstractmethod
     def get_outgoing_edges(self, node_id: str) -> Sequence[EdgeProtocol]: ...
-
-
-class ChildGraphEngineBuilderProtocol(Protocol):
-    @abstractmethod
-    def build_child_engine(
-        self,
-        *,
-        workflow_id: str,
-        graph_init_params: GraphInitParams,
-        parent_graph_runtime_state: GraphRuntimeState,
-        root_node_id: str,
-        variable_pool: VariablePool | None = None,
-    ) -> Any: ...
-
-
-class ChildEngineError(ValueError):
-    """Base error type for child-engine creation failures."""
-
-
-class ChildEngineBuilderNotConfiguredError(ChildEngineError):
-    """Raised when child-engine creation is requested without a bound builder."""
-
-
-class ChildGraphNotFoundError(ChildEngineError):
-    """Raised when the requested child graph entry point cannot be resolved."""
 
 
 class _GraphStateSnapshot(BaseModel):
@@ -395,18 +374,17 @@ class _GraphRuntimeBindings:
         self,
         *,
         runtime_state: GraphRuntimeState,
-        ready_queue: ReadyQueueProtocol | None = None,
+        ready_queue: ReadyQueue | None = None,
         graph_execution: GraphExecutionProtocol | None = None,
         execution_context: AbstractContextManager[object] | None = None,
     ) -> None:
         self._runtime_state = runtime_state
         self.graph: GraphProtocol | Graph | None = None
-        self.ready_queue: ReadyQueueProtocol | None = ready_queue
+        self.ready_queue: ReadyQueue | None = ready_queue
         self.graph_execution: GraphExecutionProtocol | None = graph_execution
         self.execution_context: AbstractContextManager[object] = (
             execution_context if execution_context is not None else nullcontext(None)
         )
-        self.child_engine_builder: ChildGraphEngineBuilderProtocol | None = None
 
     def attach_graph(
         self,
@@ -433,33 +411,7 @@ class _GraphRuntimeBindings:
         _ = self.get_ready_queue()
         _ = self.get_graph_execution()
 
-    def bind_child_engine_builder(
-        self,
-        builder: ChildGraphEngineBuilderProtocol,
-    ) -> None:
-        self.child_engine_builder = builder
-
-    def create_child_engine(
-        self,
-        *,
-        workflow_id: str,
-        graph_init_params: GraphInitParams,
-        root_node_id: str,
-        variable_pool: VariablePool | None = None,
-    ) -> Any:
-        if self.child_engine_builder is None:
-            msg = "Child engine builder is not configured."
-            raise ChildEngineBuilderNotConfiguredError(msg)
-
-        return self.child_engine_builder.build_child_engine(
-            workflow_id=workflow_id,
-            graph_init_params=graph_init_params,
-            parent_graph_runtime_state=self._runtime_state,
-            root_node_id=root_node_id,
-            variable_pool=variable_pool,
-        )
-
-    def get_ready_queue(self) -> ReadyQueueProtocol:
+    def get_ready_queue(self) -> ReadyQueue:
         if self.ready_queue is None:
             self.ready_queue = self._runtime_state.create_ready_queue()
         return self.ready_queue
@@ -526,7 +478,7 @@ class GraphRuntimeState:  # noqa: PLR0904
         llm_usage: LLMUsage | None = None,
         outputs: dict[str, object] | None = None,
         node_run_steps: int = 0,
-        ready_queue: ReadyQueueProtocol | None = None,
+        ready_queue: ReadyQueue | None = None,
         graph_execution: GraphExecutionProtocol | None = None,
         graph: GraphProtocol | Graph | None = None,
         execution_context: AbstractContextManager[object] | None = None,
@@ -554,7 +506,7 @@ class GraphRuntimeState:  # noqa: PLR0904
         return self._execution_data.variable_pool
 
     @property
-    def ready_queue(self) -> ReadyQueueProtocol:
+    def ready_queue(self) -> ReadyQueue:
         return self._bindings.get_ready_queue()
 
     @property
@@ -650,28 +602,6 @@ class GraphRuntimeState:  # noqa: PLR0904
         """Ensure core collaborators are initialized with the provided context."""
         self._bindings.configure(self._suspension_state, graph=graph)
 
-    def bind_child_engine_builder(
-        self,
-        builder: ChildGraphEngineBuilderProtocol,
-    ) -> None:
-        self._bindings.bind_child_engine_builder(builder)
-
-    def create_child_engine(
-        self,
-        *,
-        workflow_id: str,
-        graph_init_params: GraphInitParams,
-        root_node_id: str,
-        variable_pool: VariablePool | None = None,
-    ) -> Any:
-        """Create a child graph engine whose runtime state derives from this parent."""
-        return self._bindings.create_child_engine(
-            workflow_id=workflow_id,
-            graph_init_params=graph_init_params,
-            root_node_id=root_node_id,
-            variable_pool=variable_pool,
-        )
-
     def dumps(self) -> str:
         """Serialize runtime state into a JSON string."""
         snapshot: dict[str, Any] = {
@@ -745,7 +675,7 @@ class GraphRuntimeState:  # noqa: PLR0904
     # ------------------------------------------------------------------
     # Builders
     # ------------------------------------------------------------------
-    def create_ready_queue(self) -> ReadyQueueProtocol:
+    def create_ready_queue(self) -> ReadyQueue:
         """Create the ready queue collaborator used by this runtime state."""
         return self._build_ready_queue()
 
@@ -753,7 +683,7 @@ class GraphRuntimeState:  # noqa: PLR0904
         """Create the graph execution aggregate used by this runtime state."""
         return self._build_graph_execution()
 
-    def _build_ready_queue(self) -> ReadyQueueProtocol:
+    def _build_ready_queue(self) -> ReadyQueue:
         # Import lazily to avoid breaching architecture boundaries
         # enforced by import-linter.
         module = importlib.import_module("graphon.graph_engine.ready_queue")

@@ -7,7 +7,8 @@ from typing import TypedDict, final
 from graphon.enums import NodeState
 from graphon.graph.edge import Edge
 from graphon.graph.graph import Graph
-from graphon.runtime.ready_queue import ReadyQueueProtocol
+
+from .ready_queue import ReadyQueue, StartTask
 
 
 class EdgeStateAnalysis(TypedDict):
@@ -20,7 +21,7 @@ class EdgeStateAnalysis(TypedDict):
 
 @final
 class GraphStateManager:
-    def __init__(self, graph: Graph, ready_queue: ReadyQueueProtocol) -> None:
+    def __init__(self, graph: Graph, ready_queue: ReadyQueue) -> None:
         """Initialize the state manager.
 
         Args:
@@ -33,23 +34,24 @@ class GraphStateManager:
         self._lock = threading.RLock()
 
         # Execution tracking state
-        self._executing_nodes: set[str] = set()
+        self._executing_tasks: set[StartTask] = set()
 
     # ============= Node State Operations =============
 
-    def enqueue_node(self, node_id: str) -> None:
-        """Mark a node as TAKEN and add it to the ready queue.
+    def enqueue_node(self, *, frame_id: str, node_id: str) -> None:
+        """Mark a node as TAKEN and add its task to the ready queue.
 
         This combines the state transition and enqueueing operations
         that always occur together when preparing a node for execution.
 
         Args:
+            frame_id: The ID of the execution frame that owns the task
             node_id: The ID of the node to enqueue
 
         """
         with self._lock:
             self._graph.nodes[node_id].state = NodeState.TAKEN
-            self._ready_queue.put(node_id)
+            self._ready_queue.put(StartTask(frame_id=frame_id, node_id=node_id))
 
     def mark_node_skipped(self, node_id: str) -> None:
         """Mark a node as SKIPPED.
@@ -188,38 +190,43 @@ class GraphStateManager:
 
     # ============= Execution Tracking Operations =============
 
-    def start_execution(self, node_id: str) -> None:
-        """Mark a node as executing.
+    def start_execution(self, *, frame_id: str, node_id: str) -> None:
+        """Mark a task as executing.
 
         Args:
+            frame_id: The ID of the execution frame that owns the task
             node_id: The ID of the node starting execution
 
         """
         with self._lock:
-            self._executing_nodes.add(node_id)
+            self._executing_tasks.add(StartTask(frame_id=frame_id, node_id=node_id))
 
-    def finish_execution(self, node_id: str) -> None:
-        """Mark a node as no longer executing.
+    def finish_execution(self, *, frame_id: str, node_id: str) -> None:
+        """Mark a task as no longer executing.
 
         Args:
+            frame_id: The ID of the execution frame that owns the task
             node_id: The ID of the node finishing execution
 
         """
         with self._lock:
-            self._executing_nodes.discard(node_id)
+            self._executing_tasks.discard(StartTask(frame_id=frame_id, node_id=node_id))
 
-    def is_executing(self, node_id: str) -> bool:
-        """Check if a node is currently executing.
+    def is_executing(self, *, frame_id: str, node_id: str) -> bool:
+        """Check if a task is currently executing.
 
         Args:
+            frame_id: The ID of the execution frame that owns the task
             node_id: The ID of the node to check
 
         Returns:
-            True if the node is executing
+            True if the task is executing
 
         """
         with self._lock:
-            return node_id in self._executing_nodes
+            return (
+                StartTask(frame_id=frame_id, node_id=node_id) in self._executing_tasks
+            )
 
     def get_executing_count(self) -> int:
         """Get the count of currently executing nodes.
@@ -231,38 +238,37 @@ class GraphStateManager:
         # This count is a best-effort snapshot and can change concurrently.
         # Only use it for pause-drain checks where scheduling is already frozen.
         with self._lock:
-            return len(self._executing_nodes)
+            return len(self._executing_tasks)
 
-    def get_executing_nodes(self) -> set[str]:
-        """Get a copy of the set of executing node IDs.
+    def get_executing_nodes(self) -> set[StartTask]:
+        """Get a copy of the set of executing tasks.
 
         Returns:
-            Set of node IDs currently executing
+            Set of tasks currently executing
 
         """
         with self._lock:
-            return self._executing_nodes.copy()
+            return self._executing_tasks.copy()
 
     def clear_executing(self) -> None:
         """Clear all executing nodes."""
         with self._lock:
-            self._executing_nodes.clear()
+            self._executing_tasks.clear()
 
     # ============= Composite Operations =============
 
     def is_execution_complete(self) -> bool:
-        """Check if graph execution is complete.
+        """Check if this frame's execution is complete.
 
-        Execution is complete when:
-        - Ready queue is empty
-        - No nodes are executing
+        Tasks are marked executing when they are enqueued, so this frame is
+        complete when no task in this manager remains pending or running.
 
         Returns:
             True if execution is complete
 
         """
         with self._lock:
-            return self._ready_queue.empty() and len(self._executing_nodes) == 0
+            return len(self._executing_tasks) == 0
 
     def get_queue_depth(self) -> int:
         """Get the current depth of the ready queue.
@@ -299,7 +305,7 @@ class GraphStateManager:
 
             return {
                 "queue_depth": self._ready_queue.qsize(),
-                "executing": len(self._executing_nodes),
+                "executing": len(self._executing_tasks),
                 "taken_nodes": taken_nodes,
                 "skipped_nodes": skipped_nodes,
                 "unknown_nodes": unknown_nodes,

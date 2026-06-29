@@ -1,10 +1,10 @@
 """Runtime ready queue protocol."""
 
 from abc import abstractmethod
-from typing import Protocol
+from typing import Any, Protocol
 
 
-class ReadyQueueProtocol(Protocol):
+class ReadyQueue(Protocol):
     """Structural interface required from ready queue implementations.
 
     Implementations may be in-memory or persistence-backed, but they must
@@ -12,24 +12,24 @@ class ReadyQueueProtocol(Protocol):
     """
 
     @abstractmethod
-    def put(self, item: str) -> None:
-        """Add a node identifier to the ready queue.
+    def put(self, item: Any) -> None:
+        """Add a ready item to the ready queue.
 
         Args:
-            item: The node identifier to add to the queue.
+            item: The implementation-defined item to add to the queue.
         """
         ...
 
     @abstractmethod
-    def get(self, timeout: float | None = None) -> str:
-        """Retrieve and remove the next node identifier from the queue.
+    def get(self, timeout: float | None = None) -> Any:
+        """Retrieve and remove the next ready item from the queue.
 
         Args:
             timeout: Maximum time to wait for an item. ``None`` blocks until an
                 item becomes available.
 
         Returns:
-            The node identifier retrieved from the queue.
+            The implementation-defined item retrieved from the queue.
         """
         ...
 
@@ -44,7 +44,7 @@ class ReadyQueueProtocol(Protocol):
 
     @abstractmethod
     def empty(self) -> bool:
-        """Check whether the queue contains any pending nodes.
+        """Check whether the queue contains any pending items.
 
         This method must be safe to call concurrently with other queue operations,
         including put and get.
@@ -59,7 +59,7 @@ class ReadyQueueProtocol(Protocol):
 
     @abstractmethod
     def qsize(self) -> int:
-        """Return the approximate number of pending nodes awaiting execution.
+        """Return the approximate number of pending items awaiting execution.
 
         This method must be safe to call concurrently with other queue operations,
         including put and get.

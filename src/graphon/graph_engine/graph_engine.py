@@ -12,12 +12,10 @@ from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from typing import final
 
-from graphon.entities.graph_init_params import GraphInitParams
 from graphon.entities.workflow_start_reason import WorkflowStartReason
 from graphon.graph.graph import Graph
 from graphon.graph_events.base import (
     GraphEngineEvent,
-    GraphNodeEventBase,
 )
 from graphon.graph_events.graph import (
     GraphRunAbortedEvent,
@@ -28,12 +26,10 @@ from graphon.graph_events.graph import (
     GraphRunSucceededEvent,
 )
 from graphon.runtime.graph_runtime_state import (
-    ChildGraphEngineBuilderProtocol,
     GraphExecutionProtocol,
     GraphRuntimeState,
 )
 from graphon.runtime.read_only_wrappers import ReadOnlyGraphRuntimeStateWrapper
-from graphon.runtime.variable_pool import VariablePool
 
 from .command_channels import CommandChannel
 from .command_processing import (
@@ -43,13 +39,17 @@ from .command_processing import (
     UpdateVariablesCommandHandler,
 )
 from .config import GraphEngineConfig
+from .container_execution import ContainerExecution
 from .entities.commands import AbortCommand, PauseCommand, UpdateVariablesCommand
+from .entities.tasks import TaskEvent
 from .error_handler import ErrorHandler
 from .event_management import EventHandler, EventManager
+from .frames import ExecutionFrame, FrameRegistry
 from .graph_state_manager import GraphStateManager
 from .graph_traversal import EdgeProcessor, SkipPropagator
 from .layers.base import GraphEngineLayer
 from .orchestration import Dispatcher, ExecutionCoordinator
+from .ready_queue import ROOT_FRAME_ID
 from .worker_management import WorkerPool
 
 logger = logging.getLogger(__name__)
@@ -127,7 +127,6 @@ class GraphEngine:
         graph_runtime_state: GraphRuntimeState,
         command_channel: CommandChannel,
         config: GraphEngineConfig = _DEFAULT_CONFIG,
-        child_engine_builder: ChildGraphEngineBuilderProtocol | None = None,
     ) -> None:
         """Initialize the graph engine with all subsystems and dependencies."""
         # Bind runtime state to current workflow context
@@ -137,9 +136,6 @@ class GraphEngine:
         self._command_channel = command_channel
         self._config = config
         self._layers: list[GraphEngineLayer] = []
-        self._child_engine_builder = child_engine_builder
-        if child_engine_builder is not None:
-            self._graph_runtime_state.bind_child_engine_builder(child_engine_builder)
 
         # Graph execution tracks the overall execution state
         self._graph_execution = self._graph_runtime_state.graph_execution
@@ -149,11 +145,12 @@ class GraphEngine:
         self._ready_queue = self._graph_runtime_state.ready_queue
 
         # Queue for events generated during execution
-        self._event_queue: queue.Queue[GraphNodeEventBase] = queue.Queue()
+        self._event_queue: queue.Queue[TaskEvent] = queue.Queue()
 
         # === State Management ===
         # Unified state manager handles all node state transitions and queue operations
         self._state_manager = GraphStateManager(self._graph, self._ready_queue)
+        self._frame_registry = FrameRegistry()
 
         # === Event Management ===
         # Event manager handles both collection and emission of events
@@ -176,6 +173,16 @@ class GraphEngine:
             graph=self._graph,
             state_manager=self._state_manager,
             skip_propagator=self._skip_propagator,
+        )
+        self._frame_registry.register(
+            ExecutionFrame(
+                frame_id=ROOT_FRAME_ID,
+                graph=self._graph,
+                graph_runtime_state=self._graph_runtime_state,
+                state_manager=self._state_manager,
+                edge_processor=self._edge_processor,
+                error_handler=self._error_handler,
+            ),
         )
 
         # === Command Processing ===
@@ -201,14 +208,21 @@ class GraphEngine:
         )
 
         # === Worker Pool Setup ===
+        self._container_execution = ContainerExecution(
+            frame_registry=self._frame_registry,
+            graph_execution=self._graph_execution,
+        )
+
         # Create worker pool for parallel node execution
         self._worker_pool = WorkerPool(
             ready_queue=self._ready_queue,
             event_queue=self._event_queue,
             graph=self._graph,
+            frame_registry=self._frame_registry,
             layers=self._layers,
             execution_context=self._graph_runtime_state.execution_context,
             config=self._config,
+            container_execution=self._container_execution,
         )
 
         # === Orchestration ===
@@ -223,13 +237,10 @@ class GraphEngine:
         # === Event Handler Registry ===
         # Central registry for handling all node execution events
         self._event_handler_registry = EventHandler(
-            graph=self._graph,
-            graph_runtime_state=self._graph_runtime_state,
             graph_execution=self._graph_execution,
             event_collector=self._event_manager,
-            edge_processor=self._edge_processor,
-            state_manager=self._state_manager,
-            error_handler=self._error_handler,
+            frame_registry=self._frame_registry,
+            container_execution=self._container_execution,
         )
 
         # Dispatches events and manages execution flow
@@ -274,21 +285,6 @@ class GraphEngine:
         """Queue an abort command for this engine."""
         self._command_channel.send_command(
             AbortCommand(reason=reason or "User requested abort"),
-        )
-
-    def create_child_engine(
-        self,
-        *,
-        workflow_id: str,
-        graph_init_params: GraphInitParams,
-        root_node_id: str,
-        variable_pool: VariablePool | None = None,
-    ) -> GraphEngine:
-        return self._graph_runtime_state.create_child_engine(
-            workflow_id=workflow_id,
-            graph_init_params=graph_init_params,
-            root_node_id=root_node_id,
-            variable_pool=variable_pool,
         )
 
     def run(self) -> Generator[GraphEngineEvent, None, None]:
@@ -384,16 +380,28 @@ class GraphEngine:
         if not resume:
             # Enqueue root node
             root_node = self._graph.root_node
-            self._state_manager.enqueue_node(root_node.id)
-            self._state_manager.start_execution(root_node.id)
+            self._state_manager.enqueue_node(
+                frame_id=ROOT_FRAME_ID,
+                node_id=root_node.id,
+            )
+            self._state_manager.start_execution(
+                frame_id=ROOT_FRAME_ID,
+                node_id=root_node.id,
+            )
         else:
             seen_nodes: set[str] = set()
             for node_id in paused_nodes + deferred_nodes:
                 if node_id in seen_nodes:
                     continue
                 seen_nodes.add(node_id)
-                self._state_manager.enqueue_node(node_id)
-                self._state_manager.start_execution(node_id)
+                self._state_manager.enqueue_node(
+                    frame_id=ROOT_FRAME_ID,
+                    node_id=node_id,
+                )
+                self._state_manager.start_execution(
+                    frame_id=ROOT_FRAME_ID,
+                    node_id=node_id,
+                )
 
         # Start dispatcher
         self._dispatcher.start()

@@ -8,14 +8,27 @@ import logging
 import queue
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, datetime
-from typing import final, override
+from typing import cast, final, override
+from uuid import uuid4
 
 from graphon.enums import WorkflowNodeExecutionStatus
-from graphon.graph.graph import Graph
+from graphon.graph_engine.container_execution import ContainerExecution
+from graphon.graph_engine.entities.tasks import TaskEvent
+from graphon.graph_engine.frames import FrameRegistry
 from graphon.graph_engine.layers.base import GraphEngineLayer
+from graphon.graph_engine.ready_queue import (
+    ROOT_FRAME_ID,
+    ReadyQueue,
+    ReadyTask,
+    StartTask,
+)
+from graphon.graph_engine.suspended_invocations import (
+    SuspendedInvocation,
+    SuspendedInvocationStore,
+)
 from graphon.graph_events.base import GraphNodeEventBase
 from graphon.graph_events.node import (
     NodeRunFailedEvent,
@@ -24,10 +37,26 @@ from graphon.graph_events.node import (
 )
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.node import Node
-from graphon.runtime.ready_queue import ReadyQueueProtocol
+from graphon.nodes.container_effects import (
+    ContainerAwaitRequest,
+    ContainerRunResult,
+)
 
 logger = logging.getLogger(__name__)
 WORKER_IDLE_THRESHOLD_SECONDS = 0.2
+
+NodeEventStream = Generator[
+    GraphNodeEventBase | ContainerAwaitRequest,
+    ContainerRunResult,
+    None,
+]
+
+
+class _Suspended:
+    pass
+
+
+_NO_RESUME_RESULT = object()
 
 
 @final
@@ -41,10 +70,12 @@ class Worker(threading.Thread):
 
     def __init__(
         self,
-        ready_queue: ReadyQueueProtocol,
-        event_queue: queue.Queue[GraphNodeEventBase],
-        graph: Graph,
+        ready_queue: ReadyQueue,
+        event_queue: queue.Queue[TaskEvent],
+        frame_registry: FrameRegistry,
         layers: Sequence[GraphEngineLayer],
+        suspended_invocations: SuspendedInvocationStore,
+        container_execution: ContainerExecution,
         worker_id: int = 0,
         execution_context: AbstractContextManager[object] | None = None,
     ) -> None:
@@ -52,8 +83,8 @@ class Worker(threading.Thread):
 
         Args:
             ready_queue: Ready queue containing node IDs ready for execution
-            event_queue: Queue for pushing execution events
-            graph: Graph containing nodes to execute
+            event_queue: Queue for pushing task-scoped execution events
+            frame_registry: Registry containing frame-local graphs to execute
             layers: Graph engine layers for node execution hooks
             worker_id: Unique identifier for this worker
             execution_context: Optional execution context for context preservation
@@ -62,13 +93,17 @@ class Worker(threading.Thread):
         super().__init__(name=f"GraphWorker-{worker_id}", daemon=True)
         self._ready_queue = ready_queue
         self._event_queue = event_queue
-        self._graph = graph
+        self._frame_registry = frame_registry
         self._worker_id = worker_id
         self._execution_context = execution_context
         self._stop_event = threading.Event()
         self._layers = layers if layers is not None else []
+        self._suspended_invocations = suspended_invocations
+        self._container_execution = container_execution
         self._last_task_time = time.time()
         self._current_node_started_at: datetime | None = None
+        self._current_node: Node | None = None
+        self._current_frame_id = ROOT_FRAME_ID
 
     def stop(self) -> None:
         """Signal the worker to stop processing."""
@@ -100,39 +135,66 @@ class Worker(threading.Thread):
         while not self._stop_event.is_set():
             # Try to get a node ID from the ready queue (with timeout)
             try:
-                node_id = self._ready_queue.get(timeout=0.1)
+                task = self._ready_queue.get(timeout=0.1)
             except queue.Empty:
                 continue
 
             self._last_task_time = time.time()
-            node = self._graph.nodes[node_id]
             try:
                 self._current_node_started_at = None
-                self._execute_node(node)
+                self._current_node = None
+                self._current_frame_id = ROOT_FRAME_ID
+                self._execute_task(task)
                 self._ready_queue.task_done()
             except Exception as e:
+                if self._current_node is None:
+                    raise
+                node = self._current_node
                 logger.exception(
                     "Worker failed while executing node %s",
-                    getattr(node, "id", node_id),
+                    node.id,
                 )
                 self._event_queue.put(
-                    self._build_fallback_failure_event(
-                        node,
-                        e,
-                        started_at=self._current_node_started_at,
-                    ),
+                    TaskEvent(
+                        frame_id=self._current_frame_id,
+                        event=self._build_fallback_failure_event(
+                            node,
+                            e,
+                            started_at=self._current_node_started_at,
+                        ),
+                    )
                 )
             finally:
                 self._current_node_started_at = None
+                self._current_node = None
+                self._current_frame_id = ROOT_FRAME_ID
 
-    def _execute_node(self, node: Node) -> None:
+    def _execute_task(self, task: ReadyTask) -> None:
+        if isinstance(task, StartTask):
+            self._current_frame_id = task.frame_id
+            node = self._frame_registry.get_node(task)
+            self._current_node = node
+            self._execute_node(task=task, node=node)
+            return
+        invocation = self._suspended_invocations.pop(task.invocation_id)
+        self._current_frame_id = invocation.frame_id
+        self._current_node = invocation.node
+        self._current_node_started_at = invocation.started_at
+        self._resume_node(
+            invocation_id=task.invocation_id,
+            invocation=invocation,
+            result=task.result,
+        )
+
+    def _execute_node(self, *, task: StartTask, node: Node) -> None:
         """Execute a single node and handle its events.
 
         Args:
             node: The node instance to execute
 
         """
-        node.ensure_execution_id()
+        self._bind_node_execution_id(task=task, node=node)
+        frame_id = task.frame_id
 
         context = self._execution_context
         if context is None:
@@ -140,26 +202,122 @@ class Worker(threading.Thread):
 
         error: Exception | None = None
         result_event: GraphNodeEventBase | None = None
+        suspended = False
 
         with context:
             self._invoke_node_run_start_hooks(node)
             try:
-                result_event = self._consume_node_events(node)
+                outcome = self._consume_node_events(
+                    invocation_id=str(uuid4()),
+                    frame_id=frame_id,
+                    node_id=task.node_id,
+                    node=node,
+                    node_events=node.run(),
+                )
+                if isinstance(outcome, _Suspended):
+                    suspended = True
+                    return
+                result_event = outcome
             except Exception as exc:
                 error = exc
                 raise
             finally:
-                self._invoke_node_run_end_hooks(node, error, result_event)
+                if not suspended:
+                    self._invoke_node_run_end_hooks(node, error, result_event)
 
-    def _consume_node_events(self, node: Node) -> GraphNodeEventBase | None:
+    def _resume_node(
+        self,
+        *,
+        invocation_id: str,
+        invocation: SuspendedInvocation,
+        result: ContainerRunResult,
+    ) -> None:
+        context = self._execution_context
+        if context is None:
+            context = nullcontext()
+
+        error: Exception | None = None
         result_event: GraphNodeEventBase | None = None
-        for event in node.run():
+        suspended = False
+        with context:
+            try:
+                outcome = self._consume_node_events(
+                    invocation_id=invocation_id,
+                    frame_id=invocation.frame_id,
+                    node_id=invocation.node_id,
+                    node=invocation.node,
+                    node_events=invocation.events,
+                    resume_result=result,
+                )
+                if isinstance(outcome, _Suspended):
+                    suspended = True
+                    return
+                result_event = outcome
+            except Exception as exc:
+                error = exc
+                raise
+            finally:
+                if not suspended:
+                    self._invoke_node_run_end_hooks(
+                        invocation.node,
+                        error,
+                        result_event,
+                    )
+
+    def _bind_node_execution_id(self, *, task: StartTask, node: Node) -> None:
+        frame = self._frame_registry.get(task.frame_id)
+        graph_execution = frame.graph_runtime_state.graph_execution
+        node_execution = graph_execution.get_or_create_node_execution(
+            frame_id=task.frame_id,
+            node_id=task.node_id,
+        )
+        node.bind_execution_id(node_execution.execution_id)
+
+    def _consume_node_events(
+        self,
+        *,
+        invocation_id: str,
+        frame_id: str,
+        node_id: str,
+        node: Node,
+        node_events: NodeEventStream,
+        resume_result: ContainerRunResult | object = _NO_RESUME_RESULT,
+    ) -> GraphNodeEventBase | _Suspended | None:
+        result_event: GraphNodeEventBase | None = None
+        if resume_result is _NO_RESUME_RESULT:
+            next_item = next(node_events)
+        else:
+            next_item = node_events.send(cast(ContainerRunResult, resume_result))
+        while True:
+            event = next_item
+            if isinstance(event, ContainerAwaitRequest):
+                self._suspended_invocations.store(
+                    invocation_id,
+                    SuspendedInvocation(
+                        frame_id=frame_id,
+                        node_id=node_id,
+                        node=node,
+                        events=node_events,
+                        started_at=self._current_node_started_at
+                        or datetime.now(UTC).replace(tzinfo=None),
+                    ),
+                )
+                self._container_execution.start_container_await(
+                    frame_id=frame_id,
+                    node_id=node_id,
+                    invocation_id=invocation_id,
+                    request=event,
+                )
+                return _Suspended()
             if isinstance(event, NodeRunStartedEvent) and event.id == node.execution_id:
                 self._current_node_started_at = event.start_at
-            self._event_queue.put(event)
+            self._event_queue.put(TaskEvent(frame_id=frame_id, event=event))
             if is_node_result_event(event):
                 result_event = event
-        return result_event
+            try:
+                next_item = next(node_events)
+            except StopIteration:
+                return result_event
 
     def _invoke_node_run_start_hooks(self, node: Node) -> None:
         """Invoke on_node_run_start hooks for all layers."""
