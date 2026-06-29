@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import abstractmethod
 from typing import Protocol
 
 from graphon.graph_events.base import GraphNodeEventBase
@@ -12,6 +13,7 @@ from .frames import ExecutionFrame
 class ContainerHandler(Protocol):
     kind: str
 
+    @abstractmethod
     def start_await(
         self,
         *,
@@ -21,6 +23,7 @@ class ContainerHandler(Protocol):
         request: ContainerAwaitRequest,
     ) -> None: ...
 
+    @abstractmethod
     def prepare_frame_event(
         self,
         *,
@@ -28,6 +31,7 @@ class ContainerHandler(Protocol):
         event: GraphNodeEventBase,
     ) -> None: ...
 
+    @abstractmethod
     def should_collect(
         self,
         *,
@@ -35,6 +39,7 @@ class ContainerHandler(Protocol):
         event: GraphNodeEventBase,
     ) -> bool: ...
 
+    @abstractmethod
     def record_frame_failure(
         self,
         *,
@@ -42,4 +47,5 @@ class ContainerHandler(Protocol):
         event: NodeRunFailedEvent,
     ) -> bool: ...
 
+    @abstractmethod
     def complete_frame(self, frame: ExecutionFrame) -> bool: ...

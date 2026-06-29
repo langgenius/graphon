@@ -106,7 +106,7 @@ class IterationFramesRequested(BaseModel):
     indexes: tuple[int, ...]
 
 
-ContainerExecutionResult = Annotated[
+ContainerRunResult = Annotated[
     LoopExecutionSucceeded
     | LoopExecutionFailed
     | LoopFrameCompleted
@@ -115,13 +115,3 @@ ContainerExecutionResult = Annotated[
     | IterationFramesRequested,
     Field(discriminator="kind"),
 ]
-
-
-ContainerRunResult = (
-    LoopExecutionSucceeded
-    | LoopExecutionFailed
-    | LoopFrameCompleted
-    | IterationExecutionSucceeded
-    | IterationExecutionFailed
-    | IterationFramesRequested
-)

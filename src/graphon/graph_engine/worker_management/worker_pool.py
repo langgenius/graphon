@@ -147,6 +147,10 @@ class WorkerPool:
             for worker in idle_workers:
                 worker.stop()
 
+    def has_current_tasks(self) -> bool:
+        with self._lock:
+            return any(worker.has_current_task for worker in self._workers)
+
     def _create_worker(self) -> None:
         """Create and start a new worker."""
         worker_id = self._worker_counter

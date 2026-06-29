@@ -92,11 +92,10 @@ class ExecutionCoordinator:
         self._state_manager.clear_executing()
 
     def has_executing_nodes(self) -> bool:
-        """Return True if any nodes are currently marked as executing."""
-        # This check is only safe once execution has already paused.
-        # Before pause, executing state can change concurrently, making the result
-        # unreliable.
+        """Return True if a worker still owns a task."""
+        # Suspended containers remain in state_manager execution bookkeeping until
+        # their ResumeTask runs, so paused draining waits on worker ownership instead.
         if not self._graph_execution.is_paused:
             msg = "has_executing_nodes should only be called after execution is paused"
             raise AssertionError(msg)
-        return self._state_manager.get_executing_count() > 0
+        return self._worker_pool.has_current_tasks()

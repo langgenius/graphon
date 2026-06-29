@@ -51,7 +51,7 @@ from .iteration_container_handler import IterationContainerHandler
 from .layers.base import GraphEngineLayer
 from .loop_container_handler import LoopContainerHandler
 from .orchestration import Dispatcher, ExecutionCoordinator
-from .ready_queue import ROOT_FRAME_ID, StartTask
+from .ready_queue import ROOT_FRAME_ID, ResumeTask, StartTask
 from .worker_management import WorkerPool
 
 logger = logging.getLogger(__name__)
@@ -411,6 +411,14 @@ class GraphEngine:
                     self._state_manager.start_execution(
                         frame_id=task.frame_id,
                         node_id=task.node_id,
+                    )
+                if isinstance(task, ResumeTask):
+                    run_state = self._graph_runtime_state.get_container_run(
+                        task.invocation_id,
+                    )
+                    self._state_manager.start_execution(
+                        frame_id=run_state.frame_id,
+                        node_id=run_state.node_id,
                     )
 
         # Start dispatcher

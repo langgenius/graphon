@@ -5,7 +5,7 @@ from typing import Annotated, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from graphon.nodes.container_effects import ContainerExecutionResult
+from graphon.nodes.container_effects import ContainerRunResult
 
 ROOT_FRAME_ID: Final = "root"
 
@@ -27,7 +27,7 @@ class ResumeTask(BaseModel):
 
     kind: Literal["resume"] = "resume"
     invocation_id: str = Field(description="Suspended invocation to resume")
-    result: ContainerExecutionResult = Field(
+    result: ContainerRunResult = Field(
         description="Container result to send into the suspended invocation",
     )
 
