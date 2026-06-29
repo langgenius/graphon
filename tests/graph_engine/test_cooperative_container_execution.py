@@ -542,3 +542,5 @@ def test_worker_reports_resume_failure_on_suspended_invocation_frame() -> None:
     assert failed.frame_id == "parent-frame"
     assert isinstance(failed.event, NodeRunFailedEvent)
     assert failed.event.error == "resume bad"
+    with pytest.raises(KeyError):
+        runtime_state.get_container_run("invocation-1")

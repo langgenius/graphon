@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import threading
 from abc import abstractmethod
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
@@ -485,6 +486,7 @@ class GraphRuntimeState:  # noqa: PLR0904
     _execution_data: _GraphRuntimeExecutionData
     _bindings: _GraphRuntimeBindings
     _suspension_state: _GraphRuntimeSuspensionState
+    _container_state_lock: threading.RLock
 
     def __init__(
         self,
@@ -509,6 +511,7 @@ class GraphRuntimeState:  # noqa: PLR0904
             node_run_steps=node_run_steps,
         )
         self._suspension_state = _GraphRuntimeSuspensionState()
+        self._container_state_lock = threading.RLock()
         self._bindings = _GraphRuntimeBindings(
             runtime_state=self,
             ready_queue=ready_queue,
@@ -718,25 +721,32 @@ class GraphRuntimeState:  # noqa: PLR0904
         return self._suspension_state.consume_deferred_nodes()
 
     def put_container_run(self, run: ContainerRunState) -> None:
-        self._suspension_state.container_runs[run.invocation_id] = run
+        with self._container_state_lock:
+            self._suspension_state.container_runs[run.invocation_id] = run
 
     def get_container_run(self, invocation_id: str) -> ContainerRunState:
-        return self._suspension_state.container_runs[invocation_id]
+        with self._container_state_lock:
+            return self._suspension_state.container_runs[invocation_id]
 
     def pop_container_run(self, invocation_id: str) -> ContainerRunState:
-        return self._suspension_state.container_runs.pop(invocation_id)
+        with self._container_state_lock:
+            return self._suspension_state.container_runs.pop(invocation_id)
 
     def put_container_frame(self, frame: ContainerFrameState) -> None:
-        self._suspension_state.container_frames[frame.frame_id] = frame
+        with self._container_state_lock:
+            self._suspension_state.container_frames[frame.frame_id] = frame
 
     def has_container_frame(self, frame_id: str) -> bool:
-        return frame_id in self._suspension_state.container_frames
+        with self._container_state_lock:
+            return frame_id in self._suspension_state.container_frames
 
     def get_container_frame(self, frame_id: str) -> ContainerFrameState:
-        return self._suspension_state.container_frames[frame_id]
+        with self._container_state_lock:
+            return self._suspension_state.container_frames[frame_id]
 
     def pop_container_frame(self, frame_id: str) -> ContainerFrameState:
-        return self._suspension_state.container_frames.pop(frame_id)
+        with self._container_state_lock:
+            return self._suspension_state.container_frames.pop(frame_id)
 
     # ------------------------------------------------------------------
     # Builders

@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime
+from threading import Thread
 from time import time
 from unittest.mock import MagicMock
 
@@ -241,6 +242,55 @@ class TestGraphRuntimeState:  # noqa: PLR0904
 
         assert restored.get_container_run("invocation-1") == run
         assert restored.get_container_frame("exec-loop:loop:1") == frame
+
+    def test_container_runtime_state_thread_safe_claims(self) -> None:
+        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+        run = ContainerRunState(
+            invocation_id="invocation-1",
+            kind="loop",
+            frame_id="root",
+            node_id="loop",
+            execution_id="exec-loop",
+            started_at=datetime.fromtimestamp(1, UTC).replace(tzinfo=None),
+            phase_data={},
+        )
+        frame = ContainerFrameState(
+            frame_id="exec-loop:loop:1",
+            kind="loop",
+            parent_invocation_id="invocation-1",
+            root_node_id="loop-start",
+            phase_data={},
+            runtime_data=FrameRuntimeData(
+                variable_pool=VariablePool(),
+                outputs={},
+                llm_usage=LLMUsage.empty_usage(),
+                node_run_steps=0,
+                graph_node_states={},
+                graph_edge_states={},
+            ),
+        )
+        state.put_container_run(run)
+        state.put_container_frame(frame)
+        claimed: list[ContainerRunState] = []
+        misses: list[str] = []
+
+        def pop_run() -> None:
+            try:
+                claimed.append(state.pop_container_run("invocation-1"))
+            except KeyError:
+                misses.append("miss")
+
+        threads = [Thread(target=pop_run) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert claimed == [run]
+        assert len(misses) == 7
+        assert state.has_container_frame("exec-loop:loop:1")
+        assert state.pop_container_frame("exec-loop:loop:1") == frame
+        assert not state.has_container_frame("exec-loop:loop:1")
 
     def test_graph_execution_lazy_instantiation(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())

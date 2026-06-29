@@ -167,7 +167,7 @@ class Worker(threading.Thread):
             self._execute_node(task=task, node=node)
             return
         root_runtime_state = self._frame_registry.get(ROOT_FRAME_ID).graph_runtime_state
-        run_state = root_runtime_state.get_container_run(task.invocation_id)
+        run_state = root_runtime_state.pop_container_run(task.invocation_id)
         self._current_frame_id = run_state.frame_id
         node = self._frame_registry.get(run_state.frame_id).graph.nodes[
             run_state.node_id
@@ -253,9 +253,6 @@ class Worker(threading.Thread):
                     suspended = True
                     return
                 result_event = outcome
-                self._frame_registry.get(
-                    ROOT_FRAME_ID,
-                ).graph_runtime_state.pop_container_run(invocation_id)
             except Exception as exc:
                 error = exc
                 raise
