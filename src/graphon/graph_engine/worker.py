@@ -8,10 +8,10 @@ import logging
 import queue
 import threading
 import time
-from collections.abc import Generator, Sequence
+from collections.abc import Iterator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, datetime
-from typing import cast, final, override
+from typing import final, override
 from uuid import uuid4
 
 from graphon.enums import WorkflowNodeExecutionStatus
@@ -25,10 +25,6 @@ from graphon.graph_engine.ready_queue import (
     ReadyTask,
     StartTask,
 )
-from graphon.graph_engine.suspended_invocations import (
-    SuspendedInvocation,
-    SuspendedInvocationStore,
-)
 from graphon.graph_events.base import GraphNodeEventBase
 from graphon.graph_events.node import (
     NodeRunFailedEvent,
@@ -40,23 +36,19 @@ from graphon.nodes.base.node import Node
 from graphon.nodes.container_effects import (
     ContainerAwaitRequest,
     ContainerRunResult,
+    IterationFrameRequest,
+    LoopFrameRequest,
 )
+from graphon.runtime.container_state import ContainerRunState
 
 logger = logging.getLogger(__name__)
 WORKER_IDLE_THRESHOLD_SECONDS = 0.2
 
-NodeEventStream = Generator[
-    GraphNodeEventBase | ContainerAwaitRequest,
-    ContainerRunResult,
-    None,
-]
+NodeEventStream = Iterator[GraphNodeEventBase | ContainerAwaitRequest]
 
 
 class _Suspended:
     pass
-
-
-_NO_RESUME_RESULT = object()
 
 
 @final
@@ -74,7 +66,6 @@ class Worker(threading.Thread):
         event_queue: queue.Queue[TaskEvent],
         frame_registry: FrameRegistry,
         layers: Sequence[GraphEngineLayer],
-        suspended_invocations: SuspendedInvocationStore,
         container_execution: ContainerExecution,
         worker_id: int = 0,
         execution_context: AbstractContextManager[object] | None = None,
@@ -98,7 +89,6 @@ class Worker(threading.Thread):
         self._execution_context = execution_context
         self._stop_event = threading.Event()
         self._layers = layers if layers is not None else []
-        self._suspended_invocations = suspended_invocations
         self._container_execution = container_execution
         self._last_task_time = time.time()
         self._current_node_started_at: datetime | None = None
@@ -176,13 +166,19 @@ class Worker(threading.Thread):
             self._current_node = node
             self._execute_node(task=task, node=node)
             return
-        invocation = self._suspended_invocations.pop(task.invocation_id)
-        self._current_frame_id = invocation.frame_id
-        self._current_node = invocation.node
-        self._current_node_started_at = invocation.started_at
+        root_runtime_state = self._frame_registry.get(ROOT_FRAME_ID).graph_runtime_state
+        run_state = root_runtime_state.get_container_run(task.invocation_id)
+        self._current_frame_id = run_state.frame_id
+        node = self._frame_registry.get(run_state.frame_id).graph.nodes[
+            run_state.node_id
+        ]
+        node.bind_execution_id(run_state.execution_id)
+        self._current_node = node
+        self._current_node_started_at = run_state.started_at
         self._resume_node(
             invocation_id=task.invocation_id,
-            invocation=invocation,
+            run_state=run_state,
+            node=node,
             result=task.result,
         )
 
@@ -229,7 +225,8 @@ class Worker(threading.Thread):
         self,
         *,
         invocation_id: str,
-        invocation: SuspendedInvocation,
+        run_state: ContainerRunState,
+        node: Node,
         result: ContainerRunResult,
     ) -> None:
         context = self._execution_context
@@ -243,23 +240,29 @@ class Worker(threading.Thread):
             try:
                 outcome = self._consume_node_events(
                     invocation_id=invocation_id,
-                    frame_id=invocation.frame_id,
-                    node_id=invocation.node_id,
-                    node=invocation.node,
-                    node_events=invocation.events,
-                    resume_result=result,
+                    frame_id=run_state.frame_id,
+                    node_id=run_state.node_id,
+                    node=node,
+                    node_events=node.resume_container(
+                        phase_data=run_state.phase_data,
+                        result=result,
+                        started_at=run_state.started_at,
+                    ),
                 )
                 if isinstance(outcome, _Suspended):
                     suspended = True
                     return
                 result_event = outcome
+                self._frame_registry.get(
+                    ROOT_FRAME_ID,
+                ).graph_runtime_state.pop_container_run(invocation_id)
             except Exception as exc:
                 error = exc
                 raise
             finally:
                 if not suspended:
                     self._invoke_node_run_end_hooks(
-                        invocation.node,
+                        node,
                         error,
                         result_event,
                     )
@@ -281,26 +284,28 @@ class Worker(threading.Thread):
         node_id: str,
         node: Node,
         node_events: NodeEventStream,
-        resume_result: ContainerRunResult | object = _NO_RESUME_RESULT,
     ) -> GraphNodeEventBase | _Suspended | None:
         result_event: GraphNodeEventBase | None = None
-        if resume_result is _NO_RESUME_RESULT:
-            next_item = next(node_events)
-        else:
-            next_item = node_events.send(cast(ContainerRunResult, resume_result))
+        next_item = next(node_events)
         while True:
             event = next_item
             if isinstance(event, ContainerAwaitRequest):
-                self._suspended_invocations.store(
-                    invocation_id,
-                    SuspendedInvocation(
+                started_at = self._current_node_started_at or datetime.now(
+                    UTC,
+                ).replace(tzinfo=None)
+                root_runtime_state = self._frame_registry.get(
+                    ROOT_FRAME_ID,
+                ).graph_runtime_state
+                root_runtime_state.put_container_run(
+                    ContainerRunState(
+                        invocation_id=invocation_id,
+                        kind=event.kind,
                         frame_id=frame_id,
                         node_id=node_id,
-                        node=node,
-                        events=node_events,
-                        started_at=self._current_node_started_at
-                        or datetime.now(UTC).replace(tzinfo=None),
-                    ),
+                        execution_id=node.execution_id,
+                        started_at=started_at,
+                        phase_data=_container_phase_data(event),
+                    )
                 )
                 self._container_execution.start_container_await(
                     frame_id=frame_id,
@@ -374,3 +379,28 @@ class Worker(threading.Thread):
                 error_type=type(error).__name__,
             ),
         )
+
+
+def _container_phase_data(request: ContainerAwaitRequest) -> dict[str, object]:
+    if isinstance(request, LoopFrameRequest):
+        return {
+            "inputs": dict(request.inputs),
+            "loop_count": request.loop_count,
+            "root_node_id": request.root_node_id,
+            "loop_variable_selectors": {
+                key: list(value)
+                for key, value in request.loop_variable_selectors.items()
+            },
+            "loop_node_ids": tuple(sorted(request.loop_node_ids)),
+        }
+    if isinstance(request, IterationFrameRequest):
+        return {
+            "inputs": dict(request.inputs),
+            "items": request.items,
+            "root_node_id": request.root_node_id,
+            "output_selector": list(request.output_selector),
+            "error_handle_mode": request.error_handle_mode,
+            "flatten_output": request.flatten_output,
+            "parallel_nums": request.parallel_nums,
+        }
+    raise TypeError(type(request).__name__)

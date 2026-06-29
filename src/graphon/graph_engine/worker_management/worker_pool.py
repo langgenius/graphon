@@ -15,7 +15,6 @@ from graphon.graph_engine.container_execution import ContainerExecution
 from graphon.graph_engine.entities.tasks import TaskEvent
 from graphon.graph_engine.frames import FrameRegistry
 from graphon.graph_engine.ready_queue import ReadyQueue
-from graphon.graph_engine.suspended_invocations import SuspendedInvocationStore
 
 from ..config import GraphEngineConfig
 from ..layers.base import GraphEngineLayer
@@ -73,7 +72,6 @@ class WorkerPool:
         self._running = False
 
         # No longer tracking worker states with callbacks to avoid lock contention
-        self._suspended_invocations = SuspendedInvocationStore()
         self._container_execution = container_execution
 
     def start(self, initial_count: int | None = None) -> None:
@@ -149,7 +147,6 @@ class WorkerPool:
             layers=self._layers,
             worker_id=worker_id,
             execution_context=self._execution_context,
-            suspended_invocations=self._suspended_invocations,
             container_execution=self._container_execution,
         )
 

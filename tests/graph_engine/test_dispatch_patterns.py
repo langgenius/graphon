@@ -47,7 +47,6 @@ from graphon.graph_engine.ready_queue.protocol import (
     ResumeTask,
     StartTask,
 )
-from graphon.graph_engine.suspended_invocations import SuspendedInvocationStore
 from graphon.graph_engine.worker import Worker
 from graphon.graph_events.base import GraphNodeEventBase
 from graphon.graph_events.node import (
@@ -213,7 +212,6 @@ def _worker(
         event_queue=event_queue,
         frame_registry=frame_registry,
         layers=[],
-        suspended_invocations=SuspendedInvocationStore(),
         container_execution=ContainerExecution(
             frame_registry=frame_registry,
             graph_execution=cast(Any, MagicMock()),
@@ -715,7 +713,6 @@ def test_worker_suspends_container_invocation_at_await_request() -> None:
         event_queue=event_queue,
         frame_registry=frame_registry,
         layers=[],
-        suspended_invocations=SuspendedInvocationStore(),
         container_execution=cast(ContainerExecution, container_execution),
     )
 
