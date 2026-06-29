@@ -59,6 +59,7 @@ class _DispatcherLifecycle:
             if self._execution_finished:
                 return _DispatcherLoopOutcome()
             if self.execution_coordinator.paused:
+                self.execution_coordinator.handle_pause_if_needed()
                 return _DispatcherLoopOutcome(paused=True)
 
             self.execution_coordinator.check_scaling()

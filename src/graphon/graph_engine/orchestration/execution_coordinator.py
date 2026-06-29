@@ -76,12 +76,12 @@ class ExecutionCoordinator:
         self._graph_execution.fail(error)
 
     def handle_pause_if_needed(self) -> None:
-        """If the execution has been paused, stop workers immediately."""
+        """If execution is paused, freeze scheduling and drain idle workers."""
         if not self._graph_execution.is_paused:
             return
 
-        self._worker_pool.stop()
-        self._state_manager.clear_executing()
+        self._state_manager.drain_ready_tasks_to_deferred()
+        self._worker_pool.drain()
 
     def handle_abort_if_needed(self) -> None:
         """If the execution has been aborted, stop workers immediately."""

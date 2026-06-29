@@ -68,8 +68,7 @@ def _execution_frame(
     graph: Graph,
     graph_runtime_state: GraphRuntimeState,
 ) -> ExecutionFrame:
-    ready_queue = graph_runtime_state.ready_queue
-    state_manager = GraphStateManager(graph, ready_queue)
+    state_manager = GraphStateManager(graph, graph_runtime_state)
     return ExecutionFrame(
         frame_id=frame_id,
         graph=graph,

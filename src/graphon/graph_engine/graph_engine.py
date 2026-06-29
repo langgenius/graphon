@@ -51,7 +51,7 @@ from .iteration_container_handler import IterationContainerHandler
 from .layers.base import GraphEngineLayer
 from .loop_container_handler import LoopContainerHandler
 from .orchestration import Dispatcher, ExecutionCoordinator
-from .ready_queue import ROOT_FRAME_ID
+from .ready_queue import ROOT_FRAME_ID, StartTask
 from .worker_management import WorkerPool
 
 logger = logging.getLogger(__name__)
@@ -151,7 +151,10 @@ class GraphEngine:
 
         # === State Management ===
         # Unified state manager handles all node state transitions and queue operations
-        self._state_manager = GraphStateManager(self._graph, self._ready_queue)
+        self._state_manager = GraphStateManager(
+            self._graph,
+            self._graph_runtime_state,
+        )
         self._frame_registry = FrameRegistry()
 
         # === Event Management ===
@@ -378,12 +381,6 @@ class GraphEngine:
 
     def _start_execution(self, *, resume: bool = False) -> None:
         """Start execution subsystems."""
-        paused_nodes: list[str] = []
-        deferred_nodes: list[str] = []
-        if resume:
-            paused_nodes = self._graph_runtime_state.consume_paused_nodes()
-            deferred_nodes = self._graph_runtime_state.consume_deferred_nodes()
-
         # Start worker pool (it calculates initial workers internally)
         self._worker_pool.start()
 
@@ -399,19 +396,13 @@ class GraphEngine:
                 node_id=root_node.id,
             )
         else:
-            seen_nodes: set[str] = set()
-            for node_id in paused_nodes + deferred_nodes:
-                if node_id in seen_nodes:
-                    continue
-                seen_nodes.add(node_id)
-                self._state_manager.enqueue_node(
-                    frame_id=ROOT_FRAME_ID,
-                    node_id=node_id,
-                )
-                self._state_manager.start_execution(
-                    frame_id=ROOT_FRAME_ID,
-                    node_id=node_id,
-                )
+            for task in self._graph_runtime_state.drain_deferred_ready_tasks():
+                self._graph_runtime_state.enqueue_ready_task(task)
+                if isinstance(task, StartTask):
+                    self._state_manager.start_execution(
+                        frame_id=task.frame_id,
+                        node_id=task.node_id,
+                    )
 
         # Start dispatcher
         self._dispatcher.start()

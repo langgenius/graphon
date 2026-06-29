@@ -31,6 +31,7 @@ from graphon.graph_engine.entities.tasks import TaskEvent
 from graphon.graph_engine.event_management.event_handlers import EventHandler
 from graphon.graph_engine.event_management.event_manager import EventManager
 from graphon.graph_engine.frames import ExecutionFrame, FrameRegistry
+from graphon.graph_engine.graph_engine import GraphEngine
 from graphon.graph_engine.graph_state_manager import GraphStateManager
 from graphon.graph_engine.iteration_container_handler import IterationContainerHandler
 from graphon.graph_engine.layers.execution_limits import (
@@ -363,10 +364,18 @@ def test_create_ready_queue_from_state_restores_ready_tasks() -> None:
 
 def test_graph_state_manager_enqueues_ready_task_for_frame() -> None:
     ready_queue = InMemoryReadyQueue()
+    runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=0,
+        ready_queue=ready_queue,
+    )
     graph = SimpleNamespace(
         nodes={"start": SimpleNamespace(state=NodeState.UNKNOWN)},
     )
-    manager = GraphStateManager(graph=cast(Graph, graph), ready_queue=ready_queue)
+    manager = GraphStateManager(
+        graph=cast(Graph, graph),
+        graph_runtime_state=runtime_state,
+    )
 
     manager.enqueue_node(frame_id="root", node_id="start")
 
@@ -377,10 +386,44 @@ def test_graph_state_manager_enqueues_ready_task_for_frame() -> None:
     assert graph.nodes["start"].state == NodeState.TAKEN
 
 
+def test_graph_state_manager_defers_ready_task_when_paused() -> None:
+    ready_queue = InMemoryReadyQueue()
+    graph_execution = GraphExecution(workflow_id="workflow", paused=True)
+    runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=0,
+        ready_queue=ready_queue,
+        graph_execution=graph_execution,
+    )
+    graph = SimpleNamespace(
+        nodes={"start": SimpleNamespace(state=NodeState.UNKNOWN)},
+    )
+    manager = GraphStateManager(
+        graph=cast(Graph, graph),
+        graph_runtime_state=runtime_state,
+    )
+
+    manager.enqueue_node(frame_id="root", node_id="start")
+
+    assert ready_queue.qsize() == 0
+    assert runtime_state.drain_deferred_ready_tasks() == [
+        StartTask(frame_id="root", node_id="start"),
+    ]
+    assert graph.nodes["start"].state == NodeState.TAKEN
+
+
 def test_graph_state_manager_tracks_executing_tasks_by_frame() -> None:
     ready_queue = InMemoryReadyQueue()
+    runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=0,
+        ready_queue=ready_queue,
+    )
     graph = SimpleNamespace(nodes={})
-    manager = GraphStateManager(graph=cast(Graph, graph), ready_queue=ready_queue)
+    manager = GraphStateManager(
+        graph=cast(Graph, graph),
+        graph_runtime_state=runtime_state,
+    )
 
     manager.start_execution(frame_id="iteration-0", node_id="answer")
     manager.start_execution(frame_id="iteration-1", node_id="answer")
@@ -395,10 +438,85 @@ def test_graph_state_manager_tracks_executing_tasks_by_frame() -> None:
 def test_graph_state_manager_completion_ignores_other_frame_queue_items() -> None:
     ready_queue = InMemoryReadyQueue()
     ready_queue.put(StartTask(frame_id="other-frame", node_id="answer"))
+    runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=0,
+        ready_queue=ready_queue,
+    )
     graph = SimpleNamespace(nodes={})
-    manager = GraphStateManager(graph=cast(Graph, graph), ready_queue=ready_queue)
+    manager = GraphStateManager(
+        graph=cast(Graph, graph),
+        graph_runtime_state=runtime_state,
+    )
 
     assert manager.is_execution_complete() is True
+
+
+def test_pause_drains_ready_tasks_without_clearing_executing_tasks() -> None:
+    ready_queue = InMemoryReadyQueue()
+    queued_task = StartTask(frame_id="root", node_id="queued")
+    ready_queue.put(queued_task)
+    graph_execution = GraphExecution(workflow_id="workflow", paused=True)
+    runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=0,
+        ready_queue=ready_queue,
+        graph_execution=graph_execution,
+    )
+    manager = GraphStateManager(
+        graph=cast(Graph, SimpleNamespace(nodes={})),
+        graph_runtime_state=runtime_state,
+    )
+    manager.start_execution(frame_id="root", node_id="running")
+    worker_pool = MagicMock()
+    coordinator = RealExecutionCoordinator(
+        graph_execution=graph_execution,
+        state_manager=manager,
+        command_processor=MagicMock(),
+        worker_pool=worker_pool,
+    )
+
+    coordinator.handle_pause_if_needed()
+
+    assert ready_queue.qsize() == 0
+    assert runtime_state.drain_deferred_ready_tasks() == [queued_task]
+    assert manager.get_executing_nodes() == {
+        StartTask(frame_id="root", node_id="running"),
+    }
+    worker_pool.drain.assert_called_once_with()
+    worker_pool.stop.assert_not_called()
+
+
+def test_resume_schedules_deferred_ready_tasks_not_legacy_node_snapshots() -> None:
+    ready_queue = InMemoryReadyQueue()
+    runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=0,
+        ready_queue=ready_queue,
+    )
+    runtime_state.defer_ready_task(StartTask(frame_id="root", node_id="ready"))
+    runtime_state.register_paused_node("paused-legacy")
+    runtime_state.register_deferred_node("deferred-legacy")
+    engine = object.__new__(GraphEngine)
+    engine._worker_pool = MagicMock()
+    engine._graph_runtime_state = runtime_state
+    engine._state_manager = MagicMock()
+    engine._dispatcher = MagicMock()
+
+    engine._start_execution(resume=True)
+
+    assert ready_queue.get(timeout=0.01) == StartTask(
+        frame_id="root",
+        node_id="ready",
+    )
+    with pytest.raises(queue.Empty):
+        ready_queue.get(timeout=0.01)
+    engine._state_manager.start_execution.assert_called_once_with(
+        frame_id="root",
+        node_id="ready",
+    )
+    assert runtime_state.consume_paused_nodes() == ["paused-legacy"]
+    assert runtime_state.consume_deferred_nodes() == ["deferred-legacy"]
 
 
 def test_graph_execution_tracks_node_executions_by_frame() -> None:

@@ -77,7 +77,7 @@ class FrameRegistry:
         graph_runtime_state.configure(graph=graph)
         state_manager = GraphStateManager(
             graph,
-            graph_runtime_state.ready_queue,
+            graph_runtime_state,
         )
         skip_propagator = SkipPropagator(
             graph=graph,

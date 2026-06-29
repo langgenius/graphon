@@ -136,6 +136,15 @@ class WorkerPool:
 
             self._workers.clear()
 
+    def drain(self) -> None:
+        """Stop accepting new work and signal currently idle workers to exit."""
+        with self._lock:
+            self._running = False
+            idle_workers = [worker for worker in self._workers if worker.is_idle]
+
+            for worker in idle_workers:
+                worker.stop()
+
     def _create_worker(self) -> None:
         """Create and start a new worker."""
         worker_id = self._worker_counter

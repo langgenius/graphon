@@ -7,8 +7,9 @@ from typing import TypedDict, final
 from graphon.enums import NodeState
 from graphon.graph.edge import Edge
 from graphon.graph.graph import Graph
+from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
-from .ready_queue import ReadyQueue, StartTask
+from .ready_queue import StartTask
 
 
 class EdgeStateAnalysis(TypedDict):
@@ -21,16 +22,16 @@ class EdgeStateAnalysis(TypedDict):
 
 @final
 class GraphStateManager:
-    def __init__(self, graph: Graph, ready_queue: ReadyQueue) -> None:
+    def __init__(self, graph: Graph, graph_runtime_state: GraphRuntimeState) -> None:
         """Initialize the state manager.
 
         Args:
             graph: The workflow graph
-            ready_queue: Ready queue protocol for nodes ready to execute
+            graph_runtime_state: Runtime state owning ready task queues
 
         """
         self._graph = graph
-        self._ready_queue = ready_queue
+        self._graph_runtime_state = graph_runtime_state
         self._lock = threading.RLock()
 
         # Execution tracking state
@@ -38,7 +39,7 @@ class GraphStateManager:
 
     # ============= Node State Operations =============
 
-    def enqueue_node(self, *, frame_id: str, node_id: str) -> None:
+    def enqueue_node(self, *, frame_id: str, node_id: str) -> bool:
         """Mark a node as TAKEN and add its task to the ready queue.
 
         This combines the state transition and enqueueing operations
@@ -48,10 +49,17 @@ class GraphStateManager:
             frame_id: The ID of the execution frame that owns the task
             node_id: The ID of the node to enqueue
 
+        Returns:
+            True when the task was scheduled on the live ready queue.
+
         """
         with self._lock:
             self._graph.nodes[node_id].state = NodeState.TAKEN
-            self._ready_queue.put(StartTask(frame_id=frame_id, node_id=node_id))
+            paused = self._graph_runtime_state.graph_execution.is_paused
+            self._graph_runtime_state.enqueue_ready_task(
+                StartTask(frame_id=frame_id, node_id=node_id),
+            )
+            return not paused
 
     def mark_node_skipped(self, node_id: str) -> None:
         """Mark a node as SKIPPED.
@@ -277,7 +285,11 @@ class GraphStateManager:
             Number of nodes in the ready queue
 
         """
-        return self._ready_queue.qsize()
+        return self._graph_runtime_state.ready_queue.qsize()
+
+    def drain_ready_tasks_to_deferred(self) -> None:
+        """Move all live ready tasks into the deferred ready queue."""
+        self._graph_runtime_state.drain_ready_tasks_to_deferred()
 
     def get_execution_stats(self) -> dict[str, int]:
         """Get execution statistics.
@@ -304,7 +316,7 @@ class GraphStateManager:
             )
 
             return {
-                "queue_depth": self._ready_queue.qsize(),
+                "queue_depth": self._graph_runtime_state.ready_queue.qsize(),
                 "executing": len(self._executing_tasks),
                 "taken_nodes": taken_nodes,
                 "skipped_nodes": skipped_nodes,
