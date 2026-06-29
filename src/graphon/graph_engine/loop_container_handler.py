@@ -340,14 +340,14 @@ class LoopContainerHandler:
                 runtime_data=self._frame_runtime_data(child_frame),
             ),
         )
-        child_frame.state_manager.enqueue_node(
+        if child_frame.state_manager.enqueue_node(
             frame_id=child_frame.frame_id,
             node_id=request.root_node_id,
-        )
-        child_frame.state_manager.start_execution(
-            frame_id=child_frame.frame_id,
-            node_id=request.root_node_id,
-        )
+        ):
+            child_frame.state_manager.start_execution(
+                frame_id=child_frame.frame_id,
+                node_id=request.root_node_id,
+            )
 
     def _complete_loop_step(
         self,

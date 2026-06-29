@@ -361,14 +361,14 @@ class EventHandler:
             self._event_collector.collect(edge_event)
 
         for node_id in ready_nodes:
-            frame.state_manager.enqueue_node(
+            if frame.state_manager.enqueue_node(
                 frame_id=frame.frame_id,
                 node_id=node_id,
-            )
-            frame.state_manager.start_execution(
-                frame_id=frame.frame_id,
-                node_id=node_id,
-            )
+            ):
+                frame.state_manager.start_execution(
+                    frame_id=frame.frame_id,
+                    node_id=node_id,
+                )
 
         # Update response outputs if applicable
         if node.execution_type == NodeExecutionType.RESPONSE:
@@ -409,14 +409,14 @@ class EventHandler:
         self._collect(frame=frame, event=event)
 
         # Re-queue node for execution
-        frame.state_manager.enqueue_node(
+        if frame.state_manager.enqueue_node(
             frame_id=frame.frame_id,
             node_id=event.node_id,
-        )
-        frame.state_manager.start_execution(
-            frame_id=frame.frame_id,
-            node_id=event.node_id,
-        )
+        ):
+            frame.state_manager.start_execution(
+                frame_id=frame.frame_id,
+                node_id=event.node_id,
+            )
 
     def _accumulate_node_usage(
         self,

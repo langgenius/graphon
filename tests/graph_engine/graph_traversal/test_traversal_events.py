@@ -94,9 +94,10 @@ class _StateManager:
             and all(state == NodeState.SKIPPED for state in states),
         }
 
-    def enqueue_node(self, *, frame_id: str, node_id: str) -> None:
+    def enqueue_node(self, *, frame_id: str, node_id: str) -> bool:
         _ = frame_id
         self.started_nodes.append(node_id)
+        return True
 
     def start_execution(self, *, frame_id: str, node_id: str) -> None:
         _ = frame_id

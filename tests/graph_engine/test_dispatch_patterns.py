@@ -1,4 +1,5 @@
 import queue
+import threading
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ import pytest
 
 from graphon.enums import (
     BuiltinNodeTypes,
+    ErrorStrategy,
     NodeExecutionType,
     NodeState,
     NodeType,
@@ -51,8 +53,10 @@ from graphon.graph_engine.ready_queue.protocol import (
     StartTask,
 )
 from graphon.graph_engine.worker import Worker
+from graphon.graph_engine.worker_management import WorkerPool
 from graphon.graph_events.base import GraphNodeEventBase
 from graphon.graph_events.node import (
+    NodeRunExceptionEvent,
     NodeRunFailedEvent,
     NodeRunStartedEvent,
     NodeRunSucceededEvent,
@@ -487,6 +491,29 @@ def test_pause_drains_ready_tasks_without_clearing_executing_tasks() -> None:
     worker_pool.stop.assert_not_called()
 
 
+def test_worker_pool_drain_does_not_stop_worker_with_current_task() -> None:
+    class WorkerStub:
+        def __init__(self, *, has_current_task: bool) -> None:
+            self.has_current_task = has_current_task
+            self.is_idle = True
+            self.stopped = False
+
+        def stop(self) -> None:
+            self.stopped = True
+
+    active_worker = WorkerStub(has_current_task=True)
+    idle_worker = WorkerStub(has_current_task=False)
+    pool = object.__new__(WorkerPool)
+    pool._lock = threading.RLock()
+    pool._running = True
+    pool._workers = [active_worker, idle_worker]
+
+    pool.drain()
+
+    assert active_worker.stopped is False
+    assert idle_worker.stopped is True
+
+
 def test_resume_schedules_deferred_ready_tasks_not_legacy_node_snapshots() -> None:
     ready_queue = InMemoryReadyQueue()
     runtime_state = GraphRuntimeState(
@@ -517,6 +544,58 @@ def test_resume_schedules_deferred_ready_tasks_not_legacy_node_snapshots() -> No
     )
     assert runtime_state.consume_paused_nodes() == ["paused-legacy"]
     assert runtime_state.consume_deferred_nodes() == ["deferred-legacy"]
+
+
+def test_paused_exception_default_path_defers_without_marking_executing() -> None:
+    graph = MagicMock()
+    graph.nodes = {
+        "failed": MagicMock(
+            execution_type=NodeExecutionType.EXECUTABLE,
+            error_strategy=ErrorStrategy.DEFAULT_VALUE,
+        )
+    }
+    runtime_state = MagicMock()
+    runtime_state.variable_pool = MagicMock()
+    graph_execution = MagicMock()
+    graph_execution.is_paused = True
+    graph_execution.get_or_create_node_execution.return_value = MagicMock()
+    event_collector = MagicMock()
+    edge_processor = MagicMock()
+    edge_processor.process_node_success.return_value = (["next"], [])
+    state_manager = MagicMock()
+    state_manager.enqueue_node.return_value = False
+    frame_registry = FrameRegistry()
+    frame_registry.register(
+        _execution_frame(
+            frame_id="root",
+            graph=cast(Graph, graph),
+            graph_runtime_state=runtime_state,
+            state_manager=state_manager,
+            edge_processor=edge_processor,
+        ),
+    )
+    handler = _event_handler(
+        graph_execution=graph_execution,
+        event_collector=cast(EventManager, event_collector),
+        frame_registry=frame_registry,
+    )
+    event = NodeRunExceptionEvent(
+        id="run-failed",
+        node_id="failed",
+        node_type=BuiltinNodeTypes.CODE,
+        start_at=datetime.now(UTC).replace(tzinfo=None),
+        finished_at=datetime.now(UTC).replace(tzinfo=None),
+        error="boom",
+        node_run_result=NodeRunResult(outputs={"answer": "fallback"}),
+    )
+
+    handler.dispatch(TaskEvent(frame_id="root", event=event))
+
+    state_manager.enqueue_node.assert_called_once_with(
+        frame_id="root",
+        node_id="next",
+    )
+    state_manager.start_execution.assert_not_called()
 
 
 def test_graph_execution_tracks_node_executions_by_frame() -> None:

@@ -387,14 +387,14 @@ class GraphEngine:
         if not resume:
             # Enqueue root node
             root_node = self._graph.root_node
-            self._state_manager.enqueue_node(
+            if self._state_manager.enqueue_node(
                 frame_id=ROOT_FRAME_ID,
                 node_id=root_node.id,
-            )
-            self._state_manager.start_execution(
-                frame_id=ROOT_FRAME_ID,
-                node_id=root_node.id,
-            )
+            ):
+                self._state_manager.start_execution(
+                    frame_id=ROOT_FRAME_ID,
+                    node_id=root_node.id,
+                )
         else:
             for task in self._graph_runtime_state.drain_deferred_ready_tasks():
                 self._graph_runtime_state.enqueue_ready_task(task)

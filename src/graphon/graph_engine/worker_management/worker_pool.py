@@ -140,7 +140,9 @@ class WorkerPool:
         """Stop accepting new work and signal currently idle workers to exit."""
         with self._lock:
             self._running = False
-            idle_workers = [worker for worker in self._workers if worker.is_idle]
+            idle_workers = [
+                worker for worker in self._workers if not worker.has_current_task
+            ]
 
             for worker in idle_workers:
                 worker.stop()

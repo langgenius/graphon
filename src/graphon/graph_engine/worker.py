@@ -94,6 +94,7 @@ class Worker(threading.Thread):
         self._current_node_started_at: datetime | None = None
         self._current_node: Node | None = None
         self._current_frame_id = ROOT_FRAME_ID
+        self._has_current_task = False
 
     def stop(self) -> None:
         """Signal the worker to stop processing."""
@@ -109,6 +110,11 @@ class Worker(threading.Thread):
     def idle_duration(self) -> float:
         """Get the duration in seconds since the worker last processed a task."""
         return time.time() - self._last_task_time
+
+    @property
+    def has_current_task(self) -> bool:
+        """Return True while the worker owns a queue task."""
+        return self._has_current_task
 
     @property
     def worker_id(self) -> int:
@@ -130,6 +136,7 @@ class Worker(threading.Thread):
                 continue
 
             self._last_task_time = time.time()
+            self._has_current_task = True
             try:
                 self._current_node_started_at = None
                 self._current_node = None
@@ -158,6 +165,7 @@ class Worker(threading.Thread):
                 self._current_node_started_at = None
                 self._current_node = None
                 self._current_frame_id = ROOT_FRAME_ID
+                self._has_current_task = False
 
     def _execute_task(self, task: ReadyTask) -> None:
         if isinstance(task, StartTask):
