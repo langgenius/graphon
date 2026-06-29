@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Protocol, cast, final
 
@@ -116,10 +117,10 @@ class FrameRegistry:
     ) -> ExecutionFrame:
         runtime_data = frame_state.runtime_data
         graph_runtime_state = GraphRuntimeState(
-            variable_pool=runtime_data.variable_pool,
+            variable_pool=runtime_data.variable_pool.model_copy(deep=True),
             start_at=0.0,
-            llm_usage=runtime_data.llm_usage,
-            outputs=dict(runtime_data.outputs),
+            llm_usage=runtime_data.llm_usage.model_copy(),
+            outputs=deepcopy(dict(runtime_data.outputs)),
             node_run_steps=runtime_data.node_run_steps,
             ready_queue=ready_queue,
             graph_execution=graph_execution,
@@ -129,12 +130,22 @@ class FrameRegistry:
             root_node_id=frame_state.root_node_id,
             graph_runtime_state=graph_runtime_state,
         )
+        missing_node_ids = sorted(
+            set(runtime_data.graph_node_states) - set(frame.graph.nodes),
+        )
+        missing_edge_ids = sorted(
+            set(runtime_data.graph_edge_states) - set(frame.graph.edges),
+        )
+        if missing_node_ids or missing_edge_ids:
+            msg = (
+                f"Saved frame state for {frame_state.frame_id} does not match "
+                f"rebuilt graph: missing node ids={missing_node_ids}, "
+                f"missing edge ids={missing_edge_ids}"
+            )
+            raise RuntimeError(msg)
+
         for node_id, state in runtime_data.graph_node_states.items():
-            node = frame.graph.nodes.get(node_id)
-            if node is not None:
-                node.state = state
+            frame.graph.nodes[node_id].state = state
         for edge_id, state in runtime_data.graph_edge_states.items():
-            edge = frame.graph.edges.get(edge_id)
-            if edge is not None:
-                edge.state = state
+            frame.graph.edges[edge_id].state = state
         return frame

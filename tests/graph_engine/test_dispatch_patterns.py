@@ -795,6 +795,111 @@ def test_frame_registry_materializes_child_frame_from_state() -> None:
     assert child_frame.graph.nodes["start"].state == NodeState.TAKEN
 
 
+def test_frame_registry_rejects_frame_state_with_missing_graph_state_ids() -> None:
+    graph_config = {
+        "nodes": [
+            {"id": "start", "data": {"type": BuiltinNodeTypes.ITERATION_START}},
+        ],
+        "edges": [],
+    }
+    ready_queue = InMemoryReadyQueue()
+    graph_execution = GraphExecution(workflow_id="workflow")
+    root_runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=1,
+        ready_queue=ready_queue,
+        graph_execution=graph_execution,
+    )
+    root_graph = Graph.init(
+        graph_config=graph_config,
+        node_factory=cast(Any, _FrameFactory()),
+        root_node_id="start",
+    )
+    frame_registry = FrameRegistry()
+    frame_registry.register(
+        _execution_frame(
+            frame_id="root",
+            graph=root_graph,
+            graph_runtime_state=root_runtime_state,
+        ),
+    )
+    frame_state = ContainerFrameState(
+        frame_id="child-frame",
+        kind="iteration",
+        parent_invocation_id="iteration-invocation",
+        root_node_id="start",
+        runtime_data=FrameRuntimeData(
+            variable_pool=VariablePool(),
+            graph_node_states={"missing-node": NodeState.TAKEN},
+            graph_edge_states={"missing-edge": NodeState.TAKEN},
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match=r"missing-node.*missing-edge"):
+        frame_registry.materialize_child_frame_from_state(
+            frame_state,
+            graph_execution=graph_execution,
+            ready_queue=ready_queue,
+        )
+
+
+def test_frame_registry_copies_frame_runtime_data_from_state() -> None:
+    graph_config = {
+        "nodes": [
+            {"id": "start", "data": {"type": BuiltinNodeTypes.ITERATION_START}},
+        ],
+        "edges": [],
+    }
+    ready_queue = InMemoryReadyQueue()
+    graph_execution = GraphExecution(workflow_id="workflow")
+    root_runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=1,
+        ready_queue=ready_queue,
+        graph_execution=graph_execution,
+    )
+    root_graph = Graph.init(
+        graph_config=graph_config,
+        node_factory=cast(Any, _FrameFactory()),
+        root_node_id="start",
+    )
+    frame_registry = FrameRegistry()
+    frame_registry.register(
+        _execution_frame(
+            frame_id="root",
+            graph=root_graph,
+            graph_runtime_state=root_runtime_state,
+        ),
+    )
+    variable_pool = VariablePool()
+    variable_pool.add(["child", "value"], "saved")
+    frame_state = ContainerFrameState(
+        frame_id="child-frame",
+        kind="iteration",
+        parent_invocation_id="iteration-invocation",
+        root_node_id="start",
+        runtime_data=FrameRuntimeData(
+            variable_pool=variable_pool,
+            outputs={"nested": {"value": "saved"}},
+        ),
+    )
+
+    child_frame = frame_registry.materialize_child_frame_from_state(
+        frame_state,
+        graph_execution=graph_execution,
+        ready_queue=ready_queue,
+    )
+    child_frame.graph_runtime_state.variable_pool.add(["child", "value"], "changed")
+    outputs = child_frame.graph_runtime_state.outputs
+    cast(dict[str, object], outputs["nested"])["value"] = "changed"
+    child_frame.graph_runtime_state.outputs = outputs
+
+    saved_variable = frame_state.runtime_data.variable_pool.get(["child", "value"])
+    assert saved_variable is not None
+    assert saved_variable.to_object() == "saved"
+    assert frame_state.runtime_data.outputs == {"nested": {"value": "saved"}}
+
+
 def test_worker_executes_node_from_ready_task() -> None:
     class RunnableNode:
         id = "start"
