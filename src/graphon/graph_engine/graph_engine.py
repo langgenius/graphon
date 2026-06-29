@@ -390,9 +390,6 @@ class GraphEngine:
                         ready_queue=self._ready_queue,
                     )
 
-        # Start worker pool (it calculates initial workers internally)
-        self._worker_pool.start()
-
         if not resume:
             # Enqueue root node
             root_node = self._graph.root_node
@@ -420,6 +417,9 @@ class GraphEngine:
                         frame_id=run_state.frame_id,
                         node_id=run_state.node_id,
                     )
+
+        # Start worker pool after scheduling is stable.
+        self._worker_pool.start()
 
         # Start dispatcher
         self._dispatcher.start()

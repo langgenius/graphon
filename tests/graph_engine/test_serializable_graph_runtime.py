@@ -5,6 +5,7 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, ClassVar, cast
+from unittest.mock import MagicMock, call
 
 import yaml
 
@@ -30,7 +31,7 @@ from graphon.graph_events.base import GraphEngineEvent
 from graphon.graph_events.graph import GraphRunPausedEvent, GraphRunSucceededEvent
 from graphon.graph_events.loop import NodeRunLoopSucceededEvent
 from graphon.graph_events.node import NodeRunSucceededEvent
-from graphon.nodes.container_effects import LoopFrameRequest
+from graphon.nodes.container_effects import LoopFrameCompleted, LoopFrameRequest
 from graphon.nodes.loop.loop_node import LoopNode
 from graphon.runtime.container_state import ContainerRunState
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
@@ -157,15 +158,16 @@ def _iteration_dsl() -> str:
 def _load_engine(
     dsl: str,
     *,
-    start_inputs: Mapping[str, Any] = {},
+    start_inputs: Mapping[str, Any] | None = None,
     runtime_state: GraphRuntimeState | None = None,
     command_channel: InMemoryChannel | None = None,
 ) -> GraphEngine:
+    resolved_start_inputs = dict(start_inputs or {})
     if runtime_state is None:
         return loads(
             dsl,
             workflow_id="workflow",
-            start_inputs=dict(start_inputs),
+            start_inputs=resolved_start_inputs,
             command_channel=command_channel or InMemoryChannel(),
             config=GraphEngineConfig(min_workers=1, max_workers=1),
         )
@@ -213,7 +215,7 @@ def _final_outputs(events: Sequence[GraphEngineEvent]) -> dict[str, object]:
 def _pause_snapshot(
     dsl: str,
     *,
-    start_inputs: Mapping[str, Any] = {},
+    start_inputs: Mapping[str, Any] | None = None,
     pause_after: Callable[[NodeRunSucceededEvent], bool],
 ) -> tuple[str, list[GraphEngineEvent]]:
     command_channel = InMemoryChannel()
@@ -236,10 +238,6 @@ def _resume_from_snapshot(dsl: str, snapshot: str) -> list[GraphEngineEvent]:
     runtime_state = GraphRuntimeState.from_snapshot(snapshot)
     engine = _load_engine(dsl, runtime_state=runtime_state)
     return list(engine.run())
-
-
-def _deferred_tasks(snapshot: str) -> list[object]:
-    return GraphRuntimeState.from_snapshot(snapshot).drain_deferred_ready_tasks()
 
 
 class _PauseOnChildSuccess(GraphEngineLayer):
@@ -442,6 +440,54 @@ def _resume_loop_snapshot(snapshot: str) -> list[TaskEvent]:
     finally:
         worker.stop()
         worker.join(timeout=1)
+
+
+def test_resume_replays_deferred_tasks_before_workers_start() -> None:
+    runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=1,
+    )
+    runtime_state.put_container_run(
+        ContainerRunState(
+            invocation_id="loop-invocation",
+            kind="loop",
+            frame_id="root",
+            node_id="loop",
+            execution_id="loop-run",
+            started_at=datetime.now(UTC).replace(tzinfo=None),
+            phase_data={},
+        ),
+    )
+    runtime_state.defer_ready_task(StartTask(frame_id="root", node_id="start"))
+    runtime_state.defer_ready_task(
+        ResumeTask(
+            invocation_id="loop-invocation",
+            result=LoopFrameCompleted(next_index=1),
+        )
+    )
+    state_manager = MagicMock()
+    worker_pool = MagicMock()
+
+    def assert_replay_before_workers_start() -> None:
+        assert runtime_state.ready_queue.qsize() == 2
+        assert state_manager.start_execution.call_args_list == [
+            call(frame_id="root", node_id="start"),
+            call(frame_id="root", node_id="loop"),
+        ]
+
+    worker_pool.start.side_effect = assert_replay_before_workers_start
+    engine = object.__new__(GraphEngine)
+    engine._graph_runtime_state = runtime_state
+    engine._frame_registry = MagicMock()
+    engine._ready_queue = runtime_state.ready_queue
+    engine._state_manager = state_manager
+    engine._worker_pool = worker_pool
+    engine._dispatcher = MagicMock()
+
+    engine._start_execution(resume=True)
+
+    worker_pool.start.assert_called_once_with()
+    engine._dispatcher.start.assert_called_once_with()
 
 
 def test_loop_graph_pause_snapshot_resume_outputs_match_uninterrupted_run() -> None:
