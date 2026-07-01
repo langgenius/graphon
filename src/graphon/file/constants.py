@@ -38,6 +38,7 @@ DOCUMENT_EXTENSIONS = _with_case_variants(
         "pptx",
         "xml",
         "epub",
+        "odt",
     )),
 )
 
