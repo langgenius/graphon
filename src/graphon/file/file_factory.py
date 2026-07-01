@@ -6,6 +6,25 @@ from .constants import (
 )
 from .enums import FileType
 
+_DOCUMENT_MIME_TYPES = frozenset((
+    "application/epub+zip",
+    "application/msword",
+    "application/pdf",
+    "application/dps",
+    "application/et",
+    "application/kswps",
+    "application/vnd.ms-excel",
+    "application/vnd.ms-outlook",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.oasis.opendocument.text",
+    "message/rfc822",
+))
+_DOCUMENT_MIME_PREFIXES = (
+    "application/vnd.openxmlformats-officedocument",
+    "application/wps-office",
+    "text/",
+)
+
 
 def standardize_file_type(*, extension: str = "", mime_type: str = "") -> FileType:
     """Infer the actual file type from extension and mime type."""
@@ -31,12 +50,15 @@ def _get_file_type_by_extension(extension: str) -> FileType | None:
 
 
 def get_file_type_by_mime_type(mime_type: str) -> FileType:
-    if "image" in mime_type:
+    normalized_mime_type = mime_type.lower()
+    if "image" in normalized_mime_type:
         return FileType.IMAGE
-    if "video" in mime_type:
+    if "video" in normalized_mime_type:
         return FileType.VIDEO
-    if "audio" in mime_type:
+    if "audio" in normalized_mime_type:
         return FileType.AUDIO
-    if "text" in mime_type or "pdf" in mime_type:
+    if normalized_mime_type in _DOCUMENT_MIME_TYPES or normalized_mime_type.startswith(
+        _DOCUMENT_MIME_PREFIXES
+    ):
         return FileType.DOCUMENT
     return FileType.CUSTOM

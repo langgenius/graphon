@@ -77,6 +77,50 @@ def test_extract_text_by_mime_type_routes_registered_extractor() -> None:
     assert extracted == "# comment\nfoo: bar"
 
 
+@pytest.mark.parametrize(
+    ("route_kind", "file_kind"),
+    [
+        ("extension", ".odt"),
+        ("mime_type", "application/vnd.oasis.opendocument.text"),
+    ],
+)
+def test_opendocument_text_routes_to_unstructured_extractor(
+    monkeypatch: pytest.MonkeyPatch,
+    route_kind: str,
+    file_kind: str,
+) -> None:
+    calls = []
+
+    def extract_odt(
+        file_content: bytes, *, unstructured_api_config: UnstructuredApiConfig
+    ) -> str:
+        calls.append((file_content, unstructured_api_config))
+        return "OpenDocument text"
+
+    monkeypatch.setattr(document_extractor_node, "_extract_text_from_odt", extract_odt)
+    monkeypatch.setattr(
+        document_extractor_node,
+        "_TEXT_EXTRACTOR_REGISTRY",
+        document_extractor_node._build_text_extractor_registry(),
+    )
+
+    if route_kind == "extension":
+        extracted = document_extractor_node._extract_text_by_file_extension(
+            file_content=b"odt",
+            file_extension=file_kind,
+            unstructured_api_config=UnstructuredApiConfig(),
+        )
+    else:
+        extracted = document_extractor_node._extract_text_by_mime_type(
+            file_content=b"odt",
+            mime_type=file_kind,
+            unstructured_api_config=UnstructuredApiConfig(),
+        )
+
+    assert extracted == "OpenDocument text"
+    assert calls == [(b"odt", UnstructuredApiConfig())]
+
+
 def test_extract_text_from_file_prefers_extension_over_mime_type(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -383,6 +427,7 @@ def test_partition_unstructured_file_uses_api_partition(
         (document_extractor_node._extract_text_from_ppt, "PPT"),
         (document_extractor_node._extract_text_from_pptx, "PPTX"),
         (document_extractor_node._extract_text_from_epub, "EPUB"),
+        (document_extractor_node._extract_text_from_odt, "ODT"),
     ],
 )
 def test_unstructured_extractors_convert_partition_errors(

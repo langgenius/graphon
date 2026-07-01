@@ -898,6 +898,24 @@ def _extract_text_from_epub(
         raise TextExtractionError(msg) from e
 
 
+def _extract_text_from_odt(
+    file_content: bytes,
+    *,
+    unstructured_api_config: UnstructuredApiConfig,
+) -> str:
+    try:
+        return _partition_unstructured_file(
+            file_content,
+            suffix=".odt",
+            unstructured_api_config=unstructured_api_config,
+            load_local_partition=_load_partition_odt,
+            render_element=_render_unstructured_text_element,
+        )
+    except Exception as e:
+        msg = f"Failed to extract text from ODT: {e!s}"
+        raise TextExtractionError(msg) from e
+
+
 def _partition_unstructured_file(
     file_content: bytes,
     *,
@@ -967,6 +985,12 @@ def _load_partition_epub() -> Callable[..., Sequence[Any]]:
     from unstructured.partition.epub import partition_epub  # noqa: PLC0415
 
     return partition_epub
+
+
+def _load_partition_odt() -> Callable[..., Sequence[Any]]:
+    from unstructured.partition.odt import partition_odt  # noqa: PLC0415
+
+    return partition_odt
 
 
 def _render_unstructured_text_element(element: Any) -> str:
@@ -1141,6 +1165,13 @@ def _build_text_extractor_registry() -> _TextExtractorRegistry:
             extractor=_extract_text_from_epub,
             mime_types=frozenset({"application/epub+zip"}),
             file_extensions=frozenset({".epub"}),
+            requires_unstructured_config=True,
+        ),
+        _ExtractorRegistration(
+            name="odt",
+            extractor=_extract_text_from_odt,
+            mime_types=frozenset({"application/vnd.oasis.opendocument.text"}),
+            file_extensions=frozenset({".odt"}),
             requires_unstructured_config=True,
         ),
         _ExtractorRegistration(
