@@ -6,12 +6,13 @@ from typing_extensions import TypeIs
 
 from graphon.file import file_manager
 from graphon.file.enums import FileAttribute
-from graphon.runtime.variable_pool import VariablePool
+from graphon.runtime.graph_runtime_state_protocol import ReadOnlyVariablePool
 from graphon.variables.segments import (
     ArrayBooleanSegment,
     ArrayFileSegment,
     BooleanSegment,
 )
+from graphon.variables.template_resolution import convert_template
 
 from .entities import Condition, SubCondition, SupportedComparisonOperator
 
@@ -78,7 +79,7 @@ class ConditionProcessor:
     def process_conditions(
         self,
         *,
-        variable_pool: VariablePool,
+        variable_pool: ReadOnlyVariablePool,
         conditions: Sequence[Condition],
         operator: Literal["and", "or"],
     ) -> ConditionCheckResult:
@@ -176,12 +177,13 @@ def _is_bool_sequence(value: object) -> TypeIs[Sequence[bool]]:
 def _prepare_expected_value(
     *,
     variable: Any,
-    variable_pool: VariablePool,
+    variable_pool: ReadOnlyVariablePool,
     expected_value: str | Sequence[str] | bool | Sequence[bool] | None,
 ) -> str | Sequence[str] | bool | list[bool] | None:
     match expected_value:
         case str():
-            normalized_expected_value = variable_pool.convert_template(
+            normalized_expected_value = convert_template(
+                variable_pool,
                 expected_value,
             ).text
         case _:

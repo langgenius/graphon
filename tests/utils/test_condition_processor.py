@@ -1,3 +1,4 @@
+from graphon.runtime import ReadOnlyVariablePoolWrapper
 from graphon.runtime.variable_pool import VariablePool
 from graphon.utils.condition.entities import Condition
 from graphon.utils.condition.processor import ConditionProcessor
@@ -122,3 +123,24 @@ def test_process_conditions_contains_supports_string_and_list_values() -> None:
 
     assert text_result.final_result is True
     assert list_result.final_result is True
+
+
+def test_process_conditions_resolves_templates_from_read_only_variable_pool() -> None:
+    condition_processor = ConditionProcessor()
+    variable_pool = VariablePool()
+    variable_pool.add(["test_node_id", "text"], "graphon")
+    variable_pool.add(["test_node_id", "needle"], "pho")
+
+    result = condition_processor.process_conditions(
+        variable_pool=ReadOnlyVariablePoolWrapper(variable_pool),
+        conditions=[
+            Condition(
+                variable_selector=["test_node_id", "text"],
+                comparison_operator="contains",
+                value="{{#test_node_id.needle#}}",
+            ),
+        ],
+        operator="and",
+    )
+
+    assert result.final_result is True

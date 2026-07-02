@@ -34,6 +34,7 @@ from graphon.nodes.tool_runtime_entities import (
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import ArrayFileSegment
+from graphon.variables.template_resolution import convert_template
 
 from .entities import ToolInputType, ToolNodeData
 from .exc import ToolFileError, ToolNodeError, ToolParameterError
@@ -247,7 +248,7 @@ class ToolNode(Node[ToolNodeData]):
                     continue
                 parameter_value = variable.value
             elif tool_input.type in _TEMPLATE_TOOL_INPUT_TYPES:
-                segment_group = variable_pool.convert_template(str(tool_input.value))
+                segment_group = convert_template(variable_pool, str(tool_input.value))
                 parameter_value = segment_group.log if for_log else segment_group.text
             else:
                 msg = f"Unknown tool input type '{tool_input.type}'"

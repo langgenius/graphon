@@ -45,6 +45,7 @@ from graphon.nodes.llm.runtime_protocols import (
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.template_rendering import Jinja2TemplateRenderer
 from graphon.utils.json_in_md_parser import parse_and_check_json_markdown
+from graphon.variables.template_resolution import convert_template
 
 from .entities import QuestionClassifierNodeData
 from .exc import InvalidModelTypeError
@@ -262,7 +263,8 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
             else None
         )
         query = variable.value if variable else None
-        node_data.instruction = variable_pool.convert_template(
+        node_data.instruction = convert_template(
+            variable_pool,
             node_data.instruction or "",
         ).text
         model_instance = self._prepare_model_instance(variable_pool=variable_pool)
@@ -285,7 +287,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         }
         rendered_classes = [
             class_.model_copy(
-                update={"name": variable_pool.convert_template(class_.name).text},
+                update={"name": convert_template(variable_pool, class_.name).text},
             )
             for class_ in node_data.classes
         ]
