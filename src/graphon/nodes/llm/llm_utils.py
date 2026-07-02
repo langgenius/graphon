@@ -35,6 +35,7 @@ from graphon.variables.segments import (
     FileSegment,
     NoneSegment,
 )
+from graphon.variables.template_resolution import convert_template
 
 from .entities import (
     LLMNodeChatModelMessage,
@@ -364,7 +365,7 @@ def handle_list_messages(
             continue
 
         template = message.text.replace(CONTEXT_PLACEHOLDER, context)
-        segment_group = variable_pool.convert_template(template)
+        segment_group = convert_template(variable_pool, template)
         file_contents: list[PromptMessageContentUnionTypes] = []
         for segment in segment_group.value:
             if isinstance(segment, ArrayFileSegment):
@@ -454,7 +455,7 @@ def handle_completion_template(
         )
     else:
         template_text = template.text.replace(CONTEXT_PLACEHOLDER, context)
-        result_text = variable_pool.convert_template(template_text).text
+        result_text = convert_template(variable_pool, template_text).text
     return [
         combine_message_content_with_role(
             contents=[TextPromptMessageContent(data=result_text)],
@@ -627,8 +628,8 @@ def resolve_completion_params_variables(
     Security notes:
     - Resolved values are length-capped to ``MAX_RESOLVED_VALUE_LENGTH`` to
       prevent denial-of-service through excessively large variable payloads.
-    - This follows the same ``VariablePool.convert_template`` pattern used across
-      Dify (Answer Node, HTTP Request Node, Agent Node, etc.).  The downstream
+    - This follows the shared Graphon template-resolution path used across
+      nodes (Answer Node, HTTP Request Node, Agent Node, etc.). The downstream
       model plugin receives these values as structured JSON key-value pairs — they
       are never concatenated into raw HTTP headers or SQL queries.
     - Numeric/boolean coercion is applied so that variables holding ``"0.7"`` are
@@ -641,7 +642,7 @@ def resolve_completion_params_variables(
     resolved: dict[str, Any] = {}
     for key, value in completion_params.items():
         if isinstance(value, str) and VARIABLE_PATTERN.search(value):
-            segment_group = variable_pool.convert_template(value)
+            segment_group = convert_template(variable_pool, value)
             text = segment_group.text
             if len(text) > MAX_RESOLVED_VALUE_LENGTH:
                 logger.warning(

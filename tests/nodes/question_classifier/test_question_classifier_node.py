@@ -116,9 +116,6 @@ def test_question_classifier_constructor_accepts_dependency_bundle(
     })
     variable_pool = MagicMock()
     variable_pool.get.return_value = SimpleNamespace(value="Question about billing")
-    variable_pool.convert_template.side_effect = lambda value: SimpleNamespace(
-        text=value
-    )
     template_renderer = MagicMock()
     model_instance = MagicMock(
         provider="openai",
@@ -259,9 +256,6 @@ def test_question_classifier_run_returns_custom_class_label(
     })
     variable_pool = MagicMock()
     variable_pool.get.return_value = SimpleNamespace(value="Where is my refund?")
-    variable_pool.convert_template.side_effect = lambda value: SimpleNamespace(
-        text=value
-    )
     template_renderer = MagicMock()
     node = _build_question_classifier_node(
         node_data,
@@ -331,9 +325,6 @@ def test_question_classifier_run_falls_back_to_canonical_class_label(
     })
     variable_pool = MagicMock()
     variable_pool.get.return_value = SimpleNamespace(value="Where is my refund?")
-    variable_pool.convert_template.side_effect = lambda value: SimpleNamespace(
-        text=value
-    )
     template_renderer = MagicMock()
     node = _build_question_classifier_node(
         node_data,

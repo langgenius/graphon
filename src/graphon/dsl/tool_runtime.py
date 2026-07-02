@@ -17,6 +17,7 @@ from graphon.nodes.tool_runtime_entities import (
     ToolRuntimeParameter,
 )
 from graphon.runtime.variable_pool import VariablePool
+from graphon.variables.template_resolution import convert_template
 
 from .entities import DslToolCredential
 from .slim.client import SlimClient, SlimClientConfig, SlimClientError
@@ -246,7 +247,7 @@ class _SlimToolParameterResolver:
             case ToolInputType.MIXED:
                 if self.variable_pool is None:
                     return str(value)
-                return self.variable_pool.convert_template(str(value)).text
+                return convert_template(self.variable_pool, str(value)).text
             case ToolInputType.VARIABLE:
                 if self.variable_pool is None:
                     return _MISSING
