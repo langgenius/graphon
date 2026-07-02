@@ -14,7 +14,7 @@ VARIABLE_PATTERN = re.compile(
 )
 
 
-class TemplateLookupPool(Protocol):
+class _TemplateLookupPool(Protocol):
     @abstractmethod
     def get(self, selector: Sequence[str], /) -> Segment | None:
         """Return a segment for the selector when it exists."""
@@ -22,7 +22,7 @@ class TemplateLookupPool(Protocol):
 
 
 def convert_template(
-    pool: TemplateLookupPool,
+    pool: _TemplateLookupPool,
     template: str,
     /,
 ) -> SegmentGroup:
