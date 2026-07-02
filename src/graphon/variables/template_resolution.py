@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import re
+from abc import abstractmethod
+from collections.abc import Sequence
+from typing import Protocol
 
-from graphon.runtime.graph_runtime_state_protocol import ReadOnlyVariablePool
 from graphon.variables.factory import build_segment
 from graphon.variables.segment_group import SegmentGroup
 from graphon.variables.segments import Segment
@@ -12,8 +14,15 @@ VARIABLE_PATTERN = re.compile(
 )
 
 
+class TemplateLookupPool(Protocol):
+    @abstractmethod
+    def get(self, selector: Sequence[str], /) -> Segment | None:
+        """Return a segment for the selector when it exists."""
+        ...
+
+
 def convert_template(
-    pool: ReadOnlyVariablePool,
+    pool: TemplateLookupPool,
     template: str,
     /,
 ) -> SegmentGroup:
