@@ -531,21 +531,34 @@ class _SpeechToTextRuntimeStub(_ProviderRuntimeStub):
 @pytest.mark.parametrize(
     ("raw_model_type", "expected_model_type"),
     [
-        ("text-generation", ModelType.LLM),
         (ModelType.LLM.value, ModelType.LLM),
-        ("embeddings", ModelType.TEXT_EMBEDDING),
         (ModelType.TEXT_EMBEDDING.value, ModelType.TEXT_EMBEDDING),
-        ("reranking", ModelType.RERANK),
+        (ModelType.RERANK.value, ModelType.RERANK),
         ("speech2text", ModelType.SPEECH2TEXT),
         ("moderation", ModelType.MODERATION),
         ("tts", ModelType.TTS),
     ],
 )
-def test_model_type_accepts_origin_model_type_aliases(
+def test_model_type_accepts_canonical_values(
     raw_model_type: str,
     expected_model_type: ModelType,
 ) -> None:
     assert ModelType(raw_model_type) == expected_model_type
+
+
+@pytest.mark.parametrize(
+    "legacy_model_type",
+    [
+        "text-generation",
+        "embeddings",
+        "reranking",
+    ],
+)
+def test_model_type_rejects_legacy_origin_model_type_aliases(
+    legacy_model_type: str,
+) -> None:
+    with pytest.raises(ValueError, match="is not a valid ModelType"):
+        ModelType(legacy_model_type)
 
 
 @pytest.mark.parametrize(

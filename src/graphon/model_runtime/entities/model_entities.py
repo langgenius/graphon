@@ -18,11 +18,6 @@ _ORIGIN_MODEL_TYPE_BY_MODEL_TYPE: dict[str, str] = {
     "tts": "tts",
 }
 
-_MODEL_TYPE_BY_ORIGIN_MODEL_TYPE: dict[str, str] = {
-    origin_model_type: model_type
-    for model_type, origin_model_type in _ORIGIN_MODEL_TYPE_BY_MODEL_TYPE.items()
-}
-
 
 class ModelType(StrEnum):
     """Enum class for model type."""
@@ -33,14 +28,6 @@ class ModelType(StrEnum):
     SPEECH2TEXT = auto()
     MODERATION = auto()
     TTS = auto()
-
-    @classmethod
-    def _missing_(cls, value: object) -> ModelType | None:
-        if isinstance(value, str):
-            model_type = _MODEL_TYPE_BY_ORIGIN_MODEL_TYPE.get(value)
-            if model_type is not None:
-                return cls(model_type)
-        return None
 
     def to_origin_model_type(self) -> str:
         """Map `ModelType` back to the provider-native model type string."""
