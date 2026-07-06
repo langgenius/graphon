@@ -26,5 +26,18 @@ def test_get_file_type_by_mime_type_recognizes_document_office_mime_types() -> N
     assert get_file_type_by_mime_type("application/wps-office.wps") == FileType.DOCUMENT
 
 
+def test_get_file_type_by_mime_type_ignores_parameters() -> None:
+    assert (
+        get_file_type_by_mime_type("application/pdf; charset=binary")
+        == FileType.DOCUMENT
+    )
+    assert (
+        get_file_type_by_mime_type(
+            "application/vnd.oasis.opendocument.text; charset=utf-8",
+        )
+        == FileType.DOCUMENT
+    )
+
+
 def test_get_file_type_by_mime_type_returns_custom_for_unknown_type() -> None:
     assert get_file_type_by_mime_type("application/octet-stream") == FileType.CUSTOM

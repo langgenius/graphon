@@ -50,7 +50,7 @@ def _get_file_type_by_extension(extension: str) -> FileType | None:
 
 
 def get_file_type_by_mime_type(mime_type: str) -> FileType:
-    normalized_mime_type = mime_type.lower()
+    normalized_mime_type = mime_type.partition(";")[0].strip().lower()
     if "image" in normalized_mime_type:
         return FileType.IMAGE
     if "video" in normalized_mime_type:

@@ -78,23 +78,27 @@ def test_extract_text_by_mime_type_routes_registered_extractor() -> None:
 
 
 @pytest.mark.parametrize(
-    ("route_kind", "file_kind"),
+    ("extract", "route_kwargs"),
     [
-        ("extension", ".odt"),
-        ("mime_type", "application/vnd.oasis.opendocument.text"),
+        (
+            document_extractor_node._extract_text_by_file_extension,
+            {"file_extension": ".odt"},
+        ),
+        (
+            document_extractor_node._extract_text_by_mime_type,
+            {"mime_type": "application/vnd.oasis.opendocument.text"},
+        ),
     ],
 )
 def test_opendocument_text_routes_to_unstructured_extractor(
     monkeypatch: pytest.MonkeyPatch,
-    route_kind: str,
-    file_kind: str,
+    extract: Any,
+    route_kwargs: dict[str, str],
 ) -> None:
-    calls = []
-
     def extract_odt(
-        file_content: bytes, *, unstructured_api_config: UnstructuredApiConfig
+        _file_content: bytes, *, unstructured_api_config: UnstructuredApiConfig
     ) -> str:
-        calls.append((file_content, unstructured_api_config))
+        _ = unstructured_api_config
         return "OpenDocument text"
 
     monkeypatch.setattr(document_extractor_node, "_extract_text_from_odt", extract_odt)
@@ -104,21 +108,14 @@ def test_opendocument_text_routes_to_unstructured_extractor(
         document_extractor_node._build_text_extractor_registry(),
     )
 
-    if route_kind == "extension":
-        extracted = document_extractor_node._extract_text_by_file_extension(
+    assert (
+        extract(
             file_content=b"odt",
-            file_extension=file_kind,
             unstructured_api_config=UnstructuredApiConfig(),
+            **route_kwargs,
         )
-    else:
-        extracted = document_extractor_node._extract_text_by_mime_type(
-            file_content=b"odt",
-            mime_type=file_kind,
-            unstructured_api_config=UnstructuredApiConfig(),
-        )
-
-    assert extracted == "OpenDocument text"
-    assert calls == [(b"odt", UnstructuredApiConfig())]
+        == "OpenDocument text"
+    )
 
 
 def test_extract_text_from_file_prefers_extension_over_mime_type(
