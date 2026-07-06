@@ -16,8 +16,7 @@ VARIABLE_PATTERN = re.compile(
 
 class _TemplateLookupPool(Protocol):
     @abstractmethod
-    def get(self, selector: Sequence[str], /) -> Segment | None:
-        ...
+    def get(self, selector: Sequence[str], /) -> Segment | None: ...
 
 
 def convert_template(
