@@ -61,6 +61,7 @@ from graphon.model_runtime.model_providers.model_provider_factory import (
     ModelProviderFactory,
 )
 from graphon.model_runtime.protocols.llm_runtime import LLMModelRuntime
+from graphon.model_runtime.protocols.tts_runtime import TTSModelVoice
 
 
 class _ProviderRuntimeStub:
@@ -457,9 +458,9 @@ class _TTSRuntimeStub(_ProviderRuntimeStub):
         model: str,
         credentials: dict[str, Any],
         language: str | None,
-    ) -> list[str]:
+    ) -> list[TTSModelVoice]:
         _ = provider, model, credentials, language
-        return ["nova"]
+        return [{"name": "Nova", "value": "nova"}]
 
 
 class _ModerationRuntimeStub(_ProviderRuntimeStub):
@@ -804,7 +805,7 @@ def test_tts_model_accepts_tts_only_runtime_surface() -> None:
     assert model.get_tts_model_voices(
         model="voice-model",
         credentials={},
-    ) == ["nova"]
+    ) == [{"name": "Nova", "value": "nova"}]
 
 
 def test_moderation_model_accepts_moderation_only_runtime_surface() -> None:

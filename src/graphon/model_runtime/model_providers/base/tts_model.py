@@ -1,10 +1,9 @@
 import logging
 from collections.abc import Iterable, Mapping
-from typing import Any
 
 from graphon.model_runtime.entities.model_entities import ModelType
 from graphon.model_runtime.model_providers.base.ai_model import AIModel
-from graphon.model_runtime.protocols.tts_runtime import TTSModelRuntime
+from graphon.model_runtime.protocols.tts_runtime import TTSModelRuntime, TTSModelVoice
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +40,7 @@ class TTSModel(AIModel[TTSModelRuntime]):
         model: str,
         credentials: dict,
         language: str | None = None,
-    ) -> Any:
+    ) -> list[TTSModelVoice]:
         """Retrieve the voices supported by a text-to-speech model."""
         return self.model_runtime.get_tts_model_voices(
             provider=self.provider,
