@@ -86,6 +86,7 @@ from graphon.variables.segments import (
     ObjectSegment,
     StringSegment,
 )
+from graphon.variables.template_resolution import convert_template
 
 from . import llm_utils
 from .entities import (
@@ -1881,7 +1882,7 @@ class LLMNode(Node[LLMNodeData]):
         vision_detail_config: ImagePromptMessageContent.DETAIL,
     ) -> list[PromptMessage]:
         template = message.text.replace(llm_utils.CONTEXT_PLACEHOLDER, context)
-        segment_group = variable_pool.convert_template(template)
+        segment_group = convert_template(variable_pool, template)
         prompt_messages: list[PromptMessage] = []
         plain_text = segment_group.text
         if plain_text:
@@ -2312,7 +2313,7 @@ def _handle_completion_template(
         )
     else:
         template_text = template.text.replace(llm_utils.CONTEXT_PLACEHOLDER, context)
-        result_text = variable_pool.convert_template(template_text).text
+        result_text = convert_template(variable_pool, template_text).text
     prompt_message = _combine_message_content_with_role(
         contents=[TextPromptMessageContent(data=result_text)],
         role=PromptMessageRole.USER,

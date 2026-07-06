@@ -13,6 +13,7 @@ from graphon.file.enums import FileTransferMethod
 from graphon.http import HttpClientProtocol, HttpResponse
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import ArrayFileSegment, FileSegment
+from graphon.variables.template_resolution import convert_template
 
 from ..protocols import FileManagerProtocol
 from .entities import (
@@ -93,7 +94,8 @@ class Executor:
             if node_data.authorization.config is None:
                 msg = "authorization config is required"
                 raise AuthorizationConfigError(msg)
-            node_data.authorization.config.api_key = variable_pool.convert_template(
+            node_data.authorization.config.api_key = convert_template(
+                variable_pool,
                 node_data.authorization.config.api_key,
             ).text
             # Validate that API key is not empty after template conversion
@@ -143,7 +145,7 @@ class Executor:
         self._init_body()
 
     def _init_url(self) -> None:
-        self.url = self.variable_pool.convert_template(self.node_data.url).text
+        self.url = convert_template(self.variable_pool, self.node_data.url).text
 
         # check if url is a valid URL
         if not self.url:
@@ -170,8 +172,8 @@ class Executor:
 
             value_str = value[0].strip() if value else ""
             result.append((
-                self.variable_pool.convert_template(key).text,
-                self.variable_pool.convert_template(value_str).text,
+                convert_template(self.variable_pool, key).text,
+                convert_template(self.variable_pool, value_str).text,
             ))
 
         if result:
@@ -190,7 +192,7 @@ class Executor:
             'aa\n cc : dd'   -> {'aa': '', 'cc': 'dd'}
 
         """
-        headers = self.variable_pool.convert_template(self.node_data.headers).text
+        headers = convert_template(self.variable_pool, self.node_data.headers).text
         self.headers = {
             key.strip(): (value[0].strip() if value else "")
             for line in headers.splitlines()
@@ -237,11 +239,11 @@ class Executor:
 
     def _init_raw_text_body(self, data: Sequence[BodyData]) -> None:
         item = self._require_single_body_item(data, body_type="raw-text")
-        self.content = self.variable_pool.convert_template(item.value).text
+        self.content = convert_template(self.variable_pool, item.value).text
 
     def _init_json_body(self, data: Sequence[BodyData]) -> None:
         item = self._require_single_body_item(data, body_type="json")
-        json_string = self.variable_pool.convert_template(item.value).text
+        json_string = convert_template(self.variable_pool, item.value).text
         try:
             repaired = repair_json(json_string)
             self.json = json.loads(repaired, strict=False)
@@ -260,9 +262,10 @@ class Executor:
 
     def _init_urlencoded_body(self, data: Sequence[BodyData]) -> None:
         self.data = {
-            self.variable_pool.convert_template(
+            convert_template(
+                self.variable_pool,
                 item.key,
-            ).text: self.variable_pool.convert_template(item.value).text
+            ).text: convert_template(self.variable_pool, item.value).text
             for item in data
         }
 
@@ -274,9 +277,10 @@ class Executor:
 
     def _build_form_text_data(self, data: Sequence[BodyData]) -> dict[str, str]:
         return {
-            self.variable_pool.convert_template(
+            convert_template(
+                self.variable_pool,
                 item.key,
-            ).text: self.variable_pool.convert_template(item.value).text
+            ).text: convert_template(self.variable_pool, item.value).text
             for item in data
             if item.type == "text"
         }
@@ -286,7 +290,7 @@ class Executor:
         data: Sequence[BodyData],
     ) -> dict[str, Sequence[str]]:
         return {
-            self.variable_pool.convert_template(item.key).text: item.file
+            convert_template(self.variable_pool, item.key).text: item.file
             for item in data
             if item.type == "file"
         }

@@ -17,6 +17,7 @@ from graphon.variables.segments import (
     FileSegment,
     Segment,
 )
+from graphon.variables.template_resolution import convert_template
 
 
 class AnswerNode(Node[AnswerNodeData]):
@@ -30,7 +31,8 @@ class AnswerNode(Node[AnswerNodeData]):
 
     @override
     def _run(self) -> NodeRunResult:
-        segments = self.graph_runtime_state.variable_pool.convert_template(
+        segments = convert_template(
+            self.graph_runtime_state.variable_pool,
             self.node_data.answer,
         )
         files = self._extract_files_from_segments(segments.value)

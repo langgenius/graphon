@@ -14,6 +14,7 @@ from graphon.variables.segments import (
     ArraySegment,
     ArrayStringSegment,
 )
+from graphon.variables.template_resolution import convert_template
 
 from .entities import FilterOperator, ListOperatorNodeData, Order
 from .exc import (
@@ -196,7 +197,8 @@ class ListOperatorNode(Node[ListOperatorNodeData]):
                 if not isinstance(condition.value, str):
                     msg = f"Invalid filter value: {condition.value}"
                     raise InvalidFilterValueError(msg)
-                value = self.graph_runtime_state.variable_pool.convert_template(
+                value = convert_template(
+                    self.graph_runtime_state.variable_pool,
                     condition.value,
                 ).text
                 filter_func = _get_string_filter_func(
@@ -209,7 +211,8 @@ class ListOperatorNode(Node[ListOperatorNodeData]):
                 if not isinstance(condition.value, str):
                     msg = f"Invalid filter value: {condition.value}"
                     raise InvalidFilterValueError(msg)
-                value = self.graph_runtime_state.variable_pool.convert_template(
+                value = convert_template(
+                    self.graph_runtime_state.variable_pool,
                     condition.value,
                 ).text
                 filter_func = _get_number_filter_func(
@@ -220,7 +223,8 @@ class ListOperatorNode(Node[ListOperatorNodeData]):
                 variable = variable.model_copy(update={"value": result})
             elif isinstance(variable, ArrayFileSegment):
                 if isinstance(condition.value, str):
-                    value = self.graph_runtime_state.variable_pool.convert_template(
+                    value = convert_template(
+                        self.graph_runtime_state.variable_pool,
                         condition.value,
                     ).text
                 elif isinstance(condition.value, bool):
@@ -282,7 +286,8 @@ class ListOperatorNode(Node[ListOperatorNodeData]):
         variable: _SUPPORTED_TYPES_ALIAS,
     ) -> _SUPPORTED_TYPES_ALIAS:
         value = int(
-            self.graph_runtime_state.variable_pool.convert_template(
+            convert_template(
+                self.graph_runtime_state.variable_pool,
                 self.node_data.extract_by.serial,
             ).text,
         )

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
@@ -16,15 +15,10 @@ from graphon.variables.factory import (
     build_segment,
     segment_to_variable,
 )
-from graphon.variables.segment_group import SegmentGroup
 from graphon.variables.segments import FileSegment, ObjectSegment, Segment
 from graphon.variables.variables import RAGPipelineVariableInput, Variable
 
 type VariableValue = str | int | float | dict[str, object] | list[object] | File
-
-VARIABLE_PATTERN = re.compile(
-    r"\{\{#([a-zA-Z0-9_]{1,50}(?:\.[a-zA-Z_][a-zA-Z0-9_]{0,29}){1,10})#\}\}",
-)
 
 
 def _default_variable_dictionary() -> defaultdict[str, dict[str, Variable]]:
@@ -322,16 +316,6 @@ class VariablePool(BaseModel):
             return
         key, hash_key = self._selector_to_keys(selector)
         self.variable_dictionary[key].pop(hash_key, None)
-
-    def convert_template(self, template: str, /) -> SegmentGroup:
-        parts = VARIABLE_PATTERN.split(template)
-        segments: list[Segment] = []
-        for part in filter(lambda x: x, parts):
-            if "." in part and (variable := self.get(part.split("."))):
-                segments.append(variable)
-            else:
-                segments.append(build_segment(part))
-        return SegmentGroup(value=segments)
 
     def get_file(self, selector: Sequence[str], /) -> FileSegment | None:
         segment = self.get(selector)

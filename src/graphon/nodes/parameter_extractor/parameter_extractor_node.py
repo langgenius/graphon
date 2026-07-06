@@ -48,6 +48,7 @@ from graphon.nodes.llm.runtime_protocols import (
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.factory import build_segment_with_type
+from graphon.variables.template_resolution import convert_template
 from graphon.variables.types import ArrayValidation, SegmentType
 
 from .entities import ParameterConfig, ParameterExtractorNodeData
@@ -975,7 +976,10 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
     ) -> list[LLMNodeChatModelMessage]:
         input_text = query
         memory_str = ""
-        instruction = variable_pool.convert_template(node_data.instruction or "").text
+        instruction = convert_template(
+            variable_pool,
+            node_data.instruction or "",
+        ).text
 
         if memory and node_data.memory and node_data.memory.window:
             memory_str = llm_utils.fetch_memory_text(
@@ -1027,7 +1031,10 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
     ) -> list[LLMNodeChatModelMessage] | LLMNodeCompletionModelPromptTemplate:
         input_text = query
         memory_str = ""
-        instruction = variable_pool.convert_template(node_data.instruction or "").text
+        instruction = convert_template(
+            variable_pool,
+            node_data.instruction or "",
+        ).text
 
         if memory and node_data.memory and node_data.memory.window:
             memory_str = llm_utils.fetch_memory_text(

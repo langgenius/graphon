@@ -171,12 +171,6 @@ class TestVariablePoolGetNotModifyVariableDictionary:
     _NODE_ID = "start"
     _VAR_NAME = "name"
 
-    def test_convert_to_template_should_not_introduce_extra_keys(self) -> None:
-        pool = VariablePool.empty()
-        pool.add([self._NODE_ID, self._VAR_NAME], 0)
-        pool.convert_template("The start.name is {{#start.name#}}")
-        assert "The start" not in pool.variable_dictionary
-
     def test_get_should_not_modify_variable_dictionary(self) -> None:
         pool = VariablePool.empty()
         pool.get([self._NODE_ID, self._VAR_NAME])
