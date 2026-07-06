@@ -6,7 +6,8 @@ from .constants import (
 )
 from .enums import FileType
 
-_DOCUMENT_MIME_TYPES = frozenset((
+_CONTENT_FILE_TYPES = (FileType.IMAGE, FileType.VIDEO, FileType.AUDIO)
+_DOCUMENT_MIME_TYPE_ALLOWLIST = frozenset((
     "application/epub+zip",
     "application/msword",
     "application/pdf",
@@ -19,7 +20,7 @@ _DOCUMENT_MIME_TYPES = frozenset((
     "application/vnd.oasis.opendocument.text",
     "message/rfc822",
 ))
-_DOCUMENT_MIME_PREFIXES = (
+_DOCUMENT_MIME_TYPE_PREFIXES = (
     "application/vnd.openxmlformats-officedocument",
     "application/wps-office",
     "text/",
@@ -51,14 +52,12 @@ def _get_file_type_by_extension(extension: str) -> FileType | None:
 
 def get_file_type_by_mime_type(mime_type: str) -> FileType:
     normalized_mime_type = mime_type.partition(";")[0].strip().lower()
-    if "image" in normalized_mime_type:
-        return FileType.IMAGE
-    if "video" in normalized_mime_type:
-        return FileType.VIDEO
-    if "audio" in normalized_mime_type:
-        return FileType.AUDIO
-    if normalized_mime_type in _DOCUMENT_MIME_TYPES or normalized_mime_type.startswith(
-        _DOCUMENT_MIME_PREFIXES
+    for file_type in _CONTENT_FILE_TYPES:
+        if normalized_mime_type.startswith(f"{file_type.value}/"):
+            return file_type
+    if (
+        normalized_mime_type in _DOCUMENT_MIME_TYPE_ALLOWLIST
+        or normalized_mime_type.startswith(_DOCUMENT_MIME_TYPE_PREFIXES)
     ):
         return FileType.DOCUMENT
     return FileType.CUSTOM

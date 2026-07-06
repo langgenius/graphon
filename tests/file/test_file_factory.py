@@ -39,5 +39,9 @@ def test_get_file_type_by_mime_type_ignores_parameters() -> None:
     )
 
 
+def test_get_file_type_by_mime_type_requires_top_level_media_type() -> None:
+    assert get_file_type_by_mime_type("application/image-metadata") == FileType.CUSTOM
+
+
 def test_get_file_type_by_mime_type_returns_custom_for_unknown_type() -> None:
     assert get_file_type_by_mime_type("application/octet-stream") == FileType.CUSTOM
