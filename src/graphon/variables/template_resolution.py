@@ -17,7 +17,6 @@ VARIABLE_PATTERN = re.compile(
 class _TemplateLookupPool(Protocol):
     @abstractmethod
     def get(self, selector: Sequence[str], /) -> Segment | None:
-        """Return a segment for the selector when it exists."""
         ...
 
 
@@ -28,10 +27,8 @@ def convert_template(
 ) -> SegmentGroup:
     segments: list[Segment] = []
     for part in filter(None, VARIABLE_PATTERN.split(template)):
-        if "." in part:
-            variable = pool.get(part.split("."))
-            if variable is not None:
-                segments.append(variable)
-                continue
-        segments.append(build_segment(part))
+        if "." in part and (variable := pool.get(part.split("."))) is not None:
+            segments.append(variable)
+        else:
+            segments.append(build_segment(part))
     return SegmentGroup(value=segments)
