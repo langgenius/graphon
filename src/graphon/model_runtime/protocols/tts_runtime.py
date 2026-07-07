@@ -2,9 +2,16 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Iterable, Mapping
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, TypedDict, runtime_checkable
 
 from graphon.model_runtime.protocols.provider_runtime import ModelProviderRuntime
+
+
+class TTSModelVoice(TypedDict):
+    """Voice option returned by TTS model runtimes."""
+
+    name: str
+    value: str
 
 
 @runtime_checkable
@@ -31,4 +38,4 @@ class TTSModelRuntime(ModelProviderRuntime, Protocol):
         model: str,
         credentials: dict[str, Any],
         language: str | None,
-    ) -> Any: ...
+    ) -> list[TTSModelVoice]: ...
