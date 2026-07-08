@@ -60,6 +60,7 @@ class LLMProtocol(Protocol):
         tools: Sequence[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         stream: Literal[False],
+        first_token_timeout: float | None = None,
     ) -> LLMResult: ...
 
     @overload
@@ -71,6 +72,7 @@ class LLMProtocol(Protocol):
         tools: Sequence[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         stream: Literal[True],
+        first_token_timeout: float | None = None,
     ) -> Generator[LLMResultChunk, None, None]: ...
 
     @abstractmethod
@@ -82,6 +84,7 @@ class LLMProtocol(Protocol):
         tools: Sequence[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         stream: bool,
+        first_token_timeout: float | None = None,
     ) -> LLMResult | Generator[LLMResultChunk, None, None]: ...
 
     @overload
@@ -93,6 +96,7 @@ class LLMProtocol(Protocol):
         model_parameters: Mapping[str, Any],
         stop: Sequence[str] | None,
         stream: Literal[False],
+        first_token_timeout: float | None = None,
     ) -> LLMResultWithStructuredOutput: ...
 
     @overload
@@ -104,6 +108,7 @@ class LLMProtocol(Protocol):
         model_parameters: Mapping[str, Any],
         stop: Sequence[str] | None,
         stream: Literal[True],
+        first_token_timeout: float | None = None,
     ) -> Generator[LLMResultChunkWithStructuredOutput, None, None]: ...
 
     @abstractmethod
@@ -115,6 +120,7 @@ class LLMProtocol(Protocol):
         model_parameters: Mapping[str, Any],
         stop: Sequence[str] | None,
         stream: bool,
+        first_token_timeout: float | None = None,
     ) -> (
         LLMResultWithStructuredOutput
         | Generator[LLMResultChunkWithStructuredOutput, None, None]

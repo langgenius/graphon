@@ -201,6 +201,7 @@ class SlimLLM(LLMProtocol):
         tools: Sequence[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         stream: Literal[False],
+        first_token_timeout: float | None = None,
     ) -> LLMResult: ...
 
     @overload
@@ -212,6 +213,7 @@ class SlimLLM(LLMProtocol):
         tools: Sequence[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         stream: Literal[True],
+        first_token_timeout: float | None = None,
     ) -> Generator[LLMResultChunk, None, None]: ...
 
     @override
@@ -223,7 +225,12 @@ class SlimLLM(LLMProtocol):
         tools: Sequence[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         stream: bool,
+        first_token_timeout: float | None = None,
     ) -> LLMResult | Generator[LLMResultChunk, None, None]:
+        # SlimLLM does not enforce first_token_timeout; the host transport
+        # adapter is responsible for enforcement. Accepted for protocol
+        # conformance.
+        _ = first_token_timeout
         merged_parameters = dict(self._parameters)
         merged_parameters.update(model_parameters)
         return self._invoke_llm_internal(
@@ -244,6 +251,7 @@ class SlimLLM(LLMProtocol):
         model_parameters: Mapping[str, Any],
         stop: Sequence[str] | None,
         stream: Literal[False],
+        first_token_timeout: float | None = None,
     ) -> LLMResultWithStructuredOutput: ...
 
     @overload
@@ -255,6 +263,7 @@ class SlimLLM(LLMProtocol):
         model_parameters: Mapping[str, Any],
         stop: Sequence[str] | None,
         stream: Literal[True],
+        first_token_timeout: float | None = None,
     ) -> Generator[LLMResultChunkWithStructuredOutput, None, None]: ...
 
     @override
@@ -266,10 +275,13 @@ class SlimLLM(LLMProtocol):
         model_parameters: Mapping[str, Any],
         stop: Sequence[str] | None,
         stream: bool,
+        first_token_timeout: float | None = None,
     ) -> (
         LLMResultWithStructuredOutput
         | Generator[LLMResultChunkWithStructuredOutput, None, None]
     ):
+        # first_token_timeout is not enforced by SlimLLM (see invoke_llm).
+        _ = first_token_timeout
         merged_parameters = dict(self._parameters)
         merged_parameters.update(model_parameters)
         merged_parameters["json_schema"] = json.dumps(dict(json_schema))

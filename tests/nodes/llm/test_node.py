@@ -334,6 +334,119 @@ def test_polling_llm_saves_video_output_file(
     )
 
 
+def test_invoke_llm_forwards_first_token_timeout() -> None:
+    model = MagicMock(
+        provider="openai",
+        model_name="gpt-4o",
+        parameters={},
+        stop=(),
+        is_structured_output_parse_error=lambda _error: False,
+    )
+    model.invoke_llm.return_value = _stream_results(_stream_chunk("hi"))
+
+    list(
+        LLMNode.invoke_llm(
+            model_instance=cast(LLMProtocol, model),
+            prompt_messages=[],
+            structured_output_enabled=False,
+            file_saver=MagicMock(),
+            file_outputs=[],
+            node_id="llm",
+            first_token_timeout=1.5,
+        ),
+    )
+
+    assert model.invoke_llm.call_args.kwargs["first_token_timeout"] == pytest.approx(
+        1.5,
+    )
+
+
+def test_invoke_llm_defaults_first_token_timeout_to_none() -> None:
+    model = MagicMock(
+        provider="openai",
+        model_name="gpt-4o",
+        parameters={},
+        stop=(),
+        is_structured_output_parse_error=lambda _error: False,
+    )
+    model.invoke_llm.return_value = _stream_results(_stream_chunk("hi"))
+
+    list(
+        LLMNode.invoke_llm(
+            model_instance=cast(LLMProtocol, model),
+            prompt_messages=[],
+            structured_output_enabled=False,
+            file_saver=MagicMock(),
+            file_outputs=[],
+            node_id="llm",
+        ),
+    )
+
+    assert model.invoke_llm.call_args.kwargs["first_token_timeout"] is None
+
+
+def test_invoke_llm_structured_forwards_first_token_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = MagicMock(
+        provider="openai",
+        model_name="gpt-4o",
+        parameters={},
+        stop=(),
+        is_structured_output_parse_error=lambda _error: False,
+    )
+    model.invoke_llm_with_structured_output.return_value = _stream_results(
+        _stream_chunk("hi"),
+    )
+    monkeypatch.setattr(
+        LLMNode,
+        "fetch_structured_output_schema",
+        staticmethod(lambda **_: {}),
+    )
+
+    list(
+        LLMNode.invoke_llm(
+            model_instance=cast(LLMProtocol, model),
+            prompt_messages=[],
+            structured_output_enabled=True,
+            structured_output={"schema": {}},
+            file_saver=MagicMock(),
+            file_outputs=[],
+            node_id="llm",
+            first_token_timeout=2.0,
+        ),
+    )
+
+    kwargs = model.invoke_llm_with_structured_output.call_args.kwargs
+    assert kwargs["first_token_timeout"] == pytest.approx(2.0)
+
+
+def test_run_forwards_retry_config_first_token_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    node = _build_llm_node()
+    node.node_data.retry_config.first_token_timeout = 5000
+    _stub_simple_prompt(monkeypatch, node)
+
+    captured: dict[str, Any] = {}
+
+    def _capture(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+        return iter([
+            ModelInvokeCompletedEvent(
+                text="ok",
+                usage=LLMUsage.empty_usage(),
+                finish_reason="stop",
+            ),
+        ])
+
+    monkeypatch.setattr("graphon.nodes.llm.node.LLMNode.invoke_llm", _capture)
+
+    list(node._run())
+
+    assert captured["first_token_timeout"] == pytest.approx(5.0)
+
+
 def test_streaming_invoke_result_emits_chunks_and_completion() -> None:
     usage = LLMUsage.empty_usage().model_copy(
         update={"prompt_tokens": 1, "total_tokens": 1},

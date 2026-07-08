@@ -129,6 +129,7 @@ class _FakeSlimLLM:
         tools: Sequence[PromptMessageTool] | None,
         stop: Sequence[str] | None,
         stream: bool,
+        first_token_timeout: float | None = None,
     ) -> LLMResult:
         self.invoke_calls.append({
             "prompt_messages": list(prompt_messages),
@@ -136,6 +137,7 @@ class _FakeSlimLLM:
             "tools": list(tools or []),
             "stop": stop,
             "stream": stream,
+            "first_token_timeout": first_token_timeout,
         })
         return LLMResult(
             model=self._model_name,

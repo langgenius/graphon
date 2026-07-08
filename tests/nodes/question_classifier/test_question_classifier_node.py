@@ -175,6 +175,68 @@ def test_question_classifier_constructor_accepts_dependency_bundle(
     assert result.process_data["prompts"] == ["serialized prompt"]
 
 
+def test_question_classifier_forwards_first_token_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    node_data = QuestionClassifierNodeData.model_validate({
+        "title": "Classifier",
+        "query_variable_selector": ["start", "sys.query"],
+        "model": {
+            "provider": "openai",
+            "name": "gpt-4o",
+            "mode": "chat",
+            "completion_params": {},
+        },
+        "classes": [{"id": "billing", "name": "Questions about invoices and charges"}],
+        "instruction": "Classify the query",
+        "retry_config": {"first_token_timeout": 5000},
+    })
+    variable_pool = MagicMock()
+    variable_pool.get.return_value = SimpleNamespace(value="Question about billing")
+    node = _build_question_classifier_node(
+        node_data,
+        variable_pool=variable_pool,
+        template_renderer=MagicMock(),
+    )
+
+    monkeypatch.setattr(
+        llm_utils,
+        "resolve_completion_params_variables",
+        lambda parameters, _: parameters,
+    )
+    monkeypatch.setattr(
+        llm_utils,
+        "fetch_prompt_messages",
+        MagicMock(return_value=(["prompt"], None)),
+    )
+    monkeypatch.setattr(node, "_calculate_rest_token", MagicMock(return_value=1024))
+    monkeypatch.setattr(node, "_get_prompt_template", MagicMock(return_value=[]))
+
+    captured: dict[str, Any] = {}
+
+    def _capture(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+        return iter([
+            ModelInvokeCompletedEvent(
+                text=(
+                    '{"category_id": "billing", '
+                    '"category_name": "Questions about invoices and charges"}'
+                ),
+                usage=LLMUsage.empty_usage(),
+                finish_reason="stop",
+            ),
+        ])
+
+    monkeypatch.setattr(
+        "graphon.nodes.question_classifier.question_classifier_node.LLMNode.invoke_llm",
+        _capture,
+    )
+
+    node._run()
+
+    assert captured["first_token_timeout"] == pytest.approx(5.0)
+
+
 def test_question_classifier_constructor_rejects_mixed_dependency_inputs() -> None:
     node_data = QuestionClassifierNodeData.model_validate({
         "title": "Classifier",

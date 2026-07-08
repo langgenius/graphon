@@ -357,6 +357,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
             file_saver=self._llm_file_saver,
             file_outputs=self._file_outputs,
             node_id=self._node_id,
+            first_token_timeout=self.node_data.retry_config.first_token_timeout_seconds,
         )
         for event in generator:
             if isinstance(event, ModelInvokeCompletedEvent):
