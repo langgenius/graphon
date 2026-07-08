@@ -17,6 +17,12 @@ class InvokeConnectionError(InvokeError):
     description = "Connection Error"
 
 
+class FirstTokenTimeoutError(InvokeConnectionError):
+    """Raised when the first token is not received within first_token_timeout."""
+
+    description = "First Token Timeout Error"
+
+
 class InvokeServerUnavailableError(InvokeError):
     """Raised when the Invoke returns server unavailable error."""
 
