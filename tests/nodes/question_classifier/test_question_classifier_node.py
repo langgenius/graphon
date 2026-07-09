@@ -175,10 +175,12 @@ def test_question_classifier_constructor_accepts_dependency_bundle(
     assert result.process_data["prompts"] == ["serialized prompt"]
 
 
-def test_question_classifier_forwards_first_token_timeout(
+def _run_classifier_capturing_invoke(
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    node_data = QuestionClassifierNodeData.model_validate({
+    *,
+    retry_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "title": "Classifier",
         "query_variable_selector": ["start", "sys.query"],
         "model": {
@@ -189,8 +191,10 @@ def test_question_classifier_forwards_first_token_timeout(
         },
         "classes": [{"id": "billing", "name": "Questions about invoices and charges"}],
         "instruction": "Classify the query",
-        "retry_config": {"first_token_timeout": 5000},
-    })
+    }
+    if retry_config is not None:
+        payload["retry_config"] = retry_config
+    node_data = QuestionClassifierNodeData.model_validate(payload)
     variable_pool = MagicMock()
     variable_pool.get.return_value = SimpleNamespace(value="Question about billing")
     node = _build_question_classifier_node(
@@ -234,7 +238,26 @@ def test_question_classifier_forwards_first_token_timeout(
 
     node._run()
 
+    return captured
+
+
+def test_question_classifier_forwards_first_token_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _run_classifier_capturing_invoke(
+        monkeypatch,
+        retry_config={"first_token_timeout": 5000},
+    )
+
     assert captured["first_token_timeout"] == pytest.approx(5.0)
+
+
+def test_question_classifier_defaults_first_token_timeout_to_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _run_classifier_capturing_invoke(monkeypatch)
+
+    assert captured["first_token_timeout"] is None
 
 
 def test_question_classifier_constructor_rejects_mixed_dependency_inputs() -> None:

@@ -447,6 +447,28 @@ def test_run_forwards_retry_config_first_token_timeout(
     assert captured["first_token_timeout"] == pytest.approx(5.0)
 
 
+def test_polling_llm_does_not_receive_first_token_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The polling path intentionally does not thread first_token_timeout:
+    # start_llm_polling has no such parameter. Pin this so a future change that
+    # forwards it there is flagged as out-of-scope for v1 rather than silent.
+    model = _PollingLLM([
+        LLMPollingResult(
+            status=LLMPollingStatus.SUCCEEDED,
+            result=_llm_result("done"),
+        ),
+    ])
+    node = _build_llm_node(model_instance=model)
+    node.node_data.retry_config.first_token_timeout = 5000
+    _stub_simple_prompt(monkeypatch, node)
+
+    list(node._run())
+
+    assert model.start_calls
+    assert "first_token_timeout" not in model.start_calls[0]
+
+
 def test_streaming_invoke_result_emits_chunks_and_completion() -> None:
     usage = LLMUsage.empty_usage().model_copy(
         update={"prompt_tokens": 1, "total_tokens": 1},
