@@ -22,22 +22,11 @@ class ModelConfig(BaseModel):
     completion_params: dict[str, Any] = Field(default_factory=dict)
 
 
-class FirstTokenTimeoutConfig(BaseModel):
-    """Per-node first-token timeout for LLM-family nodes.
-
-    A client-side invocation deadline: if the model does not return its first
-    token within the budget, the invoke fails and the node's error-strategy
-    takes over. graphon only carries the value down to the invoke call;
-    enforcement is the host transport adapter's responsibility.
-    """
-
-    first_token_timeout: int = 0  # first token timeout in milliseconds; 0 disables
-
-    @property
-    def first_token_timeout_seconds(self) -> float | None:
-        if self.first_token_timeout <= 0:
-            return None
-        return self.first_token_timeout / 1000
+def first_token_timeout_seconds(first_token_timeout_ms: int) -> float | None:
+    """Convert first_token_timeout ms to seconds; None when disabled (<= 0)."""
+    if first_token_timeout_ms <= 0:
+        return None
+    return first_token_timeout_ms / 1000
 
 
 class ContextConfig(BaseModel):
@@ -82,8 +71,9 @@ class LLMNodeCompletionModelPromptTemplate(CompletionModelPromptTemplate):
     jinja2_text: str | None = None
 
 
-class LLMNodeData(BaseNodeData, FirstTokenTimeoutConfig):
+class LLMNodeData(BaseNodeData):
     type: NodeType = BuiltinNodeTypes.LLM
+    first_token_timeout: int = 0  # first token timeout in milliseconds; 0 disables
     model: ModelConfig
     prompt_template: (
         Sequence[LLMNodeChatModelMessage] | LLMNodeCompletionModelPromptTemplate

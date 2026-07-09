@@ -93,6 +93,7 @@ from .entities import (
     LLMNodeChatModelMessage,
     LLMNodeCompletionModelPromptTemplate,
     LLMNodeData,
+    first_token_timeout_seconds,
 )
 from .exc import (
     InvalidContextStructureError,
@@ -467,7 +468,9 @@ class LLMNode(Node[LLMNodeData]):
                 file_outputs=self._file_outputs,
                 node_id=self._node_id,
                 reasoning_format=self.node_data.reasoning_format,
-                first_token_timeout=self.node_data.first_token_timeout_seconds,
+                first_token_timeout=first_token_timeout_seconds(
+                    self.node_data.first_token_timeout,
+                ),
             )
 
         return self._invoke_llm_with_polling(

@@ -35,6 +35,7 @@ from graphon.nodes.llm import llm_utils
 from graphon.nodes.llm.entities import (
     LLMNodeChatModelMessage,
     LLMNodeCompletionModelPromptTemplate,
+    first_token_timeout_seconds,
 )
 from graphon.nodes.llm.file_saver import LLMFileSaver
 from graphon.nodes.llm.node import LLMNode
@@ -357,7 +358,9 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
             file_saver=self._llm_file_saver,
             file_outputs=self._file_outputs,
             node_id=self._node_id,
-            first_token_timeout=self.node_data.first_token_timeout_seconds,
+            first_token_timeout=first_token_timeout_seconds(
+                self.node_data.first_token_timeout,
+            ),
         )
         for event in generator:
             if isinstance(event, ModelInvokeCompletedEvent):

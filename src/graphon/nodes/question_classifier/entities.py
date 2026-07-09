@@ -3,7 +3,6 @@ from pydantic import BaseModel, Field
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.enums import BuiltinNodeTypes, NodeType
 from graphon.nodes.llm.entities import (
-    FirstTokenTimeoutConfig,
     ModelConfig,
     VisionConfig,
 )
@@ -30,8 +29,9 @@ class ClassConfig(BaseModel):
     )
 
 
-class QuestionClassifierNodeData(BaseNodeData, FirstTokenTimeoutConfig):
+class QuestionClassifierNodeData(BaseNodeData):
     type: NodeType = BuiltinNodeTypes.QUESTION_CLASSIFIER
+    first_token_timeout: int = 0  # first token timeout in milliseconds; 0 disables
     query_variable_selector: list[str]
     model: ModelConfig
     classes: list[ClassConfig]
