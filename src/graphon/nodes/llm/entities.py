@@ -22,6 +22,28 @@ class ModelConfig(BaseModel):
     completion_params: dict[str, Any] = Field(default_factory=dict)
 
 
+class FirstTokenTimeoutConfig(BaseModel):
+    """Per-node first-token timeout, shared by LLM-family nodes.
+
+    This is a client-side invocation deadline, not a retry concept: if the
+    model does not return its first token within the budget, the invoke fails
+    and the node's error-strategy takes over. It deliberately does NOT live on
+    the shared ``RetryConfig`` (which sits on every node) — the deadline is
+    upstream of retry and is only meaningful for LLM-backed nodes.
+
+    graphon only carries the value down to the invoke call; enforcement is the
+    host transport adapter's responsibility.
+    """
+
+    first_token_timeout: int = 0  # first token timeout in milliseconds; 0 disables
+
+    @property
+    def first_token_timeout_seconds(self) -> float | None:
+        if self.first_token_timeout <= 0:
+            return None
+        return self.first_token_timeout / 1000
+
+
 class ContextConfig(BaseModel):
     enabled: bool
     variable_selector: list[str] | None = None
@@ -64,7 +86,7 @@ class LLMNodeCompletionModelPromptTemplate(CompletionModelPromptTemplate):
     jinja2_text: str | None = None
 
 
-class LLMNodeData(BaseNodeData):
+class LLMNodeData(BaseNodeData, FirstTokenTimeoutConfig):
     type: NodeType = BuiltinNodeTypes.LLM
     model: ModelConfig
     prompt_template: (

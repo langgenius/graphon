@@ -20,17 +20,10 @@ class RetryConfig(BaseModel):
     max_retries: int = 0  # max retry times
     retry_interval: int = 0  # retry interval in milliseconds
     retry_enabled: bool = False  # whether retry is enabled
-    first_token_timeout: int = 0  # first token timeout in milliseconds; 0 disables
 
     @property
     def retry_interval_seconds(self) -> float:
         return self.retry_interval / 1000
-
-    @property
-    def first_token_timeout_seconds(self) -> float | None:
-        if self.first_token_timeout <= 0:
-            return None
-        return self.first_token_timeout / 1000
 
 
 class DefaultValueType(StrEnum):

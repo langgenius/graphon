@@ -478,7 +478,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
             tools=tools or None,
             stop=stop,
             stream=False,
-            first_token_timeout=self.node_data.retry_config.first_token_timeout_seconds,
+            first_token_timeout=self.node_data.first_token_timeout_seconds,
         )
 
         # handle invoke result

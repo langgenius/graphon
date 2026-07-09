@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.enums import BuiltinNodeTypes, NodeType
 from graphon.nodes.llm.entities import (
+    FirstTokenTimeoutConfig,
     ModelConfig,
     VisionConfig,
 )
@@ -29,7 +30,7 @@ class ClassConfig(BaseModel):
     )
 
 
-class QuestionClassifierNodeData(BaseNodeData):
+class QuestionClassifierNodeData(BaseNodeData, FirstTokenTimeoutConfig):
     type: NodeType = BuiltinNodeTypes.QUESTION_CLASSIFIER
     query_variable_selector: list[str]
     model: ModelConfig

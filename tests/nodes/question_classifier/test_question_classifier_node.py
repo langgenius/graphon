@@ -178,7 +178,7 @@ def test_question_classifier_constructor_accepts_dependency_bundle(
 def _run_classifier_capturing_invoke(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    retry_config: dict[str, Any] | None = None,
+    first_token_timeout: int | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "title": "Classifier",
@@ -192,8 +192,8 @@ def _run_classifier_capturing_invoke(
         "classes": [{"id": "billing", "name": "Questions about invoices and charges"}],
         "instruction": "Classify the query",
     }
-    if retry_config is not None:
-        payload["retry_config"] = retry_config
+    if first_token_timeout is not None:
+        payload["first_token_timeout"] = first_token_timeout
     node_data = QuestionClassifierNodeData.model_validate(payload)
     variable_pool = MagicMock()
     variable_pool.get.return_value = SimpleNamespace(value="Question about billing")
@@ -244,10 +244,7 @@ def _run_classifier_capturing_invoke(
 def test_question_classifier_forwards_first_token_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured = _run_classifier_capturing_invoke(
-        monkeypatch,
-        retry_config={"first_token_timeout": 5000},
-    )
+    captured = _run_classifier_capturing_invoke(monkeypatch, first_token_timeout=5000)
 
     assert captured["first_token_timeout"] == pytest.approx(5.0)
 

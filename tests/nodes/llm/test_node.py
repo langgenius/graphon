@@ -421,11 +421,11 @@ def test_invoke_llm_structured_forwards_first_token_timeout(
     assert kwargs["first_token_timeout"] == pytest.approx(2.0)
 
 
-def test_run_forwards_retry_config_first_token_timeout(
+def test_run_forwards_first_token_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     node = _build_llm_node()
-    node.node_data.retry_config.first_token_timeout = 5000
+    node.node_data.first_token_timeout = 5000
     _stub_simple_prompt(monkeypatch, node)
 
     captured: dict[str, Any] = {}
@@ -460,7 +460,7 @@ def test_polling_llm_does_not_receive_first_token_timeout(
         ),
     ])
     node = _build_llm_node(model_instance=model)
-    node.node_data.retry_config.first_token_timeout = 5000
+    node.node_data.first_token_timeout = 5000
     _stub_simple_prompt(monkeypatch, node)
 
     list(node._run())
