@@ -39,7 +39,6 @@ from graphon.nodes.llm import llm_utils
 from graphon.nodes.llm.entities import (
     LLMNodeChatModelMessage,
     LLMNodeCompletionModelPromptTemplate,
-    first_token_timeout_seconds,
 )
 from graphon.nodes.llm.node import LLMNode
 from graphon.nodes.llm.runtime_protocols import (
@@ -479,9 +478,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
             tools=tools or None,
             stop=stop,
             stream=False,
-            first_token_timeout=first_token_timeout_seconds(
-                self.node_data.first_token_timeout,
-            ),
+            first_token_timeout=self.node_data.invocation.first_token_timeout_seconds,
         )
 
         # handle invoke result

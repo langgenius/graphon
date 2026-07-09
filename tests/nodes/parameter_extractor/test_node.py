@@ -28,7 +28,7 @@ def _build_parameter_extractor_node(
             },
         ],
         "reasoning_mode": "function_call",
-        "first_token_timeout": first_token_timeout,
+        "invocation": {"first_token_timeout": first_token_timeout},
     })
     return node
 

@@ -425,7 +425,7 @@ def test_run_forwards_first_token_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     node = _build_llm_node()
-    node.node_data.first_token_timeout = 5000
+    node.node_data.invocation.first_token_timeout = 5000
     _stub_simple_prompt(monkeypatch, node)
 
     captured: dict[str, Any] = {}
@@ -460,7 +460,7 @@ def test_polling_llm_does_not_receive_first_token_timeout(
         ),
     ])
     node = _build_llm_node(model_instance=model)
-    node.node_data.first_token_timeout = 5000
+    node.node_data.invocation.first_token_timeout = 5000
     _stub_simple_prompt(monkeypatch, node)
 
     list(node._run())

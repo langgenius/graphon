@@ -9,7 +9,11 @@ from pydantic import (
 
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.enums import BuiltinNodeTypes, NodeType
-from graphon.nodes.llm.entities import ModelConfig, VisionConfig
+from graphon.nodes.llm.entities import (
+    LLMInvocationConfig,
+    ModelConfig,
+    VisionConfig,
+)
 from graphon.prompt_entities import MemoryConfig
 from graphon.variables.types import SegmentType
 
@@ -108,7 +112,7 @@ class ParameterExtractorNodeData(BaseNodeData):
     """Parameter Extractor Node Data."""
 
     type: NodeType = BuiltinNodeTypes.PARAMETER_EXTRACTOR
-    first_token_timeout: int = 0  # first token timeout in milliseconds; 0 disables
+    invocation: LLMInvocationConfig = Field(default_factory=LLMInvocationConfig)
     model: ModelConfig
     query: list[str]
     parameters: list[ParameterConfig]

@@ -193,7 +193,7 @@ def _run_classifier_capturing_invoke(
         "instruction": "Classify the query",
     }
     if first_token_timeout is not None:
-        payload["first_token_timeout"] = first_token_timeout
+        payload["invocation"] = {"first_token_timeout": first_token_timeout}
     node_data = QuestionClassifierNodeData.model_validate(payload)
     variable_pool = MagicMock()
     variable_pool.get.return_value = SimpleNamespace(value="Question about billing")

@@ -22,11 +22,19 @@ class ModelConfig(BaseModel):
     completion_params: dict[str, Any] = Field(default_factory=dict)
 
 
-def first_token_timeout_seconds(first_token_timeout_ms: int) -> float | None:
-    """Convert first_token_timeout ms to seconds; None when disabled (<= 0)."""
-    if first_token_timeout_ms <= 0:
-        return None
-    return first_token_timeout_ms / 1000
+class LLMInvocationConfig(BaseModel):
+    """Per-node LLM invocation limits, shared by LLM-family nodes.
+
+    Holds client-side deadlines the node hands to the invoke call. graphon only
+    carries the values — enforcement is the host transport adapter's job.
+    """
+
+    first_token_timeout: int = 0  # first token timeout in milliseconds; 0 disables
+
+    @property
+    def first_token_timeout_seconds(self) -> float | None:
+        ms = self.first_token_timeout
+        return ms / 1000 if ms > 0 else None
 
 
 class ContextConfig(BaseModel):
@@ -73,7 +81,7 @@ class LLMNodeCompletionModelPromptTemplate(CompletionModelPromptTemplate):
 
 class LLMNodeData(BaseNodeData):
     type: NodeType = BuiltinNodeTypes.LLM
-    first_token_timeout: int = 0  # first token timeout in milliseconds; 0 disables
+    invocation: LLMInvocationConfig = Field(default_factory=LLMInvocationConfig)
     model: ModelConfig
     prompt_template: (
         Sequence[LLMNodeChatModelMessage] | LLMNodeCompletionModelPromptTemplate
