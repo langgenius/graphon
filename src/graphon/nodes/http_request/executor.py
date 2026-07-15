@@ -276,6 +276,8 @@ class Executor:
         item = self._require_single_body_item(data, body_type="json")
         group = convert_template(self.variable_pool, item.value)
         json_string = group.text
+        # Raw masked template text (not re-normalized via json.dumps); self.json
+        # holds the parsed plaintext, so _log_json_text must never fall back to it.
         self._log_json_text = group.log
         try:
             repaired = repair_json(json_string)
@@ -585,11 +587,10 @@ class Executor:
         elif self.data and self.node_data.body.type == "form-data":
             body_string = self._build_form_data_log_body(boundary)
         elif self.json:
-            body_string = (
-                self._log_json_text
-                if self._log_json_text is not None
-                else json.dumps(self.json)
-            )
+            if self._log_json_text is None:
+                msg = "log json body requested before initialization"
+                raise RuntimeError(msg)
+            body_string = self._log_json_text
         elif self.node_data.body.type == "raw-text":
             body_string = self._log_content if self._log_content is not None else ""
         return body_string
@@ -627,10 +628,11 @@ class Executor:
     def _build_content_log_body(self) -> str:
         if isinstance(self.content, bytes):
             return f"<binary_content: size={len(self.content)} bytes>"
-        # For raw-text bodies use the log-safe copy; fall back to content if not set.
-        if self._log_content is not None:
-            return str(self._log_content)
-        return str(self.content)
+        # For raw-text bodies use the log-safe copy; fail closed if not set.
+        if self._log_content is None:
+            msg = "log content requested before initialization"
+            raise RuntimeError(msg)
+        return str(self._log_content)
 
     def _build_form_data_log_body(self, boundary: str) -> str:
         body_string = ""

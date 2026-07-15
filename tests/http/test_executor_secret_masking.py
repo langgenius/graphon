@@ -10,6 +10,8 @@ from typing import Any, Literal
 
 import pytest
 
+from graphon.file.enums import FileTransferMethod, FileType
+from graphon.file.models import File
 from graphon.nodes.http_request.config import build_http_request_config
 from graphon.nodes.http_request.entities import (
     BodyData,
@@ -313,3 +315,58 @@ def test_no_secret_never_leaks_across_body_types(body_type: str) -> None:
         )
     log = executor.to_log()
     assert SECRET not in log, f"Secret leaked in to_log() for body_type={body_type!r}"
+
+
+# ---------------------------------------------------------------------------
+# Tests: form-data with file + secret text field (Finding 2 lock-in)
+# ---------------------------------------------------------------------------
+
+
+def test_form_data_file_plus_secret_text_no_leak() -> None:
+    """Form-data with a real file and a secret text field must not leak the secret.
+
+    When files are present, _has_loggable_files() is True and _build_log_body takes
+    the file-log path; the text field (and its secret value) is omitted entirely.
+    This test locks in that the combination is safe - no secret leaks via to_log().
+    """
+    pool = _build_pool()
+    # Register a dummy remote-url file so the file selector resolves.
+    dummy_file = File(
+        file_type=FileType.DOCUMENT,
+        transfer_method=FileTransferMethod.REMOTE_URL,
+        remote_url="https://example.com/dummy.txt",
+        filename="dummy.txt",
+        mime_type="text/plain",
+    )
+    pool.add(["test_node", "test_file"], dummy_file)
+
+    body_data = [
+        BodyData(key="attachment", type="file", file=["test_node", "test_file"]),
+        BodyData(key="token", type="text", value="{{#env.API_TOKEN#}}"),
+    ]
+
+    class _FileManagerWithBytes:
+        def download(self, _f: Any, /) -> bytes:
+            return b"dummy file bytes"
+
+    executor = Executor(
+        node_data=HttpRequestNodeData(
+            title="Test HTTP",
+            method="post",
+            url="https://example.com",
+            authorization=HttpRequestNodeAuthorization(type="no-auth"),
+            headers="",
+            params="",
+            body=HttpRequestNodeBody(type="form-data", data=body_data),
+        ),
+        timeout=HttpRequestNodeTimeout(connect=10, read=60, write=60),
+        variable_pool=pool,
+        http_request_config=build_http_request_config(),
+        http_client=_StubHttpClient(),
+        file_manager=_FileManagerWithBytes(),
+    )
+    log = executor.to_log()
+    # Real request field keeps the raw secret in the text-field data dict.
+    assert executor.data == {"token": SECRET}
+    # The log must NOT contain the raw secret (file-log path omits text fields).
+    assert SECRET not in log
