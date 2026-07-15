@@ -7,13 +7,11 @@ serialization capabilities for state storage.
 import queue
 from typing import final
 
-from graphon.runtime.ready_queue import ReadyQueue
-
 from .protocol import ReadyQueueState, ReadyTask
 
 
 @final
-class InMemoryReadyQueue(ReadyQueue):
+class InMemoryReadyQueue:
     """In-memory ready queue implementation with serialization support.
 
     This implementation uses Python's queue.Queue internally and provides
@@ -48,8 +46,6 @@ class InMemoryReadyQueue(ReadyQueue):
             The task retrieved from the queue
 
         """
-        if timeout is None:
-            return self._queue.get(block=True)
         return self._queue.get(timeout=timeout)
 
     def task_done(self) -> None:
@@ -59,15 +55,6 @@ class InMemoryReadyQueue(ReadyQueue):
         join() synchronization.
         """
         self._queue.task_done()
-
-    def empty(self) -> bool:
-        """Check if the queue is empty.
-
-        Returns:
-            True if the queue has no items, False otherwise
-
-        """
-        return self._queue.empty()
 
     def qsize(self) -> int:
         """Get the approximate size of the queue.
@@ -80,10 +67,9 @@ class InMemoryReadyQueue(ReadyQueue):
 
     def drain(self) -> list[ReadyTask]:
         """Remove and return all queued tasks in FIFO order."""
-        items: list[ReadyTask] = []
         with self._queue.mutex:
-            while self._queue.queue:
-                items.append(self._queue.queue.popleft())
+            items: list[ReadyTask] = list(self._queue.queue)
+            self._queue.queue.clear()
             self._queue.unfinished_tasks -= len(items)
             if items:
                 self._queue.not_full.notify_all()
@@ -99,11 +85,10 @@ class InMemoryReadyQueue(ReadyQueue):
 
         """
         with self._queue.mutex:
-            items = list(self._queue.queue)
+            items: list[ReadyTask] = list(self._queue.queue)
         state = ReadyQueueState(
-            type="InMemoryReadyQueue",
             version="1.0",
-            items=items,
+            items=tuple(items),
         )
         return state.model_dump_json()
 
@@ -113,26 +98,10 @@ class InMemoryReadyQueue(ReadyQueue):
         Args:
             data: The JSON string containing the serialized queue state to restore
 
-        Raises:
-            ValueError: If the serialized queue type or version is unsupported.
-
         """
         state = ReadyQueueState.model_validate_json(data)
 
-        if state.type != "InMemoryReadyQueue":
-            msg = f"Invalid serialized data type: {state.type}"
-            raise ValueError(msg)
-
-        if state.version != "1.0":
-            msg = f"Unsupported version: {state.version}"
-            raise ValueError(msg)
-
-        # Clear the current queue
-        while not self._queue.empty():
-            try:
-                self._queue.get_nowait()
-            except queue.Empty:
-                break
+        self.drain()
 
         # Restore items
         for item in state.items:

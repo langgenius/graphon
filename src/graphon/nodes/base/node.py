@@ -7,7 +7,7 @@ from collections.abc import Generator, Mapping, Sequence
 from datetime import UTC, datetime
 from functools import singledispatchmethod
 from types import MappingProxyType
-from typing import Any, ClassVar, assert_never, cast, get_args, get_origin
+from typing import Any, ClassVar, assert_never, get_args, get_origin
 
 from graphon.entities.base_node_data import BaseNodeData, RetryConfig
 from graphon.entities.graph_config import NodeConfigDict, NodeConfigDictAdapter
@@ -78,15 +78,6 @@ from graphon.nodes.container_effects import ContainerAwaitRequest, ContainerRunR
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
 _MISSING_RUN_CONTEXT_VALUE = object()
-_MISSING_SEND_VALUE = object()
-
-NodeRunEventGenerator = Generator[NodeEventBase | GraphNodeEventBase, None, None]
-ContainerRunEventGenerator = Generator[
-    NodeEventBase | GraphNodeEventBase | ContainerAwaitRequest,
-    ContainerRunResult,
-    None,
-]
-NodeRunOutcome = NodeRunResult | NodeRunEventGenerator | ContainerRunEventGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -368,6 +359,9 @@ class _NodeRuntimeMixin[NodeDataT: BaseNodeData]:
 
     @property
     def execution_id(self: Node[NodeDataT]) -> str:
+        if not self._node_execution_id:
+            msg = "node execution_id must be bound before use"
+            raise RuntimeError(msg)
         return self._node_execution_id
 
     def bind_execution_id(self: Node[NodeDataT], execution_id: str) -> None:
@@ -626,7 +620,14 @@ class Node[NodeDataT: BaseNodeData](
     @abstractmethod
     def _run(
         self,
-    ) -> NodeRunOutcome:
+    ) -> (
+        NodeRunResult
+        | Generator[
+            NodeEventBase | GraphNodeEventBase | ContainerAwaitRequest,
+            None,
+            None,
+        ]
+    ):
         """Run the node and return either a result object or an event stream."""
         raise NotImplementedError
 
@@ -634,13 +635,10 @@ class Node[NodeDataT: BaseNodeData](
         self,
     ) -> Generator[
         GraphNodeEventBase | ContainerAwaitRequest,
-        ContainerRunResult,
+        None,
         None,
     ]:
         execution_id = self.execution_id
-        if not execution_id:
-            msg = "node execution_id must be bound before run"
-            raise RuntimeError(msg)
         self._start_at = datetime.now(UTC).replace(tzinfo=None)
 
         # Create and push start event with required fields
@@ -672,7 +670,7 @@ class Node[NodeDataT: BaseNodeData](
         self,
     ) -> Generator[
         GraphNodeEventBase | ContainerAwaitRequest,
-        ContainerRunResult,
+        None,
         None,
     ]:
         result = self._run()
@@ -680,35 +678,18 @@ class Node[NodeDataT: BaseNodeData](
             yield self._convert_node_run_result_to_graph_node_event(result)
             return
 
-        send_value: object = _MISSING_SEND_VALUE
-        while True:
-            try:
-                event = (
-                    next(result)
-                    if send_value is _MISSING_SEND_VALUE
-                    else result.send(cast(Any, send_value))
-                )
-            except StopIteration:
-                return
-            send_value = yield self._normalize_run_event(event)
+        for event in result:
+            yield self._normalize_run_event(event)
 
     def resume_container(
         self,
         *,
-        phase_data: Mapping[str, object],
         result: ContainerRunResult,
         started_at: datetime,
     ) -> Generator[GraphNodeEventBase | ContainerAwaitRequest, None, None]:
-        execution_id = self.execution_id
-        if not execution_id:
-            msg = "node execution_id must be bound before resume"
-            raise RuntimeError(msg)
         self._start_at = started_at
         try:
-            for event in self._resume_container_events(
-                phase_data=phase_data,
-                result=result,
-            ):
+            for event in self._resume_container_events(result=result):
                 yield self._normalize_run_event(event)
         except Exception as e:
             logger.exception("Node %s failed to resume", self._node_id)
@@ -717,14 +698,12 @@ class Node[NodeDataT: BaseNodeData](
     def _resume_container_events(
         self,
         *,
-        phase_data: Mapping[str, object],
         result: ContainerRunResult,
     ) -> Generator[
         NodeEventBase | GraphNodeEventBase | ContainerAwaitRequest,
         None,
         None,
     ]:
-        _ = phase_data
         _ = result
         msg = f"Node {self._node_id} does not support container resume"
         raise TypeError(msg)

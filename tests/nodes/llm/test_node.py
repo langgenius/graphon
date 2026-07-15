@@ -141,7 +141,7 @@ def _build_llm_node(
         prepared_variables.append((("sys", "workflow_run_id"), workflow_run_id))
     prepared_variables.extend(variables)
 
-    return LLMNode(
+    node = LLMNode(
         node_id="llm",
         data=LLMNodeData.model_validate({
             "title": "LLM",
@@ -173,6 +173,8 @@ def _build_llm_node(
             serialize=MagicMock(return_value=[]),
         ),
     )
+    node.bind_execution_id("llm-run")
+    return node
 
 
 def _stub_simple_prompt(monkeypatch: pytest.MonkeyPatch, node: LLMNode) -> None:

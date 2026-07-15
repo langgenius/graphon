@@ -2,9 +2,13 @@ import json
 import logging
 from collections.abc import Generator, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any, assert_never, cast, override
+from typing import Any, assert_never, override
 
-from graphon.enums import BuiltinNodeTypes, NodeExecutionType
+from graphon.enums import (
+    BuiltinNodeTypes,
+    NodeExecutionType,
+    WorkflowNodeExecutionStatus,
+)
 from graphon.node_events.base import NodeEventBase
 from graphon.node_events.loop import (
     LoopFailedEvent,
@@ -15,10 +19,8 @@ from graphon.node_events.loop import (
 from graphon.node_events.node import StreamCompletedEvent
 from graphon.nodes.base.node import Node
 from graphon.nodes.container_effects import (
+    ContainerExecutionResult,
     ContainerRunResult,
-    LoopExecutionFailed,
-    LoopExecutionSucceeded,
-    LoopFrameCompleted,
     LoopFrameRequest,
 )
 from graphon.nodes.loop.entities import LoopNodeData
@@ -51,11 +53,14 @@ class LoopNode(Node[LoopNodeData]):
     @override
     def _run(
         self,
-    ) -> Generator[NodeEventBase | LoopFrameRequest, ContainerRunResult, None]:
+    ) -> Generator[NodeEventBase | LoopFrameRequest, None, None]:
         loop_count = self.node_data.loop_count
         inputs: dict[str, object] = {"loop_count": loop_count}
-        root_node_id, loop_variable_selectors, loop_node_ids = self.initialize_loop_run(
-            inputs=inputs,
+        root_node_id = self.node_data.start_node_id
+        loop_variable_selectors = self._initialize_loop_variables(inputs=inputs)
+        loop_node_ids = self._extract_loop_node_ids_from_config(
+            self.graph_config,
+            self._node_id,
         )
         started_at = datetime.now(UTC).replace(tzinfo=None)
         yield LoopStartedEvent(
@@ -63,121 +68,57 @@ class LoopNode(Node[LoopNodeData]):
             inputs=inputs,
             metadata={"loop_length": loop_count},
         )
-        result = yield LoopFrameRequest(
-            started_at=started_at,
+        yield LoopFrameRequest(
             inputs=inputs,
+            outputs={},
             loop_count=loop_count,
             root_node_id=root_node_id,
             loop_variable_selectors=loop_variable_selectors,
             loop_node_ids=frozenset(loop_node_ids),
             index=0,
         )
-        while isinstance(result, LoopFrameCompleted):
-            yield LoopNextEvent(
-                index=result.next_index,
-                pre_loop_output=self.node_data.outputs,
-            )
-            result = yield LoopFrameRequest(
-                started_at=started_at,
-                inputs=inputs,
-                loop_count=loop_count,
-                root_node_id=root_node_id,
-                loop_variable_selectors=loop_variable_selectors,
-                loop_node_ids=frozenset(loop_node_ids),
-                index=result.next_index,
-            )
-
-        if isinstance(result, LoopExecutionSucceeded):
-            yield LoopSucceededEvent(
-                start_at=result.started_at,
-                inputs=result.inputs,
-                outputs=result.outputs,
-                metadata=result.metadata,
-                steps=result.steps,
-            )
-        elif isinstance(result, LoopExecutionFailed):
-            yield LoopFailedEvent(
-                start_at=result.started_at,
-                inputs=result.inputs,
-                outputs=result.outputs,
-                metadata=result.metadata,
-                steps=result.steps,
-                error=result.error,
-            )
-        else:
-            msg = f"Unsupported loop result {type(result).__name__}"
-            raise TypeError(msg)
-        yield StreamCompletedEvent(node_run_result=result.node_run_result)
 
     @override
     def _resume_container_events(
         self,
         *,
-        phase_data: Mapping[str, object],
         result: ContainerRunResult,
     ) -> Generator[NodeEventBase | LoopFrameRequest, None, None]:
-        if isinstance(result, LoopFrameCompleted):
+        if isinstance(result, LoopFrameRequest):
             yield LoopNextEvent(
-                index=result.next_index,
-                pre_loop_output=self.node_data.outputs,
+                index=result.index,
+                pre_loop_output=result.outputs,
             )
-            yield LoopFrameRequest(
-                started_at=self._start_at,
-                inputs=cast(Mapping[str, object], phase_data["inputs"]),
-                loop_count=cast(int, phase_data["loop_count"]),
-                root_node_id=cast(str, phase_data["root_node_id"]),
-                loop_variable_selectors=cast(
-                    Mapping[str, Sequence[str]],
-                    phase_data["loop_variable_selectors"],
-                ),
-                loop_node_ids=frozenset(
-                    cast(Sequence[str], phase_data["loop_node_ids"]),
-                ),
-                index=result.next_index,
-            )
+            yield result
             return
 
-        if isinstance(result, LoopExecutionSucceeded):
-            yield LoopSucceededEvent(
-                start_at=result.started_at,
-                inputs=result.inputs,
-                outputs=result.outputs,
-                metadata=result.metadata,
-                steps=result.steps,
-            )
-            yield StreamCompletedEvent(node_run_result=result.node_run_result)
-            return
-
-        if isinstance(result, LoopExecutionFailed):
-            yield LoopFailedEvent(
-                start_at=result.started_at,
-                inputs=result.inputs,
-                outputs=result.outputs,
-                metadata=result.metadata,
-                steps=result.steps,
-                error=result.error,
-            )
+        if isinstance(result, ContainerExecutionResult):
+            node_run_result = result.node_run_result
+            if node_run_result.status == WorkflowNodeExecutionStatus.SUCCEEDED:
+                yield LoopSucceededEvent(
+                    start_at=self._start_at,
+                    inputs=node_run_result.inputs,
+                    outputs=node_run_result.outputs,
+                    metadata=result.metadata,
+                    steps=result.steps,
+                )
+            elif node_run_result.status == WorkflowNodeExecutionStatus.FAILED:
+                yield LoopFailedEvent(
+                    start_at=self._start_at,
+                    inputs=node_run_result.inputs,
+                    outputs=node_run_result.outputs,
+                    metadata=result.metadata,
+                    steps=result.steps,
+                    error=node_run_result.error,
+                )
+            else:
+                msg = f"Unsupported loop status {node_run_result.status}"
+                raise ValueError(msg)
             yield StreamCompletedEvent(node_run_result=result.node_run_result)
             return
 
         msg = f"Unsupported loop result {type(result).__name__}"
         raise TypeError(msg)
-
-    def initialize_loop_run(
-        self,
-        *,
-        inputs: dict[str, Any],
-    ) -> tuple[str, dict[str, list[str]], set[str]]:
-        if not self.node_data.start_node_id:
-            msg = f"field start_node_id in loop {self._node_id} not found"
-            raise ValueError(msg)
-
-        loop_variable_selectors = self._initialize_loop_variables(inputs=inputs)
-        loop_node_ids = self._extract_loop_node_ids_from_config(
-            self.graph_config,
-            self._node_id,
-        )
-        return self.node_data.start_node_id, loop_variable_selectors, loop_node_ids
 
     def _initialize_loop_variables(
         self,
@@ -196,15 +137,16 @@ class LoopNode(Node[LoopNodeData]):
                         original_value=loop_variable.value,
                     )
                 case "variable":
-                    processed_segment = (
-                        self.graph_runtime_state.variable_pool.get(loop_variable.value)
-                        if isinstance(loop_variable.value, list)
-                        else None
+                    if not isinstance(loop_variable.value, list):
+                        msg = f"Invalid value for loop variable {loop_variable.label}"
+                        raise TypeError(msg)
+                    processed_segment = self.graph_runtime_state.variable_pool.get(
+                        loop_variable.value,
                     )
                 case _:
                     assert_never(loop_variable.value_type)
 
-            if not processed_segment:
+            if processed_segment is None:
                 msg = f"Invalid value for loop variable {loop_variable.label}"
                 raise ValueError(msg)
 
@@ -251,11 +193,11 @@ class LoopNode(Node[LoopNodeData]):
                 if value[0] != node_id
             })
 
-        for loop_variable in node_data.loop_variables or []:
+        for loop_variable in node_data.loop_variables:
             if loop_variable.value_type == "variable":
-                if loop_variable.value is None:
-                    msg = "Loop variable value must be provided for variable type"
-                    raise ValueError(msg)
+                if not isinstance(loop_variable.value, list):
+                    msg = "Loop variable value must be a selector for variable type"
+                    raise TypeError(msg)
                 variable_mapping[f"{node_id}.{loop_variable.label}"] = (
                     loop_variable.value
                 )

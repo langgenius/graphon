@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -13,20 +14,21 @@ from graphon.runtime.variable_pool import VariablePool
 class FrameRuntimeData(BaseModel):
     """Serializable runtime data needed to rebuild one execution frame."""
 
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+    model_config = ConfigDict(frozen=True)
 
-    variable_pool: VariablePool
-    outputs: Mapping[str, object] = Field(default_factory=dict)
-    llm_usage: LLMUsage = Field(default_factory=LLMUsage.empty_usage)
-    node_run_steps: int = 0
-    graph_node_states: Mapping[str, NodeState] = Field(default_factory=dict)
-    graph_edge_states: Mapping[str, NodeState] = Field(default_factory=dict)
+    # Local snapshot, or a marker to rebind the parent frame's shared pool.
+    variable_pool: VariablePool | Literal["parent"]
+    outputs: Mapping[str, object]
+    llm_usage: LLMUsage
+    node_run_steps: int
+    graph_node_states: Mapping[str, NodeState]
+    graph_edge_states: Mapping[str, NodeState]
 
 
 class ContainerRunState(BaseModel):
     """Runtime state for one container node invocation.
 
-    A run belongs to the parent Loop/Iteration/WorkflowToolContainer node.
+    A run belongs to its parent container node.
     It stores only the state needed to resume that parent node after child
     frames complete. It must not store Graph definitions, Node objects, or
     live generators.
@@ -35,10 +37,8 @@ class ContainerRunState(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     invocation_id: str
-    kind: str
     frame_id: str
     node_id: str
-    execution_id: str
     started_at: datetime
     phase_data: Mapping[str, object] = Field(default_factory=dict)
 
@@ -56,8 +56,10 @@ class ContainerFrameState(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     frame_id: str
-    kind: str
+    kind: Literal["loop", "iteration"]
     parent_invocation_id: str
     root_node_id: str
+    index: int
+    started_at: datetime
     phase_data: Mapping[str, object] = Field(default_factory=dict)
     runtime_data: FrameRuntimeData

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import Any, ClassVar
 
@@ -10,18 +9,8 @@ import pytest
 import graphon.dsl.node_factory as node_factory_module
 from graphon.dsl import loads
 from graphon.graph_events.base import GraphEngineEvent, GraphNodeEventBase
-from graphon.graph_events.graph import GraphRunStartedEvent, GraphRunSucceededEvent
-from graphon.graph_events.iteration import (
-    NodeRunIterationNextEvent,
-    NodeRunIterationStartedEvent,
-    NodeRunIterationSucceededEvent,
-)
-from graphon.graph_events.loop import (
-    NodeRunLoopNextEvent,
-    NodeRunLoopStartedEvent,
-    NodeRunLoopSucceededEvent,
-)
-from graphon.graph_events.node import NodeRunStartedEvent, NodeRunSucceededEvent
+from graphon.graph_events.graph import GraphRunSucceededEvent
+from graphon.graph_events.traversal import GraphEdgeTakenEvent
 from graphon.model_runtime.entities.common_entities import I18nObject
 from graphon.model_runtime.entities.llm_entities import LLMResult, LLMUsage
 from graphon.model_runtime.entities.message_entities import (
@@ -37,12 +26,6 @@ from graphon.model_runtime.entities.model_entities import (
 )
 
 _EMPTY_MAPPING: Mapping[str, Any] = MappingProxyType({})
-
-
-@dataclass(frozen=True, slots=True)
-class EventCheck:
-    description: str
-    matches: Callable[[GraphEngineEvent], bool]
 
 
 class FakeSlimLLM:
@@ -165,177 +148,34 @@ def run_workflow(
     return list(engine.run())
 
 
-def expect_event_path(
+def event_path(
     events: Sequence[GraphEngineEvent],
-    checks: Sequence[EventCheck],
-) -> None:
-    event_index = 0
-    for check in checks:
-        while event_index < len(events):
-            event = events[event_index]
-            event_index += 1
-            if check.matches(event):
-                break
+) -> list[tuple[str, str, str, str]]:
+    """Project events to stable fields while preserving the complete event order."""
+    path: list[tuple[str, str, str, str]] = []
+    for event in events:
+        if isinstance(event, GraphNodeEventBase):
+            path.append((
+                type(event).__name__,
+                event.node_id,
+                event.in_loop_id or "",
+                event.in_iteration_id or "",
+            ))
+        elif isinstance(event, GraphEdgeTakenEvent):
+            path.append((
+                type(event).__name__,
+                f"{event.source_node_id}->{event.target_node_id}",
+                "",
+                "",
+            ))
         else:
-            remaining = ", ".join(_event_label(event) for event in events[event_index:])
-            msg = f"Expected event path item not found: {check.description}"
-            if remaining:
-                msg = f"{msg}. Remaining events: {remaining}"
-            raise AssertionError(msg)
+            path.append((type(event).__name__, "", "", ""))
+    return path
 
 
-def graph_started() -> EventCheck:
-    return EventCheck(
-        "graph started",
-        lambda event: isinstance(event, GraphRunStartedEvent),
-    )
-
-
-def graph_succeeded(
-    *,
-    outputs: Mapping[str, object] = _EMPTY_MAPPING,
-) -> EventCheck:
-    return EventCheck(
-        f"graph succeeded with {dict(outputs)}",
-        lambda event: (
-            isinstance(event, GraphRunSucceededEvent)
-            and _outputs_include(event.outputs, outputs)
-        ),
-    )
-
-
-def node_started(node_id: str) -> EventCheck:
-    return EventCheck(
-        f"node {node_id} started",
-        lambda event: (
-            isinstance(event, NodeRunStartedEvent) and event.node_id == node_id
-        ),
-    )
-
-
-def node_succeeded(
-    node_id: str,
-    *,
-    outputs: Mapping[str, object] = _EMPTY_MAPPING,
-    in_loop: str = "",
-    in_iteration: str = "",
-) -> EventCheck:
-    return EventCheck(
-        f"node {node_id} succeeded with {dict(outputs)}",
-        lambda event: (
-            isinstance(event, NodeRunSucceededEvent)
-            and event.node_id == node_id
-            and _outputs_include(event.node_run_result.outputs, outputs)
-            and _context_matches(
-                event,
-                in_loop=in_loop,
-                in_iteration=in_iteration,
-            )
-        ),
-    )
-
-
-def loop_started(node_id: str) -> EventCheck:
-    return EventCheck(
-        f"loop {node_id} started",
-        lambda event: (
-            isinstance(event, NodeRunLoopStartedEvent) and event.node_id == node_id
-        ),
-    )
-
-
-def loop_next(node_id: str, *, index: int) -> EventCheck:
-    return EventCheck(
-        f"loop {node_id} next {index}",
-        lambda event: (
-            isinstance(event, NodeRunLoopNextEvent)
-            and event.node_id == node_id
-            and event.index == index
-        ),
-    )
-
-
-def loop_succeeded(
-    node_id: str,
-    *,
-    steps: int,
-    outputs: Mapping[str, object] = _EMPTY_MAPPING,
-) -> EventCheck:
-    return EventCheck(
-        f"loop {node_id} succeeded after {steps} steps",
-        lambda event: (
-            isinstance(event, NodeRunLoopSucceededEvent)
-            and event.node_id == node_id
-            and event.steps == steps
-            and _outputs_include(event.outputs, outputs)
-        ),
-    )
-
-
-def iteration_started(node_id: str) -> EventCheck:
-    return EventCheck(
-        f"iteration {node_id} started",
-        lambda event: (
-            isinstance(event, NodeRunIterationStartedEvent) and event.node_id == node_id
-        ),
-    )
-
-
-def iteration_next(node_id: str, *, index: int) -> EventCheck:
-    return EventCheck(
-        f"iteration {node_id} next {index}",
-        lambda event: (
-            isinstance(event, NodeRunIterationNextEvent)
-            and event.node_id == node_id
-            and event.index == index
-        ),
-    )
-
-
-def iteration_succeeded(
-    node_id: str,
-    *,
-    steps: int,
-    outputs: Mapping[str, object] = _EMPTY_MAPPING,
-) -> EventCheck:
-    return EventCheck(
-        f"iteration {node_id} succeeded after {steps} steps",
-        lambda event: (
-            isinstance(event, NodeRunIterationSucceededEvent)
-            and event.node_id == node_id
-            and event.steps == steps
-            and _outputs_include(event.outputs, outputs)
-        ),
-    )
-
-
-def _outputs_include(
-    actual: Mapping[str, object],
-    expected: Mapping[str, object],
-) -> bool:
-    for key, expected_value in expected.items():
-        if key not in actual:
-            return False
-        if actual[key] != expected_value:
-            return False
-    return True
-
-
-def _context_matches(
-    event: NodeRunSucceededEvent,
-    *,
-    in_loop: str,
-    in_iteration: str,
-) -> bool:
-    return not (in_loop and event.in_loop_id != in_loop) and not (
-        in_iteration and event.in_iteration_id != in_iteration
-    )
-
-
-def _event_label(event: GraphEngineEvent) -> str:
-    event_name = event.__class__.__name__
-    if isinstance(event, NodeRunLoopNextEvent | NodeRunIterationNextEvent):
-        return f"{event_name}({event.node_id}, {event.index})"
-    if isinstance(event, GraphNodeEventBase):
-        return f"{event_name}({event.node_id})"
-    return event_name
+def final_outputs(events: Sequence[GraphEngineEvent]) -> dict[str, object]:
+    for event in reversed(events):
+        if isinstance(event, GraphRunSucceededEvent):
+            return event.outputs
+    msg = "graph did not succeed"
+    raise AssertionError(msg)

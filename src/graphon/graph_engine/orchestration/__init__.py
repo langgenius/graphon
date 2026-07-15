@@ -5,9 +5,5 @@ different subsystems.
 """
 
 from .dispatcher import Dispatcher
-from .execution_coordinator import ExecutionCoordinator
 
-__all__ = [
-    "Dispatcher",
-    "ExecutionCoordinator",
-]
+__all__ = ["Dispatcher"]

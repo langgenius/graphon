@@ -1,31 +1,18 @@
-from enum import StrEnum
-from typing import Any
-
 from pydantic import Field
 
 from graphon.entities.base_node_data import BaseNodeData
-from graphon.enums import BuiltinNodeTypes, NodeType
-from graphon.nodes.base.entities import (
-    BaseIterationNodeData,
-    BaseIterationState,
-)
+from graphon.enums import BuiltinNodeTypes, ErrorHandleMode, NodeType
 
 
-class ErrorHandleMode(StrEnum):
-    TERMINATED = "terminated"
-    CONTINUE_ON_ERROR = "continue-on-error"
-    REMOVE_ABNORMAL_OUTPUT = "remove-abnormal-output"
-
-
-class IterationNodeData(BaseIterationNodeData):
+class IterationNodeData(BaseNodeData):
     """Iteration Node Data."""
 
     type: NodeType = BuiltinNodeTypes.ITERATION
-    parent_loop_id: str | None = None  # redundant field, not used currently
+    start_node_id: str
     iterator_selector: list[str]  # variable selector
     output_selector: list[str]  # output selector
     is_parallel: bool = False  # open the parallel mode or not
-    parallel_nums: int = 10  # the numbers of parallel
+    parallel_nums: int = Field(default=10, ge=1)  # the numbers of parallel
     error_handle_mode: ErrorHandleMode = (
         ErrorHandleMode.TERMINATED
     )  # how to handle the error
@@ -38,25 +25,3 @@ class IterationStartNodeData(BaseNodeData):
     """Iteration Start Node Data."""
 
     type: NodeType = BuiltinNodeTypes.ITERATION_START
-
-
-class IterationState(BaseIterationState):
-    """Iteration State."""
-
-    outputs: list[Any] = Field(default_factory=list)
-    current_output: Any = None
-
-    class MetaData(BaseIterationState.MetaData):
-        """Data."""
-
-        iterator_length: int
-
-    def get_last_output(self) -> Any:
-        """Get last output."""
-        if self.outputs:
-            return self.outputs[-1]
-        return None
-
-    def get_current_output(self) -> Any:
-        """Get current output."""
-        return self.current_output

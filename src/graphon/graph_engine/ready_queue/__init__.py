@@ -2,7 +2,6 @@
 
 from graphon.runtime.ready_queue import ReadyQueue
 
-from .factory import create_ready_queue_from_state
 from .in_memory import InMemoryReadyQueue
 from .protocol import ROOT_FRAME_ID, ReadyQueueState, ReadyTask, ResumeTask, StartTask
 
@@ -14,5 +13,4 @@ __all__ = [
     "ReadyTask",
     "ResumeTask",
     "StartTask",
-    "create_ready_queue_from_state",
 ]

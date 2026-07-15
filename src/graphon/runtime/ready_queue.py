@@ -1,7 +1,12 @@
 """Runtime ready queue protocol."""
 
+from __future__ import annotations
+
 from abc import abstractmethod
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from graphon.graph_engine.ready_queue.protocol import ReadyTask
 
 
 class ReadyQueue(Protocol):
@@ -12,7 +17,7 @@ class ReadyQueue(Protocol):
     """
 
     @abstractmethod
-    def put(self, item: Any) -> None:
+    def put(self, item: ReadyTask) -> None:
         """Add a ready item to the ready queue.
 
         Args:
@@ -21,7 +26,7 @@ class ReadyQueue(Protocol):
         ...
 
     @abstractmethod
-    def get(self, timeout: float | None = None) -> Any:
+    def get(self, timeout: float | None = None) -> ReadyTask:
         """Retrieve and remove the next ready item from the queue.
 
         Args:
@@ -43,21 +48,6 @@ class ReadyQueue(Protocol):
         ...
 
     @abstractmethod
-    def empty(self) -> bool:
-        """Check whether the queue contains any pending items.
-
-        This method must be safe to call concurrently with other queue operations,
-        including put and get.
-
-        NOTE: Because the queue can be modified by other threads between the check
-        and the subsequent use, this method is prone to TOCTOU errors.
-
-        Returns:
-            ``True`` when the queue has no pending items, otherwise ``False``.
-        """
-        ...
-
-    @abstractmethod
     def qsize(self) -> int:
         """Return the approximate number of pending items awaiting execution.
 
@@ -73,7 +63,7 @@ class ReadyQueue(Protocol):
         ...
 
     @abstractmethod
-    def drain(self) -> list[Any]:
+    def drain(self) -> list[ReadyTask]:
         """Remove and return all pending items in FIFO order."""
         ...
 

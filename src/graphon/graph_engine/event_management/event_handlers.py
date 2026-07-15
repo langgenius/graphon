@@ -33,13 +33,12 @@ from graphon.graph_events.node import (
     NodeRunSucceededEvent,
     NodeRunVariableUpdatedEvent,
 )
-from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.runtime.graph_runtime_state import GraphExecutionProtocol
 
 from ..container_handlers import ContainerHandler
 from ..entities.tasks import TaskEvent
 from ..frames import ExecutionFrame, FrameRegistry
-from ..ready_queue import ROOT_FRAME_ID
+from ..ready_queue import ROOT_FRAME_ID, StartTask
 from .event_manager import EventManager
 
 logger = logging.getLogger(__name__)
@@ -81,23 +80,40 @@ class EventHandler:
             task_event: The frame-scoped event to handle
 
         """
-        event = task_event.event
-        self._dispatch_event(frame_id=task_event.frame_id, event=event)
+        self._dispatch_event(frame_id=task_event.frame_id, event=task_event.event)
         frame = self._frame_registry.get(task_event.frame_id)
         handler = self._container_handler_for_frame(frame.frame_id)
         if handler is not None:
             handler.complete_frame(frame)
+
+    def snapshot_frames(self) -> None:
+        """Persist live child frames after workers have drained for a pause."""
+        root_runtime_state = self._frame_registry.get(
+            ROOT_FRAME_ID,
+        ).graph_runtime_state
+        for frame_state in root_runtime_state.container_frames():
+            frame = self._frame_registry.get(frame_state.frame_id)
+            variable_pool_scope = (
+                "parent"
+                if isinstance(frame_state.runtime_data.variable_pool, str)
+                else "local"
+            )
+            root_runtime_state.put_container_frame(
+                frame_state.model_copy(
+                    update={
+                        "runtime_data": frame.graph_runtime_state.snapshot_frame(
+                            variable_pool_scope=variable_pool_scope,
+                        ),
+                    },
+                ),
+            )
 
     def _dispatch_event(self, *, frame_id: str, event: GraphNodeEventBase) -> None:
         frame = self._frame_registry.get(frame_id)
         handler = self._container_handler_for_frame(frame_id)
         if handler is not None:
             handler.prepare_frame_event(frame=frame, event=event)
-        if isinstance(event, NodeRunVariableUpdatedEvent):
-            self._dispatch(event, frame=frame)
-            return None
-
-        return self._dispatch(event, frame=frame)
+        self._dispatch(event, frame=frame)
 
     @singledispatchmethod
     def _dispatch(self, event: GraphNodeEventBase, *, frame: ExecutionFrame) -> None:
@@ -106,10 +122,7 @@ class EventHandler:
 
     def _collect(self, *, frame: ExecutionFrame, event: GraphNodeEventBase) -> None:
         handler = self._container_handler_for_frame(frame.frame_id)
-        if handler is not None and not handler.should_collect(
-            frame=frame,
-            event=event,
-        ):
+        if handler is not None and not handler.should_collect(event=event):
             return
         self._event_collector.collect(event)
 
@@ -129,6 +142,7 @@ class EventHandler:
             | NodeRunModelPollingProgressEvent
             | NodeRunRetrieverResourceEvent
             | NodeRunReasoningChunkEvent
+            | NodeRunStreamChunkEvent
         ),
         *,
         frame: ExecutionFrame,
@@ -149,22 +163,11 @@ class EventHandler:
             node_id=event.node_id,
         )
         is_initial_attempt = node_execution.retry_count == 0
-        node_execution.mark_started()
         frame.graph_runtime_state.increment_node_run_steps()
 
         # Collect the event only for the first attempt; retries remain silent
         if is_initial_attempt:
             self._collect(frame=frame, event=event)
-
-    @_dispatch.register
-    def _(self, event: NodeRunStreamChunkEvent, *, frame: ExecutionFrame) -> None:
-        """Handle stream chunk event with full processing.
-
-        Args:
-            event: The stream chunk event
-
-        """
-        self._collect(frame=frame, event=event)
 
     @_dispatch.register
     def _(self, event: NodeRunVariableUpdatedEvent, *, frame: ExecutionFrame) -> None:
@@ -181,89 +184,23 @@ class EventHandler:
 
     @_dispatch.register
     def _(self, event: NodeRunSucceededEvent, *, frame: ExecutionFrame) -> None:
-        """Handle node success by coordinating subsystems.
-
-        This method coordinates between different subsystems to process
-        node completion, handle edges, and trigger downstream execution.
-
-        Args:
-            event: The node succeeded event
-
-        """
-        # Update domain model
-        node_execution = self._graph_execution.get_or_create_node_execution(
-            frame_id=frame.frame_id,
-            node_id=event.node_id,
-        )
-        node_execution.mark_taken()
-
-        self._accumulate_node_usage(
-            frame=frame,
-            usage=event.node_run_result.llm_usage,
-        )
-
-        # Store outputs in variable pool
-        self._store_node_outputs(
-            frame=frame,
-            node_id=event.node_id,
-            outputs=event.node_run_result.outputs,
-        )
-
-        # Process edges and get ready nodes
         node = frame.graph.nodes[event.node_id]
-        if node.execution_type == NodeExecutionType.BRANCH:
-            ready_nodes, edge_events = frame.edge_processor.handle_branch_completion(
-                event.node_id,
-                event.node_run_result.edge_source_handle,
-            )
-        else:
-            ready_nodes, edge_events = frame.edge_processor.process_node_success(
-                event.node_id
-            )
-
-        # Collect traversal events from edge processing
-        for edge_event in edge_events:
-            self._event_collector.collect(edge_event)
-
-        # Enqueue ready nodes
-        for node_id in ready_nodes:
-            if frame.state_manager.enqueue_node(
-                frame_id=frame.frame_id,
-                node_id=node_id,
-            ):
-                frame.state_manager.start_execution(
-                    frame_id=frame.frame_id,
-                    node_id=node_id,
-                )
-
-        # Update execution tracking
-        frame.state_manager.finish_execution(
-            frame_id=frame.frame_id,
-            node_id=event.node_id,
+        self._complete_node(
+            frame=frame,
+            event=event,
+            follow_branch=node.execution_type == NodeExecutionType.BRANCH,
         )
-
-        # Handle response node outputs
-        if node.execution_type == NodeExecutionType.RESPONSE:
-            self._update_response_outputs(
-                frame=frame,
-                outputs=event.node_run_result.outputs,
-            )
-
-        # Collect the event
-        self._collect(frame=frame, event=event)
 
     @_dispatch.register
     def _(self, event: NodeRunPauseRequestedEvent, *, frame: ExecutionFrame) -> None:
         """Handle pause requests emitted by nodes."""
-        pause_reason = event.reason
-        self._graph_execution.pause(pause_reason)
-        frame.state_manager.finish_execution(
-            frame_id=frame.frame_id,
-            node_id=event.node_id,
+        self._graph_execution.pause(event.reason)
+        frame.state_manager.finish_execution(event.node_id)
+        frame.graph.nodes[event.node_id].state = NodeState.UNKNOWN
+        frame.graph_runtime_state.defer_ready_task(
+            StartTask(frame_id=frame.frame_id, node_id=event.node_id)
         )
-        if event.node_id in frame.graph.nodes:
-            frame.graph.nodes[event.node_id].state = NodeState.UNKNOWN
-        frame.graph_runtime_state.register_paused_node(event.node_id)
+        frame.state_manager.track_unfinished(event.node_id)
         self._collect(frame=frame, event=event)
 
     @_dispatch.register
@@ -275,115 +212,43 @@ class EventHandler:
 
         """
         # Update domain model
-        node_execution = self._graph_execution.get_or_create_node_execution(
-            frame_id=frame.frame_id,
-            node_id=event.node_id,
-        )
-        node_execution.mark_failed(event.error)
         self._graph_execution.record_node_failure()
 
-        self._accumulate_node_usage(
-            frame=frame,
-            usage=event.node_run_result.llm_usage,
-        )
+        frame.graph_runtime_state.add_llm_usage(event.node_run_result.llm_usage)
 
         result = frame.error_handler.handle_node_failure(
             frame_id=frame.frame_id,
             event=event,
         )
 
-        if result:
+        if result is not None:
             # Process the resulting event (retry, exception, etc.)
             self._dispatch_event(frame_id=frame.frame_id, event=result)
         else:
             handler = self._container_handler_for_frame(frame.frame_id)
-            if handler is not None and handler.record_frame_failure(
-                frame=frame,
-                event=event,
-            ):
-                self._collect(frame=frame, event=event)
-                frame.state_manager.finish_execution(
-                    frame_id=frame.frame_id,
-                    node_id=event.node_id,
-                )
-                return
-            # Abort execution
-            self._graph_execution.fail(RuntimeError(event.error))
+            if handler is not None:
+                handler.record_frame_failure(frame=frame, event=event)
+            else:
+                self._graph_execution.fail(RuntimeError(event.error))
             self._collect(frame=frame, event=event)
-            frame.state_manager.finish_execution(
-                frame_id=frame.frame_id,
-                node_id=event.node_id,
-            )
+            frame.state_manager.finish_execution(event.node_id)
 
     @_dispatch.register
     def _(self, event: NodeRunExceptionEvent, *, frame: ExecutionFrame) -> None:
-        """Handle node exception event (fail-branch strategy).
-
-        Args:
-            event: The node exception event
-
-        """
-        # Node continues via fail-branch/default-value, treat as completion
-        node_execution = self._graph_execution.get_or_create_node_execution(
-            frame_id=frame.frame_id,
-            node_id=event.node_id,
-        )
-        node_execution.mark_taken()
-
-        self._accumulate_node_usage(
-            frame=frame,
-            usage=event.node_run_result.llm_usage,
-        )
-
-        # Persist outputs produced by the exception strategy (e.g. default values)
-        self._store_node_outputs(
-            frame=frame,
-            node_id=event.node_id,
-            outputs=event.node_run_result.outputs,
-        )
-
         node = frame.graph.nodes[event.node_id]
-
         if node.error_strategy == ErrorStrategy.DEFAULT_VALUE:
-            ready_nodes, edge_events = frame.edge_processor.process_node_success(
-                event.node_id
-            )
+            follow_branch = False
         elif node.error_strategy == ErrorStrategy.FAIL_BRANCH:
-            ready_nodes, edge_events = frame.edge_processor.handle_branch_completion(
-                event.node_id,
-                event.node_run_result.edge_source_handle,
-            )
+            follow_branch = True
         else:
             msg = f"Unsupported error strategy: {node.error_strategy}"
             raise NotImplementedError(msg)
 
-        for edge_event in edge_events:
-            self._event_collector.collect(edge_event)
-
-        for node_id in ready_nodes:
-            if frame.state_manager.enqueue_node(
-                frame_id=frame.frame_id,
-                node_id=node_id,
-            ):
-                frame.state_manager.start_execution(
-                    frame_id=frame.frame_id,
-                    node_id=node_id,
-                )
-
-        # Update response outputs if applicable
-        if node.execution_type == NodeExecutionType.RESPONSE:
-            self._update_response_outputs(
-                frame=frame,
-                outputs=event.node_run_result.outputs,
-            )
-
-        frame.state_manager.finish_execution(
-            frame_id=frame.frame_id,
-            node_id=event.node_id,
+        self._complete_node(
+            frame=frame,
+            event=event,
+            follow_branch=follow_branch,
         )
-
-        # Collect the exception event for observers
-        self._collect(frame=frame, event=event)
 
     @_dispatch.register
     def _(self, event: NodeRunRetryEvent, *, frame: ExecutionFrame) -> None:
@@ -400,41 +265,49 @@ class EventHandler:
         node_execution.increment_retry()
 
         # Finish the previous attempt before re-queuing the node
-        frame.state_manager.finish_execution(
-            frame_id=frame.frame_id,
-            node_id=event.node_id,
-        )
+        frame.state_manager.finish_execution(event.node_id)
 
         # Emit retry event for observers
         self._collect(frame=frame, event=event)
 
         # Re-queue node for execution
-        if frame.state_manager.enqueue_node(
-            frame_id=frame.frame_id,
-            node_id=event.node_id,
-        ):
-            frame.state_manager.start_execution(
-                frame_id=frame.frame_id,
-                node_id=event.node_id,
-            )
+        frame.state_manager.enqueue_node(event.node_id)
 
-    def _accumulate_node_usage(
+    def _complete_node(
         self,
         *,
         frame: ExecutionFrame,
-        usage: LLMUsage,
+        event: NodeRunSucceededEvent | NodeRunExceptionEvent,
+        follow_branch: bool,
     ) -> None:
-        """Accumulate token usage into the shared runtime state."""
-        if usage.total_tokens <= 0:
-            return
+        frame.graph_runtime_state.add_llm_usage(event.node_run_result.llm_usage)
+        self._store_node_outputs(
+            frame=frame,
+            node_id=event.node_id,
+            outputs=event.node_run_result.outputs,
+        )
 
-        frame.graph_runtime_state.add_tokens(usage.total_tokens)
-
-        current_usage = frame.graph_runtime_state.llm_usage
-        if current_usage.total_tokens == 0:
-            frame.graph_runtime_state.llm_usage = usage
+        if follow_branch:
+            ready_nodes, edge_events = frame.edge_processor.handle_branch_completion(
+                event.node_id,
+                event.node_run_result.edge_source_handle,
+            )
         else:
-            frame.graph_runtime_state.llm_usage = current_usage.plus(usage)
+            ready_nodes, edge_events = frame.edge_processor.process_node_success(
+                event.node_id
+            )
+        for edge_event in edge_events:
+            self._event_collector.collect(edge_event)
+        for node_id in ready_nodes:
+            frame.state_manager.enqueue_node(node_id)
+
+        node = frame.graph.nodes[event.node_id]
+        if node.execution_type == NodeExecutionType.RESPONSE:
+            frame.graph_runtime_state.merge_response_outputs(
+                event.node_run_result.outputs,
+            )
+        frame.state_manager.finish_execution(event.node_id)
+        self._collect(frame=frame, event=event)
 
     def _store_node_outputs(
         self,
@@ -456,22 +329,11 @@ class EventHandler:
                 variable_value,
             )
 
-    def _update_response_outputs(
-        self,
-        *,
-        frame: ExecutionFrame,
-        outputs: Mapping[str, object],
-    ) -> None:
-        """Update response outputs for response nodes."""
-        frame.graph_runtime_state.merge_response_outputs(outputs)
-
     def _container_handler_for_frame(self, frame_id: str) -> ContainerHandler | None:
-        try:
-            root_frame = self._frame_registry.get(ROOT_FRAME_ID)
-        except KeyError:
+        if frame_id == ROOT_FRAME_ID:
             return None
-        root_runtime_state = root_frame.graph_runtime_state
-        if not root_runtime_state.has_container_frame(frame_id):
-            return None
+        root_runtime_state = self._frame_registry.get(
+            ROOT_FRAME_ID,
+        ).graph_runtime_state
         frame_state = root_runtime_state.get_container_frame(frame_id)
         return self._container_handlers[frame_state.kind]

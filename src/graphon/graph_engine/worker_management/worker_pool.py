@@ -11,11 +11,10 @@ from collections.abc import Mapping
 from contextlib import AbstractContextManager
 from typing import final
 
-from graphon.graph.graph import Graph
 from graphon.graph_engine.container_handlers import ContainerHandler
 from graphon.graph_engine.entities.tasks import TaskEvent
 from graphon.graph_engine.frames import FrameRegistry
-from graphon.graph_engine.ready_queue import ReadyQueue
+from graphon.graph_engine.ready_queue import ROOT_FRAME_ID, ReadyQueue
 
 from ..config import GraphEngineConfig
 from ..layers.base import GraphEngineLayer
@@ -38,7 +37,6 @@ class WorkerPool:
         self,
         ready_queue: ReadyQueue,
         event_queue: queue.Queue[TaskEvent],
-        graph: Graph,
         frame_registry: FrameRegistry,
         layers: list[GraphEngineLayer],
         config: GraphEngineConfig,
@@ -50,7 +48,6 @@ class WorkerPool:
         Args:
             ready_queue: Ready queue protocol for nodes ready for execution
             event_queue: Queue for worker events
-            graph: The workflow graph
             frame_registry: Registry containing frame-local graphs to execute
             layers: Graph engine layers for node execution hooks
             config: GraphEngine worker pool configuration
@@ -60,7 +57,6 @@ class WorkerPool:
         """
         self._ready_queue = ready_queue
         self._event_queue = event_queue
-        self._graph = graph
         self._frame_registry = frame_registry
         self._execution_context = execution_context
         self._layers = layers
@@ -69,50 +65,41 @@ class WorkerPool:
         # Worker management
         self._workers: list[Worker] = []
         self._worker_counter = 0
-        self._lock = threading.RLock()
+        self._lock = threading.Lock()
         self._running = False
 
-        # No longer tracking worker states with callbacks to avoid lock contention
         self._container_handlers = container_handlers
 
-    def start(self, initial_count: int | None = None) -> None:
-        """Start the worker pool.
-
-        Args:
-            initial_count: Number of workers to start with (auto-calculated if None)
-
-        """
+    def start(self) -> None:
+        """Start the worker pool."""
         with self._lock:
             if self._running:
                 return
 
             self._running = True
-
-            # Calculate initial worker count
-            if initial_count is None:
-                node_count = len(self._graph.nodes)
-                if node_count < SMALL_GRAPH_NODE_THRESHOLD:
-                    initial_count = self._config.min_workers
-                elif node_count < MEDIUM_GRAPH_NODE_THRESHOLD:
-                    initial_count = min(
-                        self._config.min_workers + 1,
-                        self._config.max_workers,
-                    )
-                else:
-                    initial_count = min(
-                        self._config.min_workers + 2,
-                        self._config.max_workers,
-                    )
-
-                logger.debug(
-                    "Starting worker pool: %d workers (nodes=%d, min=%d, max=%d)",
-                    initial_count,
-                    node_count,
-                    self._config.min_workers,
+            node_count = len(
+                self._frame_registry.get(ROOT_FRAME_ID).graph.nodes,
+            )
+            if node_count < SMALL_GRAPH_NODE_THRESHOLD:
+                initial_count = self._config.min_workers
+            elif node_count < MEDIUM_GRAPH_NODE_THRESHOLD:
+                initial_count = min(
+                    self._config.min_workers + 1,
+                    self._config.max_workers,
+                )
+            else:
+                initial_count = min(
+                    self._config.min_workers + 2,
                     self._config.max_workers,
                 )
 
-            # Create initial workers
+            logger.debug(
+                "Starting worker pool: %d workers (nodes=%d, min=%d, max=%d)",
+                initial_count,
+                node_count,
+                self._config.min_workers,
+                self._config.max_workers,
+            )
             for _ in range(initial_count):
                 self._create_worker()
 
@@ -140,12 +127,9 @@ class WorkerPool:
         """Stop accepting new work and signal currently idle workers to exit."""
         with self._lock:
             self._running = False
-            idle_workers = [
-                worker for worker in self._workers if not worker.has_current_task
-            ]
-
-            for worker in idle_workers:
-                worker.stop()
+            for worker in self._workers:
+                if not worker.has_current_task:
+                    worker.stop()
 
     def has_current_tasks(self) -> bool:
         with self._lock:
@@ -178,9 +162,7 @@ class WorkerPool:
         if worker.is_alive():
             worker.join(timeout=2.0)
 
-        # Remove from list
-        if worker in self._workers:
-            self._workers.remove(worker)
+        self._workers.remove(worker)
 
     def _try_scale_up(self, queue_depth: int, current_count: int) -> bool:
         """Try to scale up workers if needed.
@@ -197,12 +179,11 @@ class WorkerPool:
             queue_depth > self._config.scale_up_threshold
             and current_count < self._config.max_workers
         ):
-            old_count = current_count
             self._create_worker()
 
             logger.debug(
                 "Scaled up workers: %d -> %d (queue_depth=%d exceeded threshold=%d)",
-                old_count,
+                current_count,
                 len(self._workers),
                 queue_depth,
                 self._config.scale_up_threshold,
@@ -237,50 +218,33 @@ class WorkerPool:
         has_excess_capacity = (
             queue_depth <= active_count  # Active workers can handle current queue
             or idle_count > active_count  # More idle than active workers
-            or (queue_depth == 0 and idle_count > 0)  # No work and have idle workers
         )
 
         if not has_excess_capacity:
             return False
 
-        # Find and remove idle workers that have been idle long enough
-        workers_to_remove: list[tuple[Worker, int]] = []
-
         for worker in self._workers:
-            # Check if worker is idle and has exceeded idle time threshold
             if (
                 worker.is_idle
                 and worker.idle_duration >= self._config.scale_down_idle_time
             ):
-                # Don't remove if it would leave us unable to handle the queue
-                remaining_workers = current_count - len(workers_to_remove) - 1
+                remaining_workers = current_count - 1
                 if (
                     remaining_workers >= self._config.min_workers
                     and remaining_workers >= max(1, queue_depth // 2)
                 ):
-                    workers_to_remove.append((worker, worker.worker_id))
-                    # Only remove one worker per check to avoid aggressive scaling
-                    break
-
-        # Remove idle workers if any found
-        if workers_to_remove:
-            old_count = current_count
-            for worker, worker_id in workers_to_remove:
-                _ = worker_id
-                self._remove_worker(worker)
-
-            logger.debug(
-                "Scaled down workers: %d -> %d (removed %d idle workers after %.1fs, "
-                "queue_depth=%d, active=%d, idle=%d)",
-                old_count,
-                len(self._workers),
-                len(workers_to_remove),
-                self._config.scale_down_idle_time,
-                queue_depth,
-                active_count,
-                idle_count - len(workers_to_remove),
-            )
-            return True
+                    self._remove_worker(worker)
+                    logger.debug(
+                        "Scaled down workers: %d -> %d (removed 1 idle worker after "
+                        "%.1fs, queue_depth=%d, active=%d, idle=%d)",
+                        current_count,
+                        len(self._workers),
+                        self._config.scale_down_idle_time,
+                        queue_depth,
+                        active_count,
+                        idle_count - 1,
+                    )
+                    return True
 
         return False
 
@@ -302,23 +266,3 @@ class WorkerPool:
 
             # Try to scale down if we have excess capacity
             self._try_scale_down(queue_depth, current_count, active_count, idle_count)
-
-    def get_worker_count(self) -> int:
-        """Get current number of workers."""
-        with self._lock:
-            return len(self._workers)
-
-    def get_status(self) -> dict[str, int]:
-        """Get pool status information.
-
-        Returns:
-            Dictionary with status information
-
-        """
-        with self._lock:
-            return {
-                "total_workers": len(self._workers),
-                "queue_depth": self._ready_queue.qsize(),
-                "min_workers": self._config.min_workers,
-                "max_workers": self._config.max_workers,
-            }

@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-from abc import abstractmethod
 from collections.abc import Mapping
 from enum import StrEnum, auto
-from typing import Any, Protocol
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
-
-from graphon.entities.graph_config import NodeConfigDict
 
 
 class DslKind(StrEnum):
@@ -139,8 +136,3 @@ class DslImportPlan(BaseModel):
     @property
     def loadable(self) -> bool:
         return self.load_status == LoadStatus.LOADABLE
-
-
-class TypedNodeFactory(Protocol):
-    @abstractmethod
-    def create_node(self, node_config: NodeConfigDict) -> Any: ...

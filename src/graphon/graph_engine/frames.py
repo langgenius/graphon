@@ -3,24 +3,19 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import Protocol, cast, final
 
 from graphon.graph.graph import Graph, NodeFactory
-from graphon.nodes.base.node import Node
 from graphon.runtime.container_state import ContainerFrameState
-from graphon.runtime.graph_runtime_state import (
-    GraphExecutionProtocol,
-    GraphRuntimeState,
-)
-from graphon.runtime.ready_queue import ReadyQueue
+from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.variable_pool import VariablePool
 
 from .error_handler import ErrorHandler
 from .graph_state_manager import GraphStateManager
 from .graph_traversal.edge_processor import EdgeProcessor
 from .graph_traversal.skip_propagator import SkipPropagator
-from .ready_queue import ROOT_FRAME_ID, StartTask
+from .ready_queue import ROOT_FRAME_ID
 
 
 class RebindableNodeFactory(NodeFactory, Protocol):
@@ -49,17 +44,14 @@ class FrameRegistry:
     def register(self, frame: ExecutionFrame) -> None:
         self._frames[frame.frame_id] = frame
 
-    def unregister(self, frame_id: str) -> None:
-        self._frames.pop(frame_id, None)
-
     def get(self, frame_id: str) -> ExecutionFrame:
         return self._frames[frame_id]
 
+    def remove(self, frame_id: str) -> None:
+        del self._frames[frame_id]
+
     def has(self, frame_id: str) -> bool:
         return frame_id in self._frames
-
-    def get_node(self, task: StartTask) -> Node:
-        return self.get(task.frame_id).graph.nodes[task.node_id]
 
     def materialize_child_frame(
         self,
@@ -86,10 +78,11 @@ class FrameRegistry:
             node_factory=rebound_factory,
             root_node_id=root_node_id,
         )
-        graph_runtime_state.configure(graph=graph)
+        graph_runtime_state.attach_graph(graph)
         state_manager = GraphStateManager(
             graph,
             graph_runtime_state,
+            frame_id,
         )
         skip_propagator = SkipPropagator(
             graph=graph,
@@ -115,18 +108,19 @@ class FrameRegistry:
         self,
         frame_state: ContainerFrameState,
         *,
-        graph_execution: GraphExecutionProtocol,
-        ready_queue: ReadyQueue,
+        variable_pool: VariablePool,
     ) -> ExecutionFrame:
         runtime_data = frame_state.runtime_data
+        root_runtime_state = self.get(ROOT_FRAME_ID).graph_runtime_state
         graph_runtime_state = GraphRuntimeState(
-            variable_pool=runtime_data.variable_pool.model_copy(deep=True),
-            start_at=0.0,
-            llm_usage=runtime_data.llm_usage.model_copy(),
-            outputs=deepcopy(dict(runtime_data.outputs)),
+            variable_pool=variable_pool,
+            start_at=root_runtime_state.start_at,
+            llm_usage=runtime_data.llm_usage,
+            outputs=dict(runtime_data.outputs),
             node_run_steps=runtime_data.node_run_steps,
-            ready_queue=ready_queue,
-            graph_execution=graph_execution,
+            ready_queue=root_runtime_state.ready_queue,
+            deferred_ready_queue=root_runtime_state.deferred_ready_queue,
+            graph_execution=root_runtime_state.graph_execution,
         )
         frame = self.materialize_child_frame(
             frame_id=frame_state.frame_id,
@@ -145,7 +139,7 @@ class FrameRegistry:
                 f"rebuilt graph: missing node ids={missing_node_ids}, "
                 f"missing edge ids={missing_edge_ids}"
             )
-            self.unregister(frame_state.frame_id)
+            self.remove(frame_state.frame_id)
             raise RuntimeError(msg)
 
         for node_id, state in runtime_data.graph_node_states.items():

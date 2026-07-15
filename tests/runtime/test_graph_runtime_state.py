@@ -23,105 +23,24 @@ from graphon.variables.variables import StringVariable
 
 CONVERSATION_VARIABLE_NODE_ID = "conversation"
 
-_HISTORICAL_FILE_SNAPSHOT_JSON_FROM_749751D_PARENT = (
-    """{
-  "version": "1.0",
-  "start_at": 123.0,
-  "total_tokens": 0,
-  "node_run_steps": 0,
-  "llm_usage": {
-    "prompt_tokens": 0,
-    "prompt_unit_price": "0.0",
-    "prompt_price_unit": "0.0",
-    "prompt_price": "0.0",
-    "completion_tokens": 0,
-    "completion_unit_price": "0.0",
-    "completion_price_unit": "0.0",
-    "completion_price": "0.0",
-    "total_tokens": 0,
-    "total_price": "0.0",
-    "currency": "USD",
-    "latency": 0.0,
-    "time_to_first_token": null,
-    "time_to_generate": null
-  },
-  "outputs": {},
-  "variable_pool": {
-    "variable_dictionary": {
-      "node1": {
-        "attachment": {
-          "value_type": "file",
-          "value": {
-            "dify_model_identity": "__dify__file__",
-            "id": "message-file-id",
-            "type": "document",
-            "transfer_method": "local_file",
-            "remote_url": null,
-            "reference": "upload-file-id",
-            "filename": "report.pdf",
-            "extension": ".pdf",
-            "mime_type": "application/pdf",
-            "size": 128
-          },
-          "id": "0759bf04-6fe1-4871-82b0-bc59ce96d43a",
-          "name": "attachment",
-          "description": "",
-          "selector": [
-            "node1",
-            "attachment"
-          ]
-        }
-      }
-    }
-  },
-  "ready_queue": "{\\"type\\":\\"InMemoryReadyQueue\\",\\"version\\":\\"1.0\\","""
-    """\\"items\\":[]}",
-  "graph_execution": "{\\"type\\":\\"GraphExecution\\",\\"version\\":\\"1.0\\","""
-    """\\"workflow_id\\":\\"\\",\\"started\\":false,\\"completed\\":false,"""
-    """\\"aborted\\":false,\\"paused\\":false,\\"pause_reasons\\":[],"""
-    """\\"error\\":null,\\"exceptions_count\\":0,\\"node_executions\\":[]}",
-  "paused_nodes": [],
-  "deferred_nodes": [],
-  "graph_state": {
-    "nodes": {},
-    "edges": {}
-  }
-}"""
-)
 
-
-class TestGraphRuntimeState:  # noqa: PLR0904
+class TestGraphRuntimeState:
     def test_execution_context_defaults_to_empty_context(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
 
         with state.execution_context:
             assert state.execution_context is not None
 
-        state.execution_context = None
-
-        with state.execution_context:
-            assert state.execution_context is not None
-
-    def test_property_getters_and_setters(self) -> None:
+    def test_property_getters(self) -> None:
         variable_pool = VariablePool()
         start_time = time()
 
         state = GraphRuntimeState(variable_pool=variable_pool, start_at=start_time)
 
         assert state.variable_pool == variable_pool
-
         assert state.start_at == start_time
-        new_time = time() + 100
-        state.start_at = new_time
-        assert state.start_at == new_time
-
         assert state.total_tokens == 0
-        state.total_tokens = 100
-        assert state.total_tokens == 100
-
         assert state.node_run_steps == 0
-        state.node_run_steps = 5
-        assert state.node_run_steps == 5
 
     def test_outputs_immutability(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
@@ -137,10 +56,6 @@ class TestGraphRuntimeState:  # noqa: PLR0904
 
         state.set_output("key1", "value1")
         assert state.get_output("key1") == "value1"
-
-        state.update_outputs({"key2": "value2", "key3": "value3"})
-        assert state.get_output("key2") == "value2"
-        assert state.get_output("key3") == "value3"
 
     def test_merge_response_outputs_appends_answer_and_overwrites_others(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
@@ -159,13 +74,12 @@ class TestGraphRuntimeState:  # noqa: PLR0904
         assert usage1 is not usage2
 
     def test_type_validation(self) -> None:
-        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
-
-        with pytest.raises(ValueError, match="total_tokens must be non-negative"):
-            state.total_tokens = -1
-
         with pytest.raises(ValueError, match="node_run_steps must be non-negative"):
-            state.node_run_steps = -1
+            GraphRuntimeState(
+                variable_pool=VariablePool(),
+                start_at=time(),
+                node_run_steps=-1,
+            )
 
     def test_helper_methods(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
@@ -175,11 +89,9 @@ class TestGraphRuntimeState:  # noqa: PLR0904
         assert state.node_run_steps == initial_steps + 1
 
         initial_tokens = state.total_tokens
-        state.add_tokens(50)
+        state.add_llm_usage(LLMUsage.from_metadata({"total_tokens": 50}))
         assert state.total_tokens == initial_tokens + 50
-
-        with pytest.raises(ValueError, match="tokens must be non-negative"):
-            state.add_tokens(-1)
+        assert state.llm_usage.total_tokens == 50
 
     def test_ready_queue_default_instantiation(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
@@ -200,33 +112,23 @@ class TestGraphRuntimeState:  # noqa: PLR0904
         assert restored.drain_deferred_ready_tasks() == [first, second]
         assert restored.drain_deferred_ready_tasks() == []
 
-    def test_drain_ready_tasks_to_deferred_returns_drained_tasks(self) -> None:
+    def test_drain_ready_tasks_to_deferred_moves_tasks(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
         first = StartTask(frame_id="root", node_id="a")
         second = StartTask(frame_id="child", node_id="b")
         state.ready_queue.put(first)
         state.ready_queue.put(second)
 
-        assert state.drain_ready_tasks_to_deferred() == [first, second]
+        state.drain_ready_tasks_to_deferred()
         assert state.ready_queue.qsize() == 0
         assert state.drain_deferred_ready_tasks() == [first, second]
-
-    def test_legacy_deferred_nodes_round_trip_until_scheduler_migrates(self) -> None:
-        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
-        state.register_deferred_node("legacy-node")
-
-        restored = GraphRuntimeState.from_snapshot(state.dumps())
-
-        assert restored.consume_deferred_nodes() == ["legacy-node"]
 
     def test_container_runtime_state_round_trips(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
         run = ContainerRunState(
             invocation_id="invocation-1",
-            kind="loop",
             frame_id="root",
             node_id="loop",
-            execution_id="exec-loop",
             started_at=datetime.fromtimestamp(1, UTC).replace(tzinfo=None),
             phase_data={"index": 1, "outputs": {"loop_round": 1}},
         )
@@ -235,7 +137,8 @@ class TestGraphRuntimeState:  # noqa: PLR0904
             kind="loop",
             parent_invocation_id="invocation-1",
             root_node_id="loop-start",
-            phase_data={"index": 1},
+            index=1,
+            started_at=datetime.fromtimestamp(1, UTC).replace(tzinfo=None),
             runtime_data=FrameRuntimeData(
                 variable_pool=VariablePool(),
                 outputs={},
@@ -253,98 +156,12 @@ class TestGraphRuntimeState:  # noqa: PLR0904
         assert restored.get_container_run("invocation-1") == run
         assert restored.get_container_frame("exec-loop:loop:1") == frame
 
-    def test_container_runtime_state_copy_is_stable_after_mutation(self) -> None:
+    def test_update_container_run_phase_data_preserves_existing_state(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
         run = ContainerRunState(
             invocation_id="invocation-1",
-            kind="loop",
-            frame_id="root",
-            node_id="loop",
-            execution_id="exec-loop",
-            started_at=datetime.fromtimestamp(1, UTC).replace(tzinfo=None),
-            phase_data={},
-        )
-        frame = ContainerFrameState(
-            frame_id="exec-loop:loop:1",
-            kind="loop",
-            parent_invocation_id="invocation-1",
-            root_node_id="loop-start",
-            phase_data={},
-            runtime_data=FrameRuntimeData(
-                variable_pool=VariablePool(),
-                outputs={},
-                llm_usage=LLMUsage.empty_usage(),
-                node_run_steps=0,
-                graph_node_states={},
-                graph_edge_states={},
-            ),
-        )
-        state.put_container_run(run)
-        state.put_container_frame(frame)
-
-        runs, frames = state._copy_container_state()
-        state.pop_container_run("invocation-1")
-        state.pop_container_frame("exec-loop:loop:1")
-
-        assert runs == {"invocation-1": run}
-        assert frames == {"exec-loop:loop:1": frame}
-
-    def test_container_run_claim_release_and_pop_semantics(self) -> None:
-        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
-        run = ContainerRunState(
-            invocation_id="invocation-1",
-            kind="loop",
-            frame_id="root",
-            node_id="loop",
-            execution_id="exec-loop",
-            started_at=datetime.fromtimestamp(1, UTC).replace(tzinfo=None),
-            phase_data={},
-        )
-        frame = ContainerFrameState(
-            frame_id="exec-loop:loop:1",
-            kind="loop",
-            parent_invocation_id="invocation-1",
-            root_node_id="loop-start",
-            phase_data={},
-            runtime_data=FrameRuntimeData(
-                variable_pool=VariablePool(),
-                outputs={},
-                llm_usage=LLMUsage.empty_usage(),
-                node_run_steps=0,
-                graph_node_states={},
-                graph_edge_states={},
-            ),
-        )
-        state.put_container_run(run)
-
-        assert state.claim_container_run("invocation-1") == run
-        assert state.get_container_run("invocation-1") == run
-        with pytest.raises(RuntimeError, match="already claimed"):
-            state.claim_container_run("invocation-1")
-        updated = run.model_copy(update={"phase_data": {"index": 2}})
-        state.put_container_run(updated)
-        with pytest.raises(RuntimeError, match="already claimed"):
-            state.claim_container_run("invocation-1")
-        state.release_container_run_claim("invocation-1")
-        assert state.claim_container_run("invocation-1") == updated
-        assert state.pop_container_run("invocation-1") == updated
-        with pytest.raises(KeyError):
-            state.get_container_run("invocation-1")
-        with pytest.raises(KeyError):
-            state.claim_container_run("invocation-1")
-        state.put_container_frame(frame)
-        assert state.has_container_frame("exec-loop:loop:1")
-        assert state.pop_container_frame("exec-loop:loop:1") == frame
-        assert not state.has_container_frame("exec-loop:loop:1")
-
-    def test_update_container_run_phase_data_preserves_live_claimed_state(self) -> None:
-        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
-        run = ContainerRunState(
-            invocation_id="invocation-1",
-            kind="iteration",
             frame_id="root",
             node_id="iteration",
-            execution_id="exec-iteration",
             started_at=datetime.fromtimestamp(1, UTC).replace(tzinfo=None),
             phase_data={
                 "inputs": {"iterator_selector": ["a", "b"]},
@@ -354,7 +171,6 @@ class TestGraphRuntimeState:  # noqa: PLR0904
             },
         )
         state.put_container_run(run)
-        state.claim_container_run("invocation-1")
 
         updated = state.update_container_run_phase_data(
             "invocation-1",
@@ -370,8 +186,6 @@ class TestGraphRuntimeState:  # noqa: PLR0904
             "completed_count": 1,
             "resume_pending": False,
         }
-        with pytest.raises(RuntimeError, match="already claimed"):
-            state.claim_container_run("invocation-1")
         assert state.pop_container_run("invocation-1") == updated
 
     def test_graph_execution_lazy_instantiation(self) -> None:
@@ -387,8 +201,8 @@ class TestGraphRuntimeState:  # noqa: PLR0904
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
         mock_graph = MagicMock()
 
-        state.configure(graph=mock_graph)
-        state.configure(graph=mock_graph)
+        state.attach_graph(mock_graph)
+        state.attach_graph(mock_graph)
 
         other_graph = MagicMock()
         with pytest.raises(
@@ -399,16 +213,17 @@ class TestGraphRuntimeState:  # noqa: PLR0904
 
     def test_read_only_wrapper_exposes_additional_state(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
-        state.configure()
-
         wrapper = ReadOnlyGraphRuntimeStateWrapper(state)
 
         assert wrapper.ready_queue_size == 0
         assert wrapper.exceptions_count == 0
 
     def test_read_only_wrapper_serializes_runtime_state(self) -> None:
-        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
-        state.total_tokens = 5
+        state = GraphRuntimeState(
+            variable_pool=VariablePool(),
+            start_at=time(),
+            llm_usage=LLMUsage.from_metadata({"total_tokens": 5}),
+        )
         state.set_output("result", {"success": True})
         state.ready_queue.put(StartTask(frame_id="root", node_id="node-1"))
 
@@ -423,10 +238,6 @@ class TestGraphRuntimeState:  # noqa: PLR0904
         variable_pool = VariablePool()
         variable_pool.add(("node1", "value"), "payload")
 
-        state = GraphRuntimeState(variable_pool=variable_pool, start_at=time())
-        state.total_tokens = 10
-        state.node_run_steps = 3
-        state.set_output("final", {"result": True})
         usage = LLMUsage.from_metadata({
             "prompt_tokens": 2,
             "completion_tokens": 3,
@@ -435,19 +246,26 @@ class TestGraphRuntimeState:  # noqa: PLR0904
             "currency": "USD",
             "latency": 0.5,
         })
-        state.llm_usage = usage
+        state = GraphRuntimeState(
+            variable_pool=variable_pool,
+            start_at=time(),
+            node_run_steps=3,
+            llm_usage=usage,
+        )
+        state.set_output("final", {"result": True})
         state.ready_queue.put(StartTask(frame_id="root", node_id="node-A"))
 
         graph_execution = state.graph_execution
         graph_execution.workflow_id = "wf-123"
         graph_execution.exceptions_count = 4
         graph_execution.started = True
+        graph_execution.error = ValueError("saved failure")
 
         snapshot = state.dumps()
 
         restored = GraphRuntimeState.from_snapshot(snapshot)
 
-        assert restored.total_tokens == 10
+        assert restored.total_tokens == 5
         assert restored.node_run_steps == 3
         assert restored.get_output("final") == {"result": True}
         assert restored.llm_usage.total_tokens == usage.total_tokens
@@ -465,63 +283,8 @@ class TestGraphRuntimeState:  # noqa: PLR0904
         assert restored_execution.workflow_id == "wf-123"
         assert restored_execution.exceptions_count == 4
         assert restored_execution.started is True
-
-    def test_from_snapshot_ignores_legacy_response_coordinator_payload(self) -> None:
-        payload = {
-            "version": "1.0",
-            "start_at": 1.0,
-            "total_tokens": 0,
-            "node_run_steps": 0,
-            "llm_usage": LLMUsage.empty_usage().model_dump(mode="json"),
-            "outputs": {},
-            "variable_pool": VariablePool().model_dump(mode="json"),
-            "ready_queue": InMemoryReadyQueue().dumps(),
-            "graph_execution": GraphExecution(workflow_id="wf").dumps(),
-            "paused_nodes": [],
-            "deferred_nodes": [],
-            "graph_state": {"nodes": {}, "edges": {}},
-            "response_coordinator": '{"type":"ResponseStreamCoordinator"}',
-        }
-
-        state = GraphRuntimeState.from_snapshot(payload)
-
-        assert state.outputs == {}
-
-    def test_loads_rehydrates_existing_instance(self) -> None:
-        variable_pool = VariablePool()
-        variable_pool.add(("node", "key"), "value")
-
-        state = GraphRuntimeState(variable_pool=variable_pool, start_at=time())
-        state.total_tokens = 7
-        state.node_run_steps = 2
-        state.set_output("foo", "bar")
-        state.ready_queue.put(StartTask(frame_id="root", node_id="node-1"))
-
-        execution = state.graph_execution
-        execution.workflow_id = "wf-456"
-        execution.started = True
-
-        snapshot = state.dumps()
-
-        restored = GraphRuntimeState(variable_pool=VariablePool(), start_at=0.0)
-        restored.loads(snapshot)
-
-        assert restored.total_tokens == 7
-        assert restored.node_run_steps == 2
-        assert restored.get_output("foo") == "bar"
-        assert restored.ready_queue.qsize() == 1
-        assert restored.ready_queue.get(timeout=0.01) == StartTask(
-            frame_id="root",
-            node_id="node-1",
-        )
-
-        restored_segment = restored.variable_pool.get(("node", "key"))
-        assert restored_segment is not None
-        assert restored_segment.value == "value"
-
-        restored_execution = restored.graph_execution
-        assert restored_execution.workflow_id == "wf-456"
-        assert restored_execution.started is True
+        assert isinstance(restored_execution.error, RuntimeError)
+        assert str(restored_execution.error) == "saved failure"
 
     def test_snapshot_restore_preserves_updated_conversation_variable(self) -> None:
         variable_pool = VariablePool.from_bootstrap(
@@ -567,14 +330,3 @@ class TestGraphRuntimeState:  # noqa: PLR0904
         assert restored_file.value.filename == "resume.pdf"
         assert isinstance(restored_files, ArrayFileSegment)
         assert restored_files.value[0].filename == "resume.pdf"
-
-    def test_snapshot_restore_preserves_file_variable_id(self) -> None:
-        restored = GraphRuntimeState.from_snapshot(
-            _HISTORICAL_FILE_SNAPSHOT_JSON_FROM_749751D_PARENT,
-        )
-
-        restored_segment = restored.variable_pool.get(("node1", "attachment"))
-        assert restored_segment is not None
-        assert restored_segment.value.id == "message-file-id"
-        assert restored_segment.value.type == "document"
-        assert restored_segment.value.reference == "upload-file-id"

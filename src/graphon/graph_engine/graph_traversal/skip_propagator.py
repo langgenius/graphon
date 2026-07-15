@@ -8,7 +8,6 @@ from graphon.graph.graph import Graph
 from graphon.graph_events.traversal import GraphEdgeSkippedEvent
 
 from ..graph_state_manager import GraphStateManager
-from ..ready_queue import ROOT_FRAME_ID
 
 
 @final
@@ -61,15 +60,7 @@ class SkipPropagator:
 
         # If any edge is taken, node may still execute
         if edge_states["has_taken"]:
-            # Enqueue node
-            if self._state_manager.enqueue_node(
-                frame_id=ROOT_FRAME_ID,
-                node_id=downstream_node_id,
-            ):
-                self._state_manager.start_execution(
-                    frame_id=ROOT_FRAME_ID,
-                    node_id=downstream_node_id,
-                )
+            self._state_manager.enqueue_node(downstream_node_id)
             return []
 
         # All edges are skipped, propagate skip to this node

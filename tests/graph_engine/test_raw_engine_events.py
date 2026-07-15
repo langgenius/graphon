@@ -134,7 +134,6 @@ def test_event_handler_collects_traversal_events_before_node_success() -> None:
     runtime_state.variable_pool = MagicMock()
     graph_execution = MagicMock()
     graph_execution.get_or_create_node_execution.return_value = MagicMock()
-    graph_execution.is_paused = False
     event_collector = MagicMock()
     edge_event = GraphEdgeTakenEvent(
         edge_id="edge-1",

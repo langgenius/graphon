@@ -22,44 +22,45 @@ class EdgeStateAnalysis(TypedDict):
 
 @final
 class GraphStateManager:
-    def __init__(self, graph: Graph, graph_runtime_state: GraphRuntimeState) -> None:
+    def __init__(
+        self,
+        graph: Graph,
+        graph_runtime_state: GraphRuntimeState,
+        frame_id: str,
+    ) -> None:
         """Initialize the state manager.
 
         Args:
             graph: The workflow graph
             graph_runtime_state: Runtime state owning ready task queues
+            frame_id: Execution frame managed by this instance
 
         """
         self._graph = graph
         self._graph_runtime_state = graph_runtime_state
-        self._lock = threading.RLock()
+        self._frame_id = frame_id
+        self._lock = threading.Lock()
 
-        # Execution tracking state
-        self._executing_tasks: set[StartTask] = set()
+        self._unfinished_nodes: set[str] = set()
 
     # ============= Node State Operations =============
 
-    def enqueue_node(self, *, frame_id: str, node_id: str) -> bool:
+    def enqueue_node(self, node_id: str) -> None:
         """Mark a node as TAKEN and add its task to the ready queue.
 
         This combines the state transition and enqueueing operations
         that always occur together when preparing a node for execution.
 
         Args:
-            frame_id: The ID of the execution frame that owns the task
             node_id: The ID of the node to enqueue
-
-        Returns:
-            True when the task was scheduled on the live ready queue.
 
         """
         with self._lock:
             self._graph.nodes[node_id].state = NodeState.TAKEN
-            paused = self._graph_runtime_state.graph_execution.is_paused
+            self._unfinished_nodes.add(node_id)
             self._graph_runtime_state.enqueue_ready_task(
-                StartTask(frame_id=frame_id, node_id=node_id),
+                StartTask(frame_id=self._frame_id, node_id=node_id),
             )
-            return not paused
 
     def mark_node_skipped(self, node_id: str) -> None:
         """Mark a node as SKIPPED.
@@ -98,19 +99,6 @@ class GraphStateManager:
 
             # Node is ready if at least one edge is TAKEN
             return any(edge.state == NodeState.TAKEN for edge in incoming_edges)
-
-    def get_node_state(self, node_id: str) -> NodeState:
-        """Get the current state of a node.
-
-        Args:
-            node_id: The ID of the node
-
-        Returns:
-            The current node state
-
-        """
-        with self._lock:
-            return self._graph.nodes[node_id].state
 
     # ============= Edge State Operations =============
 
@@ -155,19 +143,6 @@ class GraphStateManager:
                 ),
             )
 
-    def get_edge_state(self, edge_id: str) -> NodeState:
-        """Get the current state of an edge.
-
-        Args:
-            edge_id: The ID of the edge
-
-        Returns:
-            The current edge state
-
-        """
-        with self._lock:
-            return self._graph.edges[edge_id].state
-
     def categorize_branch_edges(
         self,
         node_id: str,
@@ -198,70 +173,25 @@ class GraphStateManager:
 
     # ============= Execution Tracking Operations =============
 
-    def start_execution(self, *, frame_id: str, node_id: str) -> None:
-        """Mark a task as executing.
+    def track_unfinished(self, node_id: str) -> None:
+        """Restore an unfinished node to this frame's execution tracking.
 
         Args:
-            frame_id: The ID of the execution frame that owns the task
-            node_id: The ID of the node starting execution
+            node_id: The ID of the unfinished node
 
         """
         with self._lock:
-            self._executing_tasks.add(StartTask(frame_id=frame_id, node_id=node_id))
+            self._unfinished_nodes.add(node_id)
 
-    def finish_execution(self, *, frame_id: str, node_id: str) -> None:
-        """Mark a task as no longer executing.
+    def finish_execution(self, node_id: str) -> None:
+        """Mark a node as no longer pending or running.
 
         Args:
-            frame_id: The ID of the execution frame that owns the task
             node_id: The ID of the node finishing execution
 
         """
         with self._lock:
-            self._executing_tasks.discard(StartTask(frame_id=frame_id, node_id=node_id))
-
-    def is_executing(self, *, frame_id: str, node_id: str) -> bool:
-        """Check if a task is currently executing.
-
-        Args:
-            frame_id: The ID of the execution frame that owns the task
-            node_id: The ID of the node to check
-
-        Returns:
-            True if the task is executing
-
-        """
-        with self._lock:
-            return (
-                StartTask(frame_id=frame_id, node_id=node_id) in self._executing_tasks
-            )
-
-    def get_executing_count(self) -> int:
-        """Get the count of currently executing nodes.
-
-        Returns:
-            Number of executing nodes
-
-        """
-        # This count is a best-effort snapshot and can change concurrently.
-        # Only use it for pause-drain checks where scheduling is already frozen.
-        with self._lock:
-            return len(self._executing_tasks)
-
-    def get_executing_nodes(self) -> set[StartTask]:
-        """Get a copy of the set of executing tasks.
-
-        Returns:
-            Set of tasks currently executing
-
-        """
-        with self._lock:
-            return self._executing_tasks.copy()
-
-    def clear_executing(self) -> None:
-        """Clear all executing nodes."""
-        with self._lock:
-            self._executing_tasks.clear()
+            self._unfinished_nodes.discard(node_id)
 
     # ============= Composite Operations =============
 
@@ -276,52 +206,8 @@ class GraphStateManager:
 
         """
         with self._lock:
-            return len(self._executing_tasks) == 0
-
-    def get_queue_depth(self) -> int:
-        """Get the current depth of the ready queue.
-
-        Returns:
-            Number of nodes in the ready queue
-
-        """
-        return self._graph_runtime_state.ready_queue.qsize()
+            return not self._unfinished_nodes
 
     def drain_ready_tasks_to_deferred(self) -> None:
         """Move all live ready tasks into the deferred ready queue."""
-        with self._lock:
-            for task in self._graph_runtime_state.drain_ready_tasks_to_deferred():
-                if isinstance(task, StartTask):
-                    self._executing_tasks.discard(task)
-
-    def get_execution_stats(self) -> dict[str, int]:
-        """Get execution statistics.
-
-        Returns:
-            Dictionary with execution statistics
-
-        """
-        with self._lock:
-            taken_nodes = sum(
-                1
-                for node in self._graph.nodes.values()
-                if node.state == NodeState.TAKEN
-            )
-            skipped_nodes = sum(
-                1
-                for node in self._graph.nodes.values()
-                if node.state == NodeState.SKIPPED
-            )
-            unknown_nodes = sum(
-                1
-                for node in self._graph.nodes.values()
-                if node.state == NodeState.UNKNOWN
-            )
-
-            return {
-                "queue_depth": self._graph_runtime_state.ready_queue.qsize(),
-                "executing": len(self._executing_tasks),
-                "taken_nodes": taken_nodes,
-                "skipped_nodes": skipped_nodes,
-                "unknown_nodes": unknown_nodes,
-            }
+        self._graph_runtime_state.drain_ready_tasks_to_deferred()

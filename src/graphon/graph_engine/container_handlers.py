@@ -6,19 +6,19 @@ from typing import Protocol
 from graphon.graph_events.base import GraphNodeEventBase
 from graphon.graph_events.node import NodeRunFailedEvent
 from graphon.nodes.container_effects import ContainerAwaitRequest
+from graphon.runtime.container_state import ContainerFrameState
 
 from .frames import ExecutionFrame
 
 
 class ContainerHandler(Protocol):
-    kind: str
+    @abstractmethod
+    def restore_frame(self, frame_state: ContainerFrameState) -> None: ...
 
     @abstractmethod
     def start_await(
         self,
         *,
-        frame_id: str,
-        node_id: str,
         invocation_id: str,
         request: ContainerAwaitRequest,
     ) -> None: ...
@@ -35,7 +35,6 @@ class ContainerHandler(Protocol):
     def should_collect(
         self,
         *,
-        frame: ExecutionFrame,
         event: GraphNodeEventBase,
     ) -> bool: ...
 
@@ -45,7 +44,7 @@ class ContainerHandler(Protocol):
         *,
         frame: ExecutionFrame,
         event: NodeRunFailedEvent,
-    ) -> bool: ...
+    ) -> None: ...
 
     @abstractmethod
-    def complete_frame(self, frame: ExecutionFrame) -> bool: ...
+    def complete_frame(self, frame: ExecutionFrame) -> None: ...

@@ -1,19 +1,16 @@
-from datetime import UTC, datetime
-
+from graphon.enums import ErrorHandleMode
 from graphon.nodes.answer.answer_node import AnswerNode
 from graphon.nodes.container_effects import IterationFrameRequest, LoopFrameRequest
-from graphon.nodes.iteration.entities import ErrorHandleMode, IterationNodeData
+from graphon.nodes.iteration.entities import IterationNodeData
 from graphon.nodes.iteration.iteration_node import IterationNode
 from graphon.nodes.loop.entities import LoopNodeData
 from graphon.nodes.loop.loop_node import LoopNode
 
 
 def test_container_await_requests_have_intrinsic_kind_tags() -> None:
-    started_at = datetime.now(UTC).replace(tzinfo=None)
-
     loop_request = LoopFrameRequest(
-        started_at=started_at,
         inputs={"loop_count": 1},
+        outputs={},
         loop_count=1,
         root_node_id="loop-start",
         loop_variable_selectors={},
@@ -21,8 +18,6 @@ def test_container_await_requests_have_intrinsic_kind_tags() -> None:
         index=0,
     )
     iteration_request = IterationFrameRequest(
-        started_at=started_at,
-        inputs={"iterator_selector": ["a"]},
         items=("a",),
         root_node_id="iteration-start",
         indexes=(0,),
@@ -43,6 +38,7 @@ def test_iteration_variable_mapping_filters_container_internal_selectors() -> No
                 "id": "iteration",
                 "data": {
                     "type": "iteration",
+                    "start_node_id": "iteration-start",
                     "iterator_selector": ["input", "items"],
                     "output_selector": ["child", "answer"],
                 },
@@ -73,6 +69,7 @@ def test_iteration_variable_mapping_filters_container_internal_selectors() -> No
         node_id="iteration",
         node_data=IterationNodeData.model_validate({
             "type": "iteration",
+            "start_node_id": "iteration-start",
             "iterator_selector": ["input", "items"],
             "output_selector": ["child", "answer"],
         }),
@@ -92,6 +89,7 @@ def test_loop_variable_mapping_filters_loop_internal_selectors() -> None:
                 "id": "loop",
                 "data": {
                     "type": "loop",
+                    "start_node_id": "loop-start",
                     "loop_count": 2,
                     "break_conditions": [],
                     "logical_operator": "and",
@@ -113,6 +111,7 @@ def test_loop_variable_mapping_filters_loop_internal_selectors() -> None:
         node_id="loop",
         node_data=LoopNodeData.model_validate({
             "type": "loop",
+            "start_node_id": "loop-start",
             "loop_count": 2,
             "break_conditions": [],
             "logical_operator": "and",

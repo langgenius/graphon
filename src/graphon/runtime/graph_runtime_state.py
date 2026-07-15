@@ -1,50 +1,35 @@
 from __future__ import annotations
 
-import importlib
 import json
 import threading
 from abc import abstractmethod
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from copy import deepcopy
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol
+from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 
-from pydantic import BaseModel, Field
-from pydantic_core import to_jsonable_python
+from pydantic import BaseModel, ConfigDict, Field
 
 from graphon.enums import NodeExecutionType, NodeState, NodeType
 from graphon.model_runtime.entities.llm_entities import LLMUsage
-from graphon.runtime.container_state import ContainerFrameState, ContainerRunState
+from graphon.runtime.container_state import (
+    ContainerFrameState,
+    ContainerRunState,
+    FrameRuntimeData,
+)
 from graphon.runtime.ready_queue import ReadyQueue
 from graphon.runtime.variable_pool import VariablePool
 
 if TYPE_CHECKING:
     from graphon.entities.pause_reason import PauseReason
-    from graphon.graph.graph import Graph
+    from graphon.graph_engine.ready_queue import ReadyTask
 
 
 class NodeExecutionProtocol(Protocol):
     """Structural interface for persisted per-node execution state."""
 
-    state: NodeState
     retry_count: int
     execution_id: str
-
-    @abstractmethod
-    def mark_started(self) -> None:
-        """Mark the node execution as started."""
-        ...
-
-    @abstractmethod
-    def mark_taken(self) -> None:
-        """Mark the node execution as successfully completed."""
-        ...
-
-    @abstractmethod
-    def mark_failed(self, error: str) -> None:
-        """Mark the node execution as failed with an error."""
-        ...
 
     @abstractmethod
     def increment_retry(self) -> None:
@@ -68,12 +53,6 @@ class GraphExecutionProtocol(Protocol):
     error: Exception | None
     exceptions_count: int
     pause_reasons: list[PauseReason]
-
-    @property
-    @abstractmethod
-    def node_executions(self) -> Mapping[Any, NodeExecutionProtocol]:
-        """Return the persisted node execution state keyed by ready task."""
-        ...
 
     @abstractmethod
     def start(self) -> None:
@@ -115,18 +94,6 @@ class GraphExecutionProtocol(Protocol):
         """Return the execution entity for a task, creating it when needed."""
         ...
 
-    @property
-    @abstractmethod
-    def is_paused(self) -> bool:
-        """Return whether the execution is currently paused."""
-        ...
-
-    @property
-    @abstractmethod
-    def has_error(self) -> bool:
-        """Return whether the execution has recorded an error."""
-        ...
-
     @abstractmethod
     def dumps(self) -> str:
         """Serialize execution state into a JSON payload."""
@@ -139,7 +106,7 @@ class GraphExecutionProtocol(Protocol):
 
 
 class NodeProtocol(Protocol):
-    """Structural interface for graph nodes."""
+    """Node behavior consumed by runtime state and response filtering."""
 
     id: str
     state: NodeState
@@ -154,6 +121,8 @@ class NodeProtocol(Protocol):
 
 
 class EdgeProtocol(Protocol):
+    """Edge data consumed by runtime state and response filtering."""
+
     id: str
     state: NodeState
     tail: str
@@ -162,9 +131,7 @@ class EdgeProtocol(Protocol):
 
 
 class GraphProtocol(Protocol):
-    """Structural interface required from graph instances attached
-    to the runtime state.
-    """
+    """Graph behavior consumed by runtime state and response filtering."""
 
     @property
     @abstractmethod
@@ -182,298 +149,38 @@ class GraphProtocol(Protocol):
     def get_outgoing_edges(self, node_id: str) -> Sequence[EdgeProtocol]: ...
 
 
-class _GraphStateSnapshot(BaseModel):
-    """Serializable graph state snapshot for node/edge states."""
+class _GraphRuntimeStateSnapshot(BaseModel):
+    """Validated serialized runtime state snapshot."""
 
-    nodes: dict[str, NodeState] = Field(default_factory=dict)
-    edges: dict[str, NodeState] = Field(default_factory=dict)
+    model_config = ConfigDict(frozen=True)
 
-
-@dataclass(slots=True)
-class _GraphRuntimeStateSnapshot:
-    """Immutable view of a serialized runtime state snapshot."""
-
+    version: Literal["1.0"]
     start_at: float
-    total_tokens: int
-    node_run_steps: int
+    node_run_steps: int = Field(ge=0)
     llm_usage: LLMUsage
     outputs: dict[str, object]
     variable_pool: VariablePool
-    has_variable_pool: bool
-    ready_queue_dump: str | None
-    graph_execution_dump: str | None
-    paused_nodes: tuple[str, ...]
-    deferred_nodes: tuple[str, ...]
-    deferred_ready_tasks_dump: str
-    container_runs: dict[str, ContainerRunState]
-    container_frames: dict[str, ContainerFrameState]
+    ready_queue: str
+    graph_execution: str
+    deferred_ready_tasks: str
+    container_runs: tuple[ContainerRunState, ...]
+    container_frames: tuple[ContainerFrameState, ...]
     graph_node_states: dict[str, NodeState]
     graph_edge_states: dict[str, NodeState]
 
 
-@dataclass(slots=True)
-class _GraphRuntimeExecutionData:
-    """Owned runtime data persisted across the graph execution lifecycle."""
+def _new_ready_queue() -> ReadyQueue:
+    from graphon.graph_engine.ready_queue import InMemoryReadyQueue  # noqa: PLC0415
 
-    variable_pool: VariablePool
-    start_at: float
-    total_tokens: int = 0
-    llm_usage: LLMUsage = field(default_factory=LLMUsage.empty_usage)
-    outputs: dict[str, Any] = field(default_factory=dict)
-    node_run_steps: int = 0
-
-    def __post_init__(self) -> None:
-        if self.total_tokens < 0:
-            msg = "total_tokens must be non-negative"
-            raise ValueError(msg)
-        if self.node_run_steps < 0:
-            msg = "node_run_steps must be non-negative"
-            raise ValueError(msg)
-        self.llm_usage = self.llm_usage.model_copy()
-        self.outputs = deepcopy(self.outputs)
-
-    def get_llm_usage(self) -> LLMUsage:
-        return self.llm_usage.model_copy()
-
-    def set_llm_usage(self, value: LLMUsage) -> None:
-        self.llm_usage = value.model_copy()
-
-    def get_outputs(self) -> dict[str, Any]:
-        return deepcopy(self.outputs)
-
-    def set_outputs(self, value: dict[str, Any]) -> None:
-        self.outputs = deepcopy(value)
-
-    def set_output(self, key: str, value: object) -> None:
-        self.outputs[key] = deepcopy(value)
-
-    def get_output(self, key: str, default: object = None) -> object:
-        return deepcopy(self.outputs.get(key, default))
-
-    def update_outputs(self, updates: dict[str, object]) -> None:
-        for key, value in updates.items():
-            self.outputs[key] = deepcopy(value)
-
-    def set_total_tokens(self, value: int) -> None:
-        if value < 0:
-            msg = "total_tokens must be non-negative"
-            raise ValueError(msg)
-        self.total_tokens = value
-
-    def add_tokens(self, tokens: int) -> None:
-        if tokens < 0:
-            msg = "tokens must be non-negative"
-            raise ValueError(msg)
-        self.total_tokens += tokens
-
-    def set_node_run_steps(self, value: int) -> None:
-        if value < 0:
-            msg = "node_run_steps must be non-negative"
-            raise ValueError(msg)
-        self.node_run_steps = value
-
-    def increment_node_run_steps(self) -> None:
-        self.node_run_steps += 1
-
-    def apply_snapshot(self, snapshot: _GraphRuntimeStateSnapshot) -> None:
-        self.start_at = snapshot.start_at
-        self.total_tokens = snapshot.total_tokens
-        self.node_run_steps = snapshot.node_run_steps
-        self.llm_usage = snapshot.llm_usage.model_copy()
-        self.outputs = deepcopy(snapshot.outputs)
-        if snapshot.has_variable_pool:
-            self.variable_pool = snapshot.variable_pool
+    return InMemoryReadyQueue()
 
 
-@dataclass(slots=True)
-class _GraphRuntimeSuspensionState:
-    """Owned suspend/resume state that is restored around graph execution."""
+def _new_graph_execution(workflow_id: str = "") -> GraphExecutionProtocol:
+    from graphon.graph_engine.domain.graph_execution import (  # noqa: PLC0415
+        GraphExecution,
+    )
 
-    pending_graph_execution_workflow_id: str | None = None
-    paused_nodes: set[str] = field(default_factory=set)
-    deferred_nodes: set[str] = field(default_factory=set)
-    container_runs: dict[str, ContainerRunState] = field(default_factory=dict)
-    container_frames: dict[str, ContainerFrameState] = field(default_factory=dict)
-    # Active worker claims are in-flight only; snapshots are stable-boundary state.
-    container_run_claims: set[str] = field(default_factory=set)
-    pending_graph_node_states: dict[str, NodeState] | None = None
-    pending_graph_edge_states: dict[str, NodeState] | None = None
-
-    def register_paused_node(self, node_id: str) -> None:
-        self.paused_nodes.add(node_id)
-
-    def get_paused_nodes(self) -> list[str]:
-        return list(self.paused_nodes)
-
-    def consume_paused_nodes(self) -> list[str]:
-        nodes = list(self.paused_nodes)
-        self.paused_nodes.clear()
-        return nodes
-
-    def register_deferred_node(self, node_id: str) -> None:
-        self.deferred_nodes.add(node_id)
-
-    def get_deferred_nodes(self) -> list[str]:
-        return list(self.deferred_nodes)
-
-    def consume_deferred_nodes(self) -> list[str]:
-        nodes = list(self.deferred_nodes)
-        self.deferred_nodes.clear()
-        return nodes
-
-    def apply_snapshot(self, snapshot: _GraphRuntimeStateSnapshot) -> None:
-        self.paused_nodes = set(snapshot.paused_nodes)
-        self.deferred_nodes = set(snapshot.deferred_nodes)
-        self.container_runs = dict(snapshot.container_runs)
-        self.container_frames = dict(snapshot.container_frames)
-        self.container_run_claims = set()
-        self.pending_graph_node_states = snapshot.graph_node_states or None
-        self.pending_graph_edge_states = snapshot.graph_edge_states or None
-
-    def snapshot_graph_state(
-        self,
-        graph: GraphProtocol | Graph | None,
-    ) -> _GraphStateSnapshot:
-        if graph is None:
-            if (
-                self.pending_graph_node_states is None
-                and self.pending_graph_edge_states is None
-            ):
-                return _GraphStateSnapshot()
-            return _GraphStateSnapshot(
-                nodes=self.pending_graph_node_states or {},
-                edges=self.pending_graph_edge_states or {},
-            )
-
-        nodes = graph.nodes
-        edges = graph.edges
-        if not isinstance(nodes, Mapping) or not isinstance(edges, Mapping):
-            return _GraphStateSnapshot()
-
-        node_states = {}
-        for node_id, node in nodes.items():
-            if isinstance(node_id, str):
-                node_states[node_id] = node.state
-
-        edge_states = {}
-        for edge_id, edge in edges.items():
-            if isinstance(edge_id, str):
-                edge_states[edge_id] = edge.state
-
-        return _GraphStateSnapshot(nodes=node_states, edges=edge_states)
-
-    def apply_pending_graph_state(self, graph: GraphProtocol | Graph | None) -> None:
-        if graph is None:
-            return
-        if self.pending_graph_node_states:
-            for node_id, state in self.pending_graph_node_states.items():
-                node = graph.nodes.get(node_id)
-                if node is not None:
-                    node.state = state
-        if self.pending_graph_edge_states:
-            for edge_id, state in self.pending_graph_edge_states.items():
-                edge = graph.edges.get(edge_id)
-                if edge is not None:
-                    edge.state = state
-        self.pending_graph_node_states = None
-        self.pending_graph_edge_states = None
-
-
-class _GraphRuntimeBindings:
-    """Owned runtime collaborators and graph attachment lifecycle."""
-
-    def __init__(
-        self,
-        *,
-        runtime_state: GraphRuntimeState,
-        ready_queue: ReadyQueue | None = None,
-        graph_execution: GraphExecutionProtocol | None = None,
-        execution_context: AbstractContextManager[object] | None = None,
-    ) -> None:
-        self._runtime_state = runtime_state
-        self.graph: GraphProtocol | Graph | None = None
-        self.ready_queue: ReadyQueue | None = ready_queue
-        self.deferred_ready_queue: ReadyQueue = runtime_state.create_ready_queue()
-        self.graph_execution: GraphExecutionProtocol | None = graph_execution
-        self.execution_context: AbstractContextManager[object] = (
-            execution_context if execution_context is not None else nullcontext(None)
-        )
-
-    def attach_graph(
-        self,
-        graph: GraphProtocol | Graph,
-        suspension_state: _GraphRuntimeSuspensionState,
-    ) -> None:
-        if self.graph is not None and self.graph is not graph:
-            msg = "GraphRuntimeState already attached to a different graph instance"
-            raise ValueError(msg)
-
-        self.graph = graph
-
-        suspension_state.apply_pending_graph_state(graph)
-
-    def configure(
-        self,
-        suspension_state: _GraphRuntimeSuspensionState,
-        *,
-        graph: GraphProtocol | Graph | None = None,
-    ) -> None:
-        if graph is not None:
-            self.attach_graph(graph, suspension_state)
-
-        _ = self.get_ready_queue()
-        _ = self.get_graph_execution()
-
-    def get_ready_queue(self) -> ReadyQueue:
-        if self.ready_queue is None:
-            self.ready_queue = self._runtime_state.create_ready_queue()
-        return self.ready_queue
-
-    def get_deferred_ready_queue(self) -> ReadyQueue:
-        return self.deferred_ready_queue
-
-    def get_graph_execution(self) -> GraphExecutionProtocol:
-        if self.graph_execution is None:
-            self.graph_execution = self._runtime_state.create_graph_execution()
-        return self.graph_execution
-
-    def set_execution_context(
-        self,
-        value: AbstractContextManager[object] | None,
-    ) -> None:
-        self.execution_context = value if value is not None else nullcontext(None)
-
-    def restore_ready_queue(self, payload: str | None) -> None:
-        if payload is None:
-            self.ready_queue = None
-            return
-        self.ready_queue = self._runtime_state.create_ready_queue()
-        self.ready_queue.loads(payload)
-
-    def restore_deferred_ready_queue(self, payload: str) -> None:
-        queue = self._runtime_state.create_ready_queue()
-        queue.loads(payload)
-        self.deferred_ready_queue = queue
-
-    def restore_graph_execution(
-        self,
-        payload: str | None,
-        suspension_state: _GraphRuntimeSuspensionState,
-    ) -> None:
-        self.graph_execution = None
-        suspension_state.pending_graph_execution_workflow_id = None
-
-        if payload is None:
-            return
-
-        try:
-            execution_payload = json.loads(payload)
-            workflow_id = execution_payload.get("workflow_id")
-            suspension_state.pending_graph_execution_workflow_id = workflow_id
-        except (json.JSONDecodeError, TypeError, AttributeError):
-            suspension_state.pending_graph_execution_workflow_id = None
-
-        self.get_graph_execution().loads(payload)
+    return GraphExecution(workflow_id=workflow_id)
 
 
 class GraphRuntimeState:  # noqa: PLR0904
@@ -486,253 +193,265 @@ class GraphRuntimeState:  # noqa: PLR0904
     throughout the execution should be part of `GraphInitParams` instead.
     """
 
-    _execution_data: _GraphRuntimeExecutionData
-    _bindings: _GraphRuntimeBindings
-    _suspension_state: _GraphRuntimeSuspensionState
-    _container_state_lock: threading.RLock
+    _container_state_lock: threading.Lock
 
     def __init__(
         self,
         *,
         variable_pool: VariablePool,
         start_at: float,
-        total_tokens: int = 0,
         llm_usage: LLMUsage | None = None,
         outputs: dict[str, object] | None = None,
         node_run_steps: int = 0,
         ready_queue: ReadyQueue | None = None,
+        deferred_ready_queue: ReadyQueue | None = None,
         graph_execution: GraphExecutionProtocol | None = None,
-        graph: GraphProtocol | Graph | None = None,
         execution_context: AbstractContextManager[object] | None = None,
     ) -> None:
-        self._execution_data = _GraphRuntimeExecutionData(
-            variable_pool=variable_pool,
-            start_at=start_at,
-            total_tokens=total_tokens,
-            llm_usage=llm_usage or LLMUsage.empty_usage(),
-            outputs=outputs or {},
-            node_run_steps=node_run_steps,
+        if node_run_steps < 0:
+            msg = "node_run_steps must be non-negative"
+            raise ValueError(msg)
+        self._variable_pool = variable_pool
+        self._start_at = start_at
+        self._llm_usage = (
+            llm_usage if llm_usage is not None else LLMUsage.empty_usage()
+        ).model_copy()
+        self._outputs = deepcopy(outputs) if outputs is not None else {}
+        self._node_run_steps = node_run_steps
+        self._graph: GraphProtocol | None = None
+        self._ready_queue = (
+            ready_queue if ready_queue is not None else _new_ready_queue()
         )
-        self._suspension_state = _GraphRuntimeSuspensionState()
-        self._container_state_lock = threading.RLock()
-        self._bindings = _GraphRuntimeBindings(
-            runtime_state=self,
-            ready_queue=ready_queue,
-            graph_execution=graph_execution,
-            execution_context=execution_context,
+        self._deferred_ready_queue = (
+            deferred_ready_queue
+            if deferred_ready_queue is not None
+            else _new_ready_queue()
         )
-        if graph is not None:
-            self.attach_graph(graph)
+        self._graph_execution = (
+            graph_execution if graph_execution is not None else _new_graph_execution()
+        )
+        self._execution_context = (
+            execution_context if execution_context is not None else nullcontext()
+        )
+        self._container_runs: dict[str, ContainerRunState] = {}
+        self._container_frames: dict[str, ContainerFrameState] = {}
+        self._pending_graph_node_states: dict[str, NodeState] = {}
+        self._pending_graph_edge_states: dict[str, NodeState] = {}
+        self._container_state_lock = threading.Lock()
 
     @property
     def variable_pool(self) -> VariablePool:
-        return self._execution_data.variable_pool
+        return self._variable_pool
 
     @property
     def ready_queue(self) -> ReadyQueue:
-        return self._bindings.get_ready_queue()
+        return self._ready_queue
+
+    @property
+    def deferred_ready_queue(self) -> ReadyQueue:
+        return self._deferred_ready_queue
 
     @property
     def graph_execution(self) -> GraphExecutionProtocol:
-        return self._bindings.get_graph_execution()
+        return self._graph_execution
 
     @property
     def execution_context(self) -> AbstractContextManager[object]:
-        return self._bindings.execution_context
-
-    @execution_context.setter
-    def execution_context(
-        self,
-        value: AbstractContextManager[object] | None,
-    ) -> None:
-        self._bindings.set_execution_context(value)
+        return self._execution_context
 
     @property
     def start_at(self) -> float:
-        return self._execution_data.start_at
-
-    @start_at.setter
-    def start_at(self, value: float) -> None:
-        self._execution_data.start_at = value
+        return self._start_at
 
     @property
     def total_tokens(self) -> int:
-        return self._execution_data.total_tokens
-
-    @total_tokens.setter
-    def total_tokens(self, value: int) -> None:
-        self._execution_data.set_total_tokens(value)
+        return self._llm_usage.total_tokens
 
     @property
     def llm_usage(self) -> LLMUsage:
-        return self._execution_data.get_llm_usage()
+        return self._llm_usage.model_copy()
 
-    @llm_usage.setter
-    def llm_usage(self, value: LLMUsage) -> None:
-        self._execution_data.set_llm_usage(value)
+    def add_llm_usage(self, usage: LLMUsage) -> None:
+        if usage.total_tokens <= 0:
+            return
+        if self._llm_usage.total_tokens == 0:
+            self._llm_usage = usage.model_copy()
+        else:
+            self._llm_usage = self._llm_usage.plus(usage)
 
     @property
-    def outputs(self) -> dict[str, Any]:
-        return self._execution_data.get_outputs()
-
-    @outputs.setter
-    def outputs(self, value: dict[str, Any]) -> None:
-        self._execution_data.set_outputs(value)
+    def outputs(self) -> dict[str, object]:
+        return deepcopy(self._outputs)
 
     def set_output(self, key: str, value: object) -> None:
-        self._execution_data.set_output(key, value)
+        self._outputs[key] = deepcopy(value)
 
     def get_output(self, key: str, default: object = None) -> object:
-        return self._execution_data.get_output(key, default)
-
-    def update_outputs(self, updates: dict[str, object]) -> None:
-        self._execution_data.update_outputs(updates)
+        return deepcopy(self._outputs.get(key, default))
 
     def merge_response_outputs(self, outputs: Mapping[str, object]) -> None:
         for key, value in outputs.items():
             if key == "answer":
-                existing = self._execution_data.get_output("answer", "")
+                existing = self.get_output("answer", "")
                 if existing:
-                    self._execution_data.set_output("answer", f"{existing}{value}")
+                    self.set_output("answer", f"{existing}{value}")
                 else:
-                    self._execution_data.set_output("answer", value)
+                    self.set_output("answer", value)
                 continue
-            self._execution_data.set_output(key, value)
+            self.set_output(key, value)
 
     @property
     def node_run_steps(self) -> int:
-        return self._execution_data.node_run_steps
-
-    @node_run_steps.setter
-    def node_run_steps(self, value: int) -> None:
-        self._execution_data.set_node_run_steps(value)
+        return self._node_run_steps
 
     def increment_node_run_steps(self) -> None:
-        self._execution_data.increment_node_run_steps()
+        self._node_run_steps += 1
 
-    def add_tokens(self, tokens: int) -> None:
-        self._execution_data.add_tokens(tokens)
-
-    def attach_graph(self, graph: GraphProtocol | Graph) -> None:
+    def attach_graph(self, graph: GraphProtocol) -> None:
         """Attach the materialized graph to the runtime state."""
-        self._bindings.attach_graph(graph, self._suspension_state)
+        if self._graph is not None and self._graph is not graph:
+            msg = "GraphRuntimeState already attached to a different graph instance"
+            raise ValueError(msg)
+        self._graph = graph
+        self._apply_pending_graph_state()
 
-    def configure(
-        self,
-        *,
-        graph: GraphProtocol | Graph | None = None,
-    ) -> None:
-        """Ensure core collaborators are initialized with the provided context."""
-        self._bindings.configure(self._suspension_state, graph=graph)
+    def _apply_pending_graph_state(self) -> None:
+        if self._graph is None:
+            return
+        for node_id, state in self._pending_graph_node_states.items():
+            self._graph.nodes[node_id].state = state
+        for edge_id, state in self._pending_graph_edge_states.items():
+            self._graph.edges[edge_id].state = state
+        self._pending_graph_node_states.clear()
+        self._pending_graph_edge_states.clear()
 
     def dumps(self) -> str:
         """Serialize runtime state into a JSON string."""
-        container_runs, container_frames = self._copy_container_state()
-        snapshot: dict[str, Any] = {
-            "version": "1.0",
-            "start_at": self._execution_data.start_at,
-            "total_tokens": self._execution_data.total_tokens,
-            "node_run_steps": self._execution_data.node_run_steps,
-            "llm_usage": self._execution_data.llm_usage.model_dump(mode="json"),
-            "outputs": self._execution_data.get_outputs(),
-            "variable_pool": self.variable_pool.model_dump(mode="json"),
-            "ready_queue": self.ready_queue.dumps(),
-            "graph_execution": self.graph_execution.dumps(),
-            "paused_nodes": list(self._suspension_state.paused_nodes),
-            "deferred_nodes": list(self._suspension_state.deferred_nodes),
-            "deferred_ready_tasks": self._bindings.get_deferred_ready_queue().dumps(),
-            "container_runs": {
-                key: value.model_dump(mode="json")
-                for key, value in container_runs.items()
-            },
-            "container_frames": {
-                key: value.model_dump(mode="json")
-                for key, value in container_frames.items()
-            },
-        }
-
-        snapshot["graph_state"] = self._suspension_state.snapshot_graph_state(
-            self._bindings.graph,
-        )
-
-        return json.dumps(to_jsonable_python(snapshot))
+        with self._container_state_lock:
+            container_runs = tuple(self._container_runs.values())
+            container_frames = tuple(self._container_frames.values())
+        if self._graph is None:
+            graph_node_states = self._pending_graph_node_states
+            graph_edge_states = self._pending_graph_edge_states
+        else:
+            graph_node_states = {
+                node_id: node.state for node_id, node in self._graph.nodes.items()
+            }
+            graph_edge_states = {
+                edge_id: edge.state for edge_id, edge in self._graph.edges.items()
+            }
+        return _GraphRuntimeStateSnapshot(
+            version="1.0",
+            start_at=self._start_at,
+            node_run_steps=self._node_run_steps,
+            llm_usage=self._llm_usage,
+            outputs=self.outputs,
+            variable_pool=self.variable_pool,
+            ready_queue=self.ready_queue.dumps(),
+            graph_execution=self.graph_execution.dumps(),
+            deferred_ready_tasks=self._deferred_ready_queue.dumps(),
+            container_runs=container_runs,
+            container_frames=container_frames,
+            graph_node_states=graph_node_states,
+            graph_edge_states=graph_edge_states,
+        ).model_dump_json()
 
     @classmethod
     def from_snapshot(
         cls: type[GraphRuntimeState],
-        data: str | Mapping[str, Any],
+        data: str,
     ) -> GraphRuntimeState:
         """Restore runtime state from a serialized snapshot."""
-        snapshot = cls._parse_snapshot_payload(data)
+        snapshot = _GraphRuntimeStateSnapshot.model_validate_json(data)
+        ready_queue = _new_ready_queue()
+        ready_queue.loads(snapshot.ready_queue)
+        deferred_ready_queue = _new_ready_queue()
+        deferred_ready_queue.loads(snapshot.deferred_ready_tasks)
+        execution_payload = json.loads(snapshot.graph_execution)
+        graph_execution = _new_graph_execution(
+            workflow_id=execution_payload["workflow_id"],
+        )
+        graph_execution.loads(snapshot.graph_execution)
 
         state = cls(
             variable_pool=snapshot.variable_pool,
             start_at=snapshot.start_at,
-            total_tokens=snapshot.total_tokens,
             llm_usage=snapshot.llm_usage,
             outputs=snapshot.outputs,
             node_run_steps=snapshot.node_run_steps,
+            ready_queue=ready_queue,
+            deferred_ready_queue=deferred_ready_queue,
+            graph_execution=graph_execution,
         )
-        state._apply_snapshot(snapshot)
+        state._container_runs = {
+            run.invocation_id: run for run in snapshot.container_runs
+        }
+        state._container_frames = {
+            frame.frame_id: frame for frame in snapshot.container_frames
+        }
+        state._pending_graph_node_states = snapshot.graph_node_states
+        state._pending_graph_edge_states = snapshot.graph_edge_states
         return state
 
-    def loads(self, data: str | Mapping[str, Any]) -> None:
-        """Restore runtime state from a serialized snapshot (legacy API)."""
-        snapshot = self._parse_snapshot_payload(data)
-        self._apply_snapshot(snapshot)
+    def defer_ready_task(self, task: ReadyTask) -> None:
+        self._deferred_ready_queue.put(task)
 
-    def register_paused_node(self, node_id: str) -> None:
-        """Record a node that should resume when execution is continued."""
-        self._suspension_state.register_paused_node(node_id)
+    def drain_deferred_ready_tasks(self) -> list[ReadyTask]:
+        return self._deferred_ready_queue.drain()
 
-    def get_paused_nodes(self) -> list[str]:
-        """Retrieve the list of paused nodes without mutating internal state."""
-        return self._suspension_state.get_paused_nodes()
-
-    def consume_paused_nodes(self) -> list[str]:
-        """Retrieve and clear the list of paused nodes awaiting resume."""
-        return self._suspension_state.consume_paused_nodes()
-
-    def defer_ready_task(self, task: object) -> None:
-        self._bindings.get_deferred_ready_queue().put(task)
-
-    def defer_ready_tasks(self, tasks: Sequence[object]) -> None:
-        for task in tasks:
-            self.defer_ready_task(task)
-
-    def drain_deferred_ready_tasks(self) -> list[object]:
-        return self._bindings.get_deferred_ready_queue().drain()
-
-    def enqueue_ready_task(self, task: object) -> None:
-        if self.graph_execution.is_paused:
+    def enqueue_ready_task(self, task: ReadyTask) -> None:
+        if self.graph_execution.paused:
             self.defer_ready_task(task)
             return
         self.ready_queue.put(task)
 
-    def drain_ready_tasks_to_deferred(self) -> list[object]:
+    def drain_ready_tasks_to_deferred(self) -> None:
         tasks = self.ready_queue.drain()
-        self.defer_ready_tasks(tasks)
-        return tasks
+        for task in tasks:
+            self.defer_ready_task(task)
 
-    def register_deferred_node(self, node_id: str) -> None:
-        """Record a node that became ready during pause and should resume later."""
-        self._suspension_state.register_deferred_node(node_id)
-
-    def get_deferred_nodes(self) -> list[str]:
-        """Retrieve deferred nodes without mutating internal state."""
-        return self._suspension_state.get_deferred_nodes()
-
-    def consume_deferred_nodes(self) -> list[str]:
-        """Retrieve and clear deferred nodes awaiting resume."""
-        return self._suspension_state.consume_deferred_nodes()
+    def snapshot_frame(
+        self,
+        *,
+        variable_pool_scope: Literal["local", "parent"] = "local",
+        copy_variable_pool: bool = True,
+    ) -> FrameRuntimeData:
+        graph = self._graph
+        if graph is None:
+            msg = "graph must be attached before snapshotting a frame"
+            raise RuntimeError(msg)
+        return FrameRuntimeData(
+            variable_pool=(
+                (
+                    self.variable_pool.model_copy(deep=True)
+                    if copy_variable_pool
+                    else self.variable_pool
+                )
+                if variable_pool_scope == "local"
+                else "parent"
+            ),
+            outputs=self.outputs,
+            llm_usage=self.llm_usage,
+            node_run_steps=self.node_run_steps,
+            graph_node_states={
+                node_id: node.state for node_id, node in graph.nodes.items()
+            },
+            graph_edge_states={
+                edge_id: edge.state for edge_id, edge in graph.edges.items()
+            },
+        )
 
     def put_container_run(self, run: ContainerRunState) -> None:
         with self._container_state_lock:
-            self._suspension_state.container_runs[run.invocation_id] = run
+            self._container_runs[run.invocation_id] = run
 
     def get_container_run(self, invocation_id: str) -> ContainerRunState:
         with self._container_state_lock:
-            return self._suspension_state.container_runs[invocation_id]
+            return self._container_runs[invocation_id]
+
+    def container_runs(self) -> tuple[ContainerRunState, ...]:
+        with self._container_state_lock:
+            return tuple(self._container_runs.values())
 
     def update_container_run_phase_data(
         self,
@@ -740,192 +459,29 @@ class GraphRuntimeState:  # noqa: PLR0904
         updates: Mapping[str, object],
     ) -> ContainerRunState:
         with self._container_state_lock:
-            run = self._suspension_state.container_runs[invocation_id]
+            run = self._container_runs[invocation_id]
             updated_run = run.model_copy(
                 update={"phase_data": {**dict(run.phase_data), **dict(updates)}},
             )
-            self._suspension_state.container_runs[invocation_id] = updated_run
+            self._container_runs[invocation_id] = updated_run
             return updated_run
-
-    def claim_container_run(self, invocation_id: str) -> ContainerRunState:
-        with self._container_state_lock:
-            if invocation_id in self._suspension_state.container_run_claims:
-                msg = f"container run {invocation_id} is already claimed"
-                raise RuntimeError(msg)
-            run = self._suspension_state.container_runs[invocation_id]
-            self._suspension_state.container_run_claims.add(invocation_id)
-            return run
-
-    def release_container_run_claim(self, invocation_id: str) -> None:
-        with self._container_state_lock:
-            self._suspension_state.container_run_claims.discard(invocation_id)
 
     def pop_container_run(self, invocation_id: str) -> ContainerRunState:
         with self._container_state_lock:
-            self._suspension_state.container_run_claims.discard(invocation_id)
-            return self._suspension_state.container_runs.pop(invocation_id)
+            return self._container_runs.pop(invocation_id)
 
     def put_container_frame(self, frame: ContainerFrameState) -> None:
         with self._container_state_lock:
-            self._suspension_state.container_frames[frame.frame_id] = frame
-
-    def has_container_frame(self, frame_id: str) -> bool:
-        with self._container_state_lock:
-            return frame_id in self._suspension_state.container_frames
+            self._container_frames[frame.frame_id] = frame
 
     def get_container_frame(self, frame_id: str) -> ContainerFrameState:
         with self._container_state_lock:
-            return self._suspension_state.container_frames[frame_id]
+            return self._container_frames[frame_id]
 
     def container_frames(self) -> tuple[ContainerFrameState, ...]:
         with self._container_state_lock:
-            return tuple(self._suspension_state.container_frames.values())
+            return tuple(self._container_frames.values())
 
     def pop_container_frame(self, frame_id: str) -> ContainerFrameState:
         with self._container_state_lock:
-            return self._suspension_state.container_frames.pop(frame_id)
-
-    def _copy_container_state(
-        self,
-    ) -> tuple[dict[str, ContainerRunState], dict[str, ContainerFrameState]]:
-        with self._container_state_lock:
-            return (
-                dict(self._suspension_state.container_runs),
-                dict(self._suspension_state.container_frames),
-            )
-
-    # ------------------------------------------------------------------
-    # Builders
-    # ------------------------------------------------------------------
-    def create_ready_queue(self) -> ReadyQueue:
-        """Create the ready queue collaborator used by this runtime state."""
-        return self._build_ready_queue()
-
-    def create_graph_execution(self) -> GraphExecutionProtocol:
-        """Create the graph execution aggregate used by this runtime state."""
-        return self._build_graph_execution()
-
-    def _build_ready_queue(self) -> ReadyQueue:
-        # Import lazily to avoid breaching architecture boundaries
-        # enforced by import-linter.
-        module = importlib.import_module("graphon.graph_engine.ready_queue")
-        in_memory_cls = module.InMemoryReadyQueue
-        return in_memory_cls()
-
-    def _build_graph_execution(self) -> GraphExecutionProtocol:
-        # Lazily import to keep the runtime domain decoupled from graph_engine modules.
-        module = importlib.import_module("graphon.graph_engine.domain.graph_execution")
-        graph_execution_cls = module.GraphExecution
-        workflow_id = self._suspension_state.pending_graph_execution_workflow_id or ""
-        self._suspension_state.pending_graph_execution_workflow_id = None
-        return graph_execution_cls(workflow_id=workflow_id)
-
-    # ------------------------------------------------------------------
-    # Snapshot helpers
-    # ------------------------------------------------------------------
-    @classmethod
-    def _parse_snapshot_payload(
-        cls,
-        data: str | Mapping[str, Any],
-    ) -> _GraphRuntimeStateSnapshot:
-        payload: dict[str, Any]
-        payload = json.loads(data) if isinstance(data, str) else dict(data)
-
-        version = payload.get("version")
-        if version != "1.0":
-            msg = f"Unsupported GraphRuntimeState snapshot version: {version}"
-            raise ValueError(msg)
-
-        start_at = float(payload.get("start_at", 0.0))
-
-        total_tokens = int(payload.get("total_tokens", 0))
-        if total_tokens < 0:
-            msg = "total_tokens must be non-negative"
-            raise ValueError(msg)
-
-        node_run_steps = int(payload.get("node_run_steps", 0))
-        if node_run_steps < 0:
-            msg = "node_run_steps must be non-negative"
-            raise ValueError(msg)
-
-        llm_usage = LLMUsage.model_validate(payload.get("llm_usage", {}))
-
-        outputs_payload = deepcopy(payload.get("outputs", {}))
-
-        variable_pool_payload = payload.get("variable_pool")
-        has_variable_pool = variable_pool_payload is not None
-        variable_pool = (
-            VariablePool.model_validate(variable_pool_payload)
-            if has_variable_pool
-            else VariablePool()
-        )
-
-        graph_state_payload = payload.get("graph_state", {}) or {}
-        graph_node_states = _coerce_graph_state_map(graph_state_payload, "nodes")
-        graph_edge_states = _coerce_graph_state_map(graph_state_payload, "edges")
-
-        return _GraphRuntimeStateSnapshot(
-            start_at=start_at,
-            total_tokens=total_tokens,
-            node_run_steps=node_run_steps,
-            llm_usage=llm_usage,
-            outputs=outputs_payload,
-            variable_pool=variable_pool,
-            has_variable_pool=has_variable_pool,
-            ready_queue_dump=payload.get("ready_queue"),
-            graph_execution_dump=payload.get("graph_execution"),
-            paused_nodes=tuple(map(str, payload.get("paused_nodes", []))),
-            deferred_nodes=tuple(map(str, payload.get("deferred_nodes", []))),
-            deferred_ready_tasks_dump=str(
-                payload.get(
-                    "deferred_ready_tasks",
-                    _empty_ready_queue_dump(),
-                ),
-            ),
-            container_runs={
-                str(key): ContainerRunState.model_validate(value)
-                for key, value in dict(payload.get("container_runs", {})).items()
-            },
-            container_frames={
-                str(key): ContainerFrameState.model_validate(value)
-                for key, value in dict(payload.get("container_frames", {})).items()
-            },
-            graph_node_states=graph_node_states,
-            graph_edge_states=graph_edge_states,
-        )
-
-    def _apply_snapshot(self, snapshot: _GraphRuntimeStateSnapshot) -> None:
-        self._execution_data.apply_snapshot(snapshot)
-        self._bindings.restore_ready_queue(snapshot.ready_queue_dump)
-        self._bindings.restore_deferred_ready_queue(
-            snapshot.deferred_ready_tasks_dump,
-        )
-        self._bindings.restore_graph_execution(
-            snapshot.graph_execution_dump,
-            self._suspension_state,
-        )
-        self._suspension_state.apply_snapshot(snapshot)
-        self._suspension_state.apply_pending_graph_state(self._bindings.graph)
-
-
-def _coerce_graph_state_map(payload: Any, key: str) -> dict[str, NodeState]:
-    if not isinstance(payload, Mapping):
-        return {}
-    raw_map = payload.get(key, {})
-    if not isinstance(raw_map, Mapping):
-        return {}
-    result: dict[str, NodeState] = {}
-    for node_id, raw_state in raw_map.items():
-        if not isinstance(node_id, str):
-            continue
-        try:
-            result[node_id] = NodeState(str(raw_state))
-        except ValueError:
-            continue
-    return result
-
-
-def _empty_ready_queue_dump() -> str:
-    module = importlib.import_module("graphon.graph_engine.ready_queue")
-    queue_cls = module.InMemoryReadyQueue
-    return queue_cls().dumps()
+            return self._container_frames.pop(frame_id)

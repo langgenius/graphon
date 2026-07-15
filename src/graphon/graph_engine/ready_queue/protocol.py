@@ -1,6 +1,5 @@
 """Serialized state models for GraphEngine ready queue implementations."""
 
-from collections.abc import Sequence
 from typing import Annotated, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -16,8 +15,8 @@ class StartTask(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     kind: Literal["start"] = "start"
-    frame_id: str = Field(description="Execution frame that owns the task")
-    node_id: str = Field(description="Node to execute within the frame")
+    frame_id: str
+    node_id: str
 
 
 class ResumeTask(BaseModel):
@@ -26,10 +25,8 @@ class ResumeTask(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     kind: Literal["resume"] = "resume"
-    invocation_id: str = Field(description="Suspended invocation to resume")
-    result: ContainerRunResult = Field(
-        description="Container result to send into the suspended invocation",
-    )
+    invocation_id: str
+    result: ContainerRunResult
 
 
 ReadyTask = Annotated[StartTask | ResumeTask, Field(discriminator="kind")]
@@ -42,11 +39,5 @@ class ReadyQueueState(BaseModel):
     and expected by loads() for ready queue serialization.
     """
 
-    type: str = Field(
-        description="Queue implementation type (e.g., 'InMemoryReadyQueue')",
-    )
-    version: str = Field(description="Serialization format version")
-    items: Sequence[ReadyTask] = Field(
-        default_factory=list,
-        description="List of ready tasks in the queue",
-    )
+    version: Literal["1.0"]
+    items: tuple[ReadyTask, ...]

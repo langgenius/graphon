@@ -4,7 +4,7 @@ import importlib
 import os
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -444,13 +444,7 @@ class SlimDslNodeFactory:
         self,
         graph_runtime_state: GraphRuntimeState,
     ) -> SlimDslNodeFactory:
-        return SlimDslNodeFactory(
-            graph_config=self.graph_config,
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=graph_runtime_state,
-            credentials=self.credentials,
-            dependencies=self.dependencies,
-        )
+        return replace(self, graph_runtime_state=graph_runtime_state)
 
     def create_node(self, node_config: NodeConfigDict) -> Node:
         request = self._node_request(node_config)

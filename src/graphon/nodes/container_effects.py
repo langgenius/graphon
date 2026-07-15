@@ -1,23 +1,20 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from graphon.enums import ErrorHandleMode
 from graphon.node_events.base import NodeRunResult
 
-if TYPE_CHECKING:
-    from graphon.nodes.iteration.entities import ErrorHandleMode
 
+class LoopFrameRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
 
-@dataclass(frozen=True, slots=True)
-class LoopFrameRequest:
-    kind: Literal["loop"] = field(default="loop", init=False)
-    started_at: datetime
+    kind: Literal["loop"] = "loop"
     inputs: Mapping[str, object]
+    outputs: Mapping[str, object]
     loop_count: int
     root_node_id: str
     loop_variable_selectors: Mapping[str, Sequence[str]]
@@ -25,11 +22,10 @@ class LoopFrameRequest:
     index: int
 
 
-@dataclass(frozen=True, slots=True)
-class IterationFrameRequest:
-    kind: Literal["iteration"] = field(default="iteration", init=False)
-    started_at: datetime
-    inputs: Mapping[str, object]
+class IterationFrameRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["iteration"] = "iteration"
     items: tuple[object, ...]
     root_node_id: str
     indexes: tuple[int, ...]
@@ -42,76 +38,16 @@ class IterationFrameRequest:
 ContainerAwaitRequest = LoopFrameRequest | IterationFrameRequest
 
 
-class LoopExecutionSucceeded(BaseModel):
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
-
-    kind: Literal["loop_succeeded"] = "loop_succeeded"
-    started_at: datetime
-    inputs: Mapping[str, object] = Field(default_factory=dict)
-    outputs: Mapping[str, object] = Field(default_factory=dict)
-    metadata: Mapping[str, object] = Field(default_factory=dict)
-    steps: int
-    node_run_result: NodeRunResult
-
-
-class LoopExecutionFailed(BaseModel):
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
-
-    kind: Literal["loop_failed"] = "loop_failed"
-    started_at: datetime
-    inputs: Mapping[str, object] = Field(default_factory=dict)
-    outputs: Mapping[str, object] = Field(default_factory=dict)
-    metadata: Mapping[str, object] = Field(default_factory=dict)
-    steps: int
-    error: str
-    node_run_result: NodeRunResult
-
-
-class LoopFrameCompleted(BaseModel):
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
-
-    kind: Literal["loop_frame_completed"] = "loop_frame_completed"
-    next_index: int
-
-
-class IterationExecutionSucceeded(BaseModel):
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
-
-    kind: Literal["iteration_succeeded"] = "iteration_succeeded"
-    started_at: datetime
-    inputs: Mapping[str, object] = Field(default_factory=dict)
-    outputs: Mapping[str, object] = Field(default_factory=dict)
-    metadata: Mapping[str, object] = Field(default_factory=dict)
-    steps: int
-    node_run_result: NodeRunResult
-
-
-class IterationExecutionFailed(BaseModel):
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
-
-    kind: Literal["iteration_failed"] = "iteration_failed"
-    started_at: datetime
-    inputs: Mapping[str, object] = Field(default_factory=dict)
-    outputs: Mapping[str, object] = Field(default_factory=dict)
-    metadata: Mapping[str, object] = Field(default_factory=dict)
-    steps: int
-    error: str
-    node_run_result: NodeRunResult
-
-
-class IterationFramesRequested(BaseModel):
+class ContainerExecutionResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    kind: Literal["iteration_frames_requested"] = "iteration_frames_requested"
-    indexes: tuple[int, ...]
+    kind: Literal["result"] = "result"
+    metadata: Mapping[str, object]
+    steps: int
+    node_run_result: NodeRunResult
 
 
 ContainerRunResult = Annotated[
-    LoopExecutionSucceeded
-    | LoopExecutionFailed
-    | LoopFrameCompleted
-    | IterationExecutionSucceeded
-    | IterationExecutionFailed
-    | IterationFramesRequested,
+    ContainerExecutionResult | LoopFrameRequest | IterationFrameRequest,
     Field(discriminator="kind"),
 ]
