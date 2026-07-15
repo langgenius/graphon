@@ -7,7 +7,6 @@ from .factory import (
 )
 from .input_entities import VariableEntity, VariableEntityType
 from .segment_group import SegmentGroup
-from .sensitivity import is_sensitive
 from .segments import (
     ArrayAnySegment,
     ArrayFileSegment,
@@ -23,6 +22,7 @@ from .segments import (
     Segment,
     StringSegment,
 )
+from .sensitivity import is_sensitive
 from .types import SegmentType
 from .variables import (
     ArrayAnyVariable,
