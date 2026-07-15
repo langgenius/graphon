@@ -198,9 +198,9 @@ class Executor:
             result.append((key_group.text, value_group.text))
             log_result.append((key_group.log, value_group.log))
 
+        # result and log_result are appended in lockstep, so they are truthy together.
         if result:
             self.params = result
-        if log_result:
             self._log_params = log_result
 
     def _init_headers(self) -> None:
@@ -217,17 +217,14 @@ class Executor:
 
         """
         headers_group = convert_template(self.variable_pool, self.node_data.headers)
-        headers = headers_group.text
-        self.headers = {
+        self.headers = self._parse_header_string(headers_group.text)
+        self._log_headers = self._parse_header_string(headers_group.log)
+
+    @staticmethod
+    def _parse_header_string(headers: str) -> dict[str, str]:
+        return {
             key.strip(): (value[0].strip() if value else "")
             for line in headers.splitlines()
-            if line.strip()
-            for key, *value in [line.split(":", 1)]
-        }
-        headers_log = headers_group.log
-        self._log_headers = {
-            key.strip(): (value[0].strip() if value else "")
-            for line in headers_log.splitlines()
             if line.strip()
             for key, *value in [line.split(":", 1)]
         }
@@ -296,28 +293,29 @@ class Executor:
             raise FileFetchError(msg)
         self.content = self._file_manager.download(file_variable.value)
 
-    def _init_urlencoded_body(self, data: Sequence[BodyData]) -> None:
+    def _convert_body_kv(
+        self,
+        data: Sequence[BodyData],
+        *,
+        text_only: bool = False,
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """Resolve body items into parallel real and log-safe key/value dicts."""
         real_data: dict[str, str] = {}
         log_data: dict[str, str] = {}
         for item in data:
+            if text_only and item.type != "text":
+                continue
             key_group = convert_template(self.variable_pool, item.key)
             val_group = convert_template(self.variable_pool, item.value)
             real_data[key_group.text] = val_group.text
             log_data[key_group.log] = val_group.log
-        self.data = real_data
-        self._log_data = log_data
+        return real_data, log_data
+
+    def _init_urlencoded_body(self, data: Sequence[BodyData]) -> None:
+        self.data, self._log_data = self._convert_body_kv(data)
 
     def _init_form_data_body(self, data: Sequence[BodyData]) -> None:
-        real_data: dict[str, str] = {}
-        log_data: dict[str, str] = {}
-        for item in data:
-            if item.type == "text":
-                key_group = convert_template(self.variable_pool, item.key)
-                val_group = convert_template(self.variable_pool, item.value)
-                real_data[key_group.text] = val_group.text
-                log_data[key_group.log] = val_group.log
-        self.data = real_data
-        self._log_data = log_data
+        self.data, self._log_data = self._convert_body_kv(data, text_only=True)
         file_selectors = self._build_form_file_selectors(data)
         files_list = self._resolve_form_files(file_selectors)
         self.files = self._build_request_files(files_list)
@@ -376,16 +374,14 @@ class Executor:
             ),
         ]
 
-    def _assembling_headers(self) -> dict[str, Any]:
+    def _assembling_headers(
+        self,
+        source: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        # ``source`` defaults to the real request headers; pass ``_log_headers`` to
+        # assemble the log-safe (obfuscated) variant.
         authorization = deepcopy(self.auth)
-        headers = deepcopy(self.headers) or {}
-        headers.update(self._build_authorization_headers(authorization))
-        return self._apply_content_type_header(headers)
-
-    def _assembling_log_headers(self) -> dict[str, Any]:
-        """Like _assembling_headers() but starts from _log_headers."""
-        authorization = deepcopy(self.auth)
-        headers = deepcopy(self._log_headers) or {}
+        headers = deepcopy(self.headers if source is None else source) or {}
         headers.update(self._build_authorization_headers(authorization))
         return self._apply_content_type_header(headers)
 
@@ -543,7 +539,7 @@ class Executor:
         return path
 
     def _build_log_headers(self, boundary: str) -> dict[str, Any]:
-        headers = self._assembling_log_headers()
+        headers = self._assembling_headers(self._log_headers)
         body = self.node_data.body
         if body is None:
             return headers
