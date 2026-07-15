@@ -7,6 +7,7 @@ from .factory import (
 )
 from .input_entities import VariableEntity, VariableEntityType
 from .segment_group import SegmentGroup
+from .sensitivity import is_sensitive
 from .segments import (
     ArrayAnySegment,
     ArrayFileSegment,
@@ -78,5 +79,6 @@ __all__ = [
     "VariableEntityType",
     "build_segment",
     "build_segment_with_type",
+    "is_sensitive",
     "segment_to_variable",
 ]
