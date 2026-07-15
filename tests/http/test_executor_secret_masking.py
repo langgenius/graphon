@@ -240,6 +240,22 @@ def test_secret_in_form_data_body_is_masked_in_log() -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Tests: secret embedded in the URL itself
+# ---------------------------------------------------------------------------
+
+
+def test_secret_in_url_is_masked_in_log() -> None:
+    executor = _build_executor(url="https://api.example.com/{{#env.API_TOKEN#}}/data")
+    log = executor.to_log()
+    # Real request field keeps the raw secret
+    assert SECRET in executor.url
+    # The log must NOT contain the raw secret
+    assert SECRET not in log
+    # The obfuscated token (with '*') appears in the log path
+    assert OBFUSCATED in log
+
+
 def test_non_secret_json_body_log_is_unchanged() -> None:
     executor = _build_executor(
         method="post",

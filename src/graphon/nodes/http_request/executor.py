@@ -308,32 +308,19 @@ class Executor:
         self._log_data = log_data
 
     def _init_form_data_body(self, data: Sequence[BodyData]) -> None:
-        self.data = self._build_form_text_data(data)
-        self._log_data = self._build_form_text_log_data(data)
+        real_data: dict[str, str] = {}
+        log_data: dict[str, str] = {}
+        for item in data:
+            if item.type == "text":
+                key_group = convert_template(self.variable_pool, item.key)
+                val_group = convert_template(self.variable_pool, item.value)
+                real_data[key_group.text] = val_group.text
+                log_data[key_group.log] = val_group.log
+        self.data = real_data
+        self._log_data = log_data
         file_selectors = self._build_form_file_selectors(data)
         files_list = self._resolve_form_files(file_selectors)
         self.files = self._build_request_files(files_list)
-
-    def _build_form_text_data(self, data: Sequence[BodyData]) -> dict[str, str]:
-        return {
-            convert_template(
-                self.variable_pool,
-                item.key,
-            ).text: convert_template(self.variable_pool, item.value).text
-            for item in data
-            if item.type == "text"
-        }
-
-    def _build_form_text_log_data(self, data: Sequence[BodyData]) -> dict[str, str]:
-        """Log-safe copy of form text data: keys and values rendered via .log."""
-        return {
-            convert_template(
-                self.variable_pool,
-                item.key,
-            ).log: convert_template(self.variable_pool, item.value).log
-            for item in data
-            if item.type == "text"
-        }
 
     def _build_form_file_selectors(
         self,
@@ -595,8 +582,10 @@ class Executor:
         elif self.content:
             body_string = self._build_content_log_body()
         elif self.data and self.node_data.body.type == "x-www-form-urlencoded":
-            log_data = self._log_data if self._log_data is not None else self.data
-            body_string = urlencode(log_data)
+            if self._log_data is None:
+                msg = "_log_data not set; urlencoded body init always populates it"
+                raise RuntimeError(msg)
+            body_string = urlencode(self._log_data)
         elif self.data and self.node_data.body.type == "form-data":
             body_string = self._build_form_data_log_body(boundary)
         elif self.json:
@@ -606,11 +595,7 @@ class Executor:
                 else json.dumps(self.json)
             )
         elif self.node_data.body.type == "raw-text":
-            item = self._require_single_body_item(
-                self.node_data.body.data,
-                body_type="raw-text",
-            )
-            body_string = item.value
+            body_string = self._log_content if self._log_content is not None else ""
         return body_string
 
     def _has_loggable_files(self) -> bool:
@@ -653,9 +638,10 @@ class Executor:
 
     def _build_form_data_log_body(self, boundary: str) -> str:
         body_string = ""
-        # Use _log_data (secret-safe) if available, otherwise fall back to self.data.
-        display_data = self._log_data if self._log_data is not None else self.data
-        for key, value in (display_data or {}).items():
+        if self._log_data is None:
+            msg = "_log_data not set; form-data body init always populates it"
+            raise RuntimeError(msg)
+        for key, value in self._log_data.items():
             body_string += f"--{boundary}\r\n"
             body_string += f'Content-Disposition: form-data; name="{key}"\r\n\r\n'
             body_string += f"{value}\r\n"
