@@ -80,11 +80,28 @@ def _build_pool() -> VariablePool:
 
 
 _Method = Literal[
-    "get", "post", "put", "patch", "delete", "head", "options",
-    "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS",
+    "get",
+    "post",
+    "put",
+    "patch",
+    "delete",
+    "head",
+    "options",
+    "GET",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "HEAD",
+    "OPTIONS",
 ]
 _BodyType = Literal[
-    "none", "form-data", "x-www-form-urlencoded", "raw-text", "json", "binary",
+    "none",
+    "form-data",
+    "x-www-form-urlencoded",
+    "raw-text",
+    "json",
+    "binary",
 ]
 
 
