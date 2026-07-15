@@ -17,11 +17,6 @@ from graphon.dsl.entities import (
     PluginDependencyType,
 )
 from graphon.dsl.errors import DslError
-from graphon.dsl.node_factory import (
-    SlimDslNodeFactory,
-    _TextOnlyFileSaver,
-    _UnsupportedHttpFileReferenceFactory,
-)
 from graphon.entities.graph_config import NodeConfigDict
 from graphon.file.enums import FileTransferMethod, FileType
 from graphon.file.models import File
@@ -45,7 +40,6 @@ from graphon.model_runtime.entities.model_entities import (
     ModelType,
 )
 from graphon.nodes.http_request.exc import HttpRequestNodeError
-from graphon.nodes.http_request.node import HttpRequestNode
 from graphon.nodes.list_operator.node import ListOperatorNode
 from graphon.nodes.llm.exc import LLMNodeError
 from graphon.nodes.parameter_extractor.parameter_extractor_node import (
@@ -364,8 +358,8 @@ def _failed_event(events: list[object]) -> NodeRunFailedEvent:
 def _dsl_node_factory(
     *,
     variables: Sequence[tuple[Sequence[str], Any]] = (),
-) -> SlimDslNodeFactory:
-    return SlimDslNodeFactory(
+) -> node_factory_module.SlimDslNodeFactory:
+    return node_factory_module.SlimDslNodeFactory(
         graph_config={"nodes": [], "edges": []},
         graph_init_params=build_graph_init_params(
             graph_config={"nodes": [], "edges": []},
@@ -516,7 +510,7 @@ def test_slim_dsl_node_factory_rebinds_graph_runtime_state() -> None:
             plugin_unique_identifier=_OPENAI_PLUGIN_ID,
         ),
     ]
-    factory = SlimDslNodeFactory(
+    factory = node_factory_module.SlimDslNodeFactory(
         graph_config=graph_config,
         graph_init_params=graph_init_params,
         graph_runtime_state=original_runtime_state,
@@ -545,7 +539,7 @@ def test_slim_dsl_node_factory_rebinds_graph_runtime_state() -> None:
 @pytest.mark.parametrize(
     ("node_data", "expected_type"),
     [
-        (_http_request_data(), HttpRequestNode),
+        (_http_request_data(), http_request_node_module.HttpRequestNode),
         (_variable_aggregator_data(), VariableAggregatorNode),
         (_assigner_v1_data(), VariableAssignerNodeV1),
         (_assigner_v2_data(), VariableAssignerNodeV2),
@@ -654,7 +648,10 @@ def test_dify_exported_app_loads_category_one_and_two_nodes(
         start_inputs={"query": "Where is my refund?", "items": ["first"]},
     )
 
-    assert isinstance(engine.graph.nodes["http"], HttpRequestNode)
+    assert isinstance(
+        engine.graph.nodes["http"],
+        http_request_node_module.HttpRequestNode,
+    )
     assert isinstance(engine.graph.nodes["aggregate"], VariableAggregatorNode)
     assert isinstance(engine.graph.nodes["assign"], VariableAssignerNodeV2)
     assert isinstance(engine.graph.nodes["list"], ListOperatorNode)
@@ -837,7 +834,7 @@ def test_http_request_node_file_body_download_fails_cleanly() -> None:
 
 def test_http_file_reference_factory_fails_with_http_node_error() -> None:
     with pytest.raises(HttpRequestNodeError, match="only supports text responses"):
-        _UnsupportedHttpFileReferenceFactory().build_from_mapping(
+        node_factory_module._UnsupportedHttpFileReferenceFactory().build_from_mapping(
             mapping={
                 "tool_file_id": "tool-file",
                 "transfer_method": FileTransferMethod.TOOL_FILE,
@@ -847,7 +844,7 @@ def test_http_file_reference_factory_fails_with_http_node_error() -> None:
 
 def test_default_llm_file_saver_fails_with_llm_node_error() -> None:
     with pytest.raises(LLMNodeError, match="only supports text responses"):
-        _TextOnlyFileSaver().save_remote_url(
+        node_factory_module._TextOnlyFileSaver().save_remote_url(
             "https://example.com/image.png",
             FileType.IMAGE,
         )
