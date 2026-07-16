@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from graphon.entities import GraphFailureSource
 from graphon.file import File, FileTransferMethod, FileType
 from graphon.graph_engine.domain.graph_execution import GraphExecution
 from graphon.graph_engine.ready_queue.in_memory import InMemoryReadyQueue
@@ -379,3 +380,26 @@ class TestGraphRuntimeState:
         assert restored_segment.value.id == "message-file-id"
         assert restored_segment.value.type == "document"
         assert restored_segment.value.reference == "upload-file-id"
+
+
+def test_graph_execution_snapshot_preserves_failure_source() -> None:
+    state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+    source = GraphFailureSource(
+        node_execution_id="execution-a",
+        node_id="node-a",
+    )
+    state.graph_execution.fail(RuntimeError("boom"), failure_source=source)
+
+    restored = GraphRuntimeState.from_snapshot(state.dumps())
+
+    assert restored.graph_execution.failure_source == source
+
+
+def test_graph_execution_loads_legacy_snapshot_without_failure_source() -> None:
+    execution = GraphExecution(workflow_id="wf")
+    payload = json.loads(execution.dumps())
+    payload.pop("failure_source", None)
+
+    execution.loads(json.dumps(payload))
+
+    assert execution.failure_source is None

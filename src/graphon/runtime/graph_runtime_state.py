@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 from pydantic import BaseModel, Field
 from pydantic_core import to_jsonable_python
 
+from graphon.entities.graph_failure_source import GraphFailureSource
 from graphon.enums import NodeExecutionType, NodeState, NodeType
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.runtime.ready_queue import ReadyQueueProtocol
@@ -65,6 +66,7 @@ class GraphExecutionProtocol(Protocol):
     aborted: bool
     paused: bool
     error: Exception | None
+    failure_source: GraphFailureSource | None
     exceptions_count: int
     pause_reasons: list[PauseReason]
 
@@ -95,8 +97,13 @@ class GraphExecutionProtocol(Protocol):
         ...
 
     @abstractmethod
-    def fail(self, error: Exception) -> None:
-        """Record an unrecoverable error and end execution."""
+    def fail(
+        self,
+        error: Exception,
+        *,
+        failure_source: GraphFailureSource | None = None,
+    ) -> None:
+        """Record an unrecoverable error and optional node source."""
         ...
 
     @abstractmethod
