@@ -47,6 +47,7 @@ from .exc import (
 
 logger = logging.getLogger(__name__)
 _PDFIUM_LOCK = threading.Lock()
+_UNSTRUCTURED_PARTITION_ENDPOINT = "/general/v0/general"
 
 _MIME_PLAIN_TEXT_TYPES = frozenset((
     "text/plain",
@@ -210,6 +211,16 @@ class _TextExtractorRegistry:
         )
 
 
+def _to_unstructured_server_url(api_url: str | None) -> str | None:
+    if api_url and _UNSTRUCTURED_PARTITION_ENDPOINT in api_url:
+        return api_url[: -len(_UNSTRUCTURED_PARTITION_ENDPOINT)]
+    return api_url
+
+
+def _to_unstructured_timeout_ms(timeout_seconds: float) -> int:
+    return int(timeout_seconds * 1000)
+
+
 def _partition_file_via_unstructured_api(
     file_content: bytes,
     *,
@@ -219,17 +230,6 @@ def _partition_file_via_unstructured_api(
     from unstructured.staging.base import elements_from_dicts  # noqa: PLC0415
     from unstructured_client import UnstructuredClient  # noqa: PLC0415
     from unstructured_client.models import operations, shared  # noqa: PLC0415
-
-    api_key = unstructured_api_config.api_key or ""
-    api_url = unstructured_api_config.api_url
-    partition_endpoint = "/general/v0/general"
-    server_url = (
-        api_url[: -len(partition_endpoint)]
-        if api_url and partition_endpoint in api_url
-        else api_url
-    )
-    timeout_seconds = unstructured_api_config.timeout_seconds
-    timeout_ms = int(timeout_seconds * 1000)
 
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp_file:
         temp_file.write(file_content)
@@ -243,13 +243,17 @@ def _partition_file_via_unstructured_api(
                 partition_parameters=shared.PartitionParameters(files=files),
             )
             with UnstructuredClient(
-                api_key_auth=api_key,
-                server_url=server_url,
+                api_key_auth=unstructured_api_config.api_key or "",
+                server_url=_to_unstructured_server_url(
+                    unstructured_api_config.api_url,
+                ),
             ) as client:
                 response = client.general.partition(
                     request=request,
                     retries=None,
-                    timeout_ms=timeout_ms,
+                    timeout_ms=_to_unstructured_timeout_ms(
+                        unstructured_api_config.timeout_seconds,
+                    ),
                 )
             return elements_from_dicts(response.elements or [])
     finally:

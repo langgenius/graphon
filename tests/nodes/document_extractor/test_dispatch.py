@@ -414,13 +414,44 @@ def test_partition_unstructured_file_uses_local_partition() -> None:
 
 
 @pytest.mark.parametrize(
+    ("api_url", "expected"),
+    [
+        (
+            "https://api.example/general/v0/general",
+            "https://api.example",
+        ),
+        ("https://api.example", "https://api.example"),
+        (None, None),
+    ],
+)
+def test_to_unstructured_server_url(
+    api_url: str | None,
+    expected: str | None,
+) -> None:
+    assert document_extractor_node._to_unstructured_server_url(api_url) == expected
+
+
+@pytest.mark.parametrize(
+    ("timeout_seconds", "expected"),
+    [(300.0, 300_000), (12.5, 12_500)],
+)
+def test_to_unstructured_timeout_ms(
+    timeout_seconds: float,
+    expected: int,
+) -> None:
+    assert (
+        document_extractor_node._to_unstructured_timeout_ms(timeout_seconds) == expected
+    )
+
+
+@pytest.mark.parametrize(
     ("timeout_seconds", "expected_timeout_ms"),
     [(300.0, 300_000), (12.5, 12_500)],
 )
 def test_partition_file_via_unstructured_api_configures_sdk_request(
     monkeypatch: pytest.MonkeyPatch,
     timeout_seconds: float,
-    expected_timeout_ms: int | None,
+    expected_timeout_ms: int,
 ) -> None:
     partition_calls: list[dict[str, Any]] = []
 
