@@ -1,5 +1,6 @@
 import io
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, ClassVar, Self
 from unittest.mock import MagicMock
@@ -15,6 +16,26 @@ from graphon.nodes.document_extractor.exc import (
 )
 
 _PDF_BYTES = b"%PDF"
+
+
+@pytest.mark.parametrize(
+    "timeout_seconds",
+    [0, -1, 3600.1, float("inf"), float("-inf"), float("nan")],
+)
+def test_unstructured_api_config_rejects_invalid_timeout(
+    timeout_seconds: float,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"timeout_seconds must be finite and in the range \(0, 3600\]",
+    ):
+        UnstructuredApiConfig(timeout_seconds=timeout_seconds)
+
+
+def test_unstructured_api_config_accepts_max_timeout() -> None:
+    config = UnstructuredApiConfig(timeout_seconds=3600)
+
+    assert config.timeout_seconds == 3600
 
 
 def _minimal_text_pdf(text: str) -> bytes:
@@ -396,6 +417,157 @@ def test_partition_unstructured_file_uses_local_partition() -> None:
 
     assert extracted == "slide"
     assert prepared == [True]
+
+
+@pytest.mark.parametrize(
+    ("api_url", "expected"),
+    [
+        (
+            "https://api.example/general/v0/general",
+            "https://api.example",
+        ),
+        ("https://api.example", "https://api.example"),
+        (
+            "https://api.example/general/v0/general/status",
+            "https://api.example/general/v0/general/status",
+        ),
+        (None, None),
+    ],
+)
+def test_to_unstructured_server_url(
+    api_url: str | None,
+    expected: str | None,
+) -> None:
+    assert document_extractor_node._to_unstructured_server_url(api_url) == expected
+
+
+@pytest.mark.parametrize(
+    ("timeout_seconds", "expected"),
+    [(300.0, 300_000), (12.5, 12_500)],
+)
+def test_to_unstructured_timeout_ms(
+    timeout_seconds: float,
+    expected: int,
+) -> None:
+    assert (
+        document_extractor_node._to_unstructured_timeout_ms(timeout_seconds) == expected
+    )
+
+
+@pytest.mark.parametrize(
+    ("timeout_seconds", "expected_timeout_ms"),
+    [(300.0, 300_000), (12.5, 12_500)],
+)
+def test_partition_file_via_unstructured_api_configures_sdk_request(
+    monkeypatch: pytest.MonkeyPatch,
+    timeout_seconds: float,
+    expected_timeout_ms: int,
+) -> None:
+    partition_calls: list[dict[str, Any]] = []
+
+    def partition(**kwargs: Any) -> SimpleNamespace:
+        request = kwargs["request"]
+        files = request.partition_parameters.files
+        partition_calls.append({
+            "content": files.content.read(),
+            "file_name": files.file_name,
+            "retries": kwargs["retries"],
+            "timeout_ms": kwargs["timeout_ms"],
+        })
+        return SimpleNamespace(
+            elements=[
+                {
+                    "type": "NarrativeText",
+                    "text": "remote text",
+                    "metadata": {},
+                },
+            ],
+        )
+
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.general.partition.side_effect = partition
+    client_factory = MagicMock(return_value=client)
+    monkeypatch.setattr("unstructured_client.UnstructuredClient", client_factory)
+
+    elements = document_extractor_node._partition_file_via_unstructured_api(
+        b"document",
+        suffix=".doc",
+        unstructured_api_config=UnstructuredApiConfig(
+            api_url="https://api.example/general/v0/general",
+            api_key="secret",
+            timeout_seconds=timeout_seconds,
+        ),
+    )
+
+    assert [element.text for element in elements] == ["remote text"]
+    client_factory.assert_called_once_with(
+        api_key_auth="secret",
+        server_url="https://api.example",
+    )
+    assert len(partition_calls) == 1
+    partition_call = partition_calls[0]
+    assert partition_call["content"] == b"document"
+    assert Path(partition_call["file_name"]).suffix == ".doc"
+    assert not Path(partition_call["file_name"]).exists()
+    assert partition_call["retries"] is None
+    assert partition_call["timeout_ms"] == expected_timeout_ms
+    client.__exit__.assert_called_once()
+
+
+def test_partition_file_via_unstructured_api_uses_default_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.general.partition.return_value = SimpleNamespace(elements=[])
+    monkeypatch.setattr(
+        "unstructured_client.UnstructuredClient",
+        MagicMock(return_value=client),
+    )
+
+    document_extractor_node._partition_file_via_unstructured_api(
+        b"document",
+        suffix=".doc",
+        unstructured_api_config=UnstructuredApiConfig(
+            api_url="https://api.example",
+        ),
+    )
+
+    assert client.general.partition.call_args.kwargs["timeout_ms"] == 300_000
+
+
+def test_partition_file_via_unstructured_api_cleans_up_after_sdk_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    temp_paths: list[Path] = []
+
+    def partition(**kwargs: Any) -> None:
+        request = kwargs["request"]
+        temp_paths.append(Path(request.partition_parameters.files.file_name))
+        msg = "partition failed"
+        raise RuntimeError(msg)
+
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.general.partition.side_effect = partition
+    monkeypatch.setattr(
+        "unstructured_client.UnstructuredClient",
+        MagicMock(return_value=client),
+    )
+
+    with pytest.raises(RuntimeError, match="partition failed"):
+        document_extractor_node._partition_file_via_unstructured_api(
+            b"document",
+            suffix=".ppt",
+            unstructured_api_config=UnstructuredApiConfig(
+                api_url="https://api.example",
+            ),
+        )
+
+    assert len(temp_paths) == 1
+    assert not temp_paths[0].exists()
+    client.__exit__.assert_called_once()
 
 
 def test_partition_unstructured_file_uses_api_partition(
