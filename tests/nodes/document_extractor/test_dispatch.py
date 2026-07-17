@@ -20,16 +20,22 @@ _PDF_BYTES = b"%PDF"
 
 @pytest.mark.parametrize(
     "timeout_seconds",
-    [0, -1, float("inf"), float("-inf"), float("nan")],
+    [0, -1, 3600.1, float("inf"), float("-inf"), float("nan")],
 )
 def test_unstructured_api_config_rejects_invalid_timeout(
     timeout_seconds: float,
 ) -> None:
     with pytest.raises(
         ValueError,
-        match="timeout_seconds must be a finite number greater than 0",
+        match=r"timeout_seconds must be finite and in the range \(0, 3600\]",
     ):
         UnstructuredApiConfig(timeout_seconds=timeout_seconds)
+
+
+def test_unstructured_api_config_accepts_max_timeout() -> None:
+    config = UnstructuredApiConfig(timeout_seconds=3600)
+
+    assert config.timeout_seconds == 3600
 
 
 def _minimal_text_pdf(text: str) -> bytes:
