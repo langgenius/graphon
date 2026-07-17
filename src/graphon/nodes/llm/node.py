@@ -1129,10 +1129,15 @@ class LLMNode(Node[LLMNodeData]):
 
         variables: dict[str, str] = {}
         for variable_selector in node_data.prompt_config.jinja2_variables or []:
-            variable = self._get_required_variable(variable_selector)
-            variables[variable_selector.variable] = self._stringify_jinja_variable(
-                variable,
+            variable = self.graph_runtime_state.variable_pool.get(
+                variable_selector.value_selector,
             )
+            if variable is not None:
+                variables[variable_selector.variable] = self._stringify_jinja_variable(
+                    variable,
+                )
+            else:
+                variables[variable_selector.variable] = ""
         return variables
 
     def _fetch_inputs(self, node_data: LLMNodeData) -> dict[str, Any]:
