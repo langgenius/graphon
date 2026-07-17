@@ -212,9 +212,9 @@ class _TextExtractorRegistry:
 
 
 def _to_unstructured_server_url(api_url: str | None) -> str | None:
-    if api_url and _UNSTRUCTURED_PARTITION_ENDPOINT in api_url:
-        return api_url[: -len(_UNSTRUCTURED_PARTITION_ENDPOINT)]
-    return api_url
+    return (
+        api_url.removesuffix(_UNSTRUCTURED_PARTITION_ENDPOINT) if api_url else api_url
+    )
 
 
 def _to_unstructured_timeout_ms(timeout_seconds: float) -> int:

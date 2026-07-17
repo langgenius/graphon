@@ -427,6 +427,10 @@ def test_partition_unstructured_file_uses_local_partition() -> None:
             "https://api.example",
         ),
         ("https://api.example", "https://api.example"),
+        (
+            "https://api.example/general/v0/general/status",
+            "https://api.example/general/v0/general/status",
+        ),
         (None, None),
     ],
 )
