@@ -1,7 +1,7 @@
 """Event handler implementations for different event types."""
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from functools import singledispatchmethod
 from typing import final
 
@@ -110,9 +110,8 @@ class EventHandler:
 
     def _dispatch_event(self, *, frame_id: str, event: GraphNodeEventBase) -> None:
         frame = self._frame_registry.get(frame_id)
-        handler = self._container_handler_for_frame(frame_id)
-        if handler is not None:
-            handler.prepare_frame_event(frame=frame, event=event)
+        for container_frame, handler in self._container_ancestors(frame_id):
+            handler.prepare_frame_event(frame=container_frame, event=event)
         self._dispatch(event, frame=frame)
 
     @singledispatchmethod
@@ -337,3 +336,21 @@ class EventHandler:
         ).graph_runtime_state
         frame_state = root_runtime_state.get_container_frame(frame_id)
         return self._container_handlers[frame_state.kind]
+
+    def _container_ancestors(
+        self,
+        frame_id: str,
+    ) -> Iterator[tuple[ExecutionFrame, ContainerHandler]]:
+        root_runtime_state = self._frame_registry.get(
+            ROOT_FRAME_ID,
+        ).graph_runtime_state
+        while frame_id != ROOT_FRAME_ID:
+            frame_state = root_runtime_state.get_container_frame(frame_id)
+            yield (
+                self._frame_registry.get(frame_id),
+                self._container_handlers[frame_state.kind],
+            )
+            run_state = root_runtime_state.get_container_run(
+                frame_state.parent_invocation_id,
+            )
+            frame_id = run_state.frame_id

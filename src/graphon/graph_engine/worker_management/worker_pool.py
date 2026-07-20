@@ -14,7 +14,7 @@ from typing import final
 from graphon.graph_engine.container_handlers import ContainerHandler
 from graphon.graph_engine.entities.tasks import TaskEvent
 from graphon.graph_engine.frames import FrameRegistry
-from graphon.graph_engine.ready_queue import ROOT_FRAME_ID, ReadyQueue
+from graphon.graph_engine.ready_queue import ROOT_FRAME_ID, ReadyQueue, ReadyTask
 
 from ..config import GraphEngineConfig
 from ..layers.base import GraphEngineLayer
@@ -66,6 +66,8 @@ class WorkerPool:
         self._workers: list[Worker] = []
         self._worker_counter = 0
         self._lock = threading.Lock()
+        self._task_claim_lock = threading.Lock()
+        self._task_claiming = threading.Event()
         self._running = False
 
         self._container_handlers = container_handlers
@@ -77,6 +79,7 @@ class WorkerPool:
                 return
 
             self._running = True
+            self._task_claiming.set()
             node_count = len(
                 self._frame_registry.get(ROOT_FRAME_ID).graph.nodes,
             )
@@ -107,6 +110,8 @@ class WorkerPool:
         """Stop all workers in the pool."""
         with self._lock:
             self._running = False
+            with self._task_claim_lock:
+                self._task_claiming.clear()
             worker_count = len(self._workers)
 
             if worker_count > 0:
@@ -123,13 +128,17 @@ class WorkerPool:
 
             self._workers.clear()
 
-    def drain(self) -> None:
-        """Stop accepting new work and signal currently idle workers to exit."""
+    def drain(self) -> list[ReadyTask]:
+        """Atomically stop task claims and remove unclaimed ready work."""
         with self._lock:
             self._running = False
-            for worker in self._workers:
-                if not worker.has_current_task:
-                    worker.stop()
+            with self._task_claim_lock:
+                self._task_claiming.clear()
+                tasks = self._ready_queue.drain()
+                for worker in self._workers:
+                    if not worker.has_current_task:
+                        worker.stop()
+            return tasks
 
     def has_current_tasks(self) -> bool:
         with self._lock:
@@ -148,6 +157,8 @@ class WorkerPool:
             worker_id=worker_id,
             execution_context=self._execution_context,
             container_handlers=self._container_handlers,
+            task_claim_lock=self._task_claim_lock,
+            task_claiming=self._task_claiming,
         )
 
         worker.start()
@@ -164,7 +175,12 @@ class WorkerPool:
 
         self._workers.remove(worker)
 
-    def _try_scale_up(self, queue_depth: int, current_count: int) -> bool:
+    def _try_scale_up(
+        self,
+        queue_depth: int,
+        current_count: int,
+        active_count: int,
+    ) -> bool:
         """Try to scale up workers if needed.
 
         Args:
@@ -175,17 +191,18 @@ class WorkerPool:
             True if scaled up, False otherwise
 
         """
-        if (
-            queue_depth > self._config.scale_up_threshold
-            and current_count < self._config.max_workers
+        available_count = current_count - active_count
+        backlog = max(queue_depth - available_count, 0)
+        if backlog > self._config.scale_up_threshold and (
+            current_count < self._config.max_workers
         ):
             self._create_worker()
 
             logger.debug(
-                "Scaled up workers: %d -> %d (queue_depth=%d exceeded threshold=%d)",
+                "Scaled up workers: %d -> %d (backlog=%d exceeded threshold=%d)",
                 current_count,
                 len(self._workers),
-                queue_depth,
+                backlog,
                 self._config.scale_up_threshold,
             )
             return True
@@ -257,12 +274,12 @@ class WorkerPool:
             current_count = len(self._workers)
             queue_depth = self._ready_queue.qsize()
 
-            # Count active vs idle workers by querying their state directly
+            # Active ownership is immediate; idle status includes the scale-down delay.
+            active_count = sum(1 for worker in self._workers if worker.has_current_task)
             idle_count = sum(1 for worker in self._workers if worker.is_idle)
-            active_count = current_count - idle_count
 
             # Try to scale up if queue is backing up
-            self._try_scale_up(queue_depth, current_count)
+            self._try_scale_up(queue_depth, current_count, active_count)
 
             # Try to scale down if we have excess capacity
             self._try_scale_down(queue_depth, current_count, active_count, idle_count)

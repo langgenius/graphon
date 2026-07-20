@@ -21,6 +21,7 @@ from graphon.nodes.container_effects import (
     ContainerExecutionResult,
     ContainerRunResult,
     IterationFrameRequest,
+    build_container_value,
 )
 from graphon.nodes.iteration.entities import IterationNodeData
 from graphon.variables.segments import ArrayAnySegment, ArraySegment, NoneSegment
@@ -93,10 +94,10 @@ class IterationNode(Node[IterationNodeData]):
         for index in indexes:
             yield IterationNextEvent(index=index)
         yield IterationFrameRequest(
-            items=tuple(iterator_value),
+            items=tuple(build_container_value(item) for item in iterator_value),
             root_node_id=root_node_id,
             indexes=indexes,
-            output_selector=self.node_data.output_selector,
+            output_selector=tuple(self.node_data.output_selector),
             error_handle_mode=self.node_data.error_handle_mode,
             flatten_output=self.node_data.flatten_output,
             parallel_nums=parallel_nums,
@@ -115,7 +116,22 @@ class IterationNode(Node[IterationNodeData]):
             return
 
         if isinstance(result, ContainerExecutionResult):
-            node_run_result = result.node_run_result
+            container_result = result.node_run_result
+            node_run_result = NodeRunResult(
+                status=container_result.status,
+                inputs={
+                    key: value.to_object()
+                    for key, value in container_result.inputs.items()
+                },
+                outputs={
+                    key: value.to_object()
+                    for key, value in container_result.outputs.items()
+                },
+                metadata=container_result.metadata,
+                llm_usage=container_result.llm_usage,
+                error=container_result.error,
+                error_type=container_result.error_type,
+            )
             if node_run_result.status == WorkflowNodeExecutionStatus.SUCCEEDED:
                 yield IterationSucceededEvent(
                     start_at=self._start_at,
@@ -136,7 +152,7 @@ class IterationNode(Node[IterationNodeData]):
             else:
                 msg = f"Unsupported iteration status {node_run_result.status}"
                 raise ValueError(msg)
-            yield StreamCompletedEvent(node_run_result=result.node_run_result)
+            yield StreamCompletedEvent(node_run_result=node_run_result)
             return
 
         msg = f"Unsupported iteration result {type(result).__name__}"

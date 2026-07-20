@@ -1,9 +1,9 @@
 import json
 import sys
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Discriminator, Tag, field_validator
 
 from graphon.file.models import File
 
@@ -223,3 +223,23 @@ def get_segment_discriminator(v: Any) -> SegmentType | None:
         return seg_type
     # return None if the discriminator value isn't found
     return None
+
+
+type SerializableSegment = Annotated[
+    (
+        Annotated[NoneSegment, Tag(SegmentType.NONE)]
+        | Annotated[StringSegment, Tag(SegmentType.STRING)]
+        | Annotated[FloatSegment, Tag(SegmentType.FLOAT)]
+        | Annotated[IntegerSegment, Tag(SegmentType.INTEGER)]
+        | Annotated[ObjectSegment, Tag(SegmentType.OBJECT)]
+        | Annotated[FileSegment, Tag(SegmentType.FILE)]
+        | Annotated[BooleanSegment, Tag(SegmentType.BOOLEAN)]
+        | Annotated[ArrayAnySegment, Tag(SegmentType.ARRAY_ANY)]
+        | Annotated[ArrayStringSegment, Tag(SegmentType.ARRAY_STRING)]
+        | Annotated[ArrayNumberSegment, Tag(SegmentType.ARRAY_NUMBER)]
+        | Annotated[ArrayObjectSegment, Tag(SegmentType.ARRAY_OBJECT)]
+        | Annotated[ArrayFileSegment, Tag(SegmentType.ARRAY_FILE)]
+        | Annotated[ArrayBooleanSegment, Tag(SegmentType.ARRAY_BOOLEAN)]
+    ),
+    Discriminator(get_segment_discriminator),
+]

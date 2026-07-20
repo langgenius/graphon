@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import contextlib
 import threading
-from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from typing import cast, final
+from typing import final
 
 from graphon.enums import (
     BuiltinNodeTypes,
@@ -13,20 +12,22 @@ from graphon.enums import (
 )
 from graphon.graph_events.base import GraphNodeEventBase
 from graphon.graph_events.node import NodeRunFailedEvent, NodeRunSucceededEvent
-from graphon.model_runtime.entities.llm_entities import LLMUsage
-from graphon.node_events.base import NodeRunResult
 from graphon.nodes.container_effects import (
     ContainerAwaitRequest,
     ContainerExecutionResult,
+    ContainerNodeRunResult,
     LoopFrameRequest,
+    build_container_value,
 )
 from graphon.nodes.loop.loop_node import LoopNode
 from graphon.runtime.container_state import (
     ContainerFrameState,
-    ContainerRunState,
+    LoopFrameState,
+    LoopRunState,
 )
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.utils.condition.processor import ConditionProcessor
+from graphon.variables.segments import SerializableSegment
 
 from .frames import ExecutionFrame, FrameRegistry
 from .ready_queue import ROOT_FRAME_ID, ResumeTask
@@ -44,10 +45,16 @@ class LoopContainerHandler:
         self._lock = threading.Lock()
 
     def restore_frame(self, frame_state: ContainerFrameState) -> None:
+        if not isinstance(frame_state, LoopFrameState):
+            msg = f"loop handler cannot restore {frame_state.kind} frame"
+            raise TypeError(msg)
         root_runtime_state = self._root_runtime_state()
         run_state = root_runtime_state.get_container_run(
             frame_state.parent_invocation_id,
         )
+        if not isinstance(run_state, LoopRunState):
+            msg = f"loop frame cannot belong to {run_state.kind} run"
+            raise TypeError(msg)
         parent_frame = self._frame_registry.get(run_state.frame_id)
         self._frame_registry.materialize_child_frame_from_state(
             frame_state,
@@ -65,10 +72,10 @@ class LoopContainerHandler:
             raise TypeError(msg)
 
         with self._lock:
-            run_state = self._initialize_run_state(
-                invocation_id=invocation_id,
-                request=request,
-            )
+            run_state = self._root_runtime_state().get_container_run(invocation_id)
+            if not isinstance(run_state, LoopRunState):
+                msg = f"loop handler cannot continue {run_state.kind} run"
+                raise TypeError(msg)
             parent_frame = self._frame_registry.get(run_state.frame_id)
             node = parent_frame.graph.nodes[run_state.node_id]
             if not isinstance(node, LoopNode):
@@ -79,10 +86,10 @@ class LoopContainerHandler:
                 node=node,
                 suppress_errors=True,
             ):
-                run_state = self._root_runtime_state().update_container_run_phase_data(
-                    invocation_id,
-                    {"reached_break": True},
+                run_state = run_state.model_copy(
+                    update={"reached_break": True},
                 )
+                self._root_runtime_state().put_container_run(run_state)
                 self._enqueue_container_result(
                     runtime_state=parent_frame.graph_runtime_state,
                     invocation_id=run_state.invocation_id,
@@ -108,10 +115,17 @@ class LoopContainerHandler:
         with self._lock:
             root_runtime_state = self._root_runtime_state()
             frame_state = root_runtime_state.get_container_frame(frame.frame_id)
+            if not isinstance(frame_state, LoopFrameState):
+                msg = f"loop handler cannot prepare {frame_state.kind} frame"
+                raise TypeError(msg)
             run_state = root_runtime_state.get_container_run(
                 frame_state.parent_invocation_id,
             )
-            event.in_loop_id = run_state.node_id
+            if not isinstance(run_state, LoopRunState):
+                msg = f"loop frame cannot belong to {run_state.kind} run"
+                raise TypeError(msg)
+            if event.in_loop_id is None:
+                event.in_loop_id = run_state.node_id
             loop_metadata = {
                 WorkflowNodeExecutionMetadataKey.LOOP_ID: run_state.node_id,
                 WorkflowNodeExecutionMetadataKey.LOOP_INDEX: frame_state.index,
@@ -125,15 +139,11 @@ class LoopContainerHandler:
             if (
                 isinstance(event, NodeRunSucceededEvent)
                 and event.node_type == BuiltinNodeTypes.LOOP_END
+                and event.node_id in run_state.loop_node_ids
             ):
                 root_runtime_state.put_container_frame(
                     frame_state.model_copy(
-                        update={
-                            "phase_data": {
-                                **dict(frame_state.phase_data),
-                                "reached_break": True,
-                            },
-                        },
+                        update={"reached_break": True},
                     ),
                 )
 
@@ -152,15 +162,12 @@ class LoopContainerHandler:
     ) -> None:
         with self._lock:
             frame_state = self._root_runtime_state().get_container_frame(frame.frame_id)
+            if not isinstance(frame_state, LoopFrameState):
+                msg = f"loop handler cannot fail {frame_state.kind} frame"
+                raise TypeError(msg)
             self._root_runtime_state().put_container_frame(
                 frame_state.model_copy(
-                    update={
-                        "phase_data": {
-                            **dict(frame_state.phase_data),
-                            "failed": True,
-                            "error": event.error,
-                        },
-                    },
+                    update={"errors": (*frame_state.errors, event.error)},
                 ),
             )
 
@@ -170,25 +177,49 @@ class LoopContainerHandler:
                 return
 
             root_runtime_state = self._root_runtime_state()
-            frame_state = root_runtime_state.pop_container_frame(frame.frame_id)
-            self._frame_registry.remove(frame.frame_id)
-            self._complete_ready_loop_frame(
-                frame=frame,
-                frame_state=frame_state,
-            )
+            frame_state = root_runtime_state.get_container_frame(frame.frame_id)
+            if not isinstance(frame_state, LoopFrameState):
+                msg = f"loop handler cannot complete {frame_state.kind} frame"
+                raise TypeError(msg)
+            try:
+                self._complete_ready_loop_frame(
+                    frame=frame,
+                    frame_state=frame_state,
+                )
+            except (TypeError, ValueError) as error:
+                run_state = root_runtime_state.get_container_run(
+                    frame_state.parent_invocation_id,
+                )
+                if not isinstance(run_state, LoopRunState):
+                    raise
+                parent_frame = self._frame_registry.get(run_state.frame_id)
+                self._enqueue_container_result(
+                    runtime_state=parent_frame.graph_runtime_state,
+                    invocation_id=run_state.invocation_id,
+                    result=self._fail_loop(run_state=run_state, error=str(error)),
+                )
+            finally:
+                root_runtime_state.pop_container_frame(frame.frame_id)
+                self._frame_registry.remove(frame.frame_id)
 
     def _complete_ready_loop_frame(
         self,
         *,
         frame: ExecutionFrame,
-        frame_state: ContainerFrameState,
+        frame_state: LoopFrameState,
     ) -> None:
         root_runtime_state = self._root_runtime_state()
         run_state = root_runtime_state.get_container_run(
             frame_state.parent_invocation_id,
         )
+        if not isinstance(run_state, LoopRunState):
+            msg = f"loop frame cannot complete {run_state.kind} run"
+            raise TypeError(msg)
         parent_frame = self._frame_registry.get(run_state.frame_id)
-        node = cast(LoopNode, parent_frame.graph.nodes[run_state.node_id])
+        node = parent_frame.graph.nodes[run_state.node_id]
+        if not isinstance(node, LoopNode):
+            msg = f"node {run_state.node_id} is not a loop"
+            raise TypeError(msg)
 
         run_state = self._complete_loop_step(
             frame=frame,
@@ -196,40 +227,36 @@ class LoopContainerHandler:
             parent_frame=parent_frame,
             run_state=run_state,
         )
-        phase_data = dict(frame_state.phase_data)
-        if phase_data.get("failed") is True:
-            error = cast(str, phase_data["error"])
+        if frame_state.errors:
             self._enqueue_container_result(
                 runtime_state=parent_frame.graph_runtime_state,
                 invocation_id=run_state.invocation_id,
-                result=self._fail_loop(run_state=run_state, error=error),
+                result=self._fail_loop(
+                    run_state=run_state,
+                    error=frame_state.errors[0],
+                ),
             )
             return
 
-        if phase_data.get("reached_break") is True or (
+        if frame_state.reached_break or (
             self._loop_break_conditions_reached(
                 frame=parent_frame,
                 node=node,
                 suppress_errors=False,
             )
         ):
-            run_state = self._root_runtime_state().update_container_run_phase_data(
-                run_state.invocation_id,
-                {"reached_break": True},
+            run_state = run_state.model_copy(
+                update={"reached_break": True},
             )
+            self._root_runtime_state().put_container_run(run_state)
 
-        run_phase_data = dict(run_state.phase_data)
-        completed_count = cast(int, run_phase_data["completed_count"])
-        loop_count = cast(int, run_phase_data["loop_count"])
-        if cast(bool, run_phase_data["reached_break"]) or (
-            completed_count >= loop_count
-        ):
+        if run_state.reached_break or run_state.completed_count >= run_state.loop_count:
             self._enqueue_container_result(
                 runtime_state=parent_frame.graph_runtime_state,
                 invocation_id=run_state.invocation_id,
                 result=self._complete_loop(
                     run_state=run_state,
-                    steps=loop_count,
+                    steps=run_state.loop_count,
                 ),
             )
             return
@@ -238,62 +265,21 @@ class LoopContainerHandler:
             runtime_state=parent_frame.graph_runtime_state,
             invocation_id=run_state.invocation_id,
             result=LoopFrameRequest(
-                inputs=cast(Mapping[str, object], run_phase_data["inputs"]),
-                outputs=cast(Mapping[str, object], run_phase_data["outputs"]),
-                loop_count=loop_count,
-                root_node_id=cast(str, run_phase_data["root_node_id"]),
-                loop_variable_selectors=cast(
-                    Mapping[str, Sequence[str]],
-                    run_phase_data["loop_variable_selectors"],
-                ),
-                loop_node_ids=frozenset(
-                    cast(Sequence[str], run_phase_data["loop_node_ids"]),
-                ),
-                index=completed_count,
+                inputs=run_state.inputs,
+                outputs=run_state.outputs,
+                loop_count=run_state.loop_count,
+                root_node_id=run_state.root_node_id,
+                loop_variable_selectors=run_state.loop_variable_selectors,
+                loop_node_ids=run_state.loop_node_ids,
+                index=run_state.completed_count,
             ),
         )
-
-    def _initialize_run_state(
-        self,
-        *,
-        invocation_id: str,
-        request: LoopFrameRequest,
-    ) -> ContainerRunState:
-        root_runtime_state = self._root_runtime_state()
-        run_state = root_runtime_state.get_container_run(invocation_id)
-        phase_data = dict(run_state.phase_data)
-        phase_data.update({
-            "inputs": dict(request.inputs),
-            "outputs": dict(request.outputs),
-            "loop_count": request.loop_count,
-            "root_node_id": request.root_node_id,
-            "loop_variable_selectors": {
-                key: list(value)
-                for key, value in request.loop_variable_selectors.items()
-            },
-            "loop_node_ids": tuple(sorted(request.loop_node_ids)),
-            "duration_map": dict(
-                cast(Mapping[str, float], phase_data.get("duration_map", {})),
-            ),
-            "variable_map": dict(
-                cast(
-                    Mapping[str, dict[str, object]],
-                    phase_data.get("variable_map", {}),
-                ),
-            ),
-            "usage": self._phase_usage(phase_data),
-            "completed_count": cast(int, phase_data.get("completed_count", 0)),
-            "reached_break": cast(bool, phase_data.get("reached_break", False)),
-        })
-        updated_run_state = run_state.model_copy(update={"phase_data": phase_data})
-        root_runtime_state.put_container_run(updated_run_state)
-        return updated_run_state
 
     def _start_loop_frame(
         self,
         *,
         parent_frame: ExecutionFrame,
-        run_state: ContainerRunState,
+        run_state: LoopRunState,
         request: LoopFrameRequest,
     ) -> None:
         for node_id in request.loop_node_ids:
@@ -314,9 +300,8 @@ class LoopContainerHandler:
             graph_runtime_state=child_runtime_state,
         )
         self._root_runtime_state().put_container_frame(
-            ContainerFrameState(
+            LoopFrameState(
                 frame_id=child_frame_id,
-                kind="loop",
                 parent_invocation_id=run_state.invocation_id,
                 root_node_id=request.root_node_id,
                 index=request.index,
@@ -332,48 +317,42 @@ class LoopContainerHandler:
         self,
         *,
         frame: ExecutionFrame,
-        frame_state: ContainerFrameState,
+        frame_state: LoopFrameState,
         parent_frame: ExecutionFrame,
-        run_state: ContainerRunState,
-    ) -> ContainerRunState:
-        phase_data = dict(run_state.phase_data)
-        completed_count = cast(int, phase_data["completed_count"]) + 1
-        usage = self._phase_usage(phase_data).plus(frame.graph_runtime_state.llm_usage)
-        duration_map = dict(cast(Mapping[str, float], phase_data["duration_map"]))
+        run_state: LoopRunState,
+    ) -> LoopRunState:
+        completed_count = run_state.completed_count + 1
+        usage = run_state.usage.plus(frame.graph_runtime_state.llm_usage)
+        duration_map = dict(run_state.duration_map)
         loop_index = frame_state.index
         duration_map[str(loop_index)] = (
             datetime.now(UTC).replace(tzinfo=None) - frame_state.started_at
         ).total_seconds()
-        loop_variable_selectors = cast(
-            Mapping[str, Sequence[str]],
-            phase_data["loop_variable_selectors"],
-        )
-        outputs = dict(cast(Mapping[str, object], phase_data["outputs"]))
-        variable_map = dict(
-            cast(Mapping[str, dict[str, object]], phase_data["variable_map"]),
-        )
-        loop_variable_values: dict[str, object] = {}
-        for key, selector in loop_variable_selectors.items():
+        outputs = dict(run_state.outputs)
+        variable_map = {
+            key: dict(value) for key, value in run_state.variable_map.items()
+        }
+        loop_variable_values: dict[str, SerializableSegment] = {}
+        for key, selector in run_state.loop_variable_selectors.items():
             segment = parent_frame.graph_runtime_state.variable_pool.get(selector)
             if segment is None:
                 msg = f"loop variable {key} is missing"
                 raise ValueError(msg)
-            loop_variable_values[key] = segment.value
+            loop_variable_values[key] = build_container_value(segment)
         variable_map[str(loop_index)] = loop_variable_values
         parent_frame.graph_runtime_state.merge_response_outputs(
             frame.graph_runtime_state.outputs,
         )
         outputs.update(loop_variable_values)
-        outputs["loop_round"] = loop_index + 1
-        phase_data.update({
-            "completed_count": completed_count,
-            "duration_map": duration_map,
-            "outputs": outputs,
-            "variable_map": variable_map,
-            "usage": usage,
-        })
+        outputs["loop_round"] = build_container_value(loop_index + 1)
         updated_run_state = run_state.model_copy(
-            update={"phase_data": phase_data},
+            update={
+                "completed_count": completed_count,
+                "duration_map": duration_map,
+                "outputs": outputs,
+                "variable_map": variable_map,
+                "usage": usage,
+            },
         )
         self._root_runtime_state().put_container_run(updated_run_state)
         return updated_run_state
@@ -381,47 +360,44 @@ class LoopContainerHandler:
     def _complete_loop(
         self,
         *,
-        run_state: ContainerRunState,
+        run_state: LoopRunState,
         steps: int,
     ) -> ContainerExecutionResult:
         metadata = self._loop_metadata(run_state)
         loop_metadata = self._event_metadata(metadata)
         loop_metadata[WorkflowNodeExecutionMetadataKey.COMPLETED_REASON.value] = (
-            "loop_break"
-            if cast(bool, run_state.phase_data["reached_break"])
-            else "loop_completed"
+            "loop_break" if run_state.reached_break else "loop_completed"
         )
         return ContainerExecutionResult(
             metadata=loop_metadata,
             steps=steps,
-            node_run_result=NodeRunResult(
+            node_run_result=ContainerNodeRunResult(
                 status=WorkflowNodeExecutionStatus.SUCCEEDED,
                 metadata=metadata,
-                outputs=cast(Mapping[str, object], run_state.phase_data["outputs"]),
-                inputs=cast(Mapping[str, object], run_state.phase_data["inputs"]),
-                llm_usage=self._phase_usage(dict(run_state.phase_data)),
+                outputs=run_state.outputs,
+                inputs=run_state.inputs,
+                llm_usage=run_state.usage,
             ),
         )
 
     def _fail_loop(
         self,
         *,
-        run_state: ContainerRunState,
+        run_state: LoopRunState,
         error: str,
     ) -> ContainerExecutionResult:
         metadata = self._loop_metadata(run_state)
         loop_metadata = self._event_metadata(metadata)
         loop_metadata[WorkflowNodeExecutionMetadataKey.COMPLETED_REASON.value] = "error"
-        inputs = cast(Mapping[str, object], run_state.phase_data["inputs"])
         return ContainerExecutionResult(
             metadata=loop_metadata,
-            steps=cast(int, run_state.phase_data["loop_count"]),
-            node_run_result=NodeRunResult(
+            steps=run_state.loop_count,
+            node_run_result=ContainerNodeRunResult(
                 status=WorkflowNodeExecutionStatus.FAILED,
                 error=error,
                 metadata=metadata,
-                inputs=inputs,
-                llm_usage=self._phase_usage(dict(run_state.phase_data)),
+                inputs=run_state.inputs,
+                llm_usage=run_state.usage,
             ),
         )
 
@@ -438,20 +414,17 @@ class LoopContainerHandler:
 
     def _loop_metadata(
         self,
-        run_state: ContainerRunState,
+        run_state: LoopRunState,
     ) -> dict[WorkflowNodeExecutionMetadataKey, object]:
-        phase_data = dict(run_state.phase_data)
-        usage = self._phase_usage(phase_data)
         return {
-            WorkflowNodeExecutionMetadataKey.TOTAL_TOKENS: usage.total_tokens,
-            WorkflowNodeExecutionMetadataKey.TOTAL_PRICE: usage.total_price,
-            WorkflowNodeExecutionMetadataKey.CURRENCY: usage.currency,
-            WorkflowNodeExecutionMetadataKey.LOOP_DURATION_MAP: (
-                phase_data["duration_map"]
-            ),
-            WorkflowNodeExecutionMetadataKey.LOOP_VARIABLE_MAP: (
-                phase_data["variable_map"]
-            ),
+            WorkflowNodeExecutionMetadataKey.TOTAL_TOKENS: run_state.usage.total_tokens,
+            WorkflowNodeExecutionMetadataKey.TOTAL_PRICE: run_state.usage.total_price,
+            WorkflowNodeExecutionMetadataKey.CURRENCY: run_state.usage.currency,
+            WorkflowNodeExecutionMetadataKey.LOOP_DURATION_MAP: run_state.duration_map,
+            WorkflowNodeExecutionMetadataKey.LOOP_VARIABLE_MAP: {
+                index: {key: value.to_object() for key, value in variables.items()}
+                for index, variables in run_state.variable_map.items()
+            },
         }
 
     def _event_metadata(
@@ -486,12 +459,6 @@ class LoopContainerHandler:
             operator=node.node_data.logical_operator,
         )
         return result
-
-    def _phase_usage(self, phase_data: Mapping[str, object]) -> LLMUsage:
-        value = phase_data.get("usage", LLMUsage.empty_usage())
-        if isinstance(value, LLMUsage):
-            return value
-        return LLMUsage.model_validate(value)
 
     def _root_runtime_state(self) -> GraphRuntimeState:
         return self._frame_registry.get(ROOT_FRAME_ID).graph_runtime_state

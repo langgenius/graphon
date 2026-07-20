@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from abc import abstractmethod
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from copy import deepcopy
 from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
@@ -360,12 +360,14 @@ class GraphRuntimeState:  # noqa: PLR0904
     def from_snapshot(
         cls: type[GraphRuntimeState],
         data: str,
+        *,
+        ready_queue_factory: Callable[[], ReadyQueue] = _new_ready_queue,
     ) -> GraphRuntimeState:
         """Restore runtime state from a serialized snapshot."""
         snapshot = _GraphRuntimeStateSnapshot.model_validate_json(data)
-        ready_queue = _new_ready_queue()
+        ready_queue = ready_queue_factory()
         ready_queue.loads(snapshot.ready_queue)
-        deferred_ready_queue = _new_ready_queue()
+        deferred_ready_queue = ready_queue_factory()
         deferred_ready_queue.loads(snapshot.deferred_ready_tasks)
         execution_payload = json.loads(snapshot.graph_execution)
         graph_execution = _new_graph_execution(
@@ -404,11 +406,6 @@ class GraphRuntimeState:  # noqa: PLR0904
             self.defer_ready_task(task)
             return
         self.ready_queue.put(task)
-
-    def drain_ready_tasks_to_deferred(self) -> None:
-        tasks = self.ready_queue.drain()
-        for task in tasks:
-            self.defer_ready_task(task)
 
     def snapshot_frame(
         self,
@@ -452,19 +449,6 @@ class GraphRuntimeState:  # noqa: PLR0904
     def container_runs(self) -> tuple[ContainerRunState, ...]:
         with self._container_state_lock:
             return tuple(self._container_runs.values())
-
-    def update_container_run_phase_data(
-        self,
-        invocation_id: str,
-        updates: Mapping[str, object],
-    ) -> ContainerRunState:
-        with self._container_state_lock:
-            run = self._container_runs[invocation_id]
-            updated_run = run.model_copy(
-                update={"phase_data": {**dict(run.phase_data), **dict(updates)}},
-            )
-            self._container_runs[invocation_id] = updated_run
-            return updated_run
 
     def pop_container_run(self, invocation_id: str) -> ContainerRunState:
         with self._container_state_lock:

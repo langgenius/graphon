@@ -5,23 +5,58 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from graphon.enums import ErrorHandleMode
 from graphon.file import File, FileTransferMethod, FileType
 from graphon.graph_engine.domain.graph_execution import GraphExecution
 from graphon.graph_engine.ready_queue.in_memory import InMemoryReadyQueue
-from graphon.graph_engine.ready_queue.protocol import StartTask
+from graphon.graph_engine.ready_queue.protocol import ReadyTask, ResumeTask, StartTask
 from graphon.model_runtime.entities.llm_entities import LLMUsage
+from graphon.nodes.container_effects import (
+    IterationFrameRequest,
+    build_container_value,
+)
 from graphon.runtime.container_state import (
-    ContainerFrameState,
-    ContainerRunState,
     FrameRuntimeData,
+    IterationFrameState,
+    IterationRunState,
 )
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.runtime.read_only_wrappers import ReadOnlyGraphRuntimeStateWrapper
+from graphon.runtime.ready_queue import ReadyQueue
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import ArrayFileSegment, FileSegment
 from graphon.variables.variables import StringVariable
 
 CONVERSATION_VARIABLE_NODE_ID = "conversation"
+
+
+class _PrefixedReadyQueue:
+    def __init__(self) -> None:
+        self._queue = InMemoryReadyQueue()
+
+    def put(self, item: ReadyTask) -> None:
+        self._queue.put(item)
+
+    def get(self, timeout: float | None = None) -> ReadyTask:
+        return self._queue.get(timeout)
+
+    def task_done(self) -> None:
+        self._queue.task_done()
+
+    def qsize(self) -> int:
+        return self._queue.qsize()
+
+    def drain(self) -> list[ReadyTask]:
+        return self._queue.drain()
+
+    def dumps(self) -> str:
+        return f"prefixed:{self._queue.dumps()}"
+
+    def loads(self, data: str) -> None:
+        if not data.startswith("prefixed:"):
+            msg = "invalid prefixed queue snapshot"
+            raise ValueError(msg)
+        self._queue.loads(data.removeprefix("prefixed:"))
 
 
 class TestGraphRuntimeState:
@@ -112,32 +147,67 @@ class TestGraphRuntimeState:
         assert restored.drain_deferred_ready_tasks() == [first, second]
         assert restored.drain_deferred_ready_tasks() == []
 
-    def test_drain_ready_tasks_to_deferred_moves_tasks(self) -> None:
-        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
-        first = StartTask(frame_id="root", node_id="a")
-        second = StartTask(frame_id="child", node_id="b")
-        state.ready_queue.put(first)
-        state.ready_queue.put(second)
+    def test_custom_ready_queues_round_trip_with_supplied_factory(self) -> None:
+        ready_queue: ReadyQueue = _PrefixedReadyQueue()
+        deferred_ready_queue: ReadyQueue = _PrefixedReadyQueue()
+        state = GraphRuntimeState(
+            variable_pool=VariablePool(),
+            start_at=time(),
+            ready_queue=ready_queue,
+            deferred_ready_queue=deferred_ready_queue,
+        )
+        live_task = StartTask(frame_id="root", node_id="live")
+        deferred_task = StartTask(frame_id="root", node_id="deferred")
+        state.ready_queue.put(live_task)
+        state.defer_ready_task(deferred_task)
 
-        state.drain_ready_tasks_to_deferred()
-        assert state.ready_queue.qsize() == 0
-        assert state.drain_deferred_ready_tasks() == [first, second]
+        restored = GraphRuntimeState.from_snapshot(
+            state.dumps(),
+            ready_queue_factory=_PrefixedReadyQueue,
+        )
 
-    def test_container_runtime_state_round_trips(self) -> None:
+        assert isinstance(restored.ready_queue, _PrefixedReadyQueue)
+        assert restored.ready_queue.drain() == [live_task]
+        assert restored.drain_deferred_ready_tasks() == [deferred_task]
+
+    def test_container_runtime_state_preserves_file_values(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
-        run = ContainerRunState(
+        file_value = File(
+            file_id="file-1",
+            file_type=FileType.DOCUMENT,
+            transfer_method=FileTransferMethod.REMOTE_URL,
+            remote_url="https://example.com/resume.pdf",
+            filename="resume.pdf",
+            extension=".pdf",
+            mime_type="application/pdf",
+            size=128,
+        )
+        request = IterationFrameRequest(
+            items=(build_container_value(file_value),),
+            root_node_id="iteration-start",
+            indexes=(0,),
+            output_selector=("iteration", "item"),
+            error_handle_mode=ErrorHandleMode.TERMINATED,
+            flatten_output=False,
+            parallel_nums=1,
+        )
+        run = IterationRunState(
             invocation_id="invocation-1",
             frame_id="root",
-            node_id="loop",
+            node_id="iteration",
             started_at=datetime.fromtimestamp(1, UTC).replace(tzinfo=None),
-            phase_data={"index": 1, "outputs": {"loop_round": 1}},
+            items=(build_container_value(file_value),),
+            root_node_id="iteration-start",
+            output_selector=("iteration", "item"),
+            error_handle_mode=ErrorHandleMode.TERMINATED,
+            flatten_output=False,
+            parallel_nums=1,
         )
-        frame = ContainerFrameState(
-            frame_id="exec-loop:loop:1",
-            kind="loop",
+        frame = IterationFrameState(
+            frame_id="exec-iteration:iteration:0",
             parent_invocation_id="invocation-1",
-            root_node_id="loop-start",
-            index=1,
+            root_node_id="iteration-start",
+            index=0,
             started_at=datetime.fromtimestamp(1, UTC).replace(tzinfo=None),
             runtime_data=FrameRuntimeData(
                 variable_pool=VariablePool(),
@@ -150,43 +220,22 @@ class TestGraphRuntimeState:
         )
         state.put_container_run(run)
         state.put_container_frame(frame)
+        state.ready_queue.put(
+            ResumeTask(invocation_id=run.invocation_id, result=request),
+        )
 
         restored = GraphRuntimeState.from_snapshot(state.dumps())
 
-        assert restored.get_container_run("invocation-1") == run
-        assert restored.get_container_frame("exec-loop:loop:1") == frame
-
-    def test_update_container_run_phase_data_preserves_existing_state(self) -> None:
-        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
-        run = ContainerRunState(
-            invocation_id="invocation-1",
-            frame_id="root",
-            node_id="iteration",
-            started_at=datetime.fromtimestamp(1, UTC).replace(tzinfo=None),
-            phase_data={
-                "inputs": {"iterator_selector": ["a", "b"]},
-                "outputs": {"1": "second"},
-                "completed_count": 1,
-                "resume_pending": True,
-            },
-        )
-        state.put_container_run(run)
-
-        updated = state.update_container_run_phase_data(
-            "invocation-1",
-            {
-                "inputs": {"iterator_selector": ["a", "b", "c"]},
-                "resume_pending": False,
-            },
-        )
-
-        assert updated.phase_data == {
-            "inputs": {"iterator_selector": ["a", "b", "c"]},
-            "outputs": {"1": "second"},
-            "completed_count": 1,
-            "resume_pending": False,
-        }
-        assert state.pop_container_run("invocation-1") == updated
+        restored_run = restored.get_container_run("invocation-1")
+        assert isinstance(restored_run, IterationRunState)
+        assert isinstance(restored_run.items[0], FileSegment)
+        assert restored_run.items[0].value == file_value
+        restored_task = restored.ready_queue.get(timeout=0.01)
+        assert isinstance(restored_task, ResumeTask)
+        assert isinstance(restored_task.result, IterationFrameRequest)
+        assert isinstance(restored_task.result.items[0], FileSegment)
+        assert restored_task.result.items[0].value == file_value
+        assert restored.get_container_frame("exec-iteration:iteration:0") == frame
 
     def test_graph_execution_lazy_instantiation(self) -> None:
         state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())

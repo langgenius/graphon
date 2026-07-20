@@ -9,7 +9,7 @@ from graphon.enums import (
     NodeExecutionType,
     WorkflowNodeExecutionStatus,
 )
-from graphon.node_events.base import NodeEventBase
+from graphon.node_events.base import NodeEventBase, NodeRunResult
 from graphon.node_events.loop import (
     LoopFailedEvent,
     LoopNextEvent,
@@ -22,6 +22,7 @@ from graphon.nodes.container_effects import (
     ContainerExecutionResult,
     ContainerRunResult,
     LoopFrameRequest,
+    build_container_value,
 )
 from graphon.nodes.loop.entities import LoopNodeData
 from graphon.variables.factory import (
@@ -69,7 +70,7 @@ class LoopNode(Node[LoopNodeData]):
             metadata={"loop_length": loop_count},
         )
         yield LoopFrameRequest(
-            inputs=inputs,
+            inputs={key: build_container_value(value) for key, value in inputs.items()},
             outputs={},
             loop_count=loop_count,
             root_node_id=root_node_id,
@@ -87,13 +88,30 @@ class LoopNode(Node[LoopNodeData]):
         if isinstance(result, LoopFrameRequest):
             yield LoopNextEvent(
                 index=result.index,
-                pre_loop_output=result.outputs,
+                pre_loop_output={
+                    key: value.to_object() for key, value in result.outputs.items()
+                },
             )
             yield result
             return
 
         if isinstance(result, ContainerExecutionResult):
-            node_run_result = result.node_run_result
+            container_result = result.node_run_result
+            node_run_result = NodeRunResult(
+                status=container_result.status,
+                inputs={
+                    key: value.to_object()
+                    for key, value in container_result.inputs.items()
+                },
+                outputs={
+                    key: value.to_object()
+                    for key, value in container_result.outputs.items()
+                },
+                metadata=container_result.metadata,
+                llm_usage=container_result.llm_usage,
+                error=container_result.error,
+                error_type=container_result.error_type,
+            )
             if node_run_result.status == WorkflowNodeExecutionStatus.SUCCEEDED:
                 yield LoopSucceededEvent(
                     start_at=self._start_at,
@@ -114,7 +132,7 @@ class LoopNode(Node[LoopNodeData]):
             else:
                 msg = f"Unsupported loop status {node_run_result.status}"
                 raise ValueError(msg)
-            yield StreamCompletedEvent(node_run_result=result.node_run_result)
+            yield StreamCompletedEvent(node_run_result=node_run_result)
             return
 
         msg = f"Unsupported loop result {type(result).__name__}"
@@ -124,8 +142,8 @@ class LoopNode(Node[LoopNodeData]):
         self,
         *,
         inputs: dict[str, Any],
-    ) -> dict[str, list[str]]:
-        loop_variable_selectors: dict[str, list[str]] = {}
+    ) -> dict[str, tuple[str, ...]]:
+        loop_variable_selectors: dict[str, tuple[str, ...]] = {}
         if not self.node_data.loop_variables:
             return loop_variable_selectors
 
@@ -150,7 +168,7 @@ class LoopNode(Node[LoopNodeData]):
                 msg = f"Invalid value for loop variable {loop_variable.label}"
                 raise ValueError(msg)
 
-            variable_selector = [self._node_id, loop_variable.label]
+            variable_selector = (self._node_id, loop_variable.label)
             variable = segment_to_variable(
                 segment=processed_segment,
                 selector=variable_selector,

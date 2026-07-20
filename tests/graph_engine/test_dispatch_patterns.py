@@ -1,6 +1,6 @@
 import queue
 import threading
-from collections.abc import Generator, Sequence
+from collections.abc import Generator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import time
@@ -20,6 +20,7 @@ from graphon.enums import (
 )
 from graphon.graph.graph import Graph
 from graphon.graph_engine.command_channels.redis_channel import RedisChannel
+from graphon.graph_engine.config import GraphEngineConfig
 from graphon.graph_engine.container_handlers import ContainerHandler
 from graphon.graph_engine.domain.graph_execution import GraphExecution
 from graphon.graph_engine.entities.commands import (
@@ -43,6 +44,7 @@ from graphon.graph_engine.loop_container_handler import LoopContainerHandler
 from graphon.graph_engine.orchestration.dispatcher import Dispatcher
 from graphon.graph_engine.ready_queue.in_memory import InMemoryReadyQueue
 from graphon.graph_engine.ready_queue.protocol import (
+    ReadyTask,
     ResumeTask,
     StartTask,
 )
@@ -60,12 +62,14 @@ from graphon.nodes.container_effects import (
     ContainerExecutionResult,
     IterationFrameRequest,
     LoopFrameRequest,
+    build_container_value,
 )
 from graphon.nodes.iteration.iteration_node import IterationNode
 from graphon.runtime.container_state import (
-    ContainerFrameState,
-    ContainerRunState,
     FrameRuntimeData,
+    IterationFrameState,
+    IterationRunState,
+    create_container_run_state,
 )
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.runtime.variable_pool import VariablePool
@@ -176,20 +180,21 @@ def _start_iteration_await(
     parallel_nums: int,
 ) -> None:
     request = IterationFrameRequest(
-        items=items,
+        items=tuple(build_container_value(item) for item in items),
         root_node_id="iteration-start",
         indexes=indexes,
-        output_selector=["answer", "text"],
+        output_selector=("answer", "text"),
         error_handle_mode=error_handle_mode,
         flatten_output=flatten_output,
         parallel_nums=parallel_nums,
     )
     runtime_state.put_container_run(
-        ContainerRunState(
+        create_container_run_state(
             invocation_id=invocation_id,
             frame_id="root",
             node_id="iteration",
             started_at=datetime.now(UTC).replace(tzinfo=None),
+            request=request,
         ),
     )
     container_handler.start_await(
@@ -204,12 +209,16 @@ def _worker(
     event_queue: queue.Queue[TaskEvent],
     frame_registry: FrameRegistry,
 ) -> Worker:
+    task_claiming = threading.Event()
+    task_claiming.set()
     return Worker(
         ready_queue=ready_queue,
         event_queue=event_queue,
         frame_registry=frame_registry,
         layers=[],
         container_handlers={},
+        task_claim_lock=threading.Lock(),
+        task_claiming=task_claiming,
     )
 
 
@@ -368,6 +377,7 @@ def test_pause_defers_queued_tasks_without_losing_frame_progress() -> None:
     )
     graph_execution.paused = True
     worker_pool = MagicMock()
+    worker_pool.drain.side_effect = ready_queue.drain
     dispatcher = Dispatcher(
         event_queue=queue.Queue(),
         event_handler=MagicMock(),
@@ -407,6 +417,10 @@ def test_worker_pool_drain_does_not_stop_worker_with_current_task() -> None:
     idle_worker = WorkerStub(has_current_task=False)
     pool = object.__new__(WorkerPool)
     pool._lock = threading.RLock()
+    pool._task_claim_lock = threading.Lock()
+    pool._task_claiming = threading.Event()
+    pool._task_claiming.set()
+    pool._ready_queue = InMemoryReadyQueue()
     pool._running = True
     pool._workers = [active_worker, idle_worker]
 
@@ -416,22 +430,207 @@ def test_worker_pool_drain_does_not_stop_worker_with_current_task() -> None:
     assert idle_worker.stopped is True
 
 
+def test_worker_pool_drain_observes_task_claimed_during_pause() -> None:  # noqa: C901
+    class BlockingReadyQueue:
+        def __init__(self) -> None:
+            self._queue = InMemoryReadyQueue()
+            self.task_removed = threading.Event()
+            self.release_claim = threading.Event()
+
+        def put(self, item: ReadyTask) -> None:
+            self._queue.put(item)
+
+        def get(self, timeout: float | None = None) -> ReadyTask:
+            task = self._queue.get(timeout)
+            self.task_removed.set()
+            if not self.release_claim.wait(timeout=1):
+                msg = "task claim was not released"
+                raise TimeoutError(msg)
+            return task
+
+        def task_done(self) -> None:
+            self._queue.task_done()
+
+        def qsize(self) -> int:
+            return self._queue.qsize()
+
+        def drain(self) -> list[ReadyTask]:
+            return self._queue.drain()
+
+        def dumps(self) -> str:
+            return self._queue.dumps()
+
+        def loads(self, data: str) -> None:
+            self._queue.loads(data)
+
+    class BlockingNode:
+        id = "node"
+        node_type = BuiltinNodeTypes.CODE
+        execution_type = NodeExecutionType.EXECUTABLE
+        execution_id = "pending"
+
+        def bind_execution_id(self, execution_id: str) -> None:
+            self.execution_id = execution_id
+
+        def run(self) -> Generator[NodeRunSucceededEvent, None, None]:
+            node_started.set()
+            if not finish_node.wait(timeout=1):
+                msg = "node was not released"
+                raise TimeoutError(msg)
+            now = datetime.now(UTC).replace(tzinfo=None)
+            yield NodeRunSucceededEvent(
+                id=self.execution_id,
+                node_id=self.id,
+                node_type=self.node_type,
+                start_at=now,
+                finished_at=now,
+                node_run_result=NodeRunResult(),
+            )
+
+    ready_queue = BlockingReadyQueue()
+    ready_queue.put(StartTask(frame_id="root", node_id="node"))
+    node_started = threading.Event()
+    finish_node = threading.Event()
+    event_queue: queue.Queue[TaskEvent] = queue.Queue()
+    runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=1,
+        ready_queue=ready_queue,
+        graph_execution=GraphExecution(workflow_id="workflow"),
+    )
+    frame_registry = FrameRegistry()
+    frame_registry.register(
+        _execution_frame(
+            frame_id="root",
+            graph=cast(Graph, SimpleNamespace(nodes={"node": BlockingNode()})),
+            graph_runtime_state=runtime_state,
+        ),
+    )
+    pool = WorkerPool(
+        ready_queue=ready_queue,
+        event_queue=event_queue,
+        frame_registry=frame_registry,
+        layers=[],
+        config=GraphEngineConfig(max_workers=1),
+        container_handlers={},
+    )
+    drained_tasks: list[ReadyTask] = []
+    drain_done = threading.Event()
+
+    def drain_pool() -> None:
+        drained_tasks.extend(pool.drain())
+        drain_done.set()
+
+    pool.start()
+    drain_thread = threading.Thread(target=drain_pool)
+    try:
+        assert ready_queue.task_removed.wait(timeout=1)
+        drain_thread.start()
+        assert not drain_done.wait(timeout=0.05)
+        ready_queue.release_claim.set()
+        assert node_started.wait(timeout=1)
+        assert drain_done.wait(timeout=1)
+        assert drained_tasks == []
+        assert pool.has_current_tasks()
+    finally:
+        ready_queue.release_claim.set()
+        finish_node.set()
+        drain_thread.join(timeout=1)
+        pool.stop()
+
+
+def test_worker_pool_scales_for_one_queued_sibling() -> None:
+    class ParallelNode:
+        node_type = BuiltinNodeTypes.CODE
+        execution_type = NodeExecutionType.EXECUTABLE
+        execution_id = "pending"
+
+        def __init__(self, node_id: str) -> None:
+            self.id = node_id
+
+        def bind_execution_id(self, execution_id: str) -> None:
+            self.execution_id = execution_id
+
+        def run(self) -> Generator[NodeRunSucceededEvent, None, None]:
+            first_node_started.set()
+            barrier.wait(timeout=1)
+            now = datetime.now(UTC).replace(tzinfo=None)
+            yield NodeRunSucceededEvent(
+                id=self.execution_id,
+                node_id=self.id,
+                node_type=self.node_type,
+                start_at=now,
+                finished_at=now,
+                node_run_result=NodeRunResult(),
+            )
+
+    ready_queue = InMemoryReadyQueue()
+    ready_queue.put(StartTask(frame_id="root", node_id="first"))
+    ready_queue.put(StartTask(frame_id="root", node_id="second"))
+    event_queue: queue.Queue[TaskEvent] = queue.Queue()
+    first_node_started = threading.Event()
+    barrier = threading.Barrier(2)
+    graph = SimpleNamespace(
+        nodes={
+            "first": ParallelNode("first"),
+            "second": ParallelNode("second"),
+        },
+    )
+    runtime_state = GraphRuntimeState(
+        variable_pool=VariablePool(),
+        start_at=1,
+        ready_queue=ready_queue,
+        graph_execution=GraphExecution(workflow_id="workflow"),
+    )
+    frame_registry = FrameRegistry()
+    frame_registry.register(
+        _execution_frame(
+            frame_id="root",
+            graph=cast(Graph, graph),
+            graph_runtime_state=runtime_state,
+        ),
+    )
+    pool = WorkerPool(
+        ready_queue=ready_queue,
+        event_queue=event_queue,
+        frame_registry=frame_registry,
+        layers=[],
+        config=GraphEngineConfig(max_workers=2),
+        container_handlers={},
+    )
+
+    pool.start()
+    try:
+        assert first_node_started.wait(timeout=1)
+        pool.check_and_scale()
+        events = [event_queue.get(timeout=1), event_queue.get(timeout=1)]
+    finally:
+        pool.stop()
+
+    assert {event.event.node_id for event in events} == {"first", "second"}
+    assert all(isinstance(event.event, NodeRunSucceededEvent) for event in events)
+
+
 def test_worker_with_current_task_is_not_idle() -> None:
     worker = object.__new__(Worker)
-    worker._has_current_task = True
+    worker._has_current_task = threading.Event()
+    worker._has_current_task.set()
     worker._last_task_time = 0
 
     assert not worker.is_idle
 
 
-def test_resume_schedules_deferred_ready_tasks() -> None:
+def test_resume_tracks_live_and_deferred_start_tasks_before_starting_workers() -> None:
     ready_queue = InMemoryReadyQueue()
     runtime_state = GraphRuntimeState(
         variable_pool=VariablePool(),
         start_at=0,
         ready_queue=ready_queue,
     )
-    runtime_state.defer_ready_task(StartTask(frame_id="root", node_id="ready"))
+    live_task = StartTask(frame_id="root", node_id="live")
+    deferred_task = StartTask(frame_id="root", node_id="deferred")
+    ready_queue.put(live_task)
+    runtime_state.defer_ready_task(deferred_task)
     engine = object.__new__(GraphEngine)
     engine._worker_pool = MagicMock()
     engine._graph_runtime_state = runtime_state
@@ -442,13 +641,14 @@ def test_resume_schedules_deferred_ready_tasks() -> None:
 
     engine._start_execution(resume=True)
 
-    assert ready_queue.get(timeout=0.01) == StartTask(
-        frame_id="root",
-        node_id="ready",
-    )
+    assert ready_queue.get(timeout=0.01) == live_task
+    assert ready_queue.get(timeout=0.01) == deferred_task
     with pytest.raises(queue.Empty):
         ready_queue.get(timeout=0.01)
-    state_manager.track_unfinished.assert_called_once_with("ready")
+    assert state_manager.track_unfinished.call_args_list == [
+        ((live_task.node_id,), {}),
+        ((deferred_task.node_id,), {}),
+    ]
 
 
 def test_pause_requested_event_defers_current_task_for_resume() -> None:
@@ -473,18 +673,27 @@ def test_pause_requested_event_defers_current_task_for_resume() -> None:
         edges={},
     )
     child_runtime_state.attach_graph(cast(Graph, child_graph))
+    request = IterationFrameRequest(
+        items=(build_container_value("input"),),
+        root_node_id="human",
+        indexes=(0,),
+        output_selector=("iteration", "item"),
+        error_handle_mode=ErrorHandleMode.TERMINATED,
+        flatten_output=False,
+        parallel_nums=1,
+    )
     root_runtime_state.put_container_run(
-        ContainerRunState(
+        create_container_run_state(
             invocation_id="iteration-invocation",
             frame_id="root",
             node_id="iteration",
             started_at=datetime.now(UTC).replace(tzinfo=None),
-        )
+            request=request,
+        ),
     )
     root_runtime_state.put_container_frame(
-        ContainerFrameState(
+        IterationFrameState(
             frame_id="child-frame",
-            kind="iteration",
             parent_invocation_id="iteration-invocation",
             root_node_id="human",
             index=0,
@@ -668,9 +877,8 @@ def test_frame_registry_materializes_child_frame_from_state() -> None:
     )
     variable_pool = VariablePool()
     variable_pool.add(["child", "value"], "saved")
-    frame_state = ContainerFrameState(
+    frame_state = IterationFrameState(
         frame_id="child-frame",
-        kind="iteration",
         parent_invocation_id="iteration-invocation",
         root_node_id="start",
         index=0,
@@ -742,9 +950,8 @@ def test_frame_registry_rejects_frame_state_with_missing_graph_state_ids() -> No
             graph_runtime_state=root_runtime_state,
         ),
     )
-    frame_state = ContainerFrameState(
+    frame_state = IterationFrameState(
         frame_id="child-frame",
-        kind="iteration",
         parent_invocation_id="iteration-invocation",
         root_node_id="start",
         index=0,
@@ -800,9 +1007,8 @@ def test_frame_registry_copies_frame_runtime_data_from_state() -> None:
     )
     variable_pool = VariablePool()
     variable_pool.add(["child", "value"], "saved")
-    frame_state = ContainerFrameState(
+    frame_state = IterationFrameState(
         frame_id="child-frame",
-        kind="iteration",
         parent_invocation_id="iteration-invocation",
         root_node_id="start",
         index=0,
@@ -1054,7 +1260,7 @@ def test_worker_suspends_container_invocation_at_await_request() -> None:
             )
             self.await_was_reached = True
             _ = yield LoopFrameRequest(
-                inputs={"loop_count": 1},
+                inputs={"loop_count": build_container_value(1)},
                 outputs={},
                 loop_count=1,
                 root_node_id="loop-start",
@@ -1098,12 +1304,16 @@ def test_worker_suspends_container_invocation_at_await_request() -> None:
         ),
     )
     container_handler = RecordingContainerHandler()
+    task_claiming = threading.Event()
+    task_claiming.set()
     worker = Worker(
         ready_queue=ready_queue,
         event_queue=event_queue,
         frame_registry=frame_registry,
         layers=[],
         container_handlers={"loop": cast(ContainerHandler, container_handler)},
+        task_claim_lock=threading.Lock(),
+        task_claiming=task_claiming,
     )
 
     worker.start()
@@ -1244,7 +1454,7 @@ def test_event_handler_processes_tagged_root_frame_success_before_collecting() -
     event_collector.collect.assert_called_once_with(event)
 
 
-def test_event_handler_limits_parallel_iteration_and_preserves_output_order() -> None:  # noqa: PLR0914
+def test_parallel_iteration_preserves_aggregate_and_response_order() -> None:  # noqa: PLR0914
     graph_config = {
         "nodes": [
             {
@@ -1320,6 +1530,7 @@ def test_event_handler_limits_parallel_iteration_and_preserves_output_order() ->
 
     second_frame = frame_registry.get("iteration-invocation:iteration:1")
     second_frame.graph_runtime_state.variable_pool.add(["answer", "text"], "second")
+    second_frame.graph_runtime_state.set_output("answer", "second")
     handler.dispatch(
         TaskEvent(
             frame_id="iteration-invocation:iteration:1",
@@ -1346,24 +1557,9 @@ def test_event_handler_limits_parallel_iteration_and_preserves_output_order() ->
         node_id="iteration-start",
     )
 
-    first_frame = frame_registry.get("iteration-invocation:iteration:0")
-    first_frame.graph_runtime_state.variable_pool.add(["answer", "text"], "first")
-    handler.dispatch(
-        TaskEvent(
-            frame_id="iteration-invocation:iteration:0",
-            event=NodeRunSucceededEvent(
-                id="iteration-start-run-0",
-                node_id="iteration-start",
-                node_type=BuiltinNodeTypes.ITERATION_START,
-                start_at=datetime.now(UTC).replace(tzinfo=None),
-                finished_at=datetime.now(UTC).replace(tzinfo=None),
-                node_run_result=NodeRunResult(),
-            ),
-        ),
-    )
-
     third_frame = frame_registry.get("iteration-invocation:iteration:2")
     third_frame.graph_runtime_state.variable_pool.add(["answer", "text"], "third")
+    third_frame.graph_runtime_state.set_output("answer", "third")
     handler.dispatch(
         TaskEvent(
             frame_id="iteration-invocation:iteration:2",
@@ -1378,13 +1574,31 @@ def test_event_handler_limits_parallel_iteration_and_preserves_output_order() ->
         ),
     )
 
+    first_frame = frame_registry.get("iteration-invocation:iteration:0")
+    first_frame.graph_runtime_state.variable_pool.add(["answer", "text"], "first")
+    first_frame.graph_runtime_state.set_output("answer", "first")
+    handler.dispatch(
+        TaskEvent(
+            frame_id="iteration-invocation:iteration:0",
+            event=NodeRunSucceededEvent(
+                id="iteration-start-run-0",
+                node_id="iteration-start",
+                node_type=BuiltinNodeTypes.ITERATION_START,
+                start_at=datetime.now(UTC).replace(tzinfo=None),
+                finished_at=datetime.now(UTC).replace(tzinfo=None),
+                node_run_result=NodeRunResult(),
+            ),
+        ),
+    )
+
     final_resume_task = _get_resume_task(ready_queue)
     assert isinstance(final_resume_task.result, ContainerExecutionResult)
-    assert final_resume_task.result.node_run_result.outputs["output"] == [
+    assert final_resume_task.result.node_run_result.outputs["output"].to_object() == [
         "first",
         "second",
         "third",
     ]
+    assert runtime_state.outputs["answer"] == "third"
 
 
 def test_terminated_iteration_waits_for_all_scheduled_frames() -> None:
@@ -1394,24 +1608,20 @@ def test_terminated_iteration_waits_for_all_scheduled_frames() -> None:
         start_at=1,
         ready_queue=ready_queue,
     )
-    run_state = ContainerRunState(
+    run_state = IterationRunState(
         invocation_id="iteration-invocation",
         frame_id="root",
         node_id="iteration",
         started_at=datetime.now(UTC).replace(tzinfo=None),
-        phase_data={
-            "inputs": {},
-            "items": ("a", "b"),
-            "outputs": {},
-            "duration_map": {},
-            "usage": LLMUsage.empty_usage(),
-            "flatten_output": False,
-            "scheduled_count": 2,
-            "completed_count": 1,
-            "resume_pending": False,
-            "failed": True,
-            "error": "bad item",
-        },
+        items=(build_container_value("a"), build_container_value("b")),
+        root_node_id="iteration-start",
+        output_selector=("answer", "text"),
+        error_handle_mode=ErrorHandleMode.TERMINATED,
+        flatten_output=False,
+        parallel_nums=2,
+        scheduled_count=2,
+        completed_count=1,
+        errors=("bad item",),
     )
     runtime_state.put_container_run(run_state)
     frame_registry = MagicMock()
@@ -1428,10 +1638,10 @@ def test_terminated_iteration_waits_for_all_scheduled_frames() -> None:
     )
     assert ready_queue.qsize() == 0
 
-    run_state = runtime_state.update_container_run_phase_data(
-        run_state.invocation_id,
-        {"completed_count": 2},
+    run_state = run_state.model_copy(
+        update={"completed_count": 2},
     )
+    runtime_state.put_container_run(run_state)
     assert handler._finish_failed_iteration_if_ready(
         parent_frame=parent_frame,
         run_state=run_state,
@@ -1441,7 +1651,7 @@ def test_terminated_iteration_waits_for_all_scheduled_frames() -> None:
     assert resume_task.result.node_run_result.error == "bad item"
 
 
-def test_iteration_frame_completion_preserves_concurrent_run_updates() -> None:
+def test_iteration_frame_completion_requests_next_index() -> None:
     graph_config = {
         "nodes": [
             {
@@ -1509,7 +1719,6 @@ def test_iteration_frame_completion_preserves_concurrent_run_updates() -> None:
         node_id="iteration-start",
     )
 
-    stale_run = runtime_state.get_container_run("iteration-invocation")
     sibling_frame = frame_registry.get("iteration-invocation:iteration:1")
     sibling_frame.graph_runtime_state.variable_pool.add(["answer", "text"], "second")
     sibling_frame.state_manager.finish_execution("iteration-start")
@@ -1517,28 +1726,12 @@ def test_iteration_frame_completion_preserves_concurrent_run_updates() -> None:
     container_handler.complete_frame(sibling_frame)
 
     run_state = runtime_state.get_container_run("iteration-invocation")
-    assert run_state.phase_data["completed_count"] == 1
-    assert run_state.phase_data["outputs"] == {"1": "second"}
+    assert isinstance(run_state, IterationRunState)
+    assert run_state.completed_count == 1
+    assert run_state.outputs["1"].to_object() == "second"
     resume_task = _get_resume_task(ready_queue)
     assert isinstance(resume_task.result, IterationFrameRequest)
     assert resume_task.result.indexes == (2,)
-    runtime_state.update_container_run_phase_data(
-        "iteration-invocation",
-        {
-            "items": stale_run.phase_data["items"],
-            "root_node_id": stale_run.phase_data["root_node_id"],
-            "output_selector": list(
-                cast(Sequence[str], stale_run.phase_data["output_selector"]),
-            ),
-            "error_handle_mode": stale_run.phase_data["error_handle_mode"],
-            "flatten_output": stale_run.phase_data["flatten_output"],
-            "parallel_nums": stale_run.phase_data["parallel_nums"],
-        },
-    )
-    run_state = runtime_state.get_container_run("iteration-invocation")
-    assert run_state.phase_data["completed_count"] == 1
-    assert run_state.phase_data["outputs"] == {"1": "second"}
-    runtime_state.pop_container_run("iteration-invocation")
 
 
 @pytest.mark.parametrize(

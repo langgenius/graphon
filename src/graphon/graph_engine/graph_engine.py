@@ -331,7 +331,11 @@ class GraphEngine:
             root_node = self._graph.root_node
             self._state_manager.enqueue_node(root_node.id)
         else:
-            for task in self._graph_runtime_state.drain_deferred_ready_tasks():
+            ready_tasks = [
+                *self._graph_runtime_state.ready_queue.drain(),
+                *self._graph_runtime_state.drain_deferred_ready_tasks(),
+            ]
+            for task in ready_tasks:
                 self._graph_runtime_state.enqueue_ready_task(task)
                 if isinstance(task, StartTask):
                     self._frame_registry.get(

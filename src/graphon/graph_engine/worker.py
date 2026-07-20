@@ -36,7 +36,7 @@ from graphon.nodes.base.node import Node
 from graphon.nodes.container_effects import (
     ContainerAwaitRequest,
 )
-from graphon.runtime.container_state import ContainerRunState
+from graphon.runtime.container_state import create_container_run_state
 
 logger = logging.getLogger(__name__)
 WORKER_IDLE_THRESHOLD_SECONDS = 0.2
@@ -60,6 +60,8 @@ class Worker(threading.Thread):
         frame_registry: FrameRegistry,
         layers: Sequence[GraphEngineLayer],
         container_handlers: Mapping[str, ContainerHandler],
+        task_claim_lock: threading.Lock,
+        task_claiming: threading.Event,
         worker_id: int = 0,
         execution_context: AbstractContextManager[object] | None = None,
     ) -> None:
@@ -84,11 +86,13 @@ class Worker(threading.Thread):
         self._stop_event = threading.Event()
         self._layers = layers
         self._container_handlers = container_handlers
+        self._task_claim_lock = task_claim_lock
+        self._task_claiming = task_claiming
         self._last_task_time = time.time()
         self._current_node_started_at: datetime | None = None
         self._current_node: Node | None = None
         self._current_frame_id = ROOT_FRAME_ID
-        self._has_current_task = False
+        self._has_current_task = threading.Event()
 
     def stop(self) -> None:
         """Signal the worker to stop processing."""
@@ -98,7 +102,7 @@ class Worker(threading.Thread):
     def is_idle(self) -> bool:
         """Check if the worker is currently idle."""
         return (
-            not self._has_current_task
+            not self._has_current_task.is_set()
             and (time.time() - self._last_task_time) > WORKER_IDLE_THRESHOLD_SECONDS
         )
 
@@ -110,7 +114,7 @@ class Worker(threading.Thread):
     @property
     def has_current_task(self) -> bool:
         """Return True while the worker owns a queue task."""
-        return self._has_current_task
+        return self._has_current_task.is_set()
 
     @override
     def run(self) -> None:
@@ -120,14 +124,20 @@ class Worker(threading.Thread):
         and pushes events to event_queue until stopped.
         """
         while not self._stop_event.is_set():
-            # Try to get a node ID from the ready queue (with timeout)
-            try:
-                task = self._ready_queue.get(timeout=0.1)
-            except queue.Empty:
+            with self._task_claim_lock:
+                if not self._task_claiming.is_set():
+                    return
+                try:
+                    task = self._ready_queue.get(timeout=0)
+                except queue.Empty:
+                    task_claimed = False
+                else:
+                    self._last_task_time = time.time()
+                    self._has_current_task.set()
+                    task_claimed = True
+            if not task_claimed:
+                self._stop_event.wait(0.1)
                 continue
-
-            self._last_task_time = time.time()
-            self._has_current_task = True
             try:
                 self._execute_task(task)
             except Exception as e:
@@ -153,7 +163,7 @@ class Worker(threading.Thread):
                 self._current_node_started_at = None
                 self._current_node = None
                 self._current_frame_id = ROOT_FRAME_ID
-                self._has_current_task = False
+                self._has_current_task.clear()
 
     def _execute_task(self, task: ReadyTask) -> None:
         if isinstance(task, StartTask):
@@ -261,11 +271,12 @@ class Worker(threading.Thread):
                 if new_invocation:
                     invocation_id = str(uuid4())
                     root_runtime_state.put_container_run(
-                        ContainerRunState(
+                        create_container_run_state(
                             invocation_id=invocation_id,
                             frame_id=self._current_frame_id,
                             node_id=node.id,
                             started_at=started_at,
+                            request=event,
                         )
                     )
                 try:

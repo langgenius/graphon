@@ -1,7 +1,7 @@
 import queue
 from collections.abc import Generator
 from datetime import UTC, datetime
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -34,10 +34,12 @@ from graphon.graph_events.node import (
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.container_effects import (
     ContainerExecutionResult,
+    ContainerNodeRunResult,
     ContainerRunResult,
     LoopFrameRequest,
+    build_container_value,
 )
-from graphon.runtime.container_state import ContainerRunState
+from graphon.runtime.container_state import create_container_run_state
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.runtime.variable_pool import VariablePool
 
@@ -56,6 +58,18 @@ def _execution_frame(
         state_manager=state_manager,
         edge_processor=cast(Any, SimpleNamespace()),
         error_handler=cast(Any, SimpleNamespace()),
+    )
+
+
+def _container_result() -> ContainerExecutionResult:
+    return ContainerExecutionResult(
+        metadata={},
+        steps=1,
+        node_run_result=ContainerNodeRunResult(
+            status=WorkflowNodeExecutionStatus.SUCCEEDED,
+            inputs={"loop_count": build_container_value(1)},
+            outputs={"answer": build_container_value("ok")},
+        ),
     )
 
 
@@ -86,15 +100,7 @@ class _RecordingLayer(GraphEngineLayer):
 
 def test_ready_queue_round_trips_start_and_resume_tasks() -> None:
     queue_ = InMemoryReadyQueue()
-    result = ContainerExecutionResult(
-        metadata={},
-        steps=1,
-        node_run_result=NodeRunResult(
-            status=WorkflowNodeExecutionStatus.SUCCEEDED,
-            inputs={"loop_count": 1},
-            outputs={"answer": "ok"},
-        ),
-    )
+    result = _container_result()
     queue_.put(StartTask(frame_id="root", node_id="loop"))
     queue_.put(ResumeTask(invocation_id="invocation-1", result=result))
 
@@ -171,7 +177,7 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
                 start_at=started_at,
             )
             yield LoopFrameRequest(
-                inputs={"loop_count": 1},
+                inputs={"loop_count": build_container_value(1)},
                 outputs={},
                 loop_count=1,
                 root_node_id="loop-start",
@@ -187,13 +193,24 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
             started_at: datetime,
         ) -> Generator[GraphNodeEventBase | LoopFrameRequest, None, None]:
             assert isinstance(result, ContainerExecutionResult)
+            node_run_result = NodeRunResult(
+                status=result.node_run_result.status,
+                inputs={
+                    key: value.to_object()
+                    for key, value in result.node_run_result.inputs.items()
+                },
+                outputs={
+                    key: value.to_object()
+                    for key, value in result.node_run_result.outputs.items()
+                },
+            )
             yield NodeRunSucceededEvent(
                 id=self.execution_id,
                 node_id=self.id,
                 node_type=self.node_type,
                 start_at=started_at,
                 finished_at=datetime.now(UTC).replace(tzinfo=None),
-                node_run_result=result.node_run_result,
+                node_run_result=node_run_result,
             )
 
     class RecordingContainerHandler:
@@ -233,12 +250,16 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
     )
     container_handler = RecordingContainerHandler()
     layer = _RecordingLayer()
+    task_claiming = Event()
+    task_claiming.set()
     worker = Worker(
         ready_queue=ready_queue,
         event_queue=event_queue,
         frame_registry=frame_registry,
         layers=[layer],
         container_handlers={"loop": cast(ContainerHandler, container_handler)},
+        task_claim_lock=Lock(),
+        task_claiming=task_claiming,
     )
 
     worker.start()
@@ -262,15 +283,7 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
         ready_queue.put(
             ResumeTask(
                 invocation_id=container_handler.invocation_id,
-                result=ContainerExecutionResult(
-                    metadata={},
-                    steps=1,
-                    node_run_result=NodeRunResult(
-                        status=WorkflowNodeExecutionStatus.SUCCEEDED,
-                        inputs={"loop_count": 1},
-                        outputs={"answer": "ok"},
-                    ),
-                ),
+                result=_container_result(),
             ),
         )
         succeeded = event_queue.get(timeout=1)
@@ -335,41 +348,40 @@ def test_worker_reports_resume_failure_on_suspended_invocation_frame() -> None:
         ),
     )
     started_at = datetime.now(UTC).replace(tzinfo=None)
+    request = LoopFrameRequest(
+        inputs={"loop_count": build_container_value(1)},
+        outputs={},
+        loop_count=1,
+        root_node_id="loop-start",
+        loop_variable_selectors={},
+        loop_node_ids=frozenset(),
+        index=0,
+    )
     runtime_state.put_container_run(
-        ContainerRunState(
+        create_container_run_state(
             invocation_id="invocation-1",
             frame_id="parent-frame",
             node_id="loop",
             started_at=started_at,
-            phase_data={
-                "inputs": {"loop_count": 1},
-                "loop_count": 1,
-                "root_node_id": "loop-start",
-                "loop_variable_selectors": {},
-                "loop_node_ids": (),
-            },
-        )
+            request=request,
+        ),
     )
     ready_queue.put(
         ResumeTask(
             invocation_id="invocation-1",
-            result=ContainerExecutionResult(
-                metadata={},
-                steps=1,
-                node_run_result=NodeRunResult(
-                    status=WorkflowNodeExecutionStatus.SUCCEEDED,
-                    inputs={"loop_count": 1},
-                    outputs={"answer": "ok"},
-                ),
-            ),
+            result=_container_result(),
         ),
     )
+    task_claiming = Event()
+    task_claiming.set()
     worker = Worker(
         ready_queue=ready_queue,
         event_queue=event_queue,
         frame_registry=frame_registry,
         layers=[],
         container_handlers={},
+        task_claim_lock=Lock(),
+        task_claiming=task_claiming,
     )
 
     worker.start()

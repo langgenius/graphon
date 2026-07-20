@@ -9,7 +9,7 @@ from graphon.graph.edge import Edge
 from graphon.graph.graph import Graph
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 
-from .ready_queue import StartTask
+from .ready_queue import ReadyTask, StartTask
 
 
 class EdgeStateAnalysis(TypedDict):
@@ -208,6 +208,7 @@ class GraphStateManager:
         with self._lock:
             return not self._unfinished_nodes
 
-    def drain_ready_tasks_to_deferred(self) -> None:
-        """Move all live ready tasks into the deferred ready queue."""
-        self._graph_runtime_state.drain_ready_tasks_to_deferred()
+    def defer_ready_tasks(self, tasks: Sequence[ReadyTask]) -> None:
+        """Move unclaimed tasks into deferred storage."""
+        for task in tasks:
+            self._graph_runtime_state.defer_ready_task(task)

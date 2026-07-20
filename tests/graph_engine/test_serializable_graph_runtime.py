@@ -4,7 +4,7 @@ import queue
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from threading import Event
+from threading import Event, Lock
 from time import monotonic, sleep
 from types import SimpleNamespace
 from typing import Any, ClassVar, cast
@@ -51,7 +51,11 @@ from graphon.graph_events.node import (
     NodeRunSucceededEvent,
 )
 from graphon.nodes.base.node import Node
-from graphon.nodes.container_effects import IterationFrameRequest, LoopFrameRequest
+from graphon.nodes.container_effects import (
+    IterationFrameRequest,
+    LoopFrameRequest,
+    build_container_value,
+)
 from graphon.nodes.human_input.entities import (
     Completed,
     HITLCallback,
@@ -61,9 +65,11 @@ from graphon.nodes.human_input.entities import (
 from graphon.nodes.human_input.human_input_node import HumanInputNode
 from graphon.nodes.loop.loop_node import LoopNode
 from graphon.runtime.container_state import (
-    ContainerFrameState,
-    ContainerRunState,
     FrameRuntimeData,
+    IterationRunState,
+    LoopFrameState,
+    LoopRunState,
+    create_container_run_state,
 )
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.runtime.variable_pool import VariablePool
@@ -381,7 +387,7 @@ def _runtime_with_live_resume_task() -> GraphRuntimeState:
         ),
     )
     request = LoopFrameRequest(
-        inputs={"loop_count": 1},
+        inputs={"loop_count": build_container_value(1)},
         outputs={},
         loop_count=1,
         root_node_id="loop-start",
@@ -390,18 +396,12 @@ def _runtime_with_live_resume_task() -> GraphRuntimeState:
         index=0,
     )
     graph_runtime_state.put_container_run(
-        ContainerRunState(
+        create_container_run_state(
             invocation_id="loop-invocation",
             frame_id="root",
             node_id="loop",
             started_at=datetime.now(UTC).replace(tzinfo=None),
-            phase_data={
-                "inputs": dict(request.inputs),
-                "loop_count": request.loop_count,
-                "root_node_id": request.root_node_id,
-                "loop_variable_selectors": {},
-                "loop_node_ids": (),
-            },
+            request=request,
         ),
     )
     loop_handler = LoopContainerHandler(
@@ -440,12 +440,16 @@ def _resume_loop_snapshot(snapshot: str) -> list[TaskEvent]:
         ),
     )
     event_queue: queue.Queue[TaskEvent] = queue.Queue()
+    task_claiming = Event()
+    task_claiming.set()
     worker = Worker(
         ready_queue=cast(InMemoryReadyQueue, runtime_state.ready_queue),
         event_queue=event_queue,
         frame_registry=frame_registry,
         layers=[],
         container_handlers={},
+        task_claim_lock=Lock(),
+        task_claiming=task_claiming,
     )
     worker.start()
     try:
@@ -460,13 +464,22 @@ def test_resume_restores_container_runs_before_workers_start() -> None:
         variable_pool=VariablePool(),
         start_at=1,
     )
+    request = LoopFrameRequest(
+        inputs={"loop_count": build_container_value(1)},
+        outputs={},
+        loop_count=1,
+        root_node_id="loop-start",
+        loop_variable_selectors={},
+        loop_node_ids=frozenset(),
+        index=0,
+    )
     runtime_state.put_container_run(
-        ContainerRunState(
+        create_container_run_state(
             invocation_id="loop-invocation",
             frame_id="root",
             node_id="loop",
             started_at=datetime.now(UTC).replace(tzinfo=None),
-            phase_data={},
+            request=request,
         ),
     )
     runtime_state.defer_ready_task(StartTask(frame_id="root", node_id="start"))
@@ -499,16 +512,26 @@ def test_loop_frame_restore_shares_parent_variable_pool() -> None:
     parent_pool = VariablePool()
     parent_pool.add(["loop", "seed"], "parent")
     runtime_state = GraphRuntimeState(variable_pool=parent_pool, start_at=1)
-    run_state = ContainerRunState(
+    request = LoopFrameRequest(
+        inputs={"loop_count": build_container_value(1)},
+        outputs={},
+        loop_count=1,
+        root_node_id="loop-start",
+        loop_variable_selectors={},
+        loop_node_ids=frozenset(),
+        index=0,
+    )
+    run_state = create_container_run_state(
         invocation_id="loop-invocation",
         frame_id="root",
         node_id="loop",
         started_at=datetime.now(UTC).replace(tzinfo=None),
+        request=request,
     )
+    assert isinstance(run_state, LoopRunState)
     runtime_state.put_container_run(run_state)
-    frame_state = ContainerFrameState(
+    frame_state = LoopFrameState(
         frame_id="loop-invocation:loop:0",
-        kind="loop",
         parent_invocation_id=run_state.invocation_id,
         root_node_id="loop-start",
         index=0,
@@ -612,8 +635,12 @@ def test_loop_hitl_runtime_state_round_trip_preserves_progress() -> None:
         if isinstance(event, NodeRunLoopSucceededEvent)
     )
     assert completed_rounds == 1
-    assert run_state.phase_data["completed_count"] == 1
-    assert run_state.phase_data["outputs"] == {"seed": "fixed", "loop_round": 1}
+    assert isinstance(run_state, LoopRunState)
+    assert run_state.completed_count == 1
+    assert {key: value.to_object() for key, value in run_state.outputs.items()} == {
+        "seed": "fixed",
+        "loop_round": 1,
+    }
     assert frame_state.index == 1
     assert deferred_tasks == [
         StartTask(frame_id=frame_state.frame_id, node_id="human-input")
@@ -732,9 +759,12 @@ def test_parallel_iteration_hitl_runtime_state_round_trip_preserves_order() -> N
     assert paused_events.index(pause_requests[0]) < paused_events.index(
         paused_successes[0]
     )
-    assert run_state.phase_data["scheduled_count"] == 2
-    assert run_state.phase_data["completed_count"] == 1
-    assert run_state.phase_data["outputs"] == {"0": "alpha!"}
+    assert isinstance(run_state, IterationRunState)
+    assert run_state.scheduled_count == 2
+    assert run_state.completed_count == 1
+    assert {key: value.to_object() for key, value in run_state.outputs.items()} == {
+        "0": "alpha!"
+    }
     assert frame_state.index == 1
     assert len(start_tasks) == 1
     assert start_tasks[0] == StartTask(
@@ -770,7 +800,8 @@ def test_parallel_iteration_hitl_runtime_state_round_trip_preserves_order() -> N
 def test_deferred_resume_task_round_trips_and_resumes_parent_container() -> None:
     runtime_state = _runtime_with_live_resume_task()
     runtime_state.graph_execution.paused = True
-    runtime_state.drain_ready_tasks_to_deferred()
+    for task in runtime_state.ready_queue.drain():
+        runtime_state.defer_ready_task(task)
     snapshot = runtime_state.dumps()
     restored_for_assert = GraphRuntimeState.from_snapshot(snapshot)
     deferred_tasks = restored_for_assert.drain_deferred_ready_tasks()

@@ -21,6 +21,7 @@ from graphon.graph_events.loop import (
     NodeRunLoopFailedEvent,
     NodeRunLoopSucceededEvent,
 )
+from graphon.graph_events.node import NodeRunSucceededEvent
 from graphon.variables.segments import Segment
 from tests.helpers.workflow_events import (
     event_path,
@@ -397,6 +398,124 @@ def test_full_loop_graph_stops_at_loop_end_node() -> None:
     )
     assert succeeded.outputs == {"loop_round": 1}
     assert succeeded.metadata["completed_reason"] == "loop_break"
+
+
+def test_nested_iteration_loop_end_stops_ancestor_loop() -> None:
+    dsl = _graph_dsl(
+        nodes=[
+            _start_node(),
+            {
+                "id": "loop",
+                "data": {
+                    "type": "loop",
+                    "loop_count": 3,
+                    "start_node_id": "loop-start",
+                    "break_conditions": [],
+                    "logical_operator": "and",
+                },
+            },
+            {
+                "id": "loop-start",
+                "data": {"type": "loop-start", "loop_id": "loop"},
+            },
+            {
+                "id": "iteration",
+                "data": {
+                    "type": "iteration",
+                    "loop_id": "loop",
+                    "iterator_selector": ["start", "items"],
+                    "output_selector": ["iteration", "item"],
+                    "start_node_id": "iteration-start",
+                    "is_parallel": False,
+                    "parallel_nums": 1,
+                    "error_handle_mode": "terminated",
+                    "flatten_output": False,
+                },
+            },
+            {
+                "id": "iteration-start",
+                "data": {
+                    "type": "iteration-start",
+                    "loop_id": "loop",
+                    "iteration_id": "iteration",
+                },
+            },
+            {
+                "id": "stop",
+                "data": {
+                    "type": "loop-end",
+                    "loop_id": "loop",
+                    "iteration_id": "iteration",
+                },
+            },
+            _end_node([]),
+        ],
+        edges=[
+            _edge("start", "loop"),
+            _edge("loop-start", "iteration"),
+            _edge("iteration-start", "stop"),
+            _edge("loop", "end"),
+        ],
+    )
+
+    events = run_workflow(dsl, start_inputs={"items": ["only"]})
+
+    stop_succeeded = next(
+        event
+        for event in events
+        if isinstance(event, NodeRunSucceededEvent) and event.node_id == "stop"
+    )
+    loop_succeeded = next(
+        event for event in events if isinstance(event, NodeRunLoopSucceededEvent)
+    )
+    iteration_succeeded = [
+        event for event in events if isinstance(event, NodeRunIterationSucceededEvent)
+    ]
+    assert stop_succeeded.in_loop_id == "loop"
+    assert stop_succeeded.in_iteration_id == "iteration"
+    assert loop_succeeded.outputs == {"loop_round": 1}
+    assert loop_succeeded.metadata["completed_reason"] == "loop_break"
+    assert len(iteration_succeeded) == 1
+
+
+def test_loop_condition_error_uses_node_failure_lifecycle() -> None:
+    dsl = _graph_dsl(
+        nodes=[
+            _start_node(),
+            {
+                "id": "loop",
+                "data": {
+                    "type": "loop",
+                    "loop_count": 2,
+                    "start_node_id": "loop-start",
+                    "break_conditions": [
+                        {
+                            "variable_selector": ["missing", "value"],
+                            "comparison_operator": "≥",
+                            "value": "1",
+                        },
+                    ],
+                    "logical_operator": "and",
+                },
+            },
+            {
+                "id": "loop-start",
+                "data": {"type": "loop-start", "loop_id": "loop"},
+            },
+        ],
+        edges=[_edge("start", "loop")],
+    )
+
+    events = _run_failed_workflow(dsl, start_inputs={})
+
+    assert event_path(events)[-3:] == [
+        _event("NodeRunLoopFailedEvent", "loop"),
+        _event("NodeRunFailedEvent", "loop"),
+        _event("GraphRunFailedEvent"),
+    ]
+    terminal = events[-1]
+    assert isinstance(terminal, GraphRunFailedEvent)
+    assert terminal.exceptions_count == 1
 
 
 def test_full_loop_graph_propagates_child_failure() -> None:

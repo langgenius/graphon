@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import cast, final
 
@@ -13,18 +12,21 @@ from graphon.enums import (
 )
 from graphon.graph_events.base import GraphNodeEventBase
 from graphon.graph_events.node import NodeRunFailedEvent
-from graphon.model_runtime.entities.llm_entities import LLMUsage
-from graphon.node_events.base import NodeRunResult
 from graphon.nodes.container_effects import (
     ContainerAwaitRequest,
     ContainerExecutionResult,
+    ContainerNodeRunResult,
+    ContainerValue,
     IterationFrameRequest,
+    build_container_value,
 )
 from graphon.runtime.container_state import (
     ContainerFrameState,
-    ContainerRunState,
+    IterationFrameState,
+    IterationRunState,
 )
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.variables.segments import NoneSegment, SerializableSegment
 
 from .frames import ExecutionFrame, FrameRegistry
 from .ready_queue import ROOT_FRAME_ID, ResumeTask
@@ -42,6 +44,9 @@ class IterationContainerHandler:
         self._lock = threading.Lock()
 
     def restore_frame(self, frame_state: ContainerFrameState) -> None:
+        if not isinstance(frame_state, IterationFrameState):
+            msg = f"iteration handler cannot restore {frame_state.kind} frame"
+            raise TypeError(msg)
         variable_pool = frame_state.runtime_data.variable_pool
         if isinstance(variable_pool, str):
             msg = (
@@ -64,9 +69,9 @@ class IterationContainerHandler:
             raise TypeError(msg)
 
         with self._lock:
-            run_state = self._initialize_run_state(
-                invocation_id=invocation_id,
-                request=request,
+            run_state = self._iteration_run(invocation_id)
+            run_state = self._put_run_state(
+                run_state.model_copy(update={"resume_pending": False}),
             )
             parent_frame = self._frame_registry.get(run_state.frame_id)
             if self._finish_failed_iteration_if_ready(
@@ -74,21 +79,24 @@ class IterationContainerHandler:
                 run_state=run_state,
             ):
                 return
+
             for index in request.indexes:
+                run_state = self._put_run_state(
+                    run_state.model_copy(
+                        update={
+                            "scheduled_count": max(
+                                run_state.scheduled_count,
+                                index + 1,
+                            ),
+                        },
+                    ),
+                )
                 self._start_iteration_frame(
                     parent_frame=parent_frame,
                     run_state=run_state,
                     index=index,
-                    root_node_id=request.root_node_id,
                 )
-                run_state = self._root_runtime_state().update_container_run_phase_data(
-                    invocation_id,
-                    {
-                        "scheduled_count": max(
-                            self._scheduled_count(run_state), index + 1
-                        )
-                    },
-                )
+
             self._request_iteration_frames(
                 parent_frame=parent_frame,
                 run_state=run_state,
@@ -101,12 +109,10 @@ class IterationContainerHandler:
         event: GraphNodeEventBase,
     ) -> None:
         with self._lock:
-            root_runtime_state = self._root_runtime_state()
-            frame_state = root_runtime_state.get_container_frame(frame.frame_id)
-            run_state = root_runtime_state.get_container_run(
-                frame_state.parent_invocation_id,
-            )
-            event.in_iteration_id = run_state.node_id
+            frame_state = self._iteration_frame(frame.frame_id)
+            run_state = self._iteration_run(frame_state.parent_invocation_id)
+            if event.in_iteration_id is None:
+                event.in_iteration_id = run_state.node_id
             iteration_metadata = {
                 WorkflowNodeExecutionMetadataKey.ITERATION_ID: run_state.node_id,
                 WorkflowNodeExecutionMetadataKey.ITERATION_INDEX: frame_state.index,
@@ -132,16 +138,10 @@ class IterationContainerHandler:
         event: NodeRunFailedEvent,
     ) -> None:
         with self._lock:
-            frame_state = self._root_runtime_state().get_container_frame(frame.frame_id)
+            frame_state = self._iteration_frame(frame.frame_id)
             self._root_runtime_state().put_container_frame(
                 frame_state.model_copy(
-                    update={
-                        "phase_data": {
-                            **dict(frame_state.phase_data),
-                            "failed": True,
-                            "error": event.error,
-                        },
-                    },
+                    update={"errors": (*frame_state.errors, event.error)},
                 ),
             )
 
@@ -151,82 +151,79 @@ class IterationContainerHandler:
                 return
 
             root_runtime_state = self._root_runtime_state()
-            frame_state = root_runtime_state.pop_container_frame(frame.frame_id)
-            self._frame_registry.remove(frame.frame_id)
+            frame_state = self._iteration_frame(frame.frame_id)
             self._complete_ready_iteration_frame(
                 frame=frame,
                 frame_state=frame_state,
             )
+            root_runtime_state.pop_container_frame(frame.frame_id)
+            self._frame_registry.remove(frame.frame_id)
 
     def _complete_ready_iteration_frame(
         self,
         *,
         frame: ExecutionFrame,
-        frame_state: ContainerFrameState,
+        frame_state: IterationFrameState,
     ) -> None:
-        root_runtime_state = self._root_runtime_state()
-        run_state = root_runtime_state.get_container_run(
-            frame_state.parent_invocation_id,
-        )
+        run_state = self._iteration_run(frame_state.parent_invocation_id)
         parent_frame = self._frame_registry.get(run_state.frame_id)
-        phase_data = dict(frame_state.phase_data)
-        if phase_data.get("failed") is True:
-            error = cast(str, phase_data["error"])
+        if frame_state.errors:
             self._complete_failed_iteration_frame(
                 frame=frame,
                 frame_state=frame_state,
                 parent_frame=parent_frame,
                 run_state=run_state,
-                error=error,
+                error=frame_state.errors[0],
             )
             return
 
         result = frame.graph_runtime_state.variable_pool.get(
-            cast(list[str], run_state.phase_data["output_selector"]),
+            run_state.output_selector,
         )
+        output = NoneSegment() if result is None else cast(SerializableSegment, result)
         run_state = self._complete_iteration_step(
             frame=frame,
             frame_state=frame_state,
+            parent_frame=parent_frame,
             run_state=run_state,
-            output=None if result is None else result.to_object(),
+            output=output,
             store_output=True,
         )
         self._continue_or_complete_iteration(
             parent_frame=parent_frame,
             run_state=run_state,
-            last_frame=frame,
         )
 
     def _complete_failed_iteration_frame(
         self,
         *,
         frame: ExecutionFrame,
-        frame_state: ContainerFrameState,
+        frame_state: IterationFrameState,
         parent_frame: ExecutionFrame,
-        run_state: ContainerRunState,
+        run_state: IterationRunState,
         error: str,
     ) -> None:
         run_state = self._complete_iteration_step(
             frame=frame,
             frame_state=frame_state,
+            parent_frame=parent_frame,
             run_state=run_state,
-            output=None,
-            store_output=self._error_handle_mode(run_state)
-            == ErrorHandleMode.CONTINUE_ON_ERROR,
+            output=NoneSegment(),
+            store_output=(
+                run_state.error_handle_mode == ErrorHandleMode.CONTINUE_ON_ERROR
+            ),
         )
-        match self._error_handle_mode(run_state):
+        match run_state.error_handle_mode:
             case ErrorHandleMode.TERMINATED:
-                phase_data = dict(run_state.phase_data)
-                phase_data.setdefault("error", error)
-                phase_data["failed"] = True
                 run_state = self._put_run_state(
-                    run_state.model_copy(update={"phase_data": phase_data}),
+                    run_state.model_copy(
+                        update={"errors": (*run_state.errors, error)},
+                    ),
                 )
                 self._finish_failed_iteration_if_ready(
                     parent_frame=parent_frame,
                     run_state=run_state,
                 )
-                return
             case (
                 ErrorHandleMode.CONTINUE_ON_ERROR
                 | ErrorHandleMode.REMOVE_ABNORMAL_OUTPUT
@@ -234,56 +231,55 @@ class IterationContainerHandler:
                 self._continue_or_complete_iteration(
                     parent_frame=parent_frame,
                     run_state=run_state,
-                    last_frame=frame,
                 )
 
     def _complete_iteration_step(
         self,
         *,
         frame: ExecutionFrame,
-        frame_state: ContainerFrameState,
-        run_state: ContainerRunState,
-        output: object,
+        frame_state: IterationFrameState,
+        parent_frame: ExecutionFrame,
+        run_state: IterationRunState,
+        output: SerializableSegment,
         store_output: bool,
-    ) -> ContainerRunState:
-        phase_data = dict(run_state.phase_data)
-        completed_count = self._completed_count(run_state) + 1
-        duration_map = dict(cast(Mapping[str, float], phase_data["duration_map"]))
-        index = frame_state.index
-        duration_map[str(index)] = (
+    ) -> IterationRunState:
+        duration_map = dict(run_state.duration_map)
+        duration_map[str(frame_state.index)] = (
             datetime.now(UTC).replace(tzinfo=None) - frame_state.started_at
         ).total_seconds()
-        outputs = dict(cast(Mapping[str, object], phase_data["outputs"]))
+        outputs = dict(run_state.outputs)
         if store_output:
-            outputs[str(index)] = output
-        phase_data.update({
-            "outputs": outputs,
-            "duration_map": duration_map,
-            "usage": self._phase_usage(phase_data).plus(
-                frame.graph_runtime_state.llm_usage,
-            ),
-            "completed_count": completed_count,
-        })
+            outputs[str(frame_state.index)] = output
+        if frame_state.index == len(run_state.items) - 1:
+            parent_frame.graph_runtime_state.merge_response_outputs(
+                frame.graph_runtime_state.outputs,
+            )
+
         return self._put_run_state(
-            run_state.model_copy(update={"phase_data": phase_data}),
+            run_state.model_copy(
+                update={
+                    "outputs": outputs,
+                    "duration_map": duration_map,
+                    "usage": run_state.usage.plus(
+                        frame.graph_runtime_state.llm_usage,
+                    ),
+                    "completed_count": run_state.completed_count + 1,
+                },
+            ),
         )
 
     def _continue_or_complete_iteration(
         self,
         *,
         parent_frame: ExecutionFrame,
-        run_state: ContainerRunState,
-        last_frame: ExecutionFrame,
+        run_state: IterationRunState,
     ) -> None:
         if self._finish_failed_iteration_if_ready(
             parent_frame=parent_frame,
             run_state=run_state,
         ):
             return
-        if self._completed_count(run_state) >= len(self._items(run_state)):
-            parent_frame.graph_runtime_state.merge_response_outputs(
-                last_frame.graph_runtime_state.outputs,
-            )
+        if run_state.completed_count >= len(run_state.items):
             self._enqueue_container_result(
                 runtime_state=parent_frame.graph_runtime_state,
                 invocation_id=run_state.invocation_id,
@@ -300,26 +296,25 @@ class IterationContainerHandler:
         self,
         *,
         parent_frame: ExecutionFrame,
-        run_state: ContainerRunState,
+        run_state: IterationRunState,
     ) -> bool:
-        phase_data = run_state.phase_data
-        if phase_data.get("failed") is not True:
+        if not run_state.errors:
             return False
-        if self._completed_count(run_state) < self._scheduled_count(run_state) or cast(
-            bool, phase_data["resume_pending"]
+        if (
+            run_state.completed_count < run_state.scheduled_count
+            or run_state.resume_pending
         ):
             return True
 
-        run_state = self._root_runtime_state().update_container_run_phase_data(
-            run_state.invocation_id,
-            {"resume_pending": True},
+        run_state = self._put_run_state(
+            run_state.model_copy(update={"resume_pending": True}),
         )
         self._enqueue_container_result(
             runtime_state=parent_frame.graph_runtime_state,
             invocation_id=run_state.invocation_id,
             result=self._fail_iteration(
                 run_state=run_state,
-                error=cast(str, phase_data["error"]),
+                error=run_state.errors[0],
             ),
         )
         return True
@@ -328,85 +323,50 @@ class IterationContainerHandler:
         self,
         *,
         parent_frame: ExecutionFrame,
-        run_state: ContainerRunState,
+        run_state: IterationRunState,
     ) -> None:
-        if cast(bool, run_state.phase_data["resume_pending"]):
+        if run_state.resume_pending or run_state.scheduled_count >= len(
+            run_state.items
+        ):
             return
-        items = self._items(run_state)
-        scheduled_count = self._scheduled_count(run_state)
-        if scheduled_count >= len(items):
-            return
-        active_count = scheduled_count - self._completed_count(run_state)
-        capacity = max(
-            cast(int, run_state.phase_data["parallel_nums"]) - active_count,
-            0,
-        )
+        active_count = run_state.scheduled_count - run_state.completed_count
+        capacity = max(run_state.parallel_nums - active_count, 0)
         if capacity == 0:
             return
-        end_index = min(len(items), scheduled_count + capacity)
-        indexes = tuple(range(scheduled_count, end_index))
-        run_state = self._root_runtime_state().update_container_run_phase_data(
-            run_state.invocation_id, {"resume_pending": True}
+        end_index = min(
+            len(run_state.items),
+            run_state.scheduled_count + capacity,
+        )
+        indexes = tuple(range(run_state.scheduled_count, end_index))
+        run_state = self._put_run_state(
+            run_state.model_copy(update={"resume_pending": True}),
         )
         self._enqueue_container_result(
             runtime_state=parent_frame.graph_runtime_state,
             invocation_id=run_state.invocation_id,
             result=IterationFrameRequest(
-                items=items,
-                root_node_id=cast(str, run_state.phase_data["root_node_id"]),
+                items=run_state.items,
+                root_node_id=run_state.root_node_id,
                 indexes=indexes,
-                output_selector=cast(
-                    Sequence[str],
-                    run_state.phase_data["output_selector"],
-                ),
-                error_handle_mode=self._error_handle_mode(run_state),
-                flatten_output=self._flatten_output(run_state),
-                parallel_nums=cast(int, run_state.phase_data["parallel_nums"]),
+                output_selector=run_state.output_selector,
+                error_handle_mode=run_state.error_handle_mode,
+                flatten_output=run_state.flatten_output,
+                parallel_nums=run_state.parallel_nums,
             ),
-        )
-
-    def _initialize_run_state(
-        self,
-        *,
-        invocation_id: str,
-        request: IterationFrameRequest,
-    ) -> ContainerRunState:
-        root_runtime_state = self._root_runtime_state()
-        run_state = root_runtime_state.get_container_run(invocation_id)
-        phase_data = dict(run_state.phase_data)
-        phase_data.update({
-            "items": tuple(request.items),
-            "root_node_id": request.root_node_id,
-            "output_selector": list(request.output_selector),
-            "error_handle_mode": request.error_handle_mode,
-            "flatten_output": request.flatten_output,
-            "parallel_nums": request.parallel_nums,
-            "outputs": dict(cast(Mapping[str, object], phase_data.get("outputs", {}))),
-            "duration_map": dict(
-                cast(Mapping[str, float], phase_data.get("duration_map", {})),
-            ),
-            "usage": self._phase_usage(phase_data),
-            "scheduled_count": cast(int, phase_data.get("scheduled_count", 0)),
-            "completed_count": cast(int, phase_data.get("completed_count", 0)),
-            "resume_pending": False,
-        })
-        return self._put_run_state(
-            run_state.model_copy(update={"phase_data": phase_data}),
         )
 
     def _start_iteration_frame(
         self,
         *,
         parent_frame: ExecutionFrame,
-        run_state: ContainerRunState,
+        run_state: IterationRunState,
         index: int,
-        root_node_id: str,
     ) -> None:
         variable_pool = parent_frame.graph_runtime_state.variable_pool.model_copy(
             deep=True,
         )
         variable_pool.add([run_state.node_id, "index"], index)
-        variable_pool.add([run_state.node_id, "item"], self._items(run_state)[index])
+        variable_pool.add([run_state.node_id, "item"], run_state.items[index])
         child_runtime_state = GraphRuntimeState(
             variable_pool=variable_pool,
             start_at=parent_frame.graph_runtime_state.start_at,
@@ -419,15 +379,14 @@ class IterationContainerHandler:
         child_frame_id = f"{run_state.invocation_id}:iteration:{index}"
         child_frame = self._frame_registry.materialize_child_frame(
             frame_id=child_frame_id,
-            root_node_id=root_node_id,
+            root_node_id=run_state.root_node_id,
             graph_runtime_state=child_runtime_state,
         )
         self._root_runtime_state().put_container_frame(
-            ContainerFrameState(
+            IterationFrameState(
                 frame_id=child_frame_id,
-                kind="iteration",
                 parent_invocation_id=run_state.invocation_id,
-                root_node_id=root_node_id,
+                root_node_id=run_state.root_node_id,
                 index=index,
                 started_at=datetime.now(UTC).replace(tzinfo=None),
                 runtime_data=child_frame.graph_runtime_state.snapshot_frame(
@@ -435,70 +394,74 @@ class IterationContainerHandler:
                 ),
             ),
         )
-        child_frame.state_manager.enqueue_node(root_node_id)
+        child_frame.state_manager.enqueue_node(run_state.root_node_id)
 
     def _complete_iteration(
         self,
-        run_state: ContainerRunState,
+        run_state: IterationRunState,
     ) -> ContainerExecutionResult:
-        outputs = {
-            "output": self._flatten_outputs_if_needed(
-                self._ordered_iteration_outputs(run_state),
-                flatten_output=self._flatten_output(run_state),
+        outputs: dict[str, ContainerValue] = {
+            "output": build_container_value(
+                self._flatten_outputs_if_needed(
+                    self._ordered_iteration_outputs(run_state),
+                    flatten_output=run_state.flatten_output,
+                ),
             ),
         }
         metadata = self._iteration_metadata(run_state)
         return ContainerExecutionResult(
             metadata=self._event_metadata(metadata),
-            steps=len(self._items(run_state)),
-            node_run_result=NodeRunResult(
+            steps=len(run_state.items),
+            node_run_result=ContainerNodeRunResult(
                 status=WorkflowNodeExecutionStatus.SUCCEEDED,
                 metadata=metadata,
                 outputs=outputs,
                 inputs=self._inputs(run_state),
-                llm_usage=self._phase_usage(run_state.phase_data),
+                llm_usage=run_state.usage,
             ),
         )
 
     def _fail_iteration(
         self,
         *,
-        run_state: ContainerRunState,
+        run_state: IterationRunState,
         error: str,
     ) -> ContainerExecutionResult:
-        outputs = {
-            "output": self._flatten_outputs_if_needed(
-                self._ordered_iteration_outputs(run_state),
-                flatten_output=self._flatten_output(run_state),
+        outputs: dict[str, ContainerValue] = {
+            "output": build_container_value(
+                self._flatten_outputs_if_needed(
+                    self._ordered_iteration_outputs(run_state),
+                    flatten_output=run_state.flatten_output,
+                ),
             ),
         }
         metadata = self._iteration_metadata(run_state)
         return ContainerExecutionResult(
             metadata=self._event_metadata(metadata),
-            steps=len(self._items(run_state)),
-            node_run_result=NodeRunResult(
+            steps=len(run_state.items),
+            node_run_result=ContainerNodeRunResult(
                 status=WorkflowNodeExecutionStatus.FAILED,
                 error=error,
                 metadata=metadata,
                 outputs=outputs,
                 inputs=self._inputs(run_state),
-                llm_usage=self._phase_usage(run_state.phase_data),
+                llm_usage=run_state.usage,
             ),
         )
 
     def _iteration_metadata(
         self,
-        run_state: ContainerRunState,
+        run_state: IterationRunState,
     ) -> dict[WorkflowNodeExecutionMetadataKey, object]:
-        phase_data = dict(run_state.phase_data)
-        usage = self._phase_usage(phase_data)
         return {
-            WorkflowNodeExecutionMetadataKey.TOTAL_TOKENS: usage.total_tokens,
-            WorkflowNodeExecutionMetadataKey.TOTAL_PRICE: usage.total_price,
-            WorkflowNodeExecutionMetadataKey.CURRENCY: usage.currency,
-            WorkflowNodeExecutionMetadataKey.ITERATION_DURATION_MAP: phase_data[
-                "duration_map"
-            ],
+            WorkflowNodeExecutionMetadataKey.TOTAL_TOKENS: (
+                run_state.usage.total_tokens
+            ),
+            WorkflowNodeExecutionMetadataKey.TOTAL_PRICE: run_state.usage.total_price,
+            WorkflowNodeExecutionMetadataKey.CURRENCY: run_state.usage.currency,
+            WorkflowNodeExecutionMetadataKey.ITERATION_DURATION_MAP: (
+                run_state.duration_map
+            ),
         }
 
     def _flatten_outputs_if_needed(
@@ -523,9 +486,14 @@ class IterationContainerHandler:
                 flattened.append(output)
         return flattened
 
-    def _ordered_iteration_outputs(self, run_state: ContainerRunState) -> list[object]:
-        outputs = cast(Mapping[str, object], run_state.phase_data["outputs"])
-        return [outputs[key] for key in sorted(outputs, key=int)]
+    def _ordered_iteration_outputs(
+        self,
+        run_state: IterationRunState,
+    ) -> list[object]:
+        return [
+            run_state.outputs[key].to_object()
+            for key in sorted(run_state.outputs, key=int)
+        ]
 
     def _enqueue_container_result(
         self,
@@ -544,31 +512,28 @@ class IterationContainerHandler:
     ) -> dict[str, object]:
         return {key.value: value for key, value in metadata.items()}
 
-    def _phase_usage(self, phase_data: Mapping[str, object]) -> LLMUsage:
-        value = phase_data.get("usage", LLMUsage.empty_usage())
-        if isinstance(value, LLMUsage):
-            return value
-        return LLMUsage.model_validate(value)
+    def _inputs(self, run_state: IterationRunState) -> dict[str, ContainerValue]:
+        return {
+            "iterator_selector": build_container_value(
+                [item.to_object() for item in run_state.items],
+            ),
+        }
 
-    def _inputs(self, run_state: ContainerRunState) -> Mapping[str, object]:
-        return {"iterator_selector": list(self._items(run_state))}
+    def _iteration_run(self, invocation_id: str) -> IterationRunState:
+        run_state = self._root_runtime_state().get_container_run(invocation_id)
+        if not isinstance(run_state, IterationRunState):
+            msg = f"iteration handler cannot use {run_state.kind} run"
+            raise TypeError(msg)
+        return run_state
 
-    def _items(self, run_state: ContainerRunState) -> tuple[object, ...]:
-        return tuple(cast(Sequence[object], run_state.phase_data["items"]))
+    def _iteration_frame(self, frame_id: str) -> IterationFrameState:
+        frame_state = self._root_runtime_state().get_container_frame(frame_id)
+        if not isinstance(frame_state, IterationFrameState):
+            msg = f"iteration handler cannot use {frame_state.kind} frame"
+            raise TypeError(msg)
+        return frame_state
 
-    def _error_handle_mode(self, run_state: ContainerRunState) -> ErrorHandleMode:
-        return ErrorHandleMode(run_state.phase_data["error_handle_mode"])
-
-    def _flatten_output(self, run_state: ContainerRunState) -> bool:
-        return cast(bool, run_state.phase_data["flatten_output"])
-
-    def _scheduled_count(self, run_state: ContainerRunState) -> int:
-        return cast(int, run_state.phase_data["scheduled_count"])
-
-    def _completed_count(self, run_state: ContainerRunState) -> int:
-        return cast(int, run_state.phase_data["completed_count"])
-
-    def _put_run_state(self, run_state: ContainerRunState) -> ContainerRunState:
+    def _put_run_state(self, run_state: IterationRunState) -> IterationRunState:
         self._root_runtime_state().put_container_run(run_state)
         return run_state
 

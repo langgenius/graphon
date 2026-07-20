@@ -114,8 +114,7 @@ class Dispatcher:
             ):
                 return False
             if self._graph_execution.paused:
-                self._state_manager.drain_ready_tasks_to_deferred()
-                self._worker_pool.drain()
+                self._state_manager.defer_ready_tasks(self._worker_pool.drain())
                 return True
             self._worker_pool.check_and_scale()
             self._dispatch_next_event()
