@@ -223,6 +223,7 @@ class GraphExecution:
             pause_reasons=self.pause_reasons,
             error=_serialize_error(self.error),
             failure_source=self.failure_source,
+            observed_failure_sources=self.observed_failure_sources,
             exceptions_count=self.exceptions_count,
             node_executions=node_states,
         )
@@ -252,6 +253,7 @@ class GraphExecution:
         self.pause_reasons = state.pause_reasons
         self.error = _deserialize_error(state.error)
         self.failure_source = state.failure_source
+        self.observed_failure_sources = list(state.observed_failure_sources)
         self.exceptions_count = state.exceptions_count
         self.node_executions = {
             item.node_id: NodeExecution(
