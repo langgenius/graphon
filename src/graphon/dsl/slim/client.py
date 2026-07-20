@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import shutil
-import subprocess  # noqa: S404
+import subprocess  # ruff:ignore[suspicious-subprocess-import]
 import sys
 import tempfile
 from collections.abc import Generator, Iterable, Mapping
@@ -137,7 +137,7 @@ class SlimClient:
         data: Mapping[str, Any],
     ) -> Generator[SlimEvent, None, None]:
         with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stderr_file:
-            process = subprocess.Popen(  # noqa: S603
+            process = subprocess.Popen(  # ruff:ignore[subprocess-without-shell-equals-true]
                 [
                     self._binary_path,
                     "-id",
@@ -266,7 +266,7 @@ class SlimClient:
         if action is not None:
             args.extend(("-action", action))
 
-        process = subprocess.run(  # noqa: S603
+        process = subprocess.run(  # ruff:ignore[subprocess-without-shell-equals-true]
             args,
             text=True,
             encoding="utf-8",

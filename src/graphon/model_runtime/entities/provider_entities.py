@@ -19,7 +19,7 @@ class FormType(StrEnum):
     """Enum class for form type."""
 
     TEXT_INPUT = "text-input"
-    SECRET_INPUT = "secret-input"  # noqa: S105
+    SECRET_INPUT = "secret-input"  # ruff:ignore[hardcoded-password-string]
     SELECT = auto()
     RADIO = auto()
     SWITCH = auto()

@@ -85,7 +85,7 @@ class VariableEntity(BaseModel):
             # Pydantic only wraps ValueError/AssertionError into ValidationError,
             # so we deliberately keep ValueError instead of TypeError here.
             msg = f"json_schema must be a JSON object, got {type(schema).__name__}"
-            raise ValueError(msg)  # noqa: TRY004
+            raise ValueError(msg)  # ruff:ignore[type-check-without-type-error]
         try:
             Draft7Validator.check_schema(schema)
         except SchemaError as error:
