@@ -6,13 +6,15 @@ from graphon.graph_events import GraphRunFailedEvent
 
 
 def test_graph_run_failed_event_carries_failure_source() -> None:
+    source = GraphFailureSource(
+        node_execution_id="execution-a",
+        node_id="node-a",
+    )
     event = GraphRunFailedEvent(
         error="upstream failed",
         exceptions_count=1,
-        failure_source=GraphFailureSource(
-            node_execution_id="execution-a",
-            node_id="node-a",
-        ),
+        failure_source=source,
+        observed_failure_sources=[source],
     )
 
     assert event.model_dump() == {
@@ -22,6 +24,12 @@ def test_graph_run_failed_event_carries_failure_source() -> None:
             "node_execution_id": "execution-a",
             "node_id": "node-a",
         },
+        "observed_failure_sources": [
+            {
+                "node_execution_id": "execution-a",
+                "node_id": "node-a",
+            }
+        ],
     }
 
 
@@ -34,3 +42,4 @@ def test_graph_run_failed_event_defaults_to_no_failure_source() -> None:
     event = GraphRunFailedEvent(error="infrastructure failed")
 
     assert event.failure_source is None
+    assert event.observed_failure_sources == []

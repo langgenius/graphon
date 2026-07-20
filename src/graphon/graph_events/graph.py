@@ -30,6 +30,10 @@ class GraphRunFailedEvent(BaseGraphEvent):
         default=None,
         description="node execution that caused the graph failure",
     )
+    observed_failure_sources: list[GraphFailureSource] = Field(
+        default_factory=list,
+        description="fatal node failures observed during fail-fast shutdown",
+    )
 
 
 class GraphRunPartialSucceededEvent(BaseGraphEvent):

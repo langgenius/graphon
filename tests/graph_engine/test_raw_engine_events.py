@@ -201,11 +201,19 @@ def test_handled_node_failure_does_not_record_graph_failure_source() -> None:
 
 
 def test_graph_failed_event_publishes_recorded_failure_source() -> None:
-    source = GraphFailureSource(
+    first = GraphFailureSource(
         node_execution_id="execution-a",
         node_id="node-a",
     )
-    graph_execution = MagicMock(exceptions_count=1, failure_source=source)
+    second = GraphFailureSource(
+        node_execution_id="execution-b",
+        node_id="node-b",
+    )
+    graph_execution = MagicMock(
+        exceptions_count=2,
+        failure_source=first,
+        observed_failure_sources=[first, second],
+    )
     event_manager = MagicMock()
     lifecycle = _GraphRunLifecycle(
         graph_execution=cast(Any, graph_execution),
@@ -218,12 +226,17 @@ def test_graph_failed_event_publishes_recorded_failure_source() -> None:
 
     event = lifecycle._failed_event(RuntimeError("boom"))
 
-    assert event.failure_source == source
+    assert event.failure_source == first
+    assert event.observed_failure_sources == [first, second]
     event_manager.notify_layers.assert_called_once_with(event)
 
 
 def test_graph_failed_event_omits_unattributed_failure_source() -> None:
-    graph_execution = MagicMock(exceptions_count=0, failure_source=None)
+    graph_execution = MagicMock(
+        exceptions_count=0,
+        failure_source=None,
+        observed_failure_sources=[],
+    )
     lifecycle = _GraphRunLifecycle(
         graph_execution=cast(Any, graph_execution),
         event_manager=cast(Any, MagicMock()),
