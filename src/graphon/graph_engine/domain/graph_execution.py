@@ -46,6 +46,7 @@ class GraphExecutionState(BaseModel):
     pause_reasons: list[PauseReason] = Field(default_factory=list)
     error: GraphExecutionErrorState | None = Field(default=None)
     failure_source: GraphFailureSource | None = Field(default=None)
+    observed_failure_sources: list[GraphFailureSource] = Field(default_factory=list)
     exceptions_count: int = Field(default=0)
     node_executions: list[NodeExecutionState] = Field(
         default_factory=list[NodeExecutionState],
@@ -111,6 +112,7 @@ class GraphExecution:
     pause_reasons: list[PauseReason] = field(default_factory=list)
     error: Exception | None = None
     failure_source: GraphFailureSource | None = None
+    observed_failure_sources: list[GraphFailureSource] = field(default_factory=list)
     node_executions: dict[str, NodeExecution] = field(
         default_factory=dict[str, NodeExecution],
     )
@@ -155,7 +157,16 @@ class GraphExecution:
         *,
         failure_source: GraphFailureSource | None = None,
     ) -> None:
-        """Mark the graph execution as failed with an optional node source."""
+        """Record an observed source and preserve the first terminal failure."""
+        if (
+            failure_source is not None
+            and failure_source not in self.observed_failure_sources
+        ):
+            self.observed_failure_sources.append(failure_source)
+
+        if self.completed:
+            return
+
         self.error = error
         self.failure_source = failure_source
         self.completed = True

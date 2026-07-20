@@ -67,6 +67,7 @@ class GraphExecutionProtocol(Protocol):
     paused: bool
     error: Exception | None
     failure_source: GraphFailureSource | None
+    observed_failure_sources: list[GraphFailureSource]
     exceptions_count: int
     pause_reasons: list[PauseReason]
 
