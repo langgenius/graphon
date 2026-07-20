@@ -97,7 +97,7 @@ def test_function_calling_system_prompt_formats_without_missing_placeholders() -
     )
 
     assert FUNCTION_CALLING_EXTRACTOR_NAME in rendered
-    assert "{FUNCTION_CALLING_EXTRACTOR_NAME}" not in rendered  # noqa: RUF027
+    assert "{FUNCTION_CALLING_EXTRACTOR_NAME}" not in rendered  # ruff:ignore[missing-f-string-syntax]
     assert "`extract_parameter`" not in rendered
     assert "previous messages" in rendered
     assert "Follow the schema." in rendered
@@ -151,7 +151,7 @@ def test_function_calling_prompt_template_renders_system_message() -> None:
     assert len(prompt_messages) == 2
     assert prompt_messages[0].role == PromptMessageRole.SYSTEM
     assert FUNCTION_CALLING_EXTRACTOR_NAME in prompt_messages[0].text
-    assert "{FUNCTION_CALLING_EXTRACTOR_NAME}" not in prompt_messages[0].text  # noqa: RUF027
+    assert "{FUNCTION_CALLING_EXTRACTOR_NAME}" not in prompt_messages[0].text  # ruff:ignore[missing-f-string-syntax]
     assert "`extract_parameter`" not in prompt_messages[0].text
     assert "Follow strictly instructions." in prompt_messages[0].text
     assert prompt_messages[1].role == PromptMessageRole.USER

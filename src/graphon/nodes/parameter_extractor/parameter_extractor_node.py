@@ -1059,8 +1059,8 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
             return LLMNodeCompletionModelPromptTemplate(
                 text=COMPLETION_GENERATE_JSON_PROMPT
                 .format(histories=memory_str, text=input_text, instruction=instruction)
-                .replace("{γγγ", "")  # noqa: RUF001
-                .replace("}γγγ", "")  # noqa: RUF001
+                .replace("{γγγ", "")  # ruff:ignore[ambiguous-unicode-character-string]
+                .replace("}γγγ", "")  # ruff:ignore[ambiguous-unicode-character-string]
                 .replace(
                     "{ structure }",
                     json.dumps(node_data.get_parameter_json_schema()),

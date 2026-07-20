@@ -669,7 +669,7 @@ def _estimate_prompt_message_tokens(prompt_messages: Sequence[PromptMessage]) ->
         return 0
     try:
         return GPT2Tokenizer.get_num_tokens(text)
-    except Exception:  # noqa: BLE001
+    except Exception:  # ruff:ignore[blind-except]
         return max(1, len(text) // 4)
 
 

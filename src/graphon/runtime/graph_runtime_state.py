@@ -503,7 +503,7 @@ class _GraphRuntimeBindings:
         self.get_graph_execution().loads(payload)
 
 
-class GraphRuntimeState:  # noqa: PLR0904
+class GraphRuntimeState:  # ruff:ignore[too-many-public-methods]
     """Mutable runtime state shared across graph execution components.
 
     `GraphRuntimeState` encapsulates the runtime state of workflow execution,

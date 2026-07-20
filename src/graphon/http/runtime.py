@@ -6,7 +6,7 @@ _default_http_client: HttpClientProtocol = HttpxHttpClient()
 
 def set_http_client(http_client: HttpClientProtocol) -> None:
     """Compatibility wrapper for replacing the process default client."""
-    global _default_http_client  # noqa: PLW0603
+    global _default_http_client  # ruff:ignore[global-statement]
     _default_http_client = http_client
 
 

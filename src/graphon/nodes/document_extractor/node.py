@@ -227,9 +227,16 @@ def _partition_file_via_unstructured_api(
     suffix: str,
     unstructured_api_config: UnstructuredApiConfig,
 ) -> Sequence[Any]:
-    from unstructured.staging.base import elements_from_dicts  # noqa: PLC0415
-    from unstructured_client import UnstructuredClient  # noqa: PLC0415
-    from unstructured_client.models import operations, shared  # noqa: PLC0415
+    from unstructured.staging.base import (  # ruff:ignore[import-outside-top-level]
+        elements_from_dicts,
+    )
+    from unstructured_client import (  # ruff:ignore[import-outside-top-level]
+        UnstructuredClient,
+    )
+    from unstructured_client.models import (  # ruff:ignore[import-outside-top-level]
+        operations,
+        shared,
+    )
 
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp_file:
         temp_file.write(file_content)
@@ -988,25 +995,33 @@ def _partition_unstructured_file_locally(
 
 
 def _load_partition_ppt() -> Callable[..., Sequence[Any]]:
-    from unstructured.partition.ppt import partition_ppt  # noqa: PLC0415
+    from unstructured.partition.ppt import (  # ruff:ignore[import-outside-top-level]
+        partition_ppt,
+    )
 
     return partition_ppt
 
 
 def _load_partition_pptx() -> Callable[..., Sequence[Any]]:
-    from unstructured.partition.pptx import partition_pptx  # noqa: PLC0415
+    from unstructured.partition.pptx import (  # ruff:ignore[import-outside-top-level]
+        partition_pptx,
+    )
 
     return partition_pptx
 
 
 def _load_partition_epub() -> Callable[..., Sequence[Any]]:
-    from unstructured.partition.epub import partition_epub  # noqa: PLC0415
+    from unstructured.partition.epub import (  # ruff:ignore[import-outside-top-level]
+        partition_epub,
+    )
 
     return partition_epub
 
 
 def _load_partition_odt() -> Callable[..., Sequence[Any]]:
-    from unstructured.partition.odt import partition_odt  # noqa: PLC0415
+    from unstructured.partition.odt import (  # ruff:ignore[import-outside-top-level]
+        partition_odt,
+    )
 
     return partition_odt
 
@@ -1017,7 +1032,9 @@ def _render_unstructured_text_element(element: Any) -> str:
 
 def _extract_text_from_eml(file_content: bytes) -> str:
     try:
-        from unstructured.partition.email import partition_email  # noqa: PLC0415
+        from unstructured.partition.email import (  # ruff:ignore[import-outside-top-level]
+            partition_email,
+        )
 
         with io.BytesIO(file_content) as file:
             elements = partition_email(file=file)
@@ -1029,7 +1046,9 @@ def _extract_text_from_eml(file_content: bytes) -> str:
 
 def _extract_text_from_msg(file_content: bytes) -> str:
     try:
-        from unstructured.partition.msg import partition_msg  # noqa: PLC0415
+        from unstructured.partition.msg import (  # ruff:ignore[import-outside-top-level]
+            partition_msg,
+        )
 
         with io.BytesIO(file_content) as file:
             elements = partition_msg(file=file)

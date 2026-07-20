@@ -20,7 +20,7 @@ class OutputVariableType(StrEnum):
     STRING = "string"
     NUMBER = "number"
     INTEGER = "integer"
-    SECRET = "secret"  # noqa: S105
+    SECRET = "secret"  # ruff:ignore[hardcoded-password-string]
     BOOLEAN = "boolean"
     OBJECT = "object"
     FILE = "file"

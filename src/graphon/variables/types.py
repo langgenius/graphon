@@ -32,8 +32,8 @@ def _infer_scalar_segment_type(value: Any) -> SegmentType | None:
 
 
 def _is_group_value_valid(value: Any) -> bool:
-    from .segment_group import SegmentGroup  # noqa: PLC0415
-    from .segments import Segment  # noqa: PLC0415
+    from .segment_group import SegmentGroup  # ruff:ignore[import-outside-top-level]
+    from .segments import Segment  # ruff:ignore[import-outside-top-level]
 
     match value:
         case SegmentGroup():
@@ -69,7 +69,7 @@ class SegmentType(StrEnum):
     FLOAT = "float"
     STRING = "string"
     OBJECT = "object"
-    SECRET = "secret"  # noqa: S105
+    SECRET = "secret"  # ruff:ignore[hardcoded-password-string]
 
     FILE = "file"
     BOOLEAN = "boolean"
@@ -254,7 +254,10 @@ class SegmentType(StrEnum):
     def get_zero_value(t: SegmentType) -> Segment:
         # Lazy import to avoid circular dependency between segment types
         # and factory helpers.
-        from .factory import build_segment, build_segment_with_type  # noqa: PLC0415
+        from .factory import (  # ruff:ignore[import-outside-top-level]
+            build_segment,
+            build_segment_with_type,
+        )
 
         if t in _EMPTY_ARRAY_ZERO_VALUE_TYPES:
             return build_segment_with_type(t, [])

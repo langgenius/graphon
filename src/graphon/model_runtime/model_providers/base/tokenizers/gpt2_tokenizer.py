@@ -19,7 +19,7 @@ _lock = Lock()
 
 def _try_load_tiktoken_encoder() -> _TokenizerProtocol | None:
     try:
-        import tiktoken  # noqa: PLC0415
+        import tiktoken  # ruff:ignore[import-outside-top-level]
 
         return tiktoken.get_encoding("gpt2")
     except Exception:
@@ -44,7 +44,7 @@ class GPT2Tokenizer:
 
     @staticmethod
     def get_encoder() -> _TokenizerProtocol:
-        global _tokenizer  # noqa: PLW0603
+        global _tokenizer  # ruff:ignore[global-statement]
         if _tokenizer is not None:
             return _tokenizer
         with _lock:
@@ -52,7 +52,7 @@ class GPT2Tokenizer:
                 # Try to use tiktoken to get the tokenizer because it is faster
                 _tokenizer = _try_load_tiktoken_encoder()
                 if _tokenizer is None:
-                    import transformers  # noqa: PLC0415
+                    import transformers  # ruff:ignore[import-outside-top-level]
 
                     gpt2_tokenizer_path = Path(__file__).resolve().parent / "gpt2"
                     _tokenizer = transformers.GPT2Tokenizer.from_pretrained(

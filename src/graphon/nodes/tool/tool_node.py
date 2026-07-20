@@ -82,7 +82,7 @@ class ToolNode(Node[ToolNodeData]):
         graph_init_params: GraphInitParams,
         graph_runtime_state: GraphRuntimeState,
         tool_file_manager: ToolFileManagerProtocol,
-        # TODO @-LAN: See https://github.com/langgenius/graphon/issues/new/choose.  # noqa: FIX002
+        # TODO @-LAN: See https://github.com/langgenius/graphon/issues/new/choose.  # ruff:ignore[line-contains-todo]
         # Make `runtime` optional once Graphon provides a default tool runtime
         # adapter at the workflow boundary.
         runtime: ToolNodeRuntimeProtocol,
