@@ -125,6 +125,38 @@ def test_process_conditions_contains_supports_string_and_list_values() -> None:
     assert list_result.final_result is True
 
 
+def test_process_conditions_in_matches_falsy_value_present_in_list() -> None:
+    condition_processor = ConditionProcessor()
+    variable_pool = VariablePool()
+    variable_pool.add(["test_node_id", "choice"], "")
+
+    in_result = condition_processor.process_conditions(
+        variable_pool=variable_pool,
+        conditions=[
+            Condition(
+                variable_selector=["test_node_id", "choice"],
+                comparison_operator="in",
+                value=["", "a", "b"],
+            ),
+        ],
+        operator="and",
+    )
+    not_in_result = condition_processor.process_conditions(
+        variable_pool=variable_pool,
+        conditions=[
+            Condition(
+                variable_selector=["test_node_id", "choice"],
+                comparison_operator="not in",
+                value=["", "a", "b"],
+            ),
+        ],
+        operator="and",
+    )
+
+    assert in_result.final_result is True
+    assert not_in_result.final_result is False
+
+
 def test_process_conditions_resolves_templates_from_read_only_variable_pool() -> None:
     condition_processor = ConditionProcessor()
     variable_pool = VariablePool()
