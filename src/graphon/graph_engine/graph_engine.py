@@ -107,6 +107,10 @@ class _GraphRunLifecycle:
         event = GraphRunFailedEvent(
             error=str(error),
             exceptions_count=self.graph_execution.exceptions_count,
+            failure_source=self.graph_execution.failure_source,
+            observed_failure_sources=list(
+                self.graph_execution.observed_failure_sources,
+            ),
         )
         self.event_manager.notify_layers(event)
         return event

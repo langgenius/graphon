@@ -1,5 +1,6 @@
 from pydantic import Field
 
+from graphon.entities.graph_failure_source import GraphFailureSource
 from graphon.entities.pause_reason import PauseReason
 from graphon.entities.workflow_start_reason import WorkflowStartReason
 from graphon.graph_events.base import BaseGraphEvent
@@ -25,6 +26,14 @@ class GraphRunSucceededEvent(BaseGraphEvent):
 class GraphRunFailedEvent(BaseGraphEvent):
     error: str = Field(..., description="failed reason")
     exceptions_count: int = Field(description="exception count", default=0)
+    failure_source: GraphFailureSource | None = Field(
+        default=None,
+        description="node execution that caused the graph failure",
+    )
+    observed_failure_sources: list[GraphFailureSource] = Field(
+        default_factory=list,
+        description="fatal node failures observed during fail-fast shutdown",
+    )
 
 
 class GraphRunPartialSucceededEvent(BaseGraphEvent):

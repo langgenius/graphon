@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from graphon.entities import GraphFailureSource
 from graphon.file import File, FileTransferMethod, FileType
 from graphon.graph_engine.domain.graph_execution import GraphExecution
 from graphon.graph_engine.ready_queue.in_memory import InMemoryReadyQueue
@@ -379,3 +380,64 @@ class TestGraphRuntimeState:
         assert restored_segment.value.id == "message-file-id"
         assert restored_segment.value.type == "document"
         assert restored_segment.value.reference == "upload-file-id"
+
+
+def test_graph_execution_snapshot_preserves_failure_attribution() -> None:
+    state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+    first = GraphFailureSource(node_execution_id="execution-a", node_id="node-a")
+    second = GraphFailureSource(node_execution_id="execution-b", node_id="node-b")
+    state.graph_execution.fail(RuntimeError("first"), failure_source=first)
+    state.graph_execution.fail(RuntimeError("second"), failure_source=second)
+
+    restored = GraphRuntimeState.from_snapshot(state.dumps())
+
+    assert str(restored.graph_execution.error) == "first"
+    assert restored.graph_execution.failure_source == first
+    assert restored.graph_execution.observed_failure_sources == [first, second]
+
+
+def test_graph_execution_preserves_causal_failure_and_observes_later_failures() -> None:
+    execution = GraphExecution(workflow_id="wf")
+    first = GraphFailureSource(node_execution_id="execution-a", node_id="node-a")
+    second = GraphFailureSource(node_execution_id="execution-b", node_id="node-b")
+
+    execution.fail(RuntimeError("first"), failure_source=first)
+    execution.fail(RuntimeError("second"), failure_source=second)
+
+    assert str(execution.error) == "first"
+    assert execution.failure_source == first
+    assert execution.observed_failure_sources == [first, second]
+
+
+def test_graph_execution_deduplicates_observed_failure_sources() -> None:
+    execution = GraphExecution(workflow_id="wf")
+    source = GraphFailureSource(node_execution_id="execution-a", node_id="node-a")
+
+    execution.fail(RuntimeError("first"), failure_source=source)
+    execution.fail(RuntimeError("duplicate"), failure_source=source)
+
+    assert execution.observed_failure_sources == [source]
+
+
+def test_infrastructure_failure_remains_unattributed_after_late_node_failure() -> None:
+    execution = GraphExecution(workflow_id="wf")
+    source = GraphFailureSource(node_execution_id="execution-a", node_id="node-a")
+
+    execution.fail(RuntimeError("infrastructure"))
+    execution.fail(RuntimeError("node"), failure_source=source)
+
+    assert str(execution.error) == "infrastructure"
+    assert execution.failure_source is None
+    assert execution.observed_failure_sources == [source]
+
+
+def test_graph_execution_loads_legacy_snapshot_without_failure_source() -> None:
+    execution = GraphExecution(workflow_id="wf")
+    payload = json.loads(execution.dumps())
+    payload.pop("failure_source", None)
+    payload.pop("observed_failure_sources", None)
+
+    execution.loads(json.dumps(payload))
+
+    assert execution.failure_source is None
+    assert execution.observed_failure_sources == []
