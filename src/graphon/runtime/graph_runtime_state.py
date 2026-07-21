@@ -170,13 +170,15 @@ class _GraphRuntimeStateSnapshot(BaseModel):
 
 
 def _new_ready_queue() -> ReadyQueue:
-    from graphon.graph_engine.ready_queue import InMemoryReadyQueue  # noqa: PLC0415
+    from graphon.graph_engine.ready_queue import (  # ruff:ignore[import-outside-top-level]
+        InMemoryReadyQueue,
+    )
 
     return InMemoryReadyQueue()
 
 
 def _new_graph_execution(workflow_id: str = "") -> GraphExecutionProtocol:
-    from graphon.graph_engine.domain.graph_execution import (  # noqa: PLC0415
+    from graphon.graph_engine.domain.graph_execution import (  # ruff:ignore[import-outside-top-level]
         GraphExecution,
     )
 
