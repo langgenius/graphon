@@ -1129,7 +1129,14 @@ class LLMNode(Node[LLMNodeData]):
 
         variables: dict[str, str] = {}
         for variable_selector in node_data.prompt_config.jinja2_variables or []:
-            variable = self._get_required_variable(variable_selector)
+            variable = self.graph_runtime_state.variable_pool.get(
+                variable_selector.value_selector,
+            )
+            if variable is None:
+                # Variable not in pool — the Jinja2 template handles this
+                # gracefully with {% if variable is defined %}, so skip it
+                # rather than raising VariableNotFoundError.
+                continue
             variables[variable_selector.variable] = self._stringify_jinja_variable(
                 variable,
             )
