@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from graphon.file.models import File
 from graphon.variables.segments import Segment
+from graphon.variables.sensitivity import is_sensitive
 
 
 class WorkflowRuntimeTypeConverter:
@@ -32,6 +33,8 @@ class WorkflowRuntimeTypeConverter:
             case Decimal():
                 # Convert Decimal to float for JSON serialization
                 result = float(value)
+            case Segment() if is_sensitive(value):
+                result = value.log
             case Segment():
                 result = self.value_to_json_encodable_recursive(value.value)
             case File():

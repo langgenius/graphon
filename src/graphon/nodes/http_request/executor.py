@@ -75,6 +75,17 @@ class Executor:
 
     boundary: str
 
+    # Log-safe copies of request fields; populated in _init_* methods.
+    # These are rendered by to_log() so that SecretVariable values are obfuscated
+    # while the real request fields (url, params, headers, content, data, json)
+    # retain the raw plaintext needed for the actual HTTP call.
+    _log_url: str
+    _log_params: list[tuple[str, str]] | None
+    _log_headers: dict[str, str]
+    _log_content: str | None
+    _log_data: Mapping[str, Any] | None
+    _log_json_text: str | None
+
     def __init__(
         self,
         *,
@@ -125,6 +136,14 @@ class Executor:
         self.files = None
         self.data = None
         self.json = None
+        # Log-safe copies - initialised to match real-field defaults;
+        # overwritten in _init_* once templates are resolved.
+        self._log_url = node_data.url
+        self._log_params = None
+        self._log_headers = {}
+        self._log_content = None
+        self._log_data = None
+        self._log_json_text = None
         self.max_retries = (
             max_retries
             if max_retries is not None
@@ -145,7 +164,9 @@ class Executor:
         self._init_body()
 
     def _init_url(self) -> None:
-        self.url = convert_template(self.variable_pool, self.node_data.url).text
+        url_group = convert_template(self.variable_pool, self.node_data.url)
+        self.url = url_group.text
+        self._log_url = url_group.log
 
         # check if url is a valid URL
         if not self.url:
@@ -162,6 +183,7 @@ class Executor:
         the variable value.
         """
         result = []
+        log_result = []
         for line in self.node_data.params.splitlines():
             if not (line := line.strip()):
                 continue
@@ -171,13 +193,15 @@ class Executor:
                 continue
 
             value_str = value[0].strip() if value else ""
-            result.append((
-                convert_template(self.variable_pool, key).text,
-                convert_template(self.variable_pool, value_str).text,
-            ))
+            key_group = convert_template(self.variable_pool, key)
+            value_group = convert_template(self.variable_pool, value_str)
+            result.append((key_group.text, value_group.text))
+            log_result.append((key_group.log, value_group.log))
 
+        # result and log_result are appended in lockstep, so they are truthy together.
         if result:
             self.params = result
+            self._log_params = log_result
 
     def _init_headers(self) -> None:
         r"""Convert the header string of frontend to a dictionary.
@@ -192,8 +216,13 @@ class Executor:
             'aa\n cc : dd'   -> {'aa': '', 'cc': 'dd'}
 
         """
-        headers = convert_template(self.variable_pool, self.node_data.headers).text
-        self.headers = {
+        headers_group = convert_template(self.variable_pool, self.node_data.headers)
+        self.headers = self._parse_header_string(headers_group.text)
+        self._log_headers = self._parse_header_string(headers_group.log)
+
+    @staticmethod
+    def _parse_header_string(headers: str) -> dict[str, str]:
+        return {
             key.strip(): (value[0].strip() if value else "")
             for line in headers.splitlines()
             if line.strip()
@@ -239,11 +268,17 @@ class Executor:
 
     def _init_raw_text_body(self, data: Sequence[BodyData]) -> None:
         item = self._require_single_body_item(data, body_type="raw-text")
-        self.content = convert_template(self.variable_pool, item.value).text
+        group = convert_template(self.variable_pool, item.value)
+        self.content = group.text
+        self._log_content = group.log
 
     def _init_json_body(self, data: Sequence[BodyData]) -> None:
         item = self._require_single_body_item(data, body_type="json")
-        json_string = convert_template(self.variable_pool, item.value).text
+        group = convert_template(self.variable_pool, item.value)
+        json_string = group.text
+        # Raw masked template text (not re-normalized via json.dumps); self.json
+        # holds the parsed plaintext, so _log_json_text must never fall back to it.
+        self._log_json_text = group.log
         try:
             repaired = repair_json(json_string)
             self.json = json.loads(repaired, strict=False)
@@ -260,30 +295,32 @@ class Executor:
             raise FileFetchError(msg)
         self.content = self._file_manager.download(file_variable.value)
 
+    def _convert_body_kv(
+        self,
+        data: Sequence[BodyData],
+        *,
+        text_only: bool = False,
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """Resolve body items into parallel real and log-safe key/value dicts."""
+        real_data: dict[str, str] = {}
+        log_data: dict[str, str] = {}
+        for item in data:
+            if text_only and item.type != "text":
+                continue
+            key_group = convert_template(self.variable_pool, item.key)
+            val_group = convert_template(self.variable_pool, item.value)
+            real_data[key_group.text] = val_group.text
+            log_data[key_group.log] = val_group.log
+        return real_data, log_data
+
     def _init_urlencoded_body(self, data: Sequence[BodyData]) -> None:
-        self.data = {
-            convert_template(
-                self.variable_pool,
-                item.key,
-            ).text: convert_template(self.variable_pool, item.value).text
-            for item in data
-        }
+        self.data, self._log_data = self._convert_body_kv(data)
 
     def _init_form_data_body(self, data: Sequence[BodyData]) -> None:
-        self.data = self._build_form_text_data(data)
+        self.data, self._log_data = self._convert_body_kv(data, text_only=True)
         file_selectors = self._build_form_file_selectors(data)
         files_list = self._resolve_form_files(file_selectors)
         self.files = self._build_request_files(files_list)
-
-    def _build_form_text_data(self, data: Sequence[BodyData]) -> dict[str, str]:
-        return {
-            convert_template(
-                self.variable_pool,
-                item.key,
-            ).text: convert_template(self.variable_pool, item.value).text
-            for item in data
-            if item.type == "text"
-        }
 
     def _build_form_file_selectors(
         self,
@@ -339,9 +376,14 @@ class Executor:
             ),
         ]
 
-    def _assembling_headers(self) -> dict[str, Any]:
+    def _assembling_headers(
+        self,
+        source: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        # ``source`` defaults to the real request headers; pass ``_log_headers`` to
+        # assemble the log-safe (obfuscated) variant.
         authorization = deepcopy(self.auth)
-        headers = deepcopy(self.headers) or {}
+        headers = deepcopy(self.headers if source is None else source) or {}
         headers.update(self._build_authorization_headers(authorization))
         return self._apply_content_type_header(headers)
 
@@ -473,7 +515,7 @@ class Executor:
         return self._validate_and_parse_response(response)
 
     def to_log(self) -> str:
-        url_parts = urlparse(self.url)
+        url_parts = urlparse(self._log_url)
         path = self._build_log_path(url_parts)
         raw = f"{self.method.upper()} {path} HTTP/1.1\r\n"
         raw += f"Host: {url_parts.netloc}\r\n"
@@ -492,19 +534,19 @@ class Executor:
 
     def _build_log_path(self, url_parts: ParseResult) -> str:
         path = url_parts.path or "/"
-        if self.params:
-            return path + f"?{urlencode(self.params)}"
+        if self._log_params:
+            return path + f"?{urlencode(self._log_params)}"
         if url_parts.query:
             return path + f"?{url_parts.query}"
         return path
 
     def _build_log_headers(self, boundary: str) -> dict[str, Any]:
-        headers = self._assembling_headers()
+        headers = self._assembling_headers(self._log_headers)
         body = self.node_data.body
         if body is None:
             return headers
         if (
-            "content-type" not in (k.lower() for k in self.headers)
+            "content-type" not in (k.lower() for k in self._log_headers)
             and body.type in BODY_TYPE_TO_CONTENT_TYPE
         ):
             headers["Content-Type"] = BODY_TYPE_TO_CONTENT_TYPE[body.type]
@@ -538,17 +580,19 @@ class Executor:
         elif self.content:
             body_string = self._build_content_log_body()
         elif self.data and self.node_data.body.type == "x-www-form-urlencoded":
-            body_string = urlencode(self.data)
+            if self._log_data is None:
+                msg = "_log_data not set; urlencoded body init always populates it"
+                raise RuntimeError(msg)
+            body_string = urlencode(self._log_data)
         elif self.data and self.node_data.body.type == "form-data":
             body_string = self._build_form_data_log_body(boundary)
         elif self.json:
-            body_string = json.dumps(self.json)
+            if self._log_json_text is None:
+                msg = "log json body requested before initialization"
+                raise RuntimeError(msg)
+            body_string = self._log_json_text
         elif self.node_data.body.type == "raw-text":
-            item = self._require_single_body_item(
-                self.node_data.body.data,
-                body_type="raw-text",
-            )
-            body_string = item.value
+            body_string = self._log_content if self._log_content is not None else ""
         return body_string
 
     def _has_loggable_files(self) -> bool:
@@ -584,11 +628,18 @@ class Executor:
     def _build_content_log_body(self) -> str:
         if isinstance(self.content, bytes):
             return f"<binary_content: size={len(self.content)} bytes>"
-        return str(self.content)
+        # For raw-text bodies use the log-safe copy; fail closed if not set.
+        if self._log_content is None:
+            msg = "log content requested before initialization"
+            raise RuntimeError(msg)
+        return str(self._log_content)
 
     def _build_form_data_log_body(self, boundary: str) -> str:
         body_string = ""
-        for key, value in (self.data or {}).items():
+        if self._log_data is None:
+            msg = "_log_data not set; form-data body init always populates it"
+            raise RuntimeError(msg)
+        for key, value in self._log_data.items():
             body_string += f"--{boundary}\r\n"
             body_string += f'Content-Disposition: form-data; name="{key}"\r\n\r\n'
             body_string += f"{value}\r\n"

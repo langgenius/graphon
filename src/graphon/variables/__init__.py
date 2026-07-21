@@ -22,6 +22,7 @@ from .segments import (
     Segment,
     StringSegment,
 )
+from .sensitivity import is_sensitive
 from .types import SegmentType
 from .variables import (
     ArrayAnyVariable,
@@ -78,5 +79,6 @@ __all__ = [
     "VariableEntityType",
     "build_segment",
     "build_segment_with_type",
+    "is_sensitive",
     "segment_to_variable",
 ]
