@@ -2,8 +2,6 @@
 
 from dataclasses import dataclass
 
-from graphon.enums import NodeState
-
 
 @dataclass
 class NodeExecution:
@@ -13,29 +11,8 @@ class NodeExecution:
     during graph execution.
     """
 
-    node_id: str
-    state: NodeState = NodeState.UNKNOWN
+    execution_id: str
     retry_count: int = 0
-    execution_id: str | None = None
-    error: str | None = None
-
-    def mark_started(self, execution_id: str) -> None:
-        """Mark the node as started with an execution ID."""
-        self.state = NodeState.TAKEN
-        self.execution_id = execution_id
-
-    def mark_taken(self) -> None:
-        """Mark the node as successfully completed."""
-        self.state = NodeState.TAKEN
-        self.error = None
-
-    def mark_failed(self, error: str) -> None:
-        """Mark the node as failed with an error."""
-        self.error = error
-
-    def mark_skipped(self) -> None:
-        """Mark the node as skipped."""
-        self.state = NodeState.SKIPPED
 
     def increment_retry(self) -> None:
         """Increment the retry count for this node."""

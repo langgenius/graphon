@@ -97,9 +97,6 @@ class _StateManager:
     def enqueue_node(self, node_id: str) -> None:
         self.started_nodes.append(node_id)
 
-    def start_execution(self, node_id: str) -> None:
-        self.started_nodes.append(node_id)
-
 
 def _branch_processor() -> EdgeProcessor:
     graph = _Graph()

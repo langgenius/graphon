@@ -29,7 +29,7 @@ def _build_node(
         start_at=time.perf_counter(),
     )
 
-    return VariableAssignerNode(
+    node = VariableAssignerNode(
         node_id="assigner",
         graph_init_params=init_params,
         graph_runtime_state=runtime_state,
@@ -40,6 +40,8 @@ def _build_node(
             input_variable_selector=input_selector,
         ),
     )
+    node.bind_execution_id("assigner-run")
+    return node
 
 
 def test_overwrite_string_variable() -> None:

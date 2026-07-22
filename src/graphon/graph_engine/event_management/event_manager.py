@@ -144,6 +144,12 @@ class EventManager:
         """Mark execution as complete to stop the event emission generator."""
         self._execution_complete.set()
 
+    def reset(self) -> None:
+        """Discard events and completion state from the previous engine run."""
+        with self._lock.write_lock():
+            self._events.clear()
+            self._execution_complete.clear()
+
     def emit_events(self) -> Generator[GraphEngineEvent, None, None]:
         """Generator that yields events as they're collected.
 

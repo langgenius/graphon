@@ -3,94 +3,38 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from importlib import import_module
 from typing import Literal
+from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from graphon.entities.pause_reason import PauseReason
-from graphon.enums import NodeState
 
 from .node_execution import NodeExecution
-
-
-class GraphExecutionErrorState(BaseModel):
-    """Serializable representation of an execution error."""
-
-    module: str = Field(description="Module containing the exception class")
-    qualname: str = Field(description="Qualified name of the exception class")
-    message: str | None = Field(default=None, description="Exception message string")
 
 
 class NodeExecutionState(BaseModel):
     """Serializable representation of a node execution entity."""
 
+    frame_id: str
     node_id: str
-    state: NodeState = Field(default=NodeState.UNKNOWN)
-    retry_count: int = Field(default=0)
-    execution_id: str | None = Field(default=None)
-    error: str | None = Field(default=None)
+    retry_count: int
+    execution_id: str
 
 
 class GraphExecutionState(BaseModel):
     """Pydantic model describing serialized GraphExecution state."""
 
-    type: Literal["GraphExecution"] = Field(default="GraphExecution")
-    version: str = Field(default="1.0")
+    version: Literal["1.0"]
     workflow_id: str
-    started: bool = Field(default=False)
-    completed: bool = Field(default=False)
-    aborted: bool = Field(default=False)
-    paused: bool = Field(default=False)
-    pause_reasons: list[PauseReason] = Field(default_factory=list)
-    error: GraphExecutionErrorState | None = Field(default=None)
-    exceptions_count: int = Field(default=0)
-    node_executions: list[NodeExecutionState] = Field(
-        default_factory=list[NodeExecutionState],
-    )
-
-
-def _serialize_error(error: Exception | None) -> GraphExecutionErrorState | None:
-    """Convert an exception into its serializable representation."""
-    if error is None:
-        return None
-
-    return GraphExecutionErrorState(
-        module=error.__class__.__module__,
-        qualname=error.__class__.__qualname__,
-        message=str(error),
-    )
-
-
-def _resolve_exception_class(module_name: str, qualname: str) -> type[Exception]:
-    """Locate an exception class from its module and qualified name."""
-    module = import_module(module_name)
-    attr: object = module
-    for part in qualname.split("."):
-        attr = getattr(attr, part)
-
-    if isinstance(attr, type) and issubclass(attr, Exception):
-        return attr
-
-    msg = f"{qualname} in {module_name} is not an Exception subclass"
-    raise TypeError(msg)
-
-
-def _deserialize_error(state: GraphExecutionErrorState | None) -> Exception | None:
-    """Reconstruct an exception instance from serialized data."""
-    if state is None:
-        return None
-
-    try:
-        exception_class = _resolve_exception_class(state.module, state.qualname)
-        if state.message is None:
-            return exception_class()
-        return exception_class(state.message)
-    except (ImportError, AttributeError, TypeError, ValueError):
-        # Fallback to RuntimeError when reconstruction fails
-        if state.message is None:
-            return RuntimeError(state.qualname)
-        return RuntimeError(state.message)
+    started: bool
+    completed: bool
+    aborted: bool
+    paused: bool
+    pause_reasons: list[PauseReason]
+    error: str | None
+    exceptions_count: int
+    node_executions: list[NodeExecutionState]
 
 
 @dataclass
@@ -108,8 +52,8 @@ class GraphExecution:
     paused: bool = False
     pause_reasons: list[PauseReason] = field(default_factory=list)
     error: Exception | None = None
-    node_executions: dict[str, NodeExecution] = field(
-        default_factory=dict[str, NodeExecution],
+    node_executions: dict[tuple[str, str], NodeExecution] = field(
+        default_factory=dict[tuple[str, str], NodeExecution],
     )
     exceptions_count: int = 0
 
@@ -151,57 +95,38 @@ class GraphExecution:
         self.error = error
         self.completed = True
 
-    def get_or_create_node_execution(self, node_id: str) -> NodeExecution:
+    def get_or_create_node_execution(
+        self, *, frame_id: str, node_id: str
+    ) -> NodeExecution:
         """Get or create a node execution entity."""
-        if node_id not in self.node_executions:
-            self.node_executions[node_id] = NodeExecution(node_id=node_id)
-        return self.node_executions[node_id]
-
-    @property
-    def is_running(self) -> bool:
-        """Check if the execution is currently running."""
-        return (
-            self.started and not self.completed and not self.aborted and not self.paused
-        )
-
-    @property
-    def is_paused(self) -> bool:
-        """Check if the execution is currently paused."""
-        return self.paused
-
-    @property
-    def has_error(self) -> bool:
-        """Check if the execution has encountered an error."""
-        return self.error is not None
-
-    @property
-    def error_message(self) -> str | None:
-        """Get the error message if an error exists."""
-        if not self.error:
-            return None
-        return str(self.error)
+        key = (frame_id, node_id)
+        if key not in self.node_executions:
+            self.node_executions[key] = NodeExecution(
+                execution_id=str(uuid4()),
+            )
+        return self.node_executions[key]
 
     def dumps(self) -> str:
         """Serialize the aggregate state into a JSON string."""
         node_states = [
             NodeExecutionState(
-                node_id=node_id,
-                state=node_execution.state,
+                frame_id=key[0],
+                node_id=key[1],
                 retry_count=node_execution.retry_count,
                 execution_id=node_execution.execution_id,
-                error=node_execution.error,
             )
-            for node_id, node_execution in sorted(self.node_executions.items())
+            for key, node_execution in sorted(self.node_executions.items())
         ]
 
         state = GraphExecutionState(
+            version="1.0",
             workflow_id=self.workflow_id,
             started=self.started,
             completed=self.completed,
             aborted=self.aborted,
             paused=self.paused,
             pause_reasons=self.pause_reasons,
-            error=_serialize_error(self.error),
+            error=None if self.error is None else str(self.error),
             exceptions_count=self.exceptions_count,
             node_executions=node_states,
         )
@@ -212,14 +137,6 @@ class GraphExecution:
         """Restore aggregate state from a serialized JSON string."""
         state = GraphExecutionState.model_validate_json(data)
 
-        if state.type != "GraphExecution":
-            msg = f"Invalid serialized data type: {state.type}"
-            raise ValueError(msg)
-
-        if state.version != "1.0":
-            msg = f"Unsupported serialized version: {state.version}"
-            raise ValueError(msg)
-
         if self.workflow_id != state.workflow_id:
             msg = "Serialized workflow_id does not match aggregate identity"
             raise ValueError(msg)
@@ -229,15 +146,12 @@ class GraphExecution:
         self.aborted = state.aborted
         self.paused = state.paused
         self.pause_reasons = state.pause_reasons
-        self.error = _deserialize_error(state.error)
+        self.error = RuntimeError(state.error) if state.error is not None else None
         self.exceptions_count = state.exceptions_count
         self.node_executions = {
-            item.node_id: NodeExecution(
-                node_id=item.node_id,
-                state=item.state,
+            (item.frame_id, item.node_id): NodeExecution(
                 retry_count=item.retry_count,
                 execution_id=item.execution_id,
-                error=item.error,
             )
             for item in state.node_executions
         }
