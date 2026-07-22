@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from contextlib import AbstractContextManager
 from typing import final
 
+from graphon.enums import NodeType
 from graphon.graph_engine.container_handlers import ContainerHandler
 from graphon.graph_engine.entities.tasks import TaskEvent
 from graphon.graph_engine.frames import FrameRegistry
@@ -40,7 +41,7 @@ class WorkerPool:
         frame_registry: FrameRegistry,
         layers: list[GraphEngineLayer],
         config: GraphEngineConfig,
-        container_handlers: Mapping[str, ContainerHandler],
+        container_handlers: Mapping[NodeType, ContainerHandler],
         execution_context: AbstractContextManager[object] | None = None,
     ) -> None:
         """Initialize the simple worker pool.
@@ -51,7 +52,7 @@ class WorkerPool:
             frame_registry: Registry containing frame-local graphs to execute
             layers: Graph engine layers for node execution hooks
             config: GraphEngine worker pool configuration
-            container_handlers: Engine-owned container frame handlers by kind
+            container_handlers: Engine-owned container handlers by node type
             execution_context: Optional execution context for context preservation
 
         """

@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from typing import final, override
 from uuid import uuid4
 
-from graphon.enums import WorkflowNodeExecutionStatus
+from graphon.enums import NodeType, WorkflowNodeExecutionStatus
 from graphon.graph_engine.container_handlers import ContainerHandler
 from graphon.graph_engine.entities.tasks import TaskEvent
 from graphon.graph_engine.frames import FrameRegistry
@@ -59,7 +59,7 @@ class Worker(threading.Thread):
         event_queue: queue.Queue[TaskEvent],
         frame_registry: FrameRegistry,
         layers: Sequence[GraphEngineLayer],
-        container_handlers: Mapping[str, ContainerHandler],
+        container_handlers: Mapping[NodeType, ContainerHandler],
         task_claim_lock: threading.Lock,
         task_claiming: threading.Event,
         worker_id: int = 0,
@@ -280,7 +280,7 @@ class Worker(threading.Thread):
                         )
                     )
                 try:
-                    self._container_handlers[event.kind].start_await(
+                    self._container_handlers[node.node_type].start_await(
                         invocation_id=invocation_id,
                         request=event,
                     )

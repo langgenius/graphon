@@ -34,9 +34,10 @@ from .ready_queue import ROOT_FRAME_ID, ResumeTask
 
 @final
 class IterationContainerHandler:
+    node_type = BuiltinNodeTypes.ITERATION
+
     def __init__(
         self,
-        *,
         frame_registry: FrameRegistry,
     ) -> None:
         self._frame_registry = frame_registry

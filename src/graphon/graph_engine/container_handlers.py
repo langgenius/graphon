@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+from collections.abc import Callable
 from typing import Protocol
 
+from graphon.enums import NodeType
 from graphon.graph_events.base import GraphNodeEventBase
 from graphon.graph_events.node import NodeRunFailedEvent
 from graphon.nodes.container_effects import ContainerAwaitRequest
 from graphon.runtime.container_state import ContainerFrameState
 
-from .frames import ExecutionFrame
+from .frames import ExecutionFrame, FrameRegistry
 
 
 class ContainerHandler(Protocol):
+    node_type: NodeType
+
     @abstractmethod
     def restore_frame(self, frame_state: ContainerFrameState) -> None: ...
 
@@ -48,3 +52,6 @@ class ContainerHandler(Protocol):
 
     @abstractmethod
     def complete_frame(self, frame: ExecutionFrame) -> None: ...
+
+
+type ContainerHandlerFactory = Callable[[FrameRegistry], ContainerHandler]

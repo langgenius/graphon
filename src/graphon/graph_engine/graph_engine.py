@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import queue
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from typing import final
 
 from graphon.entities.workflow_start_reason import WorkflowStartReason
@@ -35,6 +35,7 @@ from .command_processing import (
     UpdateVariablesCommandHandler,
 )
 from .config import GraphEngineConfig
+from .container_handlers import ContainerHandlerFactory
 from .entities.commands import AbortCommand, PauseCommand, UpdateVariablesCommand
 from .entities.tasks import TaskEvent
 from .error_handler import ErrorHandler
@@ -53,6 +54,10 @@ logger = logging.getLogger(__name__)
 
 
 _DEFAULT_CONFIG = GraphEngineConfig()
+_DEFAULT_CONTAINER_HANDLER_FACTORIES: tuple[ContainerHandlerFactory, ...] = (
+    LoopContainerHandler,
+    IterationContainerHandler,
+)
 
 
 @final
@@ -70,6 +75,7 @@ class GraphEngine:
         graph_runtime_state: GraphRuntimeState,
         command_channel: CommandChannel,
         config: GraphEngineConfig = _DEFAULT_CONFIG,
+        container_handler_factories: Sequence[ContainerHandlerFactory] = (),
     ) -> None:
         """Initialize the graph engine with all subsystems and dependencies."""
         # Bind runtime state to current workflow context
@@ -144,14 +150,14 @@ class GraphEngine:
         )
 
         # === Worker Pool Setup ===
-        self._container_handlers = {
-            "loop": LoopContainerHandler(
-                frame_registry=self._frame_registry,
-            ),
-            "iteration": IterationContainerHandler(
-                frame_registry=self._frame_registry,
-            ),
-        }
+        handlers = (
+            factory(self._frame_registry)
+            for factory in (
+                *_DEFAULT_CONTAINER_HANDLER_FACTORIES,
+                *container_handler_factories,
+            )
+        )
+        self._container_handlers = {handler.node_type: handler for handler in handlers}
 
         # Create worker pool for parallel node execution
         self._worker_pool = WorkerPool(
@@ -320,7 +326,15 @@ class GraphEngine:
         """Start execution subsystems."""
         if resume:
             for frame_state in self._graph_runtime_state.container_frames():
-                self._container_handlers[frame_state.kind].restore_frame(frame_state)
+                run_state = self._graph_runtime_state.get_container_run(
+                    frame_state.parent_invocation_id,
+                )
+                parent_node = self._frame_registry.get(run_state.frame_id).graph.nodes[
+                    run_state.node_id
+                ]
+                self._container_handlers[parent_node.node_type].restore_frame(
+                    frame_state,
+                )
             for run_state in self._graph_runtime_state.container_runs():
                 self._frame_registry.get(
                     run_state.frame_id,

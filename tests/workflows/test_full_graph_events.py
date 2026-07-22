@@ -7,6 +7,8 @@ import pytest
 import yaml
 
 from graphon.dsl import loads
+from graphon.graph_engine.frames import FrameRegistry
+from graphon.graph_engine.loop_container_handler import LoopContainerHandler
 from graphon.graph_events.base import GraphEngineEvent
 from graphon.graph_events.graph import (
     GraphRunFailedEvent,
@@ -398,6 +400,51 @@ def test_full_loop_graph_stops_at_loop_end_node() -> None:
     )
     assert succeeded.outputs == {"loop_round": 1}
     assert succeeded.metadata["completed_reason"] == "loop_break"
+
+
+def test_full_loop_graph_uses_custom_container_handler_factory() -> None:
+    dsl = _graph_dsl(
+        nodes=[
+            _start_node(),
+            {
+                "id": "loop",
+                "data": {
+                    "type": "loop",
+                    "loop_count": 1,
+                    "start_node_id": "loop-start",
+                    "break_conditions": [],
+                    "logical_operator": "and",
+                },
+            },
+            {
+                "id": "loop-start",
+                "data": {"type": "loop-start", "loop_id": "loop"},
+            },
+            _end_node([]),
+        ],
+        edges=[
+            _edge("start", "loop"),
+            _edge("loop", "end"),
+        ],
+    )
+    loaded_handlers: list[LoopContainerHandler] = []
+
+    def load_loop_handler(frame_registry: FrameRegistry) -> LoopContainerHandler:
+        handler = LoopContainerHandler(frame_registry)
+        loaded_handlers.append(handler)
+        return handler
+
+    engine = loads(
+        dsl,
+        container_handler_factories=(load_loop_handler,),
+    )
+    events = list(engine.run())
+
+    assert len(loaded_handlers) == 1
+    assert (
+        engine._container_handlers[LoopContainerHandler.node_type] is loaded_handlers[0]
+    )
+    assert any(isinstance(event, NodeRunLoopSucceededEvent) for event in events)
 
 
 def test_nested_iteration_loop_end_stops_ancestor_loop() -> None:

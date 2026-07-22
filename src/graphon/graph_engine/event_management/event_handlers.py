@@ -5,7 +5,7 @@ from collections.abc import Iterator, Mapping
 from functools import singledispatchmethod
 from typing import final
 
-from graphon.enums import ErrorStrategy, NodeExecutionType, NodeState
+from graphon.enums import ErrorStrategy, NodeExecutionType, NodeState, NodeType
 from graphon.graph_events.agent import NodeRunAgentLogEvent
 from graphon.graph_events.base import GraphNodeEventBase
 from graphon.graph_events.iteration import (
@@ -57,7 +57,7 @@ class EventHandler:
         graph_execution: GraphExecutionProtocol,
         event_collector: EventManager,
         frame_registry: FrameRegistry,
-        container_handlers: Mapping[str, ContainerHandler],
+        container_handlers: Mapping[NodeType, ContainerHandler],
     ) -> None:
         """Initialize the event handler registry.
 
@@ -65,7 +65,7 @@ class EventHandler:
             graph_execution: Graph execution aggregate
             event_collector: Event manager for collecting events
             frame_registry: Registry of frame-local execution collaborators
-            container_handlers: Engine-owned container frame handlers by kind
+            container_handlers: Engine-owned container handlers by node type
 
         """
         self._graph_execution = graph_execution
@@ -335,7 +335,12 @@ class EventHandler:
             ROOT_FRAME_ID,
         ).graph_runtime_state
         frame_state = root_runtime_state.get_container_frame(frame_id)
-        return self._container_handlers[frame_state.kind]
+        run_state = root_runtime_state.get_container_run(
+            frame_state.parent_invocation_id,
+        )
+        parent_frame = self._frame_registry.get(run_state.frame_id)
+        parent_node = parent_frame.graph.nodes[run_state.node_id]
+        return self._container_handlers[parent_node.node_type]
 
     def _container_ancestors(
         self,
@@ -346,11 +351,13 @@ class EventHandler:
         ).graph_runtime_state
         while frame_id != ROOT_FRAME_ID:
             frame_state = root_runtime_state.get_container_frame(frame_id)
-            yield (
-                self._frame_registry.get(frame_id),
-                self._container_handlers[frame_state.kind],
-            )
             run_state = root_runtime_state.get_container_run(
                 frame_state.parent_invocation_id,
+            )
+            parent_frame = self._frame_registry.get(run_state.frame_id)
+            parent_node = parent_frame.graph.nodes[run_state.node_id]
+            yield (
+                self._frame_registry.get(frame_id),
+                self._container_handlers[parent_node.node_type],
             )
             frame_id = run_state.frame_id

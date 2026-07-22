@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from graphon.entities.graph_init_params import GraphInitParams
 from graphon.entities.pause_reason import HitlRequired
 from graphon.enums import (
     BuiltinNodeTypes,
@@ -64,6 +65,8 @@ from graphon.nodes.container_effects import (
     LoopFrameRequest,
     build_container_value,
 )
+from graphon.nodes.human_input.entities import PauseRequested
+from graphon.nodes.human_input.human_input_node import HumanInputNode
 from graphon.nodes.iteration.iteration_node import IterationNode
 from graphon.runtime.container_state import (
     FrameRuntimeData,
@@ -667,12 +670,46 @@ def test_pause_requested_event_defers_current_task_for_resume() -> None:
         deferred_ready_queue=root_runtime_state.deferred_ready_queue,
         graph_execution=graph_execution,
     )
-    root_graph = SimpleNamespace(nodes={})
-    child_graph = SimpleNamespace(
-        nodes={"human": SimpleNamespace(state=NodeState.UNKNOWN)},
-        edges={},
+    graph_init_params = GraphInitParams(
+        workflow_id="workflow",
+        graph_config={},
+        run_context={},
+        call_depth=0,
     )
-    child_runtime_state.attach_graph(cast(Graph, child_graph))
+    iteration_node = IterationNode(
+        node_id="iteration",
+        data=IterationNode.validate_node_data({
+            "type": "iteration",
+            "start_node_id": "human",
+            "iterator_selector": ["start", "items"],
+            "output_selector": ["human", "output"],
+            "is_parallel": False,
+            "parallel_nums": 1,
+            "error_handle_mode": ErrorHandleMode.TERMINATED,
+            "flatten_output": False,
+        }),
+        graph_init_params=graph_init_params,
+        graph_runtime_state=root_runtime_state,
+    )
+    root_graph = Graph(
+        root_node=iteration_node,
+        nodes={"iteration": iteration_node},
+    )
+    human_node = HumanInputNode(
+        node_id="human",
+        data=HumanInputNode.validate_node_data({
+            "type": "human-input",
+            "title": "Human",
+        }),
+        graph_init_params=graph_init_params,
+        graph_runtime_state=child_runtime_state,
+        hitl_callback=lambda _context: PauseRequested(session_id="unused"),
+    )
+    child_graph = Graph(
+        root_node=human_node,
+        nodes={"human": human_node},
+    )
+    child_runtime_state.attach_graph(child_graph)
     request = IterationFrameRequest(
         items=(build_container_value("input"),),
         root_node_id="human",
@@ -702,7 +739,7 @@ def test_pause_requested_event_defers_current_task_for_resume() -> None:
         )
     )
     state_manager = GraphStateManager(
-        graph=cast(Graph, child_graph),
+        graph=child_graph,
         graph_runtime_state=child_runtime_state,
         frame_id="child-frame",
     )
@@ -711,14 +748,14 @@ def test_pause_requested_event_defers_current_task_for_resume() -> None:
     frame_registry.register(
         _execution_frame(
             frame_id="root",
-            graph=cast(Graph, root_graph),
+            graph=root_graph,
             graph_runtime_state=root_runtime_state,
         ),
     )
     frame_registry.register(
         _execution_frame(
             frame_id="child-frame",
-            graph=cast(Graph, child_graph),
+            graph=child_graph,
             graph_runtime_state=child_runtime_state,
             state_manager=state_manager,
         ),
