@@ -212,6 +212,50 @@ def test_run_emits_model_identity_in_node_result_inputs(
     assert completed_event.node_run_result.inputs["model_name"] == "gpt-4o"
 
 
+def test_run_emits_model_identity_in_node_result_outputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    node = _build_llm_node()
+
+    _stub_simple_prompt(monkeypatch, node)
+    monkeypatch.setattr(
+        "graphon.nodes.llm.node.LLMNode.invoke_llm",
+        lambda **_: iter([
+            ModelInvokeCompletedEvent(
+                text="Hello back",
+                usage=LLMUsage.empty_usage(),
+                finish_reason="stop",
+            ),
+        ]),
+    )
+
+    events = list(node._run())
+    completed_event = next(
+        event for event in events if isinstance(event, StreamCompletedEvent)
+    )
+
+    assert completed_event.node_run_result.outputs["model_provider"] == "openai"
+    assert completed_event.node_run_result.outputs["model_name"] == "gpt-4o"
+
+
+def test_build_run_outputs_defaults_missing_model_identity_to_empty_strings() -> None:
+    node = _build_llm_node()
+
+    outputs = node._build_run_outputs(
+        clean_text="hi",
+        usage=LLMUsage.empty_usage(),
+        finish_reason=None,
+        reasoning_content="",
+        structured_output=None,
+        model_provider=cast(str, None),
+        model_name=cast(str, None),
+    )
+
+    assert outputs["model_provider"] == ""
+    assert outputs["model_name"] == ""
+    assert outputs["text"] == "hi"
+
+
 def test_polling_llm_start_can_succeed_immediately(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
