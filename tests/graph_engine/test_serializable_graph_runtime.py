@@ -28,7 +28,7 @@ from graphon.enums import (
 from graphon.graph.graph import Graph
 from graphon.graph_engine.command_channels.in_memory_channel import InMemoryChannel
 from graphon.graph_engine.config import GraphEngineConfig
-from graphon.graph_engine.entities.tasks import TaskEvent
+from graphon.graph_engine.entities.tasks import DispatchTask, TaskEvent
 from graphon.graph_engine.frames import ExecutionFrame, FrameRegistry
 from graphon.graph_engine.graph_engine import GraphEngine
 from graphon.graph_engine.graph_state_manager import GraphStateManager
@@ -439,7 +439,7 @@ def _resume_loop_snapshot(snapshot: str) -> list[TaskEvent]:
             graph_runtime_state=runtime_state,
         ),
     )
-    event_queue: queue.Queue[TaskEvent] = queue.Queue()
+    event_queue: queue.Queue[DispatchTask] = queue.Queue()
     task_claiming = Event()
     task_claiming.set()
     worker = Worker(
@@ -447,13 +447,16 @@ def _resume_loop_snapshot(snapshot: str) -> list[TaskEvent]:
         event_queue=event_queue,
         frame_registry=frame_registry,
         layers=[],
-        container_handlers={},
         task_claim_lock=Lock(),
         task_claiming=task_claiming,
     )
     worker.start()
     try:
-        return [event_queue.get(timeout=1), event_queue.get(timeout=1)]
+        first_event = event_queue.get(timeout=1)
+        second_event = event_queue.get(timeout=1)
+        assert isinstance(first_event, TaskEvent)
+        assert isinstance(second_event, TaskEvent)
+        return [first_event, second_event]
     finally:
         worker.stop()
         worker.join(timeout=1)
@@ -486,14 +489,14 @@ def test_resume_restores_container_runs_before_workers_start() -> None:
     state_manager = MagicMock()
     worker_pool = MagicMock()
 
-    def assert_replay_before_workers_start() -> None:
-        assert runtime_state.ready_queue.qsize() == 1
+    def assert_tasks_are_tracked_before_workers_start() -> None:
+        assert runtime_state.ready_queue.qsize() == 0
         assert state_manager.track_unfinished.call_args_list == [
             call("loop"),
             call("start"),
         ]
 
-    worker_pool.start.side_effect = assert_replay_before_workers_start
+    worker_pool.start.side_effect = assert_tasks_are_tracked_before_workers_start
     frame_registry = MagicMock()
     frame_registry.get.return_value.state_manager = state_manager
     engine = object.__new__(GraphEngine)
@@ -504,6 +507,7 @@ def test_resume_restores_container_runs_before_workers_start() -> None:
 
     engine._start_execution(resume=True)
 
+    assert runtime_state.ready_queue.qsize() == 1
     worker_pool.start.assert_called_once_with()
     engine._dispatcher.start.assert_called_once_with()
 

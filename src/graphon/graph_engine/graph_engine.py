@@ -37,7 +37,7 @@ from .command_processing import (
 from .config import GraphEngineConfig
 from .container_handlers import ContainerHandlerFactory
 from .entities.commands import AbortCommand, PauseCommand, UpdateVariablesCommand
-from .entities.tasks import TaskEvent
+from .entities.tasks import DispatchTask
 from .error_handler import ErrorHandler
 from .event_management import EventHandler, EventManager
 from .frames import ExecutionFrame, FrameRegistry
@@ -90,7 +90,7 @@ class GraphEngine:
         self._graph_execution.workflow_id = workflow_id
 
         # Queue for events generated during execution
-        event_queue: queue.Queue[TaskEvent] = queue.Queue()
+        event_queue: queue.Queue[DispatchTask] = queue.Queue()
 
         # === State Management ===
         # Unified state manager handles all node state transitions and queue operations
@@ -167,7 +167,6 @@ class GraphEngine:
             layers=self._layers,
             execution_context=self._graph_runtime_state.execution_context,
             config=config,
-            container_handlers=self._container_handlers,
         )
 
         # === Event Handler Registry ===
@@ -324,6 +323,7 @@ class GraphEngine:
 
     def _start_execution(self, *, resume: bool) -> None:
         """Start execution subsystems."""
+        ready_tasks = []
         if resume:
             for frame_state in self._graph_runtime_state.container_frames():
                 run_state = self._graph_runtime_state.get_container_run(
@@ -339,18 +339,11 @@ class GraphEngine:
                 self._frame_registry.get(
                     run_state.frame_id,
                 ).state_manager.track_unfinished(run_state.node_id)
-
-        if not resume:
-            # Enqueue root node
-            root_node = self._graph.root_node
-            self._state_manager.enqueue_node(root_node.id)
-        else:
             ready_tasks = [
                 *self._graph_runtime_state.ready_queue.drain(),
                 *self._graph_runtime_state.drain_deferred_ready_tasks(),
             ]
             for task in ready_tasks:
-                self._graph_runtime_state.enqueue_ready_task(task)
                 if isinstance(task, StartTask):
                     self._frame_registry.get(
                         task.frame_id
@@ -358,10 +351,16 @@ class GraphEngine:
                         task.node_id,
                     )
 
-        # Start worker pool after scheduling is stable.
+        # ReadyQueue.put() may block, so consumers must exist before scheduling.
         self._worker_pool.start()
 
-        # Start dispatcher
+        if resume:
+            for task in ready_tasks:
+                self._graph_runtime_state.enqueue_ready_task(task)
+        else:
+            root_node = self._graph.root_node
+            self._state_manager.enqueue_node(root_node.id)
+
         self._dispatcher.start()
 
     def _stop_execution(self) -> None:

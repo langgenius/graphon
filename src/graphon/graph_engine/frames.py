@@ -50,9 +50,6 @@ class FrameRegistry:
     def remove(self, frame_id: str) -> None:
         del self._frames[frame_id]
 
-    def has(self, frame_id: str) -> bool:
-        return frame_id in self._frames
-
     def materialize_child_frame(
         self,
         *,

@@ -5,7 +5,13 @@ from collections.abc import Iterator, Mapping
 from functools import singledispatchmethod
 from typing import final
 
-from graphon.enums import ErrorStrategy, NodeExecutionType, NodeState, NodeType
+from graphon.enums import (
+    ErrorStrategy,
+    NodeExecutionType,
+    NodeState,
+    NodeType,
+    WorkflowNodeExecutionStatus,
+)
 from graphon.graph_events.agent import NodeRunAgentLogEvent
 from graphon.graph_events.base import GraphNodeEventBase
 from graphon.graph_events.iteration import (
@@ -33,12 +39,16 @@ from graphon.graph_events.node import (
     NodeRunSucceededEvent,
     NodeRunVariableUpdatedEvent,
 )
+from graphon.nodes.container_effects import (
+    ContainerExecutionResult,
+    ContainerNodeRunResult,
+)
 from graphon.runtime.graph_runtime_state import GraphExecutionProtocol
 
 from ..container_handlers import ContainerHandler
-from ..entities.tasks import TaskEvent
+from ..entities.tasks import ContainerAwaitTask, TaskEvent
 from ..frames import ExecutionFrame, FrameRegistry
-from ..ready_queue import ROOT_FRAME_ID, StartTask
+from ..ready_queue import ROOT_FRAME_ID, ResumeTask, StartTask
 from .event_manager import EventManager
 
 logger = logging.getLogger(__name__)
@@ -85,6 +95,39 @@ class EventHandler:
         handler = self._container_handler_for_frame(frame.frame_id)
         if handler is not None:
             handler.complete_frame(frame)
+
+    def start_container(self, task: ContainerAwaitTask) -> None:
+        """Schedule child-frame work for a suspended container invocation."""
+        root_runtime_state = self._frame_registry.get(
+            ROOT_FRAME_ID,
+        ).graph_runtime_state
+        run_state = root_runtime_state.get_container_run(task.invocation_id)
+        parent_frame = self._frame_registry.get(run_state.frame_id)
+        node = parent_frame.graph.nodes[run_state.node_id]
+        try:
+            self._container_handlers[node.node_type].start_await(
+                invocation_id=task.invocation_id,
+                request=task.request,
+            )
+        except Exception as error:
+            logger.exception(
+                "Container handler failed to start node %s",
+                node.id,
+            )
+            root_runtime_state.enqueue_ready_task(
+                ResumeTask(
+                    invocation_id=task.invocation_id,
+                    result=ContainerExecutionResult(
+                        metadata={},
+                        steps=0,
+                        node_run_result=ContainerNodeRunResult(
+                            status=WorkflowNodeExecutionStatus.FAILED,
+                            error=str(error),
+                            error_type=type(error).__name__,
+                        ),
+                    ),
+                ),
+            )
 
     def snapshot_frames(self) -> None:
         """Persist live child frames after workers have drained for a pause."""
@@ -329,18 +372,10 @@ class EventHandler:
             )
 
     def _container_handler_for_frame(self, frame_id: str) -> ContainerHandler | None:
-        if frame_id == ROOT_FRAME_ID:
-            return None
-        root_runtime_state = self._frame_registry.get(
-            ROOT_FRAME_ID,
-        ).graph_runtime_state
-        frame_state = root_runtime_state.get_container_frame(frame_id)
-        run_state = root_runtime_state.get_container_run(
-            frame_state.parent_invocation_id,
+        return next(
+            (handler for _, handler in self._container_ancestors(frame_id)),
+            None,
         )
-        parent_frame = self._frame_registry.get(run_state.frame_id)
-        parent_node = parent_frame.graph.nodes[run_state.node_id]
-        return self._container_handlers[parent_node.node_type]
 
     def _container_ancestors(
         self,

@@ -30,11 +30,13 @@ from graphon.graph_engine.entities.commands import (
     PauseCommand,
     UpdateVariablesCommand,
 )
-from graphon.graph_engine.entities.tasks import TaskEvent
+from graphon.graph_engine.entities.tasks import (
+    DispatchTask,
+    TaskEvent,
+)
 from graphon.graph_engine.event_management.event_handlers import EventHandler
 from graphon.graph_engine.event_management.event_manager import EventManager
 from graphon.graph_engine.frames import ExecutionFrame, FrameRegistry
-from graphon.graph_engine.graph_engine import GraphEngine
 from graphon.graph_engine.graph_state_manager import GraphStateManager
 from graphon.graph_engine.iteration_container_handler import IterationContainerHandler
 from graphon.graph_engine.layers.execution_limits import (
@@ -51,7 +53,6 @@ from graphon.graph_engine.ready_queue.protocol import (
 )
 from graphon.graph_engine.worker import Worker
 from graphon.graph_engine.worker_management import WorkerPool
-from graphon.graph_events.base import GraphNodeEventBase
 from graphon.graph_events.node import (
     NodeRunPauseRequestedEvent,
     NodeRunStartedEvent,
@@ -62,7 +63,6 @@ from graphon.node_events.base import NodeRunResult
 from graphon.nodes.container_effects import (
     ContainerExecutionResult,
     IterationFrameRequest,
-    LoopFrameRequest,
     build_container_value,
 )
 from graphon.nodes.human_input.entities import PauseRequested
@@ -209,7 +209,7 @@ def _start_iteration_await(
 def _worker(
     *,
     ready_queue: InMemoryReadyQueue,
-    event_queue: queue.Queue[TaskEvent],
+    event_queue: queue.Queue[DispatchTask],
     frame_registry: FrameRegistry,
 ) -> Worker:
     task_claiming = threading.Event()
@@ -219,7 +219,6 @@ def _worker(
         event_queue=event_queue,
         frame_registry=frame_registry,
         layers=[],
-        container_handlers={},
         task_claim_lock=threading.Lock(),
         task_claiming=task_claiming,
     )
@@ -494,7 +493,7 @@ def test_worker_pool_drain_observes_task_claimed_during_pause() -> None:  # noqa
     ready_queue.put(StartTask(frame_id="root", node_id="node"))
     node_started = threading.Event()
     finish_node = threading.Event()
-    event_queue: queue.Queue[TaskEvent] = queue.Queue()
+    event_queue: queue.Queue[DispatchTask] = queue.Queue()
     runtime_state = GraphRuntimeState(
         variable_pool=VariablePool(),
         start_at=1,
@@ -515,7 +514,6 @@ def test_worker_pool_drain_observes_task_claimed_during_pause() -> None:  # noqa
         frame_registry=frame_registry,
         layers=[],
         config=GraphEngineConfig(max_workers=1),
-        container_handlers={},
     )
     drained_tasks: list[ReadyTask] = []
     drain_done = threading.Event()
@@ -570,7 +568,7 @@ def test_worker_pool_scales_for_one_queued_sibling() -> None:
     ready_queue = InMemoryReadyQueue()
     ready_queue.put(StartTask(frame_id="root", node_id="first"))
     ready_queue.put(StartTask(frame_id="root", node_id="second"))
-    event_queue: queue.Queue[TaskEvent] = queue.Queue()
+    event_queue: queue.Queue[DispatchTask] = queue.Queue()
     first_node_started = threading.Event()
     barrier = threading.Barrier(2)
     graph = SimpleNamespace(
@@ -599,17 +597,20 @@ def test_worker_pool_scales_for_one_queued_sibling() -> None:
         frame_registry=frame_registry,
         layers=[],
         config=GraphEngineConfig(max_workers=2),
-        container_handlers={},
     )
 
     pool.start()
     try:
         assert first_node_started.wait(timeout=1)
         pool.check_and_scale()
-        events = [event_queue.get(timeout=1), event_queue.get(timeout=1)]
+        first_event = event_queue.get(timeout=1)
+        second_event = event_queue.get(timeout=1)
     finally:
         pool.stop()
 
+    assert isinstance(first_event, TaskEvent)
+    assert isinstance(second_event, TaskEvent)
+    events = (first_event, second_event)
     assert {event.event.node_id for event in events} == {"first", "second"}
     assert all(isinstance(event.event, NodeRunSucceededEvent) for event in events)
 
@@ -621,37 +622,6 @@ def test_worker_with_current_task_is_not_idle() -> None:
     worker._last_task_time = 0
 
     assert not worker.is_idle
-
-
-def test_resume_tracks_live_and_deferred_start_tasks_before_starting_workers() -> None:
-    ready_queue = InMemoryReadyQueue()
-    runtime_state = GraphRuntimeState(
-        variable_pool=VariablePool(),
-        start_at=0,
-        ready_queue=ready_queue,
-    )
-    live_task = StartTask(frame_id="root", node_id="live")
-    deferred_task = StartTask(frame_id="root", node_id="deferred")
-    ready_queue.put(live_task)
-    runtime_state.defer_ready_task(deferred_task)
-    engine = object.__new__(GraphEngine)
-    engine._worker_pool = MagicMock()
-    engine._graph_runtime_state = runtime_state
-    state_manager = MagicMock()
-    engine._frame_registry = MagicMock()
-    engine._frame_registry.get.return_value.state_manager = state_manager
-    engine._dispatcher = MagicMock()
-
-    engine._start_execution(resume=True)
-
-    assert ready_queue.get(timeout=0.01) == live_task
-    assert ready_queue.get(timeout=0.01) == deferred_task
-    with pytest.raises(queue.Empty):
-        ready_queue.get(timeout=0.01)
-    assert state_manager.track_unfinished.call_args_list == [
-        ((live_task.node_id,), {}),
-        ((deferred_task.node_id,), {}),
-    ]
 
 
 def test_pause_requested_event_defers_current_task_for_resume() -> None:
@@ -938,7 +908,6 @@ def test_frame_registry_materializes_child_frame_from_state() -> None:
         ).model_copy(deep=True),
     )
 
-    assert frame_registry.has("child-frame")
     assert child_frame.frame_id == "child-frame"
     assert _variable_value(child_frame.graph_runtime_state, ["child", "value"]) == (
         "saved"
@@ -1011,7 +980,8 @@ def test_frame_registry_rejects_frame_state_with_missing_graph_state_ids() -> No
                 frame_state.runtime_data.variable_pool,
             ).model_copy(deep=True),
         )
-    assert not frame_registry.has("child-frame")
+    with pytest.raises(KeyError):
+        frame_registry.get("child-frame")
 
 
 def test_frame_registry_copies_frame_runtime_data_from_state() -> None:
@@ -1268,104 +1238,6 @@ def test_worker_binds_node_execution_id_from_task_frame() -> None:
     assert isinstance(event.event, NodeRunStartedEvent)
     assert event.event.id != root_execution.execution_id
     assert event.event.id == child_execution.execution_id
-
-
-def test_worker_suspends_container_invocation_at_await_request() -> None:
-    class ContainerNode:
-        id = "loop"
-        node_type = BuiltinNodeTypes.LOOP
-        execution_type = NodeExecutionType.CONTAINER
-        execution_id = "run-loop"
-
-        def __init__(self) -> None:
-            self.await_was_reached = False
-            self.body_after_await_was_consumed = False
-
-        def bind_execution_id(self, execution_id: str) -> None:
-            self.execution_id = execution_id
-
-        def run(
-            self,
-        ) -> Generator[GraphNodeEventBase | LoopFrameRequest, object, None]:
-            started_at = datetime.now(UTC).replace(tzinfo=None)
-            yield NodeRunStartedEvent(
-                id=self.execution_id,
-                node_id=self.id,
-                node_type=self.node_type,
-                node_title="Loop",
-                start_at=started_at,
-            )
-            self.await_was_reached = True
-            _ = yield LoopFrameRequest(
-                inputs={"loop_count": build_container_value(1)},
-                outputs={},
-                loop_count=1,
-                root_node_id="loop-start",
-                loop_variable_selectors={},
-                loop_node_ids=frozenset(),
-                index=0,
-            )
-            self.body_after_await_was_consumed = True
-
-    class RecordingContainerHandler:
-        def __init__(self) -> None:
-            self.request: LoopFrameRequest
-
-        def start_await(
-            self,
-            *,
-            invocation_id: str,
-            request: LoopFrameRequest,
-        ) -> None:
-            _ = invocation_id
-            self.request = request
-
-    container_node = ContainerNode()
-    ready_queue = InMemoryReadyQueue()
-    ready_queue.put(StartTask(frame_id="root", node_id="loop"))
-    event_queue = queue.Queue()
-    graph_execution = GraphExecution(workflow_id="workflow")
-    graph = SimpleNamespace(nodes={"loop": container_node})
-    runtime_state = GraphRuntimeState(
-        variable_pool=VariablePool(),
-        start_at=1,
-        ready_queue=ready_queue,
-        graph_execution=graph_execution,
-    )
-    frame_registry = FrameRegistry()
-    frame_registry.register(
-        _execution_frame(
-            frame_id="root",
-            graph=cast(Graph, graph),
-            graph_runtime_state=runtime_state,
-        ),
-    )
-    container_handler = RecordingContainerHandler()
-    task_claiming = threading.Event()
-    task_claiming.set()
-    worker = Worker(
-        ready_queue=ready_queue,
-        event_queue=event_queue,
-        frame_registry=frame_registry,
-        layers=[],
-        container_handlers={"loop": cast(ContainerHandler, container_handler)},
-        task_claim_lock=threading.Lock(),
-        task_claiming=task_claiming,
-    )
-
-    worker.start()
-    try:
-        event = event_queue.get(timeout=1)
-    finally:
-        worker.stop()
-        worker.join(timeout=1)
-
-    assert isinstance(event, TaskEvent)
-    assert isinstance(event.event, NodeRunStartedEvent)
-    assert event.event.node_id == "loop"
-    assert container_node.await_was_reached is True
-    assert container_node.body_after_await_was_consumed is False
-    assert container_handler.request.index == 0
 
 
 def test_dispatcher_preserves_task_event_for_dispatch() -> None:

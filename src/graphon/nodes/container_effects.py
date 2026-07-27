@@ -34,6 +34,17 @@ class ContainerNodeRunResult(NodeRunResult):
     inputs: Mapping[str, ContainerValue] = Field(default_factory=dict)
     outputs: Mapping[str, ContainerValue] = Field(default_factory=dict)
 
+    def to_node_run_result(self) -> NodeRunResult:
+        return NodeRunResult(
+            status=self.status,
+            inputs={key: value.to_object() for key, value in self.inputs.items()},
+            outputs={key: value.to_object() for key, value in self.outputs.items()},
+            metadata=self.metadata,
+            llm_usage=self.llm_usage,
+            error=self.error,
+            error_type=self.error_type,
+        )
+
 
 class LoopFrameRequest(BaseModel):
     model_config = ConfigDict(frozen=True)

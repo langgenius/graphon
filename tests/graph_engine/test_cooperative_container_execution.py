@@ -2,8 +2,7 @@ import queue
 from collections.abc import Generator
 from datetime import UTC, datetime
 from threading import Event, Lock, Thread
-from types import SimpleNamespace
-from typing import Any, cast
+from typing import cast
 
 import pytest
 
@@ -13,11 +12,17 @@ from graphon.enums import (
     WorkflowNodeExecutionStatus,
 )
 from graphon.graph.graph import Graph
-from graphon.graph_engine.container_handlers import ContainerHandler
 from graphon.graph_engine.domain.graph_execution import GraphExecution
-from graphon.graph_engine.entities.tasks import TaskEvent
+from graphon.graph_engine.entities.tasks import (
+    ContainerAwaitTask,
+    DispatchTask,
+    TaskEvent,
+)
+from graphon.graph_engine.error_handler import ErrorHandler
 from graphon.graph_engine.frames import ExecutionFrame, FrameRegistry
 from graphon.graph_engine.graph_state_manager import GraphStateManager
+from graphon.graph_engine.graph_traversal.edge_processor import EdgeProcessor
+from graphon.graph_engine.graph_traversal.skip_propagator import SkipPropagator
 from graphon.graph_engine.layers.base import GraphEngineLayer
 from graphon.graph_engine.ready_queue.in_memory import InMemoryReadyQueue
 from graphon.graph_engine.ready_queue.protocol import (
@@ -32,6 +37,7 @@ from graphon.graph_events.node import (
     NodeRunSucceededEvent,
 )
 from graphon.node_events.base import NodeRunResult
+from graphon.nodes.base.node import Node
 from graphon.nodes.container_effects import (
     ContainerExecutionResult,
     ContainerNodeRunResult,
@@ -51,13 +57,21 @@ def _execution_frame(
     graph_runtime_state: GraphRuntimeState,
 ) -> ExecutionFrame:
     state_manager = GraphStateManager(graph, graph_runtime_state, frame_id)
+    skip_propagator = SkipPropagator(
+        graph=graph,
+        state_manager=state_manager,
+    )
     return ExecutionFrame(
         frame_id=frame_id,
         graph=graph,
         graph_runtime_state=graph_runtime_state,
         state_manager=state_manager,
-        edge_processor=cast(Any, SimpleNamespace()),
-        error_handler=cast(Any, SimpleNamespace()),
+        edge_processor=EdgeProcessor(
+            graph=graph,
+            state_manager=state_manager,
+            skip_propagator=skip_propagator,
+        ),
+        error_handler=ErrorHandler(graph, graph_runtime_state.graph_execution),
     )
 
 
@@ -145,13 +159,11 @@ def test_ready_queue_drain_notifies_waiting_bounded_queue_producers() -> None:
 
     drained = queue_.drain()
     unblocked = put_done.wait(1)
-    if not unblocked:
-        with queue_._queue.not_full:
-            queue_._queue.not_full.notify_all()
     producer.join(timeout=1)
 
     assert drained == [first]
     assert unblocked
+    assert not producer.is_alive()
     assert queue_.get(timeout=0.01) == second
 
 
@@ -161,6 +173,10 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
         node_type = BuiltinNodeTypes.LOOP
         execution_type = NodeExecutionType.CONTAINER
         execution_id = "run-loop"
+
+        def __init__(self) -> None:
+            self.await_was_reached = False
+            self.body_after_await_was_consumed = False
 
         def bind_execution_id(self, execution_id: str) -> None:
             self.execution_id = execution_id
@@ -176,6 +192,7 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
                 node_title="Loop",
                 start_at=started_at,
             )
+            self.await_was_reached = True
             yield LoopFrameRequest(
                 inputs={"loop_count": build_container_value(1)},
                 outputs={},
@@ -185,6 +202,7 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
                 loop_node_ids=frozenset(),
                 index=0,
             )
+            self.body_after_await_was_consumed = True
 
         def resume_container(
             self,
@@ -213,25 +231,14 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
                 node_run_result=node_run_result,
             )
 
-    class RecordingContainerHandler:
-        def __init__(self) -> None:
-            self.invocation_id = ""
-            self.requests: list[LoopFrameRequest] = []
-            self.request_received = Event()
-
-        def start_await(
-            self,
-            *,
-            invocation_id: str,
-            request: LoopFrameRequest,
-        ) -> None:
-            self.invocation_id = invocation_id
-            self.requests.append(request)
-            self.request_received.set()
-
+    container_node = ContainerNode()
+    graph = Graph(
+        nodes={"loop": cast(Node, container_node)},
+        root_node=cast(Node, container_node),
+    )
     ready_queue = InMemoryReadyQueue()
     ready_queue.put(StartTask(frame_id="root", node_id="loop"))
-    event_queue = queue.Queue()
+    event_queue: queue.Queue[DispatchTask] = queue.Queue()
     graph_execution = GraphExecution(workflow_id="workflow")
     runtime_state = GraphRuntimeState(
         variable_pool=VariablePool(),
@@ -239,16 +246,14 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
         ready_queue=ready_queue,
         graph_execution=graph_execution,
     )
-    graph = SimpleNamespace(nodes={"loop": ContainerNode()})
     frame_registry = FrameRegistry()
     frame_registry.register(
         _execution_frame(
             frame_id="root",
-            graph=cast(Graph, graph),
+            graph=graph,
             graph_runtime_state=runtime_state,
         ),
     )
-    container_handler = RecordingContainerHandler()
     layer = _RecordingLayer()
     task_claiming = Event()
     task_claiming.set()
@@ -257,7 +262,6 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
         event_queue=event_queue,
         frame_registry=frame_registry,
         layers=[layer],
-        container_handlers={"loop": cast(ContainerHandler, container_handler)},
         task_claim_lock=Lock(),
         task_claiming=task_claiming,
     )
@@ -267,9 +271,11 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
         started = event_queue.get(timeout=1)
         assert isinstance(started, TaskEvent)
         assert isinstance(started.event, NodeRunStartedEvent)
-        assert container_handler.request_received.wait(timeout=1)
-        assert len(container_handler.requests) == 1
-        run_state = runtime_state.get_container_run(container_handler.invocation_id)
+        await_task = event_queue.get(timeout=1)
+        assert isinstance(await_task, ContainerAwaitTask)
+        assert container_node.await_was_reached
+        assert not container_node.body_after_await_was_consumed
+        run_state = runtime_state.get_container_run(await_task.invocation_id)
         assert run_state.frame_id == "root"
         assert run_state.node_id == "loop"
         node_execution = runtime_state.graph_execution.get_or_create_node_execution(
@@ -282,7 +288,7 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
 
         ready_queue.put(
             ResumeTask(
-                invocation_id=container_handler.invocation_id,
+                invocation_id=await_task.invocation_id,
                 result=_container_result(),
             ),
         )
@@ -295,7 +301,7 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
     assert isinstance(succeeded.event, NodeRunSucceededEvent)
     assert succeeded.event.node_run_result.outputs == {"answer": "ok"}
     with pytest.raises(KeyError):
-        runtime_state.get_container_run(container_handler.invocation_id)
+        runtime_state.get_container_run(await_task.invocation_id)
     assert layer.end_events == [succeeded.event]
 
 
@@ -323,7 +329,7 @@ def test_worker_reports_resume_failure_on_suspended_invocation_frame() -> None:
             raise RuntimeError(msg)
 
     ready_queue = InMemoryReadyQueue()
-    event_queue = queue.Queue()
+    event_queue: queue.Queue[DispatchTask] = queue.Queue()
     graph_execution = GraphExecution(workflow_id="workflow")
     runtime_state = GraphRuntimeState(
         variable_pool=VariablePool(),
@@ -332,18 +338,23 @@ def test_worker_reports_resume_failure_on_suspended_invocation_frame() -> None:
         graph_execution=graph_execution,
     )
     frame_registry = FrameRegistry()
-    parent_graph = SimpleNamespace(nodes={"loop": ContainerNode()})
+    container_node = ContainerNode()
+    graph_node = cast(Node, container_node)
+    parent_graph = Graph(
+        nodes={"loop": graph_node},
+        root_node=graph_node,
+    )
     frame_registry.register(
         _execution_frame(
             frame_id="root",
-            graph=cast(Graph, parent_graph),
+            graph=parent_graph,
             graph_runtime_state=runtime_state,
         ),
     )
     frame_registry.register(
         _execution_frame(
             frame_id="parent-frame",
-            graph=cast(Graph, parent_graph),
+            graph=parent_graph,
             graph_runtime_state=runtime_state,
         ),
     )
@@ -379,7 +390,6 @@ def test_worker_reports_resume_failure_on_suspended_invocation_frame() -> None:
         event_queue=event_queue,
         frame_registry=frame_registry,
         layers=[],
-        container_handlers={},
         task_claim_lock=Lock(),
         task_claiming=task_claiming,
     )
@@ -391,6 +401,7 @@ def test_worker_reports_resume_failure_on_suspended_invocation_frame() -> None:
         worker.stop()
         worker.join(timeout=1)
 
+    assert isinstance(failed, TaskEvent)
     assert failed.frame_id == "parent-frame"
     assert isinstance(failed.event, NodeRunFailedEvent)
     assert failed.event.error == "resume bad"

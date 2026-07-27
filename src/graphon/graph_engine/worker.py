@@ -8,15 +8,18 @@ import logging
 import queue
 import threading
 import time
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, datetime
 from typing import final, override
 from uuid import uuid4
 
-from graphon.enums import NodeType, WorkflowNodeExecutionStatus
-from graphon.graph_engine.container_handlers import ContainerHandler
-from graphon.graph_engine.entities.tasks import TaskEvent
+from graphon.enums import WorkflowNodeExecutionStatus
+from graphon.graph_engine.entities.tasks import (
+    ContainerAwaitTask,
+    DispatchTask,
+    TaskEvent,
+)
 from graphon.graph_engine.frames import FrameRegistry
 from graphon.graph_engine.layers.base import GraphEngineLayer
 from graphon.graph_engine.ready_queue import (
@@ -56,10 +59,9 @@ class Worker(threading.Thread):
     def __init__(
         self,
         ready_queue: ReadyQueue,
-        event_queue: queue.Queue[TaskEvent],
+        event_queue: queue.Queue[DispatchTask],
         frame_registry: FrameRegistry,
         layers: Sequence[GraphEngineLayer],
-        container_handlers: Mapping[NodeType, ContainerHandler],
         task_claim_lock: threading.Lock,
         task_claiming: threading.Event,
         worker_id: int = 0,
@@ -85,7 +87,6 @@ class Worker(threading.Thread):
         )
         self._stop_event = threading.Event()
         self._layers = layers
-        self._container_handlers = container_handlers
         self._task_claim_lock = task_claim_lock
         self._task_claiming = task_claiming
         self._last_task_time = time.time()
@@ -267,8 +268,7 @@ class Worker(threading.Thread):
                 root_runtime_state = self._frame_registry.get(
                     ROOT_FRAME_ID,
                 ).graph_runtime_state
-                new_invocation = invocation_id is None
-                if new_invocation:
+                if invocation_id is None:
                     invocation_id = str(uuid4())
                     root_runtime_state.put_container_run(
                         create_container_run_state(
@@ -279,15 +279,12 @@ class Worker(threading.Thread):
                             request=event,
                         )
                     )
-                try:
-                    self._container_handlers[node.node_type].start_await(
+                self._event_queue.put(
+                    ContainerAwaitTask(
                         invocation_id=invocation_id,
                         request=event,
                     )
-                except Exception:
-                    if new_invocation:
-                        root_runtime_state.pop_container_run(invocation_id)
-                    raise
+                )
                 return None, True
             if isinstance(event, NodeRunStartedEvent) and event.id == node.execution_id:
                 self._current_node_started_at = event.start_at

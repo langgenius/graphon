@@ -9,7 +9,7 @@ from graphon.enums import (
     NodeExecutionType,
     WorkflowNodeExecutionStatus,
 )
-from graphon.node_events.base import NodeEventBase, NodeRunResult
+from graphon.node_events.base import NodeEventBase
 from graphon.node_events.loop import (
     LoopFailedEvent,
     LoopNextEvent,
@@ -96,22 +96,7 @@ class LoopNode(Node[LoopNodeData]):
             return
 
         if isinstance(result, ContainerExecutionResult):
-            container_result = result.node_run_result
-            node_run_result = NodeRunResult(
-                status=container_result.status,
-                inputs={
-                    key: value.to_object()
-                    for key, value in container_result.inputs.items()
-                },
-                outputs={
-                    key: value.to_object()
-                    for key, value in container_result.outputs.items()
-                },
-                metadata=container_result.metadata,
-                llm_usage=container_result.llm_usage,
-                error=container_result.error,
-                error_type=container_result.error_type,
-            )
+            node_run_result = result.node_run_result.to_node_run_result()
             if node_run_result.status == WorkflowNodeExecutionStatus.SUCCEEDED:
                 yield LoopSucceededEvent(
                     start_at=self._start_at,

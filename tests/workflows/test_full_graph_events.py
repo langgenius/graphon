@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from threading import Event, Thread
 from typing import Any
 
 import pytest
 import yaml
 
 from graphon.dsl import loads
+from graphon.graph_engine.config import GraphEngineConfig
 from graphon.graph_engine.frames import FrameRegistry
+from graphon.graph_engine.graph_engine import GraphEngine
 from graphon.graph_engine.loop_container_handler import LoopContainerHandler
+from graphon.graph_engine.ready_queue.in_memory import InMemoryReadyQueue
+from graphon.graph_engine.ready_queue.protocol import StartTask
 from graphon.graph_events.base import GraphEngineEvent
 from graphon.graph_events.graph import (
     GraphRunFailedEvent,
@@ -33,6 +38,7 @@ from tests.helpers.workflow_events import (
 )
 
 _OPENAI_PLUGIN_ID = "langgenius/openai:0.3.8@test"
+_ENGINE_TIMEOUT_SECONDS = 2
 
 
 def _graph_dsl(
@@ -63,6 +69,57 @@ def _edge(source: str, target: str) -> dict[str, str]:
     return {"source": source, "target": target}
 
 
+def _iteration_dsl(*, is_parallel: bool, parallel_nums: int) -> str:
+    return _graph_dsl(
+        nodes=[
+            _start_node(),
+            {
+                "id": "iteration",
+                "data": {
+                    "type": "iteration",
+                    "title": "For each item",
+                    "iterator_selector": ["start", "items"],
+                    "output_selector": ["render", "output"],
+                    "start_node_id": "iteration-start",
+                    "is_parallel": is_parallel,
+                    "parallel_nums": parallel_nums,
+                    "error_handle_mode": "terminated",
+                    "flatten_output": True,
+                },
+            },
+            {
+                "id": "iteration-start",
+                "data": {"type": "iteration-start", "iteration_id": "iteration"},
+            },
+            {
+                "id": "render",
+                "data": {
+                    "type": "template-transform",
+                    "iteration_id": "iteration",
+                    "variables": [
+                        {
+                            "variable": "item",
+                            "value_selector": ["iteration", "item"],
+                        }
+                    ],
+                    "template": "{{ item }}!",
+                },
+            },
+            _end_node([
+                {
+                    "variable": "items",
+                    "value_selector": ["iteration", "output"],
+                },
+            ]),
+        ],
+        edges=[
+            _edge("start", "iteration"),
+            _edge("iteration-start", "render"),
+            _edge("iteration", "end"),
+        ],
+    )
+
+
 def _event(
     event_type: str,
     subject: str = "",
@@ -81,6 +138,42 @@ def _run_failed_workflow(
     engine = loads(dsl, start_inputs=start_inputs)
     with pytest.raises(RuntimeError, match="Variable"):
         events.extend(engine.run())
+    return events
+
+
+def _use_bounded_ready_queue(engine: GraphEngine) -> InMemoryReadyQueue:
+    ready_queue = InMemoryReadyQueue(maxsize=1)
+    engine.graph_runtime_state._ready_queue = ready_queue
+    engine._worker_pool._ready_queue = ready_queue
+    return ready_queue
+
+
+def _run_with_timeout(engine: GraphEngine) -> list[GraphEngineEvent]:
+    events: list[GraphEngineEvent] = []
+    errors: list[Exception] = []
+    finished = Event()
+
+    def run() -> None:
+        try:
+            events.extend(engine.run())
+        except Exception as error:  # noqa: BLE001 - re-raised in the test thread.
+            errors.append(error)
+        finally:
+            finished.set()
+
+    thread = Thread(target=run, daemon=True)
+    thread.start()
+    completed_in_time = finished.wait(timeout=_ENGINE_TIMEOUT_SECONDS)
+    if not completed_in_time:
+        engine.graph_runtime_state.ready_queue.drain()
+        engine.request_abort("bounded ready queue test timed out")
+        finished.wait(timeout=_ENGINE_TIMEOUT_SECONDS)
+    thread.join(timeout=_ENGINE_TIMEOUT_SECONDS)
+
+    assert completed_in_time, "graph execution blocked on the bounded ready queue"
+    assert not thread.is_alive()
+    if errors:
+        raise errors[0]
     return events
 
 
@@ -149,55 +242,52 @@ def test_full_answer_graph_is_verified_from_events() -> None:
     assert outputs["answer"] == "Hello Graphon"
 
 
-def test_full_iteration_graph_records_process_and_final_outputs() -> None:
+def test_resume_replays_tasks_through_a_bounded_ready_queue() -> None:
     dsl = _graph_dsl(
         nodes=[
             _start_node(),
-            {
-                "id": "iteration",
-                "data": {
-                    "type": "iteration",
-                    "title": "For each item",
-                    "iterator_selector": ["start", "items"],
-                    "output_selector": ["render", "output"],
-                    "start_node_id": "iteration-start",
-                    "is_parallel": False,
-                    "parallel_nums": 1,
-                    "error_handle_mode": "terminated",
-                    "flatten_output": True,
-                },
-            },
-            {
-                "id": "iteration-start",
-                "data": {"type": "iteration-start", "iteration_id": "iteration"},
-            },
-            {
-                "id": "render",
-                "data": {
-                    "type": "template-transform",
-                    "iteration_id": "iteration",
-                    "variables": [
-                        {
-                            "variable": "item",
-                            "value_selector": ["iteration", "item"],
-                        }
-                    ],
-                    "template": "{{ item }}!",
-                },
-            },
-            _end_node([
-                {
-                    "variable": "items",
-                    "value_selector": ["iteration", "output"],
-                },
-            ]),
+            {"id": "answer", "data": {"type": "answer", "answer": "done"}},
         ],
-        edges=[
-            _edge("start", "iteration"),
-            _edge("iteration-start", "render"),
-            _edge("iteration", "end"),
-        ],
+        edges=[_edge("start", "answer")],
     )
+    engine = loads(
+        dsl,
+        config=GraphEngineConfig(min_workers=1, max_workers=1),
+    )
+    ready_queue = _use_bounded_ready_queue(engine)
+    engine.graph_runtime_state.graph_execution.start()
+    ready_queue.put(StartTask(frame_id="root", node_id="start"))
+    engine.graph_runtime_state.defer_ready_task(
+        StartTask(frame_id="root", node_id="answer"),
+    )
+    errors: list[Exception] = []
+    finished = Event()
+
+    def start_execution() -> None:
+        try:
+            engine._start_execution(resume=True)
+        except Exception as error:  # noqa: BLE001 - re-raised in the test thread.
+            errors.append(error)
+        finally:
+            finished.set()
+
+    thread = Thread(target=start_execution, daemon=True)
+    thread.start()
+    completed_in_time = finished.wait(timeout=_ENGINE_TIMEOUT_SECONDS)
+    if not completed_in_time:
+        ready_queue.drain()
+        finished.wait(timeout=_ENGINE_TIMEOUT_SECONDS)
+    thread.join(timeout=_ENGINE_TIMEOUT_SECONDS)
+    engine._stop_execution()
+
+    assert completed_in_time, "resume blocked while replaying bounded queue tasks"
+    assert not thread.is_alive()
+    if errors:
+        raise errors[0]
+
+
+def test_full_iteration_graph_records_process_and_final_outputs() -> None:
+    dsl = _iteration_dsl(is_parallel=False, parallel_nums=1)
 
     events = run_workflow(dsl, start_inputs={"items": ["alpha", "beta"]})
 
@@ -232,6 +322,24 @@ def test_full_iteration_graph_records_process_and_final_outputs() -> None:
     assert progress == [0, 1]
     assert succeeded.steps == 2
     assert succeeded.outputs == {"output": ["alpha!", "beta!"]}
+    assert final_outputs(events) == {"items": ["alpha!", "beta!"]}
+
+
+def test_parallel_iteration_with_one_worker_and_a_bounded_ready_queue() -> None:
+    dsl = _iteration_dsl(is_parallel=True, parallel_nums=2)
+    engine = loads(
+        dsl,
+        start_inputs={"items": ["alpha", "beta"]},
+        config=GraphEngineConfig(min_workers=1, max_workers=1),
+    )
+    _use_bounded_ready_queue(engine)
+
+    events = _run_with_timeout(engine)
+
+    progress = [
+        event.index for event in events if isinstance(event, NodeRunIterationNextEvent)
+    ]
+    assert progress == [0, 1]
     assert final_outputs(events) == {"items": ["alpha!", "beta!"]}
 
 

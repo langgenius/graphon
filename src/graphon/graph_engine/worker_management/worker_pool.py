@@ -7,13 +7,10 @@ DynamicScaler, and WorkerFactory into a single class.
 import logging
 import queue
 import threading
-from collections.abc import Mapping
 from contextlib import AbstractContextManager
 from typing import final
 
-from graphon.enums import NodeType
-from graphon.graph_engine.container_handlers import ContainerHandler
-from graphon.graph_engine.entities.tasks import TaskEvent
+from graphon.graph_engine.entities.tasks import DispatchTask
 from graphon.graph_engine.frames import FrameRegistry
 from graphon.graph_engine.ready_queue import ROOT_FRAME_ID, ReadyQueue, ReadyTask
 
@@ -37,11 +34,10 @@ class WorkerPool:
     def __init__(
         self,
         ready_queue: ReadyQueue,
-        event_queue: queue.Queue[TaskEvent],
+        event_queue: queue.Queue[DispatchTask],
         frame_registry: FrameRegistry,
         layers: list[GraphEngineLayer],
         config: GraphEngineConfig,
-        container_handlers: Mapping[NodeType, ContainerHandler],
         execution_context: AbstractContextManager[object] | None = None,
     ) -> None:
         """Initialize the simple worker pool.
@@ -52,7 +48,6 @@ class WorkerPool:
             frame_registry: Registry containing frame-local graphs to execute
             layers: Graph engine layers for node execution hooks
             config: GraphEngine worker pool configuration
-            container_handlers: Engine-owned container handlers by node type
             execution_context: Optional execution context for context preservation
 
         """
@@ -70,8 +65,6 @@ class WorkerPool:
         self._task_claim_lock = threading.Lock()
         self._task_claiming = threading.Event()
         self._running = False
-
-        self._container_handlers = container_handlers
 
     def start(self) -> None:
         """Start the worker pool."""
@@ -157,7 +150,6 @@ class WorkerPool:
             layers=self._layers,
             worker_id=worker_id,
             execution_context=self._execution_context,
-            container_handlers=self._container_handlers,
             task_claim_lock=self._task_claim_lock,
             task_claiming=self._task_claiming,
         )

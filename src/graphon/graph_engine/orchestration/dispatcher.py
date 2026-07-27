@@ -5,7 +5,10 @@ import queue
 import threading
 from typing import final
 
-from graphon.graph_engine.entities.tasks import TaskEvent
+from graphon.graph_engine.entities.tasks import (
+    ContainerAwaitTask,
+    DispatchTask,
+)
 from graphon.graph_events.base import GraphNodeEventBase
 from graphon.graph_events.node import (
     NodeRunExceptionEvent,
@@ -41,7 +44,7 @@ class Dispatcher:
 
     def __init__(
         self,
-        event_queue: queue.Queue[TaskEvent],
+        event_queue: queue.Queue[DispatchTask],
         event_handler: EventHandler,
         graph_execution: GraphExecutionProtocol,
         state_manager: GraphStateManager,
@@ -122,13 +125,13 @@ class Dispatcher:
 
     def _dispatch_next_event(self) -> None:
         try:
-            task_event = self._event_queue.get(timeout=0.1)
+            task = self._event_queue.get(timeout=0.1)
         except queue.Empty:
             self._process_commands()
             return
-        self._event_handler.dispatch(task_event)
+        event = self._dispatch_task(task)
         self._event_queue.task_done()
-        self._process_commands(task_event.event)
+        self._process_commands(event)
 
     def _drain_after_exit(self, paused: bool) -> None:
         self._process_commands()
@@ -145,21 +148,28 @@ class Dispatcher:
     def _drain_event_queue(self) -> None:
         while True:
             try:
-                task_event = self._event_queue.get(block=False)
+                task = self._event_queue.get(block=False)
             except queue.Empty:
                 return
-            self._event_handler.dispatch(task_event)
+            self._dispatch_task(task)
             self._event_queue.task_done()
 
     def _drain_events_until_idle(self) -> None:
         while not self._stop_event.is_set():
             try:
-                task_event = self._event_queue.get(timeout=0.1)
+                task = self._event_queue.get(timeout=0.1)
             except queue.Empty:
                 if not self._worker_pool.has_current_tasks():
                     break
                 continue
-            self._event_handler.dispatch(task_event)
+            event = self._dispatch_task(task)
             self._event_queue.task_done()
-            self._process_commands(task_event.event)
+            self._process_commands(event)
         self._drain_event_queue()
+
+    def _dispatch_task(self, task: DispatchTask) -> GraphNodeEventBase | None:
+        if isinstance(task, ContainerAwaitTask):
+            self._event_handler.start_container(task)
+            return None
+        self._event_handler.dispatch(task)
+        return task.event
