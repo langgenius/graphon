@@ -692,15 +692,32 @@ def test_full_loop_graph_propagates_child_failure() -> None:
                 "id": "loop-start",
                 "data": {"type": "loop-start", "loop_id": "loop"},
             },
+            {
+                "id": "child-response",
+                "data": {
+                    "type": "end",
+                    "loop_id": "loop",
+                    "outputs": [
+                        {
+                            "variable": "partial",
+                            "value_selector": ["start", "value"],
+                        },
+                    ],
+                },
+            },
             _failing_assigner(container_field="loop_id", container_id="loop"),
         ],
         edges=[
             _edge("start", "loop"),
-            _edge("loop-start", "fail"),
+            _edge("loop-start", "child-response"),
+            _edge("child-response", "fail"),
         ],
     )
 
-    events = _run_failed_workflow(dsl, start_inputs={})
+    engine = loads(dsl, start_inputs={"value": "partial"})
+    events: list[GraphEngineEvent] = []
+    with pytest.raises(RuntimeError, match="Variable"):
+        events.extend(engine.run())
 
     assert event_path(events) == [
         _event("GraphRunStartedEvent"),
@@ -709,7 +726,10 @@ def test_full_loop_graph_propagates_child_failure() -> None:
         _event("NodeRunSucceededEvent", "start"),
         _event("NodeRunStartedEvent", "loop"),
         _event("NodeRunLoopStartedEvent", "loop"),
-        _event("GraphEdgeTakenEvent", "loop-start->fail"),
+        _event("GraphEdgeTakenEvent", "loop-start->child-response"),
+        _event("NodeRunStartedEvent", "child-response", in_loop="loop"),
+        _event("GraphEdgeTakenEvent", "child-response->fail"),
+        _event("NodeRunSucceededEvent", "child-response", in_loop="loop"),
         _event("NodeRunStartedEvent", "fail", in_loop="loop"),
         _event("NodeRunFailedEvent", "fail", in_loop="loop"),
         _event("NodeRunLoopFailedEvent", "loop"),
@@ -724,6 +744,7 @@ def test_full_loop_graph_propagates_child_failure() -> None:
     assert failed.steps == 2
     assert failed.metadata["completed_reason"] == "error"
     assert terminal.exceptions_count == 2
+    assert engine.graph_runtime_state.outputs == {}
 
 
 @pytest.mark.parametrize(
@@ -845,6 +866,19 @@ def test_full_iteration_graph_applies_error_handling_mode(
                     "iteration_id": "iteration",
                 },
             },
+            {
+                "id": "child-response",
+                "data": {
+                    "type": "end",
+                    "iteration_id": "iteration",
+                    "outputs": [
+                        {
+                            "variable": "partial",
+                            "value_selector": ["iteration", "item"],
+                        },
+                    ],
+                },
+            },
             _failing_assigner(
                 container_field="iteration_id",
                 container_id="iteration",
@@ -858,7 +892,8 @@ def test_full_iteration_graph_applies_error_handling_mode(
         ],
         edges=[
             _edge("start", "iteration"),
-            _edge("iteration-start", "fail"),
+            _edge("iteration-start", "child-response"),
+            _edge("child-response", "fail"),
             _edge("iteration", "end"),
         ],
     )
@@ -880,7 +915,18 @@ def test_full_iteration_graph_applies_error_handling_mode(
     for _ in range(executed_items):
         expected_path.append(_event("NodeRunIterationNextEvent", "iteration"))
         expected_path.extend([
-            _event("GraphEdgeTakenEvent", "iteration-start->fail"),
+            _event("GraphEdgeTakenEvent", "iteration-start->child-response"),
+            _event(
+                "NodeRunStartedEvent",
+                "child-response",
+                in_iteration="iteration",
+            ),
+            _event("GraphEdgeTakenEvent", "child-response->fail"),
+            _event(
+                "NodeRunSucceededEvent",
+                "child-response",
+                in_iteration="iteration",
+            ),
             _event("NodeRunStartedEvent", "fail", in_iteration="iteration"),
             _event("NodeRunFailedEvent", "fail", in_iteration="iteration"),
         ])

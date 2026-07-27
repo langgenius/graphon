@@ -251,7 +251,7 @@ class IterationContainerHandler:
         outputs = dict(run_state.outputs)
         if store_output:
             outputs[str(frame_state.index)] = output
-        if frame_state.index == len(run_state.items) - 1:
+        if not frame_state.errors and frame_state.index == len(run_state.items) - 1:
             parent_frame.graph_runtime_state.merge_response_outputs(
                 frame.graph_runtime_state.outputs,
             )

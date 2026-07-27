@@ -341,9 +341,10 @@ class LoopContainerHandler:
                 raise ValueError(msg)
             loop_variable_values[key] = build_container_value(segment)
         variable_map[str(loop_index)] = loop_variable_values
-        parent_frame.graph_runtime_state.merge_response_outputs(
-            frame.graph_runtime_state.outputs,
-        )
+        if not frame_state.errors:
+            parent_frame.graph_runtime_state.merge_response_outputs(
+                frame.graph_runtime_state.outputs,
+            )
         outputs.update(loop_variable_values)
         outputs["loop_round"] = build_container_value(loop_index + 1)
         updated_run_state = run_state.model_copy(
