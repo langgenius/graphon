@@ -32,6 +32,14 @@ class ResumeTask(BaseModel):
 ReadyTask = Annotated[StartTask | ResumeTask, Field(discriminator="kind")]
 
 
+class ReadyQueueStateV1(BaseModel):
+    """Ready queue state produced before frame-aware tasks."""
+
+    type: Literal["InMemoryReadyQueue"]
+    version: Literal["1.0"]
+    items: tuple[str, ...]
+
+
 class ReadyQueueState(BaseModel):
     """Pydantic model for serialized ready queue state.
 
@@ -39,5 +47,5 @@ class ReadyQueueState(BaseModel):
     and expected by loads() for ready queue serialization.
     """
 
-    version: Literal["1.0"]
+    version: Literal["2.0"]
     items: tuple[ReadyTask, ...]

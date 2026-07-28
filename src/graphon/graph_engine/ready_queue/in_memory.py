@@ -5,9 +5,24 @@ serialization capabilities for state storage.
 """
 
 import queue
-from typing import final
+from typing import Annotated, final
 
-from .protocol import ReadyQueueState, ReadyTask
+from pydantic import Field, TypeAdapter
+
+from .protocol import (
+    ROOT_FRAME_ID,
+    ReadyQueueState,
+    ReadyQueueStateV1,
+    ReadyTask,
+    StartTask,
+)
+
+_READY_QUEUE_STATE_ADAPTER = TypeAdapter(
+    Annotated[
+        ReadyQueueStateV1 | ReadyQueueState,
+        Field(discriminator="version"),
+    ],
+)
 
 
 @final
@@ -87,7 +102,7 @@ class InMemoryReadyQueue:
         with self._queue.mutex:
             items: list[ReadyTask] = list(self._queue.queue)
         state = ReadyQueueState(
-            version="1.0",
+            version="2.0",
             items=tuple(items),
         )
         return state.model_dump_json()
@@ -99,10 +114,17 @@ class InMemoryReadyQueue:
             data: The JSON string containing the serialized queue state to restore
 
         """
-        state = ReadyQueueState.model_validate_json(data)
+        state = _READY_QUEUE_STATE_ADAPTER.validate_json(data)
+        if isinstance(state, ReadyQueueStateV1):
+            items: tuple[ReadyTask, ...] = tuple(
+                StartTask(frame_id=ROOT_FRAME_ID, node_id=node_id)
+                for node_id in state.items
+            )
+        else:
+            items = state.items
 
         self.drain()
 
         # Restore items
-        for item in state.items:
+        for item in items:
             self._queue.put(item)

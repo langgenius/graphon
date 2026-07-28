@@ -3,14 +3,46 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, TypeAdapter
 
 from graphon.entities.pause_reason import PauseReason
+from graphon.graph_engine.ready_queue.protocol import ROOT_FRAME_ID
 
 from .node_execution import NodeExecution
+
+
+class GraphExecutionErrorStateV1(BaseModel):
+    """Serialized graph error from version 1.0."""
+
+    qualname: str
+    message: str | None = None
+
+
+class NodeExecutionStateV1(BaseModel):
+    """Node execution state before execution frames were introduced."""
+
+    node_id: str
+    retry_count: int = 0
+    execution_id: str | None = None
+
+
+class GraphExecutionStateV1(BaseModel):
+    """Graph execution state produced before frame-aware execution."""
+
+    type: Literal["GraphExecution"]
+    version: Literal["1.0"]
+    workflow_id: str
+    started: bool = False
+    completed: bool = False
+    aborted: bool = False
+    paused: bool = False
+    pause_reasons: list[PauseReason] = Field(default_factory=list)
+    error: GraphExecutionErrorStateV1 | None = None
+    exceptions_count: int = 0
+    node_executions: list[NodeExecutionStateV1] = Field(default_factory=list)
 
 
 class NodeExecutionState(BaseModel):
@@ -25,7 +57,7 @@ class NodeExecutionState(BaseModel):
 class GraphExecutionState(BaseModel):
     """Pydantic model describing serialized GraphExecution state."""
 
-    version: Literal["1.0"]
+    version: Literal["2.0"]
     workflow_id: str
     started: bool
     completed: bool
@@ -35,6 +67,14 @@ class GraphExecutionState(BaseModel):
     error: str | None
     exceptions_count: int
     node_executions: list[NodeExecutionState]
+
+
+_GRAPH_EXECUTION_STATE_ADAPTER = TypeAdapter(
+    Annotated[
+        GraphExecutionStateV1 | GraphExecutionState,
+        Field(discriminator="version"),
+    ],
+)
 
 
 @dataclass
@@ -119,7 +159,7 @@ class GraphExecution:
         ]
 
         state = GraphExecutionState(
-            version="1.0",
+            version="2.0",
             workflow_id=self.workflow_id,
             started=self.started,
             completed=self.completed,
@@ -135,7 +175,38 @@ class GraphExecution:
 
     def loads(self, data: str) -> None:
         """Restore aggregate state from a serialized JSON string."""
-        state = GraphExecutionState.model_validate_json(data)
+        serialized_state = _GRAPH_EXECUTION_STATE_ADAPTER.validate_json(data)
+        if isinstance(serialized_state, GraphExecutionStateV1):
+            state = GraphExecutionState(
+                version="2.0",
+                workflow_id=serialized_state.workflow_id,
+                started=serialized_state.started,
+                completed=serialized_state.completed,
+                aborted=serialized_state.aborted,
+                paused=serialized_state.paused,
+                pause_reasons=serialized_state.pause_reasons,
+                error=(
+                    None
+                    if serialized_state.error is None
+                    else (
+                        serialized_state.error.qualname
+                        if serialized_state.error.message is None
+                        else serialized_state.error.message
+                    )
+                ),
+                exceptions_count=serialized_state.exceptions_count,
+                node_executions=[
+                    NodeExecutionState(
+                        frame_id=ROOT_FRAME_ID,
+                        node_id=item.node_id,
+                        retry_count=item.retry_count,
+                        execution_id=item.execution_id or str(uuid4()),
+                    )
+                    for item in serialized_state.node_executions
+                ],
+            )
+        else:
+            state = serialized_state
 
         if self.workflow_id != state.workflow_id:
             msg = "Serialized workflow_id does not match aggregate identity"

@@ -5,11 +5,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from graphon.enums import ErrorHandleMode
+from graphon.enums import ErrorHandleMode, NodeState
 from graphon.file import File, FileTransferMethod, FileType
 from graphon.graph_engine.domain.graph_execution import GraphExecution
 from graphon.graph_engine.ready_queue.in_memory import InMemoryReadyQueue
-from graphon.graph_engine.ready_queue.protocol import ReadyTask, ResumeTask, StartTask
+from graphon.graph_engine.ready_queue.protocol import (
+    ROOT_FRAME_ID,
+    ReadyTask,
+    ResumeTask,
+    StartTask,
+)
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.nodes.container_effects import (
     IterationFrameRequest,
@@ -334,6 +339,81 @@ class TestGraphRuntimeState:
         assert restored_execution.started is True
         assert isinstance(restored_execution.error, RuntimeError)
         assert str(restored_execution.error) == "saved failure"
+
+    def test_version_1_snapshot_migrates_to_frame_aware_version_2(self) -> None:
+        variable_pool = VariablePool()
+        variable_pool.add(("legacy", "value"), "preserved")
+        usage = LLMUsage.from_metadata({"total_tokens": 5})
+        snapshot = json.dumps({
+            "version": "1.0",
+            "start_at": 1.0,
+            "total_tokens": 5,
+            "node_run_steps": 3,
+            "llm_usage": usage.model_dump(mode="json"),
+            "outputs": {"answer": "legacy"},
+            "variable_pool": variable_pool.model_dump(mode="json"),
+            "ready_queue": json.dumps({
+                "type": "InMemoryReadyQueue",
+                "version": "1.0",
+                "items": ["ready"],
+            }),
+            "graph_execution": json.dumps({
+                "type": "GraphExecution",
+                "version": "1.0",
+                "workflow_id": "workflow",
+                "started": True,
+                "completed": False,
+                "aborted": False,
+                "paused": True,
+                "pause_reasons": [],
+                "error": None,
+                "exceptions_count": 1,
+                "node_executions": [
+                    {
+                        "node_id": "ready",
+                        "state": NodeState.TAKEN,
+                        "retry_count": 2,
+                        "execution_id": None,
+                        "error": None,
+                    },
+                ],
+            }),
+            "paused_nodes": ["paused"],
+            "deferred_nodes": ["deferred", "paused"],
+            "graph_state": {
+                "nodes": {"ready": NodeState.TAKEN},
+                "edges": {"edge": NodeState.SKIPPED},
+            },
+        })
+
+        restored = GraphRuntimeState.from_snapshot(snapshot)
+        migrated = json.loads(restored.dumps())
+
+        assert migrated["version"] == "2.0"
+        assert json.loads(migrated["ready_queue"])["version"] == "2.0"
+        assert json.loads(migrated["deferred_ready_tasks"])["version"] == "2.0"
+        assert json.loads(migrated["graph_execution"])["version"] == "2.0"
+        assert migrated["graph_node_states"] == {"ready": NodeState.TAKEN}
+        assert migrated["graph_edge_states"] == {"edge": NodeState.SKIPPED}
+        assert restored.ready_queue.drain() == [
+            StartTask(frame_id=ROOT_FRAME_ID, node_id="ready"),
+        ]
+        assert restored.drain_deferred_ready_tasks() == [
+            StartTask(frame_id=ROOT_FRAME_ID, node_id="paused"),
+            StartTask(frame_id=ROOT_FRAME_ID, node_id="deferred"),
+        ]
+        node_execution = restored.graph_execution.get_or_create_node_execution(
+            frame_id=ROOT_FRAME_ID,
+            node_id="ready",
+        )
+        assert node_execution.retry_count == 2
+        assert node_execution.execution_id
+        assert restored.total_tokens == 5
+        assert restored.node_run_steps == 3
+        assert restored.get_output("answer") == "legacy"
+        value = restored.variable_pool.get(("legacy", "value"))
+        assert value is not None
+        assert value.value == "preserved"
 
     def test_snapshot_restore_preserves_updated_conversation_variable(self) -> None:
         variable_pool = VariablePool.from_bootstrap(

@@ -6,9 +6,9 @@ from abc import abstractmethod
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from copy import deepcopy
-from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from graphon.enums import NodeExecutionType, NodeState, NodeType
 from graphon.model_runtime.entities.llm_entities import LLMUsage
@@ -149,12 +149,39 @@ class GraphProtocol(Protocol):
     def get_outgoing_edges(self, node_id: str) -> Sequence[EdgeProtocol]: ...
 
 
+class _GraphStateSnapshotV1(BaseModel):
+    """Node and edge state stored by runtime snapshot version 1.0."""
+
+    model_config = ConfigDict(frozen=True)
+
+    nodes: dict[str, NodeState]
+    edges: dict[str, NodeState]
+
+
+class _GraphRuntimeStateSnapshotV1(BaseModel):
+    """Runtime snapshot produced before frame-aware execution."""
+
+    model_config = ConfigDict(frozen=True)
+
+    version: Literal["1.0"]
+    start_at: float
+    node_run_steps: int = Field(ge=0)
+    llm_usage: LLMUsage
+    outputs: dict[str, object]
+    variable_pool: VariablePool
+    ready_queue: str
+    graph_execution: str
+    paused_nodes: tuple[str, ...]
+    deferred_nodes: tuple[str, ...]
+    graph_state: _GraphStateSnapshotV1
+
+
 class _GraphRuntimeStateSnapshot(BaseModel):
     """Validated serialized runtime state snapshot."""
 
     model_config = ConfigDict(frozen=True)
 
-    version: Literal["1.0"]
+    version: Literal["2.0"]
     start_at: float
     node_run_steps: int = Field(ge=0)
     llm_usage: LLMUsage
@@ -167,6 +194,14 @@ class _GraphRuntimeStateSnapshot(BaseModel):
     container_frames: tuple[ContainerFrameState, ...]
     graph_node_states: dict[str, NodeState]
     graph_edge_states: dict[str, NodeState]
+
+
+_GRAPH_RUNTIME_STATE_SNAPSHOT_ADAPTER = TypeAdapter(
+    Annotated[
+        _GraphRuntimeStateSnapshotV1 | _GraphRuntimeStateSnapshot,
+        Field(discriminator="version"),
+    ],
+)
 
 
 def _new_ready_queue() -> ReadyQueue:
@@ -343,7 +378,7 @@ class GraphRuntimeState:  # noqa: PLR0904
                 edge_id: edge.state for edge_id, edge in self._graph.edges.items()
             }
         return _GraphRuntimeStateSnapshot(
-            version="1.0",
+            version="2.0",
             start_at=self._start_at,
             node_run_steps=self._node_run_steps,
             llm_usage=self._llm_usage,
@@ -366,11 +401,35 @@ class GraphRuntimeState:  # noqa: PLR0904
         ready_queue_factory: Callable[[], ReadyQueue] = _new_ready_queue,
     ) -> GraphRuntimeState:
         """Restore runtime state from a serialized snapshot."""
-        snapshot = _GraphRuntimeStateSnapshot.model_validate_json(data)
+        snapshot = _GRAPH_RUNTIME_STATE_SNAPSHOT_ADAPTER.validate_json(data)
+
         ready_queue = ready_queue_factory()
         ready_queue.loads(snapshot.ready_queue)
         deferred_ready_queue = ready_queue_factory()
-        deferred_ready_queue.loads(snapshot.deferred_ready_tasks)
+        if isinstance(snapshot, _GraphRuntimeStateSnapshotV1):
+            from graphon.graph_engine.ready_queue import (  # ruff:ignore[import-outside-top-level]
+                ROOT_FRAME_ID,
+                StartTask,
+            )
+
+            for node_id in dict.fromkeys((
+                *snapshot.paused_nodes,
+                *snapshot.deferred_nodes,
+            )):
+                deferred_ready_queue.put(
+                    StartTask(frame_id=ROOT_FRAME_ID, node_id=node_id),
+                )
+            container_runs: tuple[ContainerRunState, ...] = ()
+            container_frames: tuple[ContainerFrameState, ...] = ()
+            graph_node_states = snapshot.graph_state.nodes
+            graph_edge_states = snapshot.graph_state.edges
+        else:
+            deferred_ready_queue.loads(snapshot.deferred_ready_tasks)
+            container_runs = snapshot.container_runs
+            container_frames = snapshot.container_frames
+            graph_node_states = snapshot.graph_node_states
+            graph_edge_states = snapshot.graph_edge_states
+
         execution_payload = json.loads(snapshot.graph_execution)
         graph_execution = _new_graph_execution(
             workflow_id=execution_payload["workflow_id"],
@@ -387,14 +446,10 @@ class GraphRuntimeState:  # noqa: PLR0904
             deferred_ready_queue=deferred_ready_queue,
             graph_execution=graph_execution,
         )
-        state._container_runs = {
-            run.invocation_id: run for run in snapshot.container_runs
-        }
-        state._container_frames = {
-            frame.frame_id: frame for frame in snapshot.container_frames
-        }
-        state._pending_graph_node_states = snapshot.graph_node_states
-        state._pending_graph_edge_states = snapshot.graph_edge_states
+        state._container_runs = {run.invocation_id: run for run in container_runs}
+        state._container_frames = {frame.frame_id: frame for frame in container_frames}
+        state._pending_graph_node_states = graph_node_states
+        state._pending_graph_edge_states = graph_edge_states
         return state
 
     def defer_ready_task(self, task: ReadyTask) -> None:
