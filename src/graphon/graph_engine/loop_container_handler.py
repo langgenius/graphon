@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import threading
 from datetime import UTC, datetime
 from typing import final
 
@@ -42,8 +41,6 @@ class LoopContainerHandler:
         frame_registry: FrameRegistry,
     ) -> None:
         self._frame_registry = frame_registry
-        # ponytail: one lock; split by run id if runtime-state mutation contends.
-        self._lock = threading.Lock()
 
     def restore_frame(self, frame_state: ContainerFrameState) -> None:
         if not isinstance(frame_state, LoopFrameState):
@@ -72,40 +69,39 @@ class LoopContainerHandler:
             msg = f"loop handler cannot handle {type(request).__name__}"
             raise TypeError(msg)
 
-        with self._lock:
-            run_state = self._root_runtime_state().get_container_run(invocation_id)
-            if not isinstance(run_state, LoopRunState):
-                msg = f"loop handler cannot continue {run_state.kind} run"
-                raise TypeError(msg)
-            parent_frame = self._frame_registry.get(run_state.frame_id)
-            node = parent_frame.graph.nodes[run_state.node_id]
-            if not isinstance(node, LoopNode):
-                msg = f"node {run_state.node_id} cannot handle loop await requests"
-                raise TypeError(msg)
-            if self._loop_break_conditions_reached(
-                frame=parent_frame,
-                node=node,
-                suppress_errors=True,
-            ):
-                run_state = run_state.model_copy(
-                    update={"reached_break": True},
-                )
-                self._root_runtime_state().put_container_run(run_state)
-                self._enqueue_container_result(
-                    runtime_state=parent_frame.graph_runtime_state,
-                    invocation_id=run_state.invocation_id,
-                    result=self._complete_loop(
-                        run_state=run_state,
-                        steps=0,
-                    ),
-                )
-                return
-
-            self._start_loop_frame(
-                parent_frame=parent_frame,
-                run_state=run_state,
-                request=request,
+        run_state = self._root_runtime_state().get_container_run(invocation_id)
+        if not isinstance(run_state, LoopRunState):
+            msg = f"loop handler cannot continue {run_state.kind} run"
+            raise TypeError(msg)
+        parent_frame = self._frame_registry.get(run_state.frame_id)
+        node = parent_frame.graph.nodes[run_state.node_id]
+        if not isinstance(node, LoopNode):
+            msg = f"node {run_state.node_id} cannot handle loop await requests"
+            raise TypeError(msg)
+        if self._loop_break_conditions_reached(
+            frame=parent_frame,
+            node=node,
+            suppress_errors=True,
+        ):
+            run_state = run_state.model_copy(
+                update={"reached_break": True},
             )
+            self._root_runtime_state().put_container_run(run_state)
+            self._enqueue_container_result(
+                runtime_state=parent_frame.graph_runtime_state,
+                invocation_id=run_state.invocation_id,
+                result=self._complete_loop(
+                    run_state=run_state,
+                    steps=0,
+                ),
+            )
+            return
+
+        self._start_loop_frame(
+            parent_frame=parent_frame,
+            run_state=run_state,
+            request=request,
+        )
 
     def prepare_frame_event(
         self,
@@ -113,40 +109,39 @@ class LoopContainerHandler:
         frame: ExecutionFrame,
         event: GraphNodeEventBase,
     ) -> None:
-        with self._lock:
-            root_runtime_state = self._root_runtime_state()
-            frame_state = root_runtime_state.get_container_frame(frame.frame_id)
-            if not isinstance(frame_state, LoopFrameState):
-                msg = f"loop handler cannot prepare {frame_state.kind} frame"
-                raise TypeError(msg)
-            run_state = root_runtime_state.get_container_run(
-                frame_state.parent_invocation_id,
-            )
-            if not isinstance(run_state, LoopRunState):
-                msg = f"loop frame cannot belong to {run_state.kind} run"
-                raise TypeError(msg)
-            if event.in_loop_id is None:
-                event.in_loop_id = run_state.node_id
-            loop_metadata = {
-                WorkflowNodeExecutionMetadataKey.LOOP_ID: run_state.node_id,
-                WorkflowNodeExecutionMetadataKey.LOOP_INDEX: frame_state.index,
+        root_runtime_state = self._root_runtime_state()
+        frame_state = root_runtime_state.get_container_frame(frame.frame_id)
+        if not isinstance(frame_state, LoopFrameState):
+            msg = f"loop handler cannot prepare {frame_state.kind} frame"
+            raise TypeError(msg)
+        run_state = root_runtime_state.get_container_run(
+            frame_state.parent_invocation_id,
+        )
+        if not isinstance(run_state, LoopRunState):
+            msg = f"loop frame cannot belong to {run_state.kind} run"
+            raise TypeError(msg)
+        if event.in_loop_id is None:
+            event.in_loop_id = run_state.node_id
+        loop_metadata = {
+            WorkflowNodeExecutionMetadataKey.LOOP_ID: run_state.node_id,
+            WorkflowNodeExecutionMetadataKey.LOOP_INDEX: frame_state.index,
+        }
+        current_metadata = event.node_run_result.metadata
+        if WorkflowNodeExecutionMetadataKey.LOOP_ID not in current_metadata:
+            event.node_run_result.metadata = {
+                **current_metadata,
+                **loop_metadata,
             }
-            current_metadata = event.node_run_result.metadata
-            if WorkflowNodeExecutionMetadataKey.LOOP_ID not in current_metadata:
-                event.node_run_result.metadata = {
-                    **current_metadata,
-                    **loop_metadata,
-                }
-            if (
-                isinstance(event, NodeRunSucceededEvent)
-                and event.node_type == BuiltinNodeTypes.LOOP_END
-                and event.node_id in run_state.loop_node_ids
-            ):
-                root_runtime_state.put_container_frame(
-                    frame_state.model_copy(
-                        update={"reached_break": True},
-                    ),
-                )
+        if (
+            isinstance(event, NodeRunSucceededEvent)
+            and event.node_type == BuiltinNodeTypes.LOOP_END
+            and event.node_id in run_state.loop_node_ids
+        ):
+            root_runtime_state.put_container_frame(
+                frame_state.model_copy(
+                    update={"reached_break": True},
+                ),
+            )
 
     def should_collect(
         self,
@@ -161,47 +156,45 @@ class LoopContainerHandler:
         frame: ExecutionFrame,
         event: NodeRunFailedEvent,
     ) -> None:
-        with self._lock:
-            frame_state = self._root_runtime_state().get_container_frame(frame.frame_id)
-            if not isinstance(frame_state, LoopFrameState):
-                msg = f"loop handler cannot fail {frame_state.kind} frame"
-                raise TypeError(msg)
-            self._root_runtime_state().put_container_frame(
-                frame_state.model_copy(
-                    update={"errors": (*frame_state.errors, event.error)},
-                ),
-            )
+        frame_state = self._root_runtime_state().get_container_frame(frame.frame_id)
+        if not isinstance(frame_state, LoopFrameState):
+            msg = f"loop handler cannot fail {frame_state.kind} frame"
+            raise TypeError(msg)
+        self._root_runtime_state().put_container_frame(
+            frame_state.model_copy(
+                update={"errors": (*frame_state.errors, event.error)},
+            ),
+        )
 
     def complete_frame(self, frame: ExecutionFrame) -> None:
-        with self._lock:
-            if not frame.state_manager.is_execution_complete():
-                return
+        if not frame.state_manager.is_execution_complete():
+            return
 
-            root_runtime_state = self._root_runtime_state()
-            frame_state = root_runtime_state.get_container_frame(frame.frame_id)
-            if not isinstance(frame_state, LoopFrameState):
-                msg = f"loop handler cannot complete {frame_state.kind} frame"
-                raise TypeError(msg)
-            try:
-                self._complete_ready_loop_frame(
-                    frame=frame,
-                    frame_state=frame_state,
-                )
-            except (TypeError, ValueError) as error:
-                run_state = root_runtime_state.get_container_run(
-                    frame_state.parent_invocation_id,
-                )
-                if not isinstance(run_state, LoopRunState):
-                    raise
-                parent_frame = self._frame_registry.get(run_state.frame_id)
-                self._enqueue_container_result(
-                    runtime_state=parent_frame.graph_runtime_state,
-                    invocation_id=run_state.invocation_id,
-                    result=self._fail_loop(run_state=run_state, error=str(error)),
-                )
-            finally:
-                root_runtime_state.pop_container_frame(frame.frame_id)
-                self._frame_registry.remove(frame.frame_id)
+        root_runtime_state = self._root_runtime_state()
+        frame_state = root_runtime_state.get_container_frame(frame.frame_id)
+        if not isinstance(frame_state, LoopFrameState):
+            msg = f"loop handler cannot complete {frame_state.kind} frame"
+            raise TypeError(msg)
+        try:
+            self._complete_ready_loop_frame(
+                frame=frame,
+                frame_state=frame_state,
+            )
+        except (TypeError, ValueError) as error:
+            run_state = root_runtime_state.get_container_run(
+                frame_state.parent_invocation_id,
+            )
+            if not isinstance(run_state, LoopRunState):
+                raise
+            parent_frame = self._frame_registry.get(run_state.frame_id)
+            self._enqueue_container_result(
+                runtime_state=parent_frame.graph_runtime_state,
+                invocation_id=run_state.invocation_id,
+                result=self._fail_loop(run_state=run_state, error=str(error)),
+            )
+        finally:
+            root_runtime_state.pop_container_frame(frame.frame_id)
+            self._frame_registry.remove(frame.frame_id)
 
     def _complete_ready_loop_frame(
         self,

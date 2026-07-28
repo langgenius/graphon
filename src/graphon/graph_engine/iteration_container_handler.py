@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import threading
 from datetime import UTC, datetime
 from typing import cast, final
 
@@ -41,8 +40,6 @@ class IterationContainerHandler:
         frame_registry: FrameRegistry,
     ) -> None:
         self._frame_registry = frame_registry
-        # ponytail: one lock; split by run id if runtime-state mutation contends.
-        self._lock = threading.Lock()
 
     def restore_frame(self, frame_state: ContainerFrameState) -> None:
         if not isinstance(frame_state, IterationFrameState):
@@ -69,39 +66,38 @@ class IterationContainerHandler:
             msg = f"iteration handler cannot handle {type(request).__name__}"
             raise TypeError(msg)
 
-        with self._lock:
-            run_state = self._iteration_run(invocation_id)
+        run_state = self._iteration_run(invocation_id)
+        run_state = self._put_run_state(
+            run_state.model_copy(update={"resume_pending": False}),
+        )
+        parent_frame = self._frame_registry.get(run_state.frame_id)
+        if self._finish_failed_iteration_if_ready(
+            parent_frame=parent_frame,
+            run_state=run_state,
+        ):
+            return
+
+        for index in request.indexes:
             run_state = self._put_run_state(
-                run_state.model_copy(update={"resume_pending": False}),
+                run_state.model_copy(
+                    update={
+                        "scheduled_count": max(
+                            run_state.scheduled_count,
+                            index + 1,
+                        ),
+                    },
+                ),
             )
-            parent_frame = self._frame_registry.get(run_state.frame_id)
-            if self._finish_failed_iteration_if_ready(
+            self._start_iteration_frame(
                 parent_frame=parent_frame,
                 run_state=run_state,
-            ):
-                return
-
-            for index in request.indexes:
-                run_state = self._put_run_state(
-                    run_state.model_copy(
-                        update={
-                            "scheduled_count": max(
-                                run_state.scheduled_count,
-                                index + 1,
-                            ),
-                        },
-                    ),
-                )
-                self._start_iteration_frame(
-                    parent_frame=parent_frame,
-                    run_state=run_state,
-                    index=index,
-                )
-
-            self._request_iteration_frames(
-                parent_frame=parent_frame,
-                run_state=run_state,
+                index=index,
             )
+
+        self._request_iteration_frames(
+            parent_frame=parent_frame,
+            run_state=run_state,
+        )
 
     def prepare_frame_event(
         self,
@@ -109,21 +105,20 @@ class IterationContainerHandler:
         frame: ExecutionFrame,
         event: GraphNodeEventBase,
     ) -> None:
-        with self._lock:
-            frame_state = self._iteration_frame(frame.frame_id)
-            run_state = self._iteration_run(frame_state.parent_invocation_id)
-            if event.in_iteration_id is None:
-                event.in_iteration_id = run_state.node_id
-            iteration_metadata = {
-                WorkflowNodeExecutionMetadataKey.ITERATION_ID: run_state.node_id,
-                WorkflowNodeExecutionMetadataKey.ITERATION_INDEX: frame_state.index,
+        frame_state = self._iteration_frame(frame.frame_id)
+        run_state = self._iteration_run(frame_state.parent_invocation_id)
+        if event.in_iteration_id is None:
+            event.in_iteration_id = run_state.node_id
+        iteration_metadata = {
+            WorkflowNodeExecutionMetadataKey.ITERATION_ID: run_state.node_id,
+            WorkflowNodeExecutionMetadataKey.ITERATION_INDEX: frame_state.index,
+        }
+        current_metadata = event.node_run_result.metadata
+        if WorkflowNodeExecutionMetadataKey.ITERATION_ID not in current_metadata:
+            event.node_run_result.metadata = {
+                **current_metadata,
+                **iteration_metadata,
             }
-            current_metadata = event.node_run_result.metadata
-            if WorkflowNodeExecutionMetadataKey.ITERATION_ID not in current_metadata:
-                event.node_run_result.metadata = {
-                    **current_metadata,
-                    **iteration_metadata,
-                }
 
     def should_collect(
         self,
@@ -138,27 +133,25 @@ class IterationContainerHandler:
         frame: ExecutionFrame,
         event: NodeRunFailedEvent,
     ) -> None:
-        with self._lock:
-            frame_state = self._iteration_frame(frame.frame_id)
-            self._root_runtime_state().put_container_frame(
-                frame_state.model_copy(
-                    update={"errors": (*frame_state.errors, event.error)},
-                ),
-            )
+        frame_state = self._iteration_frame(frame.frame_id)
+        self._root_runtime_state().put_container_frame(
+            frame_state.model_copy(
+                update={"errors": (*frame_state.errors, event.error)},
+            ),
+        )
 
     def complete_frame(self, frame: ExecutionFrame) -> None:
-        with self._lock:
-            if not frame.state_manager.is_execution_complete():
-                return
+        if not frame.state_manager.is_execution_complete():
+            return
 
-            root_runtime_state = self._root_runtime_state()
-            frame_state = self._iteration_frame(frame.frame_id)
-            self._complete_ready_iteration_frame(
-                frame=frame,
-                frame_state=frame_state,
-            )
-            root_runtime_state.pop_container_frame(frame.frame_id)
-            self._frame_registry.remove(frame.frame_id)
+        root_runtime_state = self._root_runtime_state()
+        frame_state = self._iteration_frame(frame.frame_id)
+        self._complete_ready_iteration_frame(
+            frame=frame,
+            frame_state=frame_state,
+        )
+        root_runtime_state.pop_container_frame(frame.frame_id)
+        self._frame_registry.remove(frame.frame_id)
 
     def _complete_ready_iteration_frame(
         self,
@@ -284,7 +277,10 @@ class IterationContainerHandler:
             self._enqueue_container_result(
                 runtime_state=parent_frame.graph_runtime_state,
                 invocation_id=run_state.invocation_id,
-                result=self._complete_iteration(run_state),
+                result=self._build_iteration_result(
+                    run_state=run_state,
+                    status=WorkflowNodeExecutionStatus.SUCCEEDED,
+                ),
             )
             return
 
@@ -313,8 +309,9 @@ class IterationContainerHandler:
         self._enqueue_container_result(
             runtime_state=parent_frame.graph_runtime_state,
             invocation_id=run_state.invocation_id,
-            result=self._fail_iteration(
+            result=self._build_iteration_result(
                 run_state=run_state,
+                status=WorkflowNodeExecutionStatus.FAILED,
                 error=run_state.errors[0],
             ),
         )
@@ -397,36 +394,12 @@ class IterationContainerHandler:
         )
         child_frame.state_manager.enqueue_node(run_state.root_node_id)
 
-    def _complete_iteration(
-        self,
-        run_state: IterationRunState,
-    ) -> ContainerExecutionResult:
-        outputs: dict[str, ContainerValue] = {
-            "output": build_container_value(
-                self._flatten_outputs_if_needed(
-                    self._ordered_iteration_outputs(run_state),
-                    flatten_output=run_state.flatten_output,
-                ),
-            ),
-        }
-        metadata = self._iteration_metadata(run_state)
-        return ContainerExecutionResult(
-            metadata=self._event_metadata(metadata),
-            steps=len(run_state.items),
-            node_run_result=ContainerNodeRunResult(
-                status=WorkflowNodeExecutionStatus.SUCCEEDED,
-                metadata=metadata,
-                outputs=outputs,
-                inputs=self._inputs(run_state),
-                llm_usage=run_state.usage,
-            ),
-        )
-
-    def _fail_iteration(
+    def _build_iteration_result(
         self,
         *,
         run_state: IterationRunState,
-        error: str,
+        status: WorkflowNodeExecutionStatus,
+        error: str = "",
     ) -> ContainerExecutionResult:
         outputs: dict[str, ContainerValue] = {
             "output": build_container_value(
@@ -441,7 +414,7 @@ class IterationContainerHandler:
             metadata=self._event_metadata(metadata),
             steps=len(run_state.items),
             node_run_result=ContainerNodeRunResult(
-                status=WorkflowNodeExecutionStatus.FAILED,
+                status=status,
                 error=error,
                 metadata=metadata,
                 outputs=outputs,
