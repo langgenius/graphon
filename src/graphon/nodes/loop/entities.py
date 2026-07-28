@@ -1,14 +1,9 @@
-from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import AfterValidator, BaseModel, Field, field_validator
+from pydantic import AfterValidator, BaseModel, Field
 
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.enums import BuiltinNodeTypes, NodeType
-from graphon.nodes.base.entities import (
-    BaseLoopNodeData,
-    BaseLoopState,
-)
 from graphon.utils.condition.entities import Condition
 from graphon.variables.types import SegmentType
 
@@ -36,25 +31,18 @@ class LoopVariableData(BaseModel):
     label: str
     var_type: Annotated[SegmentType, AfterValidator(_is_valid_var_type)]
     value_type: Literal["variable", "constant"]
-    value: Any | list[str] | None = None
+    value: Any
 
 
-class LoopNodeData(BaseLoopNodeData):
+class LoopNodeData(BaseNodeData):
     type: NodeType = BuiltinNodeTypes.LOOP
-    loop_count: int  # Maximum number of loops
+    start_node_id: str
+    loop_count: int = Field(ge=1)  # Maximum number of loops
     break_conditions: list[Condition]  # Conditions to break the loop
     logical_operator: Literal["and", "or"]
-    loop_variables: list[LoopVariableData] | None = Field(
+    loop_variables: list[LoopVariableData] = Field(
         default_factory=list[LoopVariableData],
     )
-    outputs: dict[str, Any] = Field(default_factory=dict)
-
-    @field_validator("outputs", mode="before")
-    @classmethod
-    def validate_outputs(cls, v: Any) -> dict[str, Any]:
-        if v is None:
-            return {}
-        return v
 
 
 class LoopStartNodeData(BaseNodeData):
@@ -67,30 +55,3 @@ class LoopEndNodeData(BaseNodeData):
     """Loop End Node Data."""
 
     type: NodeType = BuiltinNodeTypes.LOOP_END
-
-
-class LoopState(BaseLoopState):
-    """Loop State."""
-
-    outputs: list[Any] = Field(default_factory=list)
-    current_output: Any = None
-
-    class MetaData(BaseLoopState.MetaData):
-        """Data."""
-
-        loop_length: int
-
-    def get_last_output(self) -> Any:
-        """Get last output."""
-        if self.outputs:
-            return self.outputs[-1]
-        return None
-
-    def get_current_output(self) -> Any:
-        """Get current output."""
-        return self.current_output
-
-
-class LoopCompletedReason(StrEnum):
-    LOOP_BREAK = "loop_break"
-    LOOP_COMPLETED = "loop_completed"

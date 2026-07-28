@@ -215,6 +215,7 @@ def _run_if_else_node(
         ),
         graph_runtime_state=runtime_state,
     )
+    node.bind_execution_id("if-run")
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")

@@ -6,8 +6,6 @@ from typing import Any
 
 from pydantic import BaseModel, field_validator
 
-from graphon.entities.base_node_data import BaseNodeData
-
 
 class VariableSelector(BaseModel):
     """Variable Selector."""
@@ -48,33 +46,3 @@ class OutputVariableEntity(BaseModel):
         if isinstance(v, str) and v.startswith("Array["):
             return v.lower()
         return v
-
-
-class BaseIterationNodeData(BaseNodeData):
-    start_node_id: str | None = None
-
-
-class BaseIterationState(BaseModel):
-    iteration_node_id: str
-    index: int
-    inputs: dict
-
-    class MetaData(BaseModel):
-        """Metadata associated with an iteration state."""
-
-    metadata: MetaData
-
-
-class BaseLoopNodeData(BaseNodeData):
-    start_node_id: str | None = None
-
-
-class BaseLoopState(BaseModel):
-    loop_node_id: str
-    index: int
-    inputs: dict
-
-    class MetaData(BaseModel):
-        """Metadata associated with a loop state."""
-
-    metadata: MetaData

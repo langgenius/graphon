@@ -128,10 +128,9 @@ class ToolNode(Node[ToolNodeData]):
                 or self.node_data.tool_node_version is not None
             ):
                 variable_pool = self.graph_runtime_state.variable_pool
-            node_execution_id = self.ensure_execution_id()
             tool_runtime = self._get_tool_runtime(
                 variable_pool=variable_pool,
-                node_execution_id=node_execution_id,
+                node_execution_id=self.execution_id,
             )
         except ToolNodeError as e:
             yield StreamCompletedEvent(
@@ -550,7 +549,7 @@ class ToolNode(Node[ToolNodeData]):
         except Exception as error:
             raise ToolFileError(str(error)) from error
 
-        tool_file_id = getattr(tool_file, "id", None)
+        tool_file_id = tool_file.id
         if not isinstance(tool_file_id, str) or not tool_file_id:
             msg = "created tool file is missing id"
             raise ToolFileError(msg)

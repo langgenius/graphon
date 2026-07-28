@@ -50,6 +50,8 @@ class ErrorHandler:
 
     def handle_node_failure(
         self,
+        *,
+        frame_id: str,
         event: NodeRunFailedEvent,
     ) -> GraphNodeEventBase | None:
         """Handle a node failure event.
@@ -67,7 +69,8 @@ class ErrorHandler:
         node = self._graph.nodes[event.node_id]
         # Get retry count from NodeExecution
         node_execution = self._graph_execution.get_or_create_node_execution(
-            event.node_id,
+            frame_id=frame_id,
+            node_id=event.node_id,
         )
         retry_count = node_execution.retry_count
 

@@ -60,6 +60,8 @@ class Graph:
         in_edges: dict[str, list[str]] | None = None,
         out_edges: dict[str, list[str]] | None = None,
         root_node: Node,
+        graph_config: Mapping[str, Any] | None = None,
+        node_factory: NodeFactory | None = None,
     ) -> None:
         """Initialize Graph instance.
 
@@ -74,6 +76,8 @@ class Graph:
         self.in_edges = in_edges or {}
         self.out_edges = out_edges or {}
         self.root_node = root_node
+        self.graph_config = graph_config
+        self.node_factory = node_factory
 
     @classmethod
     def _parse_node_configs(
@@ -368,6 +372,8 @@ class Graph:
             in_edges=in_edges,
             out_edges=out_edges,
             root_node=root_node,
+            graph_config=graph_config,
+            node_factory=node_factory,
         )
 
         if not skip_validation:

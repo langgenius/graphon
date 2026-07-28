@@ -4,7 +4,7 @@ import importlib
 import os
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -29,10 +29,15 @@ from graphon.nodes.http_request.node import (
     HttpRequestNodeDependencies,
 )
 from graphon.nodes.if_else.if_else_node import IfElseNode
+from graphon.nodes.iteration.iteration_node import IterationNode
+from graphon.nodes.iteration.iteration_start_node import IterationStartNode
 from graphon.nodes.list_operator.entities import ListOperatorNodeData
 from graphon.nodes.list_operator.node import ListOperatorNode
 from graphon.nodes.llm import LLMNode, LLMNodeData
 from graphon.nodes.llm.exc import LLMNodeError
+from graphon.nodes.loop.loop_end_node import LoopEndNode
+from graphon.nodes.loop.loop_node import LoopNode
+from graphon.nodes.loop.loop_start_node import LoopStartNode
 from graphon.nodes.parameter_extractor.entities import ParameterExtractorNodeData
 from graphon.nodes.parameter_extractor.parameter_extractor_node import (
     ParameterExtractorNode,
@@ -435,6 +440,12 @@ class SlimDslNodeFactory:
             ignore_uv_lock=slim.ignore_uv_lock,
         )
 
+    def with_runtime_state(
+        self,
+        graph_runtime_state: GraphRuntimeState,
+    ) -> SlimDslNodeFactory:
+        return replace(self, graph_runtime_state=graph_runtime_state)
+
     def create_node(self, node_config: NodeConfigDict) -> Node:
         request = self._node_request(node_config)
         builder = self.NODE_BUILDERS.get(request.node_type)
@@ -484,6 +495,49 @@ class SlimDslNodeFactory:
         return IfElseNode(
             node_id=request.node_id,
             data=IfElseNode.validate_node_data(request.data),
+            graph_init_params=self.graph_init_params,
+            graph_runtime_state=self.graph_runtime_state,
+        )
+
+    def _create_iteration_node(self, request: _NodeBuildRequest) -> IterationNode:
+        return IterationNode(
+            node_id=request.node_id,
+            data=IterationNode.validate_node_data(request.data),
+            graph_init_params=self.graph_init_params,
+            graph_runtime_state=self.graph_runtime_state,
+        )
+
+    def _create_iteration_start_node(
+        self,
+        request: _NodeBuildRequest,
+    ) -> IterationStartNode:
+        return IterationStartNode(
+            node_id=request.node_id,
+            data=IterationStartNode.validate_node_data(request.data),
+            graph_init_params=self.graph_init_params,
+            graph_runtime_state=self.graph_runtime_state,
+        )
+
+    def _create_loop_node(self, request: _NodeBuildRequest) -> LoopNode:
+        return LoopNode(
+            node_id=request.node_id,
+            data=LoopNode.validate_node_data(request.data),
+            graph_init_params=self.graph_init_params,
+            graph_runtime_state=self.graph_runtime_state,
+        )
+
+    def _create_loop_start_node(self, request: _NodeBuildRequest) -> LoopStartNode:
+        return LoopStartNode(
+            node_id=request.node_id,
+            data=LoopStartNode.validate_node_data(request.data),
+            graph_init_params=self.graph_init_params,
+            graph_runtime_state=self.graph_runtime_state,
+        )
+
+    def _create_loop_end_node(self, request: _NodeBuildRequest) -> LoopEndNode:
+        return LoopEndNode(
+            node_id=request.node_id,
+            data=LoopEndNode.validate_node_data(request.data),
             graph_init_params=self.graph_init_params,
             graph_runtime_state=self.graph_runtime_state,
         )
@@ -785,6 +839,11 @@ class SlimDslNodeFactory:
         BuiltinNodeTypes.END: _create_end_node,
         BuiltinNodeTypes.ANSWER: _create_answer_node,
         BuiltinNodeTypes.IF_ELSE: _create_if_else_node,
+        BuiltinNodeTypes.ITERATION: _create_iteration_node,
+        BuiltinNodeTypes.ITERATION_START: _create_iteration_start_node,
+        BuiltinNodeTypes.LOOP: _create_loop_node,
+        BuiltinNodeTypes.LOOP_START: _create_loop_start_node,
+        BuiltinNodeTypes.LOOP_END: _create_loop_end_node,
         BuiltinNodeTypes.TEMPLATE_TRANSFORM: _create_template_transform_node,
         BuiltinNodeTypes.CODE: _create_code_node,
         BuiltinNodeTypes.LLM: _create_llm_node,

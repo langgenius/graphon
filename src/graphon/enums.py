@@ -95,6 +95,12 @@ class ErrorStrategy(StrEnum):
     DEFAULT_VALUE = "default-value"
 
 
+class ErrorHandleMode(StrEnum):
+    TERMINATED = "terminated"
+    CONTINUE_ON_ERROR = "continue-on-error"
+    REMOVE_ABNORMAL_OUTPUT = "remove-abnormal-output"
+
+
 class FailBranchSourceHandle(StrEnum):
     FAILED = "fail-branch"
     SUCCESS = "success-branch"

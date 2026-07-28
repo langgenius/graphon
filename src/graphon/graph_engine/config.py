@@ -10,5 +10,5 @@ class GraphEngineConfig(BaseModel):
 
     min_workers: int = 1
     max_workers: int = 5
-    scale_up_threshold: int = 3
+    scale_up_threshold: int = 0
     scale_down_idle_time: float = 5.0

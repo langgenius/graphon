@@ -28,7 +28,7 @@ def _build_human_input_node(
     *,
     hitl_callback: Callable[[HITLContext], HITLDecision],
 ) -> HumanInputNode:
-    return HumanInputNode(
+    node = HumanInputNode(
         node_id="human-input-node",
         data=HumanInputNodeData(title="Human Input"),
         graph_init_params=build_graph_init_params(
@@ -41,6 +41,8 @@ def _build_human_input_node(
         ),
         hitl_callback=hitl_callback,
     )
+    node.bind_execution_id("human-run")
+    return node
 
 
 def test_human_input_node_uses_injected_hitl_callback() -> None:

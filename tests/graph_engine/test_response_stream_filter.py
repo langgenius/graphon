@@ -123,7 +123,7 @@ def _context(
     variable_pool: VariablePool | None = None,
 ) -> GraphEventFilterContext:
     state = GraphRuntimeState(variable_pool=variable_pool or VariablePool(), start_at=0)
-    state.configure(graph=cast(Any, graph))
+    state.attach_graph(cast(Any, graph))
     return GraphEventFilterContext(
         graph=cast(Any, graph),
         runtime_state=ReadOnlyGraphRuntimeStateWrapper(state),

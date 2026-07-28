@@ -16,6 +16,7 @@ from graphon.graph.graph import Graph
 from graphon.graph.validation import GraphValidationError
 from graphon.graph_engine.command_channels import CommandChannel, InMemoryChannel
 from graphon.graph_engine.config import GraphEngineConfig
+from graphon.graph_engine.container_handlers import ContainerHandlerFactory
 from graphon.graph_engine.graph_engine import GraphEngine
 from graphon.runtime.graph_runtime_state import GraphRuntimeState
 from graphon.runtime.variable_pool import VariablePool
@@ -94,6 +95,7 @@ def loads(
     start_inputs: Mapping[str, Any] | None = None,
     command_channel: CommandChannel | None = None,
     config: GraphEngineConfig | None = None,
+    container_handler_factories: Sequence[ContainerHandlerFactory] = (),
 ) -> GraphEngine:
     plan = inspect(dsl, source_kind=source_kind)
     if plan.load_status == LoadStatus.UNSUPPORTED:
@@ -174,6 +176,7 @@ def loads(
         graph_runtime_state=graph_runtime_state,
         command_channel=command_channel or InMemoryChannel(),
         config=engine_config,
+        container_handler_factories=container_handler_factories,
     )
 
 

@@ -33,7 +33,6 @@ class TestSkipPropagator:
         mock_graph.get_incoming_edges.assert_called_once_with("node_2")
         mock_state_manager.analyze_edge_states.assert_called_once_with(incoming_edges)
         mock_state_manager.enqueue_node.assert_not_called()
-        mock_state_manager.start_execution.assert_not_called()
         mock_state_manager.mark_node_skipped.assert_not_called()
 
     def test_propagate_skip_from_edge_with_taken_edge_enqueues_node(self) -> None:
@@ -59,7 +58,6 @@ class TestSkipPropagator:
         propagator.propagate_skip_from_edge("edge_1")
 
         mock_state_manager.enqueue_node.assert_called_once_with("node_2")
-        mock_state_manager.start_execution.assert_called_once_with("node_2")
         mock_state_manager.mark_node_skipped.assert_not_called()
 
     def test_propagate_skip_from_edge_with_all_skipped_propagates_to_node(self) -> None:
@@ -86,7 +84,6 @@ class TestSkipPropagator:
 
         mock_state_manager.mark_node_skipped.assert_called_once_with("node_2")
         mock_state_manager.enqueue_node.assert_not_called()
-        mock_state_manager.start_execution.assert_not_called()
 
     def test_propagate_skip_to_node_marks_node_and_outgoing_edges_skipped(self) -> None:
         mock_graph = create_autospec(Graph)
