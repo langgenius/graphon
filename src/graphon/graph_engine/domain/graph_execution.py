@@ -8,6 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from graphon.entities.graph_failure_source import GraphFailureSource
 from graphon.entities.pause_reason import PauseReason
 from graphon.enums import NodeState
 
@@ -44,6 +45,8 @@ class GraphExecutionState(BaseModel):
     paused: bool = Field(default=False)
     pause_reasons: list[PauseReason] = Field(default_factory=list)
     error: GraphExecutionErrorState | None = Field(default=None)
+    failure_source: GraphFailureSource | None = Field(default=None)
+    observed_failure_sources: list[GraphFailureSource] = Field(default_factory=list)
     exceptions_count: int = Field(default=0)
     node_executions: list[NodeExecutionState] = Field(
         default_factory=list[NodeExecutionState],
@@ -108,6 +111,8 @@ class GraphExecution:
     paused: bool = False
     pause_reasons: list[PauseReason] = field(default_factory=list)
     error: Exception | None = None
+    failure_source: GraphFailureSource | None = None
+    observed_failure_sources: list[GraphFailureSource] = field(default_factory=list)
     node_executions: dict[str, NodeExecution] = field(
         default_factory=dict[str, NodeExecution],
     )
@@ -146,9 +151,24 @@ class GraphExecution:
         self.paused = True
         self.pause_reasons.append(reason)
 
-    def fail(self, error: Exception) -> None:
-        """Mark the graph execution as failed."""
+    def fail(
+        self,
+        error: Exception,
+        *,
+        failure_source: GraphFailureSource | None = None,
+    ) -> None:
+        """Record an observed source and preserve the first terminal failure."""
+        if (
+            failure_source is not None
+            and failure_source not in self.observed_failure_sources
+        ):
+            self.observed_failure_sources.append(failure_source)
+
+        if self.completed:
+            return
+
         self.error = error
+        self.failure_source = failure_source
         self.completed = True
 
     def get_or_create_node_execution(self, node_id: str) -> NodeExecution:
@@ -202,6 +222,8 @@ class GraphExecution:
             paused=self.paused,
             pause_reasons=self.pause_reasons,
             error=_serialize_error(self.error),
+            failure_source=self.failure_source,
+            observed_failure_sources=self.observed_failure_sources,
             exceptions_count=self.exceptions_count,
             node_executions=node_states,
         )
@@ -230,6 +252,8 @@ class GraphExecution:
         self.paused = state.paused
         self.pause_reasons = state.pause_reasons
         self.error = _deserialize_error(state.error)
+        self.failure_source = state.failure_source
+        self.observed_failure_sources = list(state.observed_failure_sources)
         self.exceptions_count = state.exceptions_count
         self.node_executions = {
             item.node_id: NodeExecution(

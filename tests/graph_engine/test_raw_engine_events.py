@@ -6,8 +6,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from graphon import graph_events, node_events
+from graphon.entities import GraphFailureSource
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType
 from graphon.graph_engine.event_management.event_handlers import EventHandler
+from graphon.graph_engine.graph_engine import _GraphRunLifecycle
 from graphon.graph_events.node import (
     NodeRunReasoningChunkEvent,
     NodeRunStreamChunkEvent,
@@ -123,3 +125,127 @@ def test_event_handler_collects_traversal_events_before_node_success() -> None:
 
     collected_events = [call.args[0] for call in event_collector.collect.call_args_list]
     assert collected_events == [edge_event, success]
+
+
+def test_fatal_node_failure_records_exact_failure_source() -> None:
+    graph_execution = MagicMock()
+    graph_execution.get_or_create_node_execution.return_value = MagicMock()
+    error_handler = MagicMock()
+    error_handler.handle_node_failure.return_value = None
+    event_collector = MagicMock()
+    state_manager = MagicMock()
+    handler = EventHandler(
+        graph=cast(Any, MagicMock()),
+        graph_runtime_state=cast(Any, MagicMock()),
+        graph_execution=cast(Any, graph_execution),
+        event_collector=cast(Any, event_collector),
+        edge_processor=cast(Any, MagicMock()),
+        state_manager=cast(Any, state_manager),
+        error_handler=cast(Any, error_handler),
+    )
+    event = graph_events.NodeRunFailedEvent(
+        id="execution-a",
+        node_id="node-a",
+        node_type=BuiltinNodeTypes.CODE,
+        error="boom",
+        start_at=_now(),
+    )
+
+    handler.dispatch(event)
+
+    error = graph_execution.fail.call_args.args[0]
+    assert str(error) == "boom"
+    assert graph_execution.fail.call_args.kwargs == {
+        "failure_source": GraphFailureSource(
+            node_execution_id="execution-a",
+            node_id="node-a",
+        )
+    }
+
+
+def test_handled_node_failure_does_not_record_graph_failure_source() -> None:
+    graph_execution = MagicMock()
+    graph_execution.get_or_create_node_execution.return_value = MagicMock()
+    retry_event = graph_events.NodeRunRetryEvent(
+        id="execution-a",
+        node_id="node-a",
+        node_type=BuiltinNodeTypes.CODE,
+        node_title="Code",
+        start_at=_now(),
+        error="retrying",
+        retry_index=1,
+        in_iteration_id="iteration-a",
+    )
+    error_handler = MagicMock()
+    error_handler.handle_node_failure.return_value = retry_event
+    handler = EventHandler(
+        graph=cast(Any, MagicMock()),
+        graph_runtime_state=cast(Any, MagicMock()),
+        graph_execution=cast(Any, graph_execution),
+        event_collector=cast(Any, MagicMock()),
+        edge_processor=cast(Any, MagicMock()),
+        state_manager=cast(Any, MagicMock()),
+        error_handler=cast(Any, error_handler),
+    )
+    event = graph_events.NodeRunFailedEvent(
+        id="execution-a",
+        node_id="node-a",
+        node_type=BuiltinNodeTypes.CODE,
+        error="temporary failure",
+        start_at=_now(),
+    )
+
+    handler.dispatch(event)
+
+    graph_execution.fail.assert_not_called()
+
+
+def test_graph_failed_event_publishes_recorded_failure_source() -> None:
+    first = GraphFailureSource(
+        node_execution_id="execution-a",
+        node_id="node-a",
+    )
+    second = GraphFailureSource(
+        node_execution_id="execution-b",
+        node_id="node-b",
+    )
+    graph_execution = MagicMock(
+        exceptions_count=2,
+        failure_source=first,
+        observed_failure_sources=[first, second],
+    )
+    event_manager = MagicMock()
+    lifecycle = _GraphRunLifecycle(
+        graph_execution=cast(Any, graph_execution),
+        event_manager=cast(Any, event_manager),
+        initialize_layers=MagicMock(),
+        start_execution=MagicMock(),
+        stop_execution=MagicMock(),
+        emit_terminal_events=MagicMock(),
+    )
+
+    event = lifecycle._failed_event(RuntimeError("boom"))
+
+    assert event.failure_source == first
+    assert event.observed_failure_sources == [first, second]
+    event_manager.notify_layers.assert_called_once_with(event)
+
+
+def test_graph_failed_event_omits_unattributed_failure_source() -> None:
+    graph_execution = MagicMock(
+        exceptions_count=0,
+        failure_source=None,
+        observed_failure_sources=[],
+    )
+    lifecycle = _GraphRunLifecycle(
+        graph_execution=cast(Any, graph_execution),
+        event_manager=cast(Any, MagicMock()),
+        initialize_layers=MagicMock(),
+        start_execution=MagicMock(),
+        stop_execution=MagicMock(),
+        emit_terminal_events=MagicMock(),
+    )
+
+    event = lifecycle._failed_event(RuntimeError("infrastructure failed"))
+
+    assert event.failure_source is None

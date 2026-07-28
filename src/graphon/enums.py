@@ -224,6 +224,7 @@ class WorkflowNodeExecutionMetadataKey(StrEnum):
     DATASOURCE_INFO = "datasource_info"
     TRIGGER_INFO = "trigger_info"
     COMPLETED_REASON = "completed_reason"  # completed reason for loop node
+    FAILURE_SOURCE = "failure_source"
 
 
 class WorkflowNodeExecutionStatus(StrEnum):

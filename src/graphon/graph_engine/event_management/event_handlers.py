@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from functools import singledispatchmethod
 from typing import final
 
+from graphon.entities.graph_failure_source import GraphFailureSource
 from graphon.enums import ErrorStrategy, NodeExecutionType, NodeState
 from graphon.graph.graph import Graph
 from graphon.graph_events.agent import NodeRunAgentLogEvent
@@ -263,7 +264,13 @@ class EventHandler:
             self.dispatch(result)
         else:
             # Abort execution
-            self._graph_execution.fail(RuntimeError(event.error))
+            self._graph_execution.fail(
+                RuntimeError(event.error),
+                failure_source=GraphFailureSource(
+                    node_execution_id=event.id,
+                    node_id=event.node_id,
+                ),
+            )
             self._event_collector.collect(event)
             self._state_manager.finish_execution(event.node_id)
 
