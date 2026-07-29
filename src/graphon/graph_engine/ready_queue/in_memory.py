@@ -40,7 +40,9 @@ class InMemoryReadyQueue:
             maxsize: Maximum size of the queue (0 for unlimited)
 
         """
-        self._queue: queue.Queue[ReadyTask] = queue.Queue(maxsize=maxsize)
+        self._queue: queue.Queue[ReadyTask] = (
+            queue.Queue() if maxsize <= 0 else queue.Queue(maxsize=maxsize)
+        )
 
     def put(self, item: ReadyTask) -> None:
         """Add a task to the ready queue.
@@ -82,14 +84,17 @@ class InMemoryReadyQueue:
 
     def drain(self) -> list[ReadyTask]:
         """Remove and return all queued tasks in FIFO order."""
-        with self._queue.mutex:
-            items: list[ReadyTask] = list(self._queue.queue)
-            self._queue.queue.clear()
-            self._queue.unfinished_tasks -= len(items)
-            if items:
-                self._queue.not_full.notify_all()
-            if self._queue.unfinished_tasks == 0:
-                self._queue.all_tasks_done.notify_all()
+        # Queue has no public atomic drain API. Limit removals to the size observed
+        # at entry so newly unblocked producers are not chased; concurrent consumers
+        # can still make this a best-effort drain.
+        items: list[ReadyTask] = []
+        for _ in range(self._queue.qsize()):
+            try:
+                item = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            items.append(item)
+            self._queue.task_done()
         return items
 
     def dumps(self) -> str:
@@ -99,12 +104,17 @@ class InMemoryReadyQueue:
             A JSON string containing the serialized queue state
 
         """
-        with self._queue.mutex:
-            items: list[ReadyTask] = list(self._queue.queue)
-        state = ReadyQueueState(
-            version="2.0",
-            items=tuple(items),
-        )
+        # Queue has no public snapshot API. This drain/restore cycle is not atomic;
+        # callers must quiesce producers and consumers while serializing.
+        items = self.drain()
+        try:
+            state = ReadyQueueState(
+                version="2.0",
+                items=tuple(items),
+            )
+        finally:
+            for item in items:
+                self._queue.put(item)
         return state.model_dump_json()
 
     def loads(self, data: str) -> None:
@@ -123,6 +133,9 @@ class InMemoryReadyQueue:
         else:
             items = state.items
 
+        # Replacing contents through public Queue operations is not atomic. Callers
+        # must quiesce producers and consumers; otherwise a partial restore may be
+        # observed, and bounded puts may block.
         self.drain()
 
         # Restore items

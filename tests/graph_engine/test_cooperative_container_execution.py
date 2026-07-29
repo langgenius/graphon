@@ -2,6 +2,7 @@ import queue
 from collections.abc import Generator
 from datetime import UTC, datetime
 from threading import Event, Lock, Thread
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -165,6 +166,42 @@ def test_ready_queue_drain_notifies_waiting_bounded_queue_producers() -> None:
     assert unblocked
     assert not producer.is_alive()
     assert queue_.get(timeout=0.01) == second
+
+
+def test_ready_queue_uses_only_public_queue_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stdlib_queue = queue.Queue
+    backends: list[queue.Queue[object]] = []
+
+    def public_queue(maxsize: int = 0) -> SimpleNamespace:
+        backend: queue.Queue[object] = stdlib_queue(maxsize=maxsize)
+        backends.append(backend)
+        return SimpleNamespace(
+            get=backend.get,
+            get_nowait=backend.get_nowait,
+            put=backend.put,
+            qsize=backend.qsize,
+            task_done=backend.task_done,
+        )
+
+    monkeypatch.setattr(queue, "Queue", public_queue)
+    queue_ = InMemoryReadyQueue()
+    first = StartTask(frame_id="root", node_id="a")
+    second = StartTask(frame_id="child", node_id="b")
+    queue_.put(first)
+    queue_.put(second)
+
+    snapshot = queue_.dumps()
+
+    assert queue_.drain() == [first, second]
+    queue_.loads(snapshot)
+    assert queue_.drain() == [first, second]
+
+    join_thread = Thread(target=backends[0].join, daemon=True)
+    join_thread.start()
+    join_thread.join(timeout=1)
+    assert not join_thread.is_alive()
 
 
 def test_worker_suspends_and_resumes_container_invocation() -> None:
