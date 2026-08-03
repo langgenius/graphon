@@ -304,6 +304,34 @@ def test_run_does_not_reuse_file_outputs_after_failure(
     assert "files" not in second_completed.node_run_result.outputs
 
 
+@pytest.mark.parametrize(
+    ("invoke_events", "expected_error"),
+    [
+        ([], "without a completion event"),
+        ([NodeEventBase()], "Unexpected LLM invocation event: NodeEventBase"),
+    ],
+)
+def test_run_rejects_invalid_invocation_event_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+    invoke_events: list[NodeEventBase],
+    expected_error: str,
+) -> None:
+    node = _build_llm_node()
+    _stub_simple_prompt(monkeypatch, node)
+    monkeypatch.setattr(
+        "graphon.nodes.llm.node.LLMNode.invoke_llm",
+        lambda **_: iter(invoke_events),
+    )
+
+    completed_event = next(
+        event for event in node._run() if isinstance(event, StreamCompletedEvent)
+    )
+
+    assert completed_event.node_run_result.status == WorkflowNodeExecutionStatus.FAILED
+    assert completed_event.node_run_result.error_type == "LLMNodeError"
+    assert expected_error in completed_event.node_run_result.error
+
+
 def test_polling_llm_start_can_succeed_immediately(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

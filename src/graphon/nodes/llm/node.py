@@ -363,10 +363,7 @@ class LLMNode(Node[LLMNodeData]):
             prompt_messages=prompt_messages,
             stop=stop,
         )
-        usage = LLMUsage.empty_usage()
-        finish_reason = None
-        reasoning_content = ""
-        clean_text = ""
+        completed_event: ModelInvokeCompletedEvent | None = None
         structured_output: LLMStructuredOutput | None = None
 
         for event in generator:
@@ -382,18 +379,25 @@ class LLMNode(Node[LLMNodeData]):
                 continue
 
             if not isinstance(event, ModelInvokeCompletedEvent):
-                continue
+                msg = f"Unexpected LLM invocation event: {type(event).__name__}"
+                raise LLMNodeError(msg)
 
-            usage = event.usage
-            usage_holder["value"] = usage
-            finish_reason = event.finish_reason
-            reasoning_content = event.reasoning_content or ""
-            clean_text = self._extract_clean_text(event.text)
-            if event.structured_output:
+            completed_event = event
+            if completed_event.structured_output:
                 structured_output = LLMStructuredOutput(
-                    structured_output=event.structured_output,
+                    structured_output=completed_event.structured_output,
                 )
             break
+
+        if completed_event is None:
+            msg = "LLM invocation ended without a completion event"
+            raise LLMNodeError(msg)
+
+        usage = completed_event.usage
+        usage_holder["value"] = usage
+        finish_reason = completed_event.finish_reason
+        reasoning_content = completed_event.reasoning_content or ""
+        clean_text = self._extract_clean_text(completed_event.text)
 
         node_inputs.update(
             llm_utils.build_model_identity_inputs(model_instance=self._model_instance),
