@@ -248,7 +248,7 @@ def fetch_prompt_messages(
     vision_detail: ImagePromptMessageContent.DETAIL,
     variable_pool: VariablePool,
     jinja2_variables: Sequence[VariableSelector],
-    context_files: list[File] | None = None,
+    context_files: Sequence[File] | None = None,
     jinja2_template_renderer: Jinja2TemplateRenderer | None = None,
 ) -> tuple[Sequence[PromptMessage], Sequence[str] | None]:
     prompt_messages: list[PromptMessage] = []

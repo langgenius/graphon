@@ -181,7 +181,7 @@ def _build_llm_node(
 def _stub_simple_prompt(monkeypatch: pytest.MonkeyPatch, node: LLMNode) -> None:
     monkeypatch.setattr(node, "_fetch_inputs", lambda **_: {})
     monkeypatch.setattr(node, "_fetch_jinja_inputs", lambda **_: {})
-    monkeypatch.setattr(node, "_collect_run_context", lambda **_: iter(()))
+    monkeypatch.setattr(node, "_fetch_context", lambda **_: iter(()))
     monkeypatch.setattr(
         "graphon.nodes.llm.node.llm_utils.fetch_prompt_messages",
         lambda **_: ([], None),

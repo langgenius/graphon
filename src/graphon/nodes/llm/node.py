@@ -103,17 +103,17 @@ _MULTIMODAL_OUTPUT_FILE_TYPES: Mapping[PromptMessageContentType, FileType] = {
 }
 
 
-@dataclass
+@dataclass(frozen=True)
 class _CollectedRunContext:
     context: str | None = None
-    context_files: list[File] = field(default_factory=list)
+    context_files: Sequence[File] = field(default_factory=tuple)
 
 
-@dataclass
+@dataclass(frozen=True)
 class _PreparedRunPrompt:
-    prompt_messages: Sequence[PromptMessage] = field(default_factory=tuple)
-    stop: Sequence[str] | None = None
-    model_instance: LLMProtocol | None = None
+    prompt_messages: Sequence[PromptMessage]
+    stop: Sequence[str] | None
+    model_instance: LLMProtocol
 
 
 @dataclass
@@ -194,13 +194,8 @@ class LLMNode(Node[LLMNodeData]):
         usage_holder = {"value": LLMUsage.empty_usage()}
 
         try:
-            prepared_prompt = _PreparedRunPrompt()
-            yield from self._prepare_run_prompt(
+            prepared_prompt = yield from self._prepare_run_prompt(
                 node_inputs=node_inputs,
-                prepared_prompt=prepared_prompt,
-            )
-            model_instance = self._require_model_instance(
-                prepared_prompt=prepared_prompt,
             )
 
             yield from self._yield_run_completion(
@@ -210,8 +205,8 @@ class LLMNode(Node[LLMNodeData]):
                 usage_holder=usage_holder,
                 prompt_messages=prepared_prompt.prompt_messages,
                 stop=prepared_prompt.stop,
-                model_provider=model_instance.provider,
-                model_name=model_instance.model_name,
+                model_provider=prepared_prompt.model_instance.provider,
+                model_name=prepared_prompt.model_instance.model_name,
             )
         except ValueError as exc:
             yield StreamCompletedEvent(
@@ -241,11 +236,10 @@ class LLMNode(Node[LLMNodeData]):
         self,
         *,
         node_inputs: dict[str, Any],
-        prepared_prompt: _PreparedRunPrompt,
     ) -> Generator[
         NodeEventBase,
         None,
-        None,
+        _PreparedRunPrompt,
     ]:
         self.node_data.prompt_template = self._transform_chat_messages(
             self.node_data.prompt_template,
@@ -264,10 +258,8 @@ class LLMNode(Node[LLMNodeData]):
         if files:
             node_inputs["#files#"] = [file.to_dict() for file in files]
 
-        collected_context = _CollectedRunContext()
-        yield from self._collect_run_context(
+        collected_context = yield from self._collect_run_context(
             node_inputs=node_inputs,
-            collected_context=collected_context,
         )
         model_instance = self._prepare_model_instance()
         node_inputs.update(
@@ -289,39 +281,34 @@ class LLMNode(Node[LLMNodeData]):
             context_files=collected_context.context_files,
             jinja2_template_renderer=self._jinja2_template_renderer,
         )
-        prepared_prompt.prompt_messages = prompt_messages
-        prepared_prompt.stop = stop
-        prepared_prompt.model_instance = model_instance
-
-    @staticmethod
-    def _require_model_instance(
-        *,
-        prepared_prompt: _PreparedRunPrompt,
-    ) -> LLMProtocol:
-        if prepared_prompt.model_instance is None:
-            msg = "model instance was not prepared"
-            raise AssertionError(msg)
-        return prepared_prompt.model_instance
+        return _PreparedRunPrompt(  # ruff:ignore[return-in-generator]
+            prompt_messages=prompt_messages,
+            stop=stop,
+            model_instance=model_instance,
+        )
 
     def _collect_run_context(
         self,
         *,
         node_inputs: dict[str, Any],
-        collected_context: _CollectedRunContext,
-    ) -> Generator[NodeEventBase, None, None]:
-        context_generator = self._fetch_context(node_data=self.node_data)
-        if context_generator is not None:
-            for event in context_generator:
-                collected_context.context = event.context
-                collected_context.context_files = event.context_files or []
-                yield event
+    ) -> Generator[NodeEventBase, None, _CollectedRunContext]:
+        context = None
+        context_files: Sequence[File] = ()
+        for event in self._fetch_context(node_data=self.node_data):
+            context = event.context
+            context_files = event.context_files or ()
+            yield event
 
-        if collected_context.context:
-            node_inputs["#context#"] = collected_context.context
-        if collected_context.context_files:
+        if context:
+            node_inputs["#context#"] = context
+        if context_files:
             node_inputs["#context_files#"] = [
-                file.model_dump() for file in collected_context.context_files
+                file.model_dump() for file in context_files
             ]
+        return _CollectedRunContext(  # ruff:ignore[return-in-generator]
+            context=context,
+            context_files=context_files,
+        )
 
     def _prepare_model_instance(self) -> LLMProtocol:
         model_instance = self._model_instance
@@ -584,16 +571,6 @@ class LLMNode(Node[LLMNodeData]):
         if isinstance(result, LLMPollingResult):
             return result
         return LLMPollingResult.model_validate(result)
-
-    def _resolve_required_workflow_run_id(self) -> str:
-        segment = self.graph_runtime_state.variable_pool.get(("sys", "workflow_run_id"))
-        if segment is not None and segment.text:
-            return segment.text
-        run_context_value = self.get_run_context_value("workflow_run_id")
-        if isinstance(run_context_value, str) and run_context_value:
-            return run_context_value
-        msg = "LLM polling requires workflow_run_id"
-        raise LLMNodeError(msg)
 
     @staticmethod
     def _updated_polling_deadline(
