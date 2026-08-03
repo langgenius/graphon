@@ -337,7 +337,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
             vision_detail=self.node_data.vision.configs.detail,
             variable_pool=self.graph_runtime_state.variable_pool,
             jinja2_variables=[],
-            template_renderer=self._template_renderer,
+            jinja2_template_renderer=self._template_renderer,
         )
 
     def _invoke_classifier(
@@ -512,7 +512,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
             vision_detail=node_data.vision.configs.detail,
             variable_pool=self.graph_runtime_state.variable_pool,
             jinja2_variables=[],
-            template_renderer=self._template_renderer,
+            jinja2_template_renderer=self._template_renderer,
         )
         rest_tokens = 2000
 
