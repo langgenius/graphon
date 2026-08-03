@@ -134,10 +134,6 @@ class _StreamingInvokeState:
 class LLMNode(Node[LLMNodeData]):
     node_type = BuiltinNodeTypes.LLM
 
-    # Instance attributes specific to LLMNode.
-    # Output variable for file
-    _file_outputs: list[File]
-
     _llm_file_saver: LLMFileSaver
     _retriever_attachment_loader: RetrieverAttachmentLoaderProtocol | None
     _prompt_message_serializer: PromptMessageSerializerProtocol
@@ -171,9 +167,6 @@ class LLMNode(Node[LLMNodeData]):
             graph_init_params=graph_init_params,
             graph_runtime_state=graph_runtime_state,
         )
-        # LLM file outputs, used for MultiModal outputs.
-        self._file_outputs = []
-
         _ = credentials_provider, model_factory, http_client
         self._model_instance = model_instance
         self._memory = memory
@@ -197,6 +190,7 @@ class LLMNode(Node[LLMNodeData]):
     def _run(self) -> Generator:
         node_inputs: dict[str, Any] = {}
         process_data: dict[str, Any] = {}
+        file_outputs: list[File] = []
         usage_holder = {"value": LLMUsage.empty_usage()}
 
         try:
@@ -212,6 +206,7 @@ class LLMNode(Node[LLMNodeData]):
             yield from self._yield_run_completion(
                 node_inputs=node_inputs,
                 process_data=process_data,
+                file_outputs=file_outputs,
                 usage_holder=usage_holder,
                 prompt_messages=prepared_prompt.prompt_messages,
                 stop=prepared_prompt.stop,
@@ -255,8 +250,8 @@ class LLMNode(Node[LLMNodeData]):
         self.node_data.prompt_template = self._transform_chat_messages(
             self.node_data.prompt_template,
         )
-        inputs = self._fetch_inputs(node_data=self.node_data)
-        inputs.update(self._fetch_jinja_inputs(node_data=self.node_data))
+        node_inputs.update(self._fetch_inputs(node_data=self.node_data))
+        node_inputs.update(self._fetch_jinja_inputs(node_data=self.node_data))
 
         files = (
             llm_utils.fetch_files(
@@ -356,6 +351,7 @@ class LLMNode(Node[LLMNodeData]):
         *,
         node_inputs: dict[str, Any],
         process_data: dict[str, Any],
+        file_outputs: list[File],
         usage_holder: dict[str, LLMUsage],
         prompt_messages: Sequence[PromptMessage],
         stop: Sequence[str] | None,
@@ -363,6 +359,7 @@ class LLMNode(Node[LLMNodeData]):
         model_name: str,
     ) -> Generator[NodeEventBase, None, None]:
         generator = self._invoke_llm_for_run(
+            file_outputs=file_outputs,
             prompt_messages=prompt_messages,
             stop=stop,
         )
@@ -416,6 +413,7 @@ class LLMNode(Node[LLMNodeData]):
             finish_reason=finish_reason,
             reasoning_content=reasoning_content,
             structured_output=structured_output,
+            file_outputs=file_outputs,
         )
         yield StreamChunkEvent(
             selector=[self._node_id, "text"],
@@ -440,6 +438,7 @@ class LLMNode(Node[LLMNodeData]):
     def _invoke_llm_for_run(
         self,
         *,
+        file_outputs: list[File],
         prompt_messages: Sequence[PromptMessage],
         stop: Sequence[str] | None,
     ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
@@ -452,12 +451,13 @@ class LLMNode(Node[LLMNodeData]):
                 structured_output_enabled=self.node_data.structured_output_enabled,
                 structured_output=self.node_data.structured_output,
                 file_saver=self._llm_file_saver,
-                file_outputs=self._file_outputs,
+                file_outputs=file_outputs,
                 node_id=self._node_id,
                 reasoning_format=self.node_data.reasoning_format,
             )
 
         return self._invoke_llm_with_polling(
+            file_outputs=file_outputs,
             polling_model=polling_model,
             prompt_messages=prompt_messages,
             stop=stop,
@@ -471,6 +471,7 @@ class LLMNode(Node[LLMNodeData]):
     def _invoke_llm_with_polling(
         self,
         *,
+        file_outputs: list[File],
         polling_model: LLMPollingCapableProtocol,
         prompt_messages: Sequence[PromptMessage],
         stop: Sequence[str] | None,
@@ -521,7 +522,7 @@ class LLMNode(Node[LLMNodeData]):
                     yield from LLMNode.handle_invoke_result(
                         invoke_result=polling_result.result,
                         file_saver=self._llm_file_saver,
-                        file_outputs=self._file_outputs,
+                        file_outputs=file_outputs,
                         node_id=self._node_id,
                         model_instance=self._model_instance,
                         reasoning_format=self.node_data.reasoning_format,
@@ -714,6 +715,7 @@ class LLMNode(Node[LLMNodeData]):
         finish_reason: str | None,
         reasoning_content: str,
         structured_output: LLMStructuredOutput | None,
+        file_outputs: list[File],
     ) -> dict[str, Any]:
         outputs = {
             "text": clean_text,
@@ -723,8 +725,8 @@ class LLMNode(Node[LLMNodeData]):
         }
         if structured_output:
             outputs["structured_output"] = structured_output.structured_output
-        if self._file_outputs:
-            outputs["files"] = ArrayFileSegment(value=self._file_outputs)
+        if file_outputs:
+            outputs["files"] = ArrayFileSegment(value=file_outputs)
         return outputs
 
     @staticmethod
@@ -1208,11 +1210,11 @@ class LLMNode(Node[LLMNodeData]):
     ) -> None:
         for variable_selector in variable_selectors:
             variable = self._get_required_variable(variable_selector)
-            if isinstance(variable, NoneSegment):
-                if skip_none:
-                    continue
-                inputs[variable_selector.variable] = ""
-            inputs[variable_selector.variable] = variable.to_object()
+            if skip_none and isinstance(variable, NoneSegment):
+                continue
+            inputs[variable_selector.variable] = (
+                "" if isinstance(variable, NoneSegment) else variable.to_object()
+            )
 
     @staticmethod
     def _extract_memory_query_variable_selectors(

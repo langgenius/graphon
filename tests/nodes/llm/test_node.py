@@ -123,6 +123,7 @@ def _stream_results(
 def _build_llm_node(
     *,
     model_instance: object | None = None,
+    prompt_text: str = "Hello",
     variables: Sequence[tuple[Sequence[str], Any]] = (),
     workflow_run_id: str | None = "wr-test",
     run_context: dict[str, Any] | None = None,
@@ -154,7 +155,7 @@ def _build_llm_node(
             "prompt_template": [
                 {
                     "role": "user",
-                    "text": "Hello",
+                    "text": prompt_text,
                 }
             ],
             "context": {"enabled": False},
@@ -211,6 +212,96 @@ def test_run_emits_model_identity_in_node_result_inputs(
 
     assert completed_event.node_run_result.inputs["model_provider"] == "openai"
     assert completed_event.node_run_result.inputs["model_name"] == "gpt-4o"
+
+
+def test_run_records_resolved_prompt_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    node = _build_llm_node(
+        prompt_text="{{#source.value#}}",
+        variables=[(("source", "value"), "recorded")],
+    )
+    monkeypatch.setattr(
+        "graphon.nodes.llm.node.llm_utils.fetch_prompt_messages",
+        lambda **_: ([], None),
+    )
+    monkeypatch.setattr(
+        "graphon.nodes.llm.node.LLMNode.invoke_llm",
+        lambda **_: iter([
+            ModelInvokeCompletedEvent(
+                text="ok",
+                usage=LLMUsage.empty_usage(),
+                finish_reason="stop",
+            ),
+        ]),
+    )
+
+    completed_event = next(
+        event for event in node._run() if isinstance(event, StreamCompletedEvent)
+    )
+
+    assert completed_event.node_run_result.inputs["#source.value#"] == "recorded"
+
+
+def test_fetch_inputs_normalizes_none_to_empty_string() -> None:
+    node = _build_llm_node(
+        prompt_text="{{#source.value#}}",
+        variables=[(("source", "value"), None)],
+    )
+
+    assert node._fetch_inputs(node.node_data) == {"#source.value#": ""}
+
+
+def test_run_does_not_reuse_file_outputs_after_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    saved_file = File(
+        file_id="saved",
+        file_type=FileType.VIDEO,
+        transfer_method=FileTransferMethod.TOOL_FILE,
+        reference="saved",
+        filename="video.mp4",
+        extension=".mp4",
+        mime_type="video/mp4",
+        size=1,
+    )
+    attempts = 0
+
+    def invoke(
+        **kwargs: Any,
+    ) -> Generator[
+        NodeEventBase | LLMStructuredOutput,
+        None,
+        None,
+    ]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            kwargs["file_outputs"].append(saved_file)
+            msg = "retry"
+            raise LLMNodeError(msg)
+        yield ModelInvokeCompletedEvent(
+            text="ok",
+            usage=LLMUsage.empty_usage(),
+            finish_reason="stop",
+        )
+
+    node = _build_llm_node()
+    _stub_simple_prompt(monkeypatch, node)
+    monkeypatch.setattr("graphon.nodes.llm.node.LLMNode.invoke_llm", invoke)
+
+    first_completed = next(
+        event for event in node._run() if isinstance(event, StreamCompletedEvent)
+    )
+    second_completed = next(
+        event for event in node._run() if isinstance(event, StreamCompletedEvent)
+    )
+
+    assert first_completed.node_run_result.status == WorkflowNodeExecutionStatus.FAILED
+    assert (
+        second_completed.node_run_result.status == WorkflowNodeExecutionStatus.SUCCEEDED
+    )
+    assert "files" not in second_completed.node_run_result.outputs
 
 
 def test_polling_llm_start_can_succeed_immediately(
