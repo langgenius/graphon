@@ -1,7 +1,7 @@
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.enums import BuiltinNodeTypes, NodeType
@@ -75,8 +75,7 @@ class LLMNodeData(BaseNodeData):
     context: ContextConfig
     vision: VisionConfig = Field(default_factory=VisionConfig)
     structured_output: Mapping[str, Any] | None = None
-    # We used 'structured_output_enabled' in the past, but it's not a good name.
-    structured_output_switch_on: bool = Field(False, alias="structured_output_enabled")
+    structured_output_switch_on: bool = False
     reasoning_format: Literal["separated", "tagged"] = Field(
         # Keep tagged as default for backward compatibility
         default="tagged",
@@ -95,6 +94,16 @@ class LLMNodeData(BaseNodeData):
             """
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_structured_output_switch(cls, data: Any) -> Any:
+        if not isinstance(data, Mapping) or "structured_output_enabled" not in data:
+            return data
+        data = dict(data)
+        legacy_value = data.pop("structured_output_enabled")
+        data.setdefault("structured_output_switch_on", legacy_value)
+        return data
 
     @field_validator("prompt_config", mode="before")
     @classmethod

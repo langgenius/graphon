@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, assert_never, override
 
+from jsonschema import Draft7Validator, SchemaError, ValidationError
+
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import (
     BuiltinNodeTypes,
@@ -44,7 +46,7 @@ from graphon.model_runtime.entities.message_entities import (
     TextPromptMessageContent,
     UserPromptMessage,
 )
-from graphon.model_runtime.entities.model_entities import ModelPropertyKey
+from graphon.model_runtime.entities.model_entities import ModelFeature, ModelPropertyKey
 from graphon.model_runtime.memory.prompt_message_memory import PromptMessageMemory
 from graphon.model_runtime.utils.encoders import jsonable_encoder
 from graphon.node_events.base import (
@@ -296,6 +298,7 @@ class LLMNode(Node[LLMNodeData]):
             context=collected_context.context or "",
             memory=self._memory,
             model_instance=model_instance,
+            structured_output_enabled=self.node_data.structured_output_enabled,
             stop=model_instance.stop,
             prompt_template=self.node_data.prompt_template,
             memory_config=self.node_data.memory,
@@ -404,7 +407,7 @@ class LLMNode(Node[LLMNodeData]):
             finish_reason = event.finish_reason
             reasoning_content = event.reasoning_content or ""
             clean_text = self._extract_clean_text(event.text)
-            if event.structured_output:
+            if event.structured_output is not None:
                 structured_output = LLMStructuredOutput(
                     structured_output=event.structured_output,
                 )
@@ -538,6 +541,7 @@ class LLMNode(Node[LLMNodeData]):
                         model_instance=self._model_instance,
                         reasoning_format=self.node_data.reasoning_format,
                         request_start_time=request_start_time,
+                        json_schema=json_schema,
                     )
                     return
                 case LLMPollingStatus.FAILED:
@@ -755,6 +759,7 @@ class LLMNode(Node[LLMNodeData]):
         model_parameters = model_instance.parameters
         invoke_model_parameters = dict(model_parameters)
         invoke_result: LLMResult | Generator[LLMResultChunk, None, None]
+        output_schema: dict[str, Any] | None = None
         if structured_output_enabled:
             output_schema = LLMNode.fetch_structured_output_schema(
                 structured_output=structured_output or {},
@@ -787,6 +792,7 @@ class LLMNode(Node[LLMNodeData]):
             model_instance=model_instance,
             reasoning_format=reasoning_format,
             request_start_time=request_start_time,
+            json_schema=output_schema,
         )
 
     @staticmethod
@@ -800,6 +806,7 @@ class LLMNode(Node[LLMNodeData]):
         model_instance: LLMProtocol,
         reasoning_format: Literal["separated", "tagged"] = "tagged",
         request_start_time: float | None = None,
+        json_schema: Mapping[str, Any] | None = None,
     ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
         if isinstance(invoke_result, LLMResult):
             yield from LLMNode._yield_blocking_invoke_result(
@@ -808,6 +815,7 @@ class LLMNode(Node[LLMNodeData]):
                 file_outputs=file_outputs,
                 reasoning_format=reasoning_format,
                 request_start_time=request_start_time,
+                json_schema=json_schema,
             )
             return
 
@@ -819,6 +827,7 @@ class LLMNode(Node[LLMNodeData]):
             model_instance=model_instance,
             reasoning_format=reasoning_format,
             request_start_time=request_start_time,
+            json_schema=json_schema,
         )
 
     @staticmethod
@@ -829,19 +838,25 @@ class LLMNode(Node[LLMNodeData]):
         file_outputs: list[File],
         reasoning_format: Literal["separated", "tagged"] = "tagged",
         request_start_time: float | None = None,
+        json_schema: Mapping[str, Any] | None = None,
     ) -> Generator[ModelInvokeCompletedEvent, None, None]:
         duration = None
         if request_start_time is not None:
             duration = time.perf_counter() - request_start_time
             invoke_result.usage.latency = round(duration, 3)
 
-        yield LLMNode.handle_blocking_result(
+        event = LLMNode.handle_blocking_result(
             invoke_result=invoke_result,
             saver=file_saver,
             file_outputs=file_outputs,
             reasoning_format=reasoning_format,
             request_latency=duration,
         )
+        LLMNode._validate_structured_output_result(
+            structured_output=event.structured_output,
+            json_schema=json_schema,
+        )
+        yield event
 
     @staticmethod
     def _yield_streaming_invoke_result(
@@ -853,6 +868,7 @@ class LLMNode(Node[LLMNodeData]):
         model_instance: LLMProtocol,
         reasoning_format: Literal["separated", "tagged"] = "tagged",
         request_start_time: float | None = None,
+        json_schema: Mapping[str, Any] | None = None,
     ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
         start_time = (
             request_start_time
@@ -876,10 +892,10 @@ class LLMNode(Node[LLMNodeData]):
                 model_instance=model_instance,
                 error=e,
             ):
-                msg = f"Failed to parse structured output: {e}"
+                msg = f"Failed to parse structured output (stage=result, path=$): {e}"
                 raise LLMNodeError(msg) from e
             if type(e).__name__ == "OutputParserError":
-                msg = f"Failed to parse structured output: {e}"
+                msg = f"Failed to parse structured output (stage=result, path=$): {e}"
                 raise LLMNodeError(msg) from e
             raise
 
@@ -916,6 +932,10 @@ class LLMNode(Node[LLMNodeData]):
             has_content=state.has_content,
             first_token_time=state.first_token_time,
             start_time=state.start_time,
+        )
+        LLMNode._validate_structured_output_result(
+            structured_output=state.structured_output,
+            json_schema=json_schema,
         )
 
         yield ModelInvokeCompletedEvent(
@@ -1079,6 +1099,29 @@ class LLMNode(Node[LLMNodeData]):
             callable(is_structured_output_parse_error)
             and is_structured_output_parse_error(error)
         )
+
+    @staticmethod
+    def _validate_structured_output_result(
+        *,
+        structured_output: Mapping[str, Any] | None,
+        json_schema: Mapping[str, Any] | None,
+    ) -> None:
+        if json_schema is None:
+            return
+        if structured_output is None:
+            msg = (
+                "Structured output validation failed "
+                "(stage=result, path=$): structured output is missing"
+            )
+            raise LLMNodeError(msg)
+        try:
+            Draft7Validator(json_schema).validate(structured_output)
+        except ValidationError as error:
+            msg = (
+                "Structured output validation failed "
+                f"(stage=result, path={error.json_path}): {error.message}"
+            )
+            raise LLMNodeError(msg) from error
 
     @staticmethod
     def _finalize_streaming_usage(
@@ -1353,6 +1396,7 @@ class LLMNode(Node[LLMNodeData]):
         context: str = "",
         memory: PromptMessageMemory | None = None,
         model_instance: LLMProtocol,
+        structured_output_enabled: bool = False,
         prompt_template: Sequence[LLMNodeChatModelMessage]
         | LLMNodeCompletionModelPromptTemplate,
         stop: Sequence[str] | None = None,
@@ -1365,6 +1409,17 @@ class LLMNode(Node[LLMNodeData]):
         jinja2_template_renderer: Jinja2TemplateRenderer | None = None,
     ) -> tuple[Sequence[PromptMessage], Sequence[str] | None]:
         model_schema = llm_utils.fetch_model_schema(model_instance=model_instance)
+        if (
+            structured_output_enabled
+            and model_schema.features is not None
+            and ModelFeature.STRUCTURED_OUTPUT not in model_schema.features
+        ):
+            msg = (
+                "Structured output is not supported by model "
+                f"{model_instance.provider}/{model_instance.model_name} "
+                "(stage=capability)"
+            )
+            raise LLMNodeError(msg)
         prompt_messages = LLMNode._build_prompt_messages_from_template(
             sys_query=sys_query,
             context=context,
@@ -2073,27 +2128,23 @@ class LLMNode(Node[LLMNodeData]):
                 or not a JSON object.
 
         """
-        if not structured_output:
-            msg = "Please provide a valid structured output schema"
+        raw_schema = structured_output.get("schema")
+        if not isinstance(raw_schema, Mapping):
+            msg = (
+                "Invalid structured output schema "
+                "(stage=schema, path=$.schema): expected a JSON object"
+            )
             raise LLMNodeError(msg)
-        structured_output_schema = json.dumps(
-            structured_output.get("schema", {}),
-            ensure_ascii=False,
-        )
-        if not structured_output_schema:
-            msg = "Please provide a valid structured output schema"
-            raise LLMNodeError(msg)
-
+        schema = dict(raw_schema)
         try:
-            schema = json.loads(structured_output_schema)
-            if not isinstance(schema, dict):
-                msg = "structured_output_schema must be a JSON object"
-                raise LLMNodeError(msg)
-        except json.JSONDecodeError as error:
-            msg = "structured_output_schema is not valid JSON format"
+            Draft7Validator.check_schema(schema)
+        except SchemaError as error:
+            msg = (
+                "Invalid structured output schema "
+                f"(stage=schema, path={error.json_path}): {error.message}"
+            )
             raise LLMNodeError(msg) from error
-        else:
-            return schema
+        return schema
 
     @staticmethod
     def _save_multimodal_output_and_convert_result_to_markdown(

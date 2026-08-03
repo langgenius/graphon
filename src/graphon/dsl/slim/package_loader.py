@@ -284,9 +284,10 @@ class SlimPackageLoader:
         if model_type is None or fetch_from is None:
             return None
 
+        raw_features = raw_model.get("features")
         features = [
             feature
-            for item in raw_model.get("features", []) or []
+            for item in raw_features or []
             if (feature := self._convert_model_feature(item)) is not None
         ]
         model_properties = {
@@ -299,7 +300,7 @@ class SlimPackageLoader:
             model=str(raw_model["model"]),
             label=self._convert_i18n(raw_model.get("label")),
             model_type=model_type,
-            features=features or None,
+            features=features if raw_features is not None else None,
             fetch_from=fetch_from,
             model_properties=model_properties,
             deprecated=bool(raw_model.get("deprecated")),
