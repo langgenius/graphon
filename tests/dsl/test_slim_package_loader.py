@@ -142,3 +142,113 @@ def _write_multi_provider_plugin(plugin_root: Path) -> None:
             + "\n",
             encoding="utf-8",
         )
+
+
+def test_slim_package_loader_retains_credential_help(tmp_path: Path) -> None:
+    """The slim loader must carry a manifest's per-field `help` through.
+
+    `_convert_credential_form_schema` builds `CredentialFormSchema` field by
+    field, so adding the field to the entity alone is not enough on this path —
+    this test covers that second drop point.
+    """
+    plugin_root = tmp_path / "plugin"
+    _write_credential_help_plugin(plugin_root)
+
+    binding = SlimProviderBinding(
+        plugin_id="author/fake:0.0.1@test",
+        provider="help-provider",
+        plugin_root=plugin_root,
+    )
+    loader = SlimPackageLoader(
+        SlimConfig(
+            bindings=[binding],
+            local=SlimLocalSettings(folder=tmp_path / "plugins"),
+        ),
+    )
+
+    loaded = loader.load(binding)
+    credential_schema = loaded.provider_entity.provider_credential_schema
+    assert credential_schema is not None
+    form_schemas = {
+        schema.variable: schema for schema in credential_schema.credential_form_schemas
+    }
+
+    assert form_schemas["api_key"].help is not None
+    assert form_schemas["api_key"].help.en_us == "Find this in the provider console."
+    assert form_schemas["api_key"].help.zh_hans == "在提供商控制台中查找。"
+    # A field without `help` still loads, unchanged.
+    assert form_schemas["api_base"].help is None
+
+
+def _write_credential_help_plugin(plugin_root: Path) -> None:
+    (plugin_root / "_assets").mkdir(parents=True, exist_ok=True)
+    (plugin_root / "provider").mkdir(parents=True, exist_ok=True)
+    (plugin_root / "models" / "llm").mkdir(parents=True, exist_ok=True)
+
+    (plugin_root / "manifest.yaml").write_text(
+        textwrap.dedent(
+            """
+            plugins:
+              models:
+                - provider/help.yaml
+            """,
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (plugin_root / "_assets" / "icon.svg").write_text(
+        "<svg xmlns='http://www.w3.org/2000/svg'></svg>\n",
+        encoding="utf-8",
+    )
+    (plugin_root / "provider" / "help.yaml").write_text(
+        textwrap.dedent(
+            """
+            provider: help-provider
+            label:
+              en_US: Help Provider
+            icon_small:
+              en_US: icon.svg
+            supported_model_types:
+              - llm
+            configurate_methods:
+              - predefined-model
+            models:
+              llm:
+                predefined:
+                  - models/llm/help-chat.yaml
+            provider_credential_schema:
+              credential_form_schemas:
+                - variable: api_key
+                  label:
+                    en_US: API Key
+                  type: secret-input
+                  required: true
+                  help:
+                    en_US: Find this in the provider console.
+                    zh_Hans: 在提供商控制台中查找。
+                - variable: api_base
+                  label:
+                    en_US: API Base
+                  type: text-input
+                  required: false
+            """,
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (plugin_root / "models" / "llm" / "help-chat.yaml").write_text(
+        textwrap.dedent(
+            """
+            model: help-chat
+            label:
+              en_US: Help Chat Model
+            model_type: llm
+            fetch_from: predefined-model
+            model_properties:
+              mode: chat
+              context_size: 8192
+            """,
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
