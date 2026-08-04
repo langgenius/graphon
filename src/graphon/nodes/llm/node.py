@@ -428,6 +428,8 @@ class LLMNode(Node[LLMNodeData]):
             finish_reason=finish_reason,
             reasoning_content=reasoning_content,
             structured_output=structured_output,
+            model_provider=model_provider,
+            model_name=model_name,
         )
         yield StreamChunkEvent(
             selector=[self._node_id, "text"],
@@ -726,12 +728,16 @@ class LLMNode(Node[LLMNodeData]):
         finish_reason: str | None,
         reasoning_content: str,
         structured_output: LLMStructuredOutput | None,
+        model_provider: str,
+        model_name: str,
     ) -> dict[str, Any]:
         outputs = {
             "text": clean_text,
             "reasoning_content": reasoning_content,
             "usage": jsonable_encoder(usage),
             "finish_reason": finish_reason,
+            "model_provider": model_provider or "",
+            "model_name": model_name or "",
         }
         if structured_output:
             outputs["structured_output"] = structured_output.structured_output
