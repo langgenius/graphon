@@ -10,9 +10,11 @@ license-files = ['LICENSE']
 requires-python = '>=3.12,<3.14'
 dependencies = [
     'charset-normalizer>=2.1',
+    'defusedxml>=0.7',
     'httpx>=0.28',
     'json-repair>=0.55',
     'jsonschema>=4',
+    'odfdo>=3.22.8',
     'orjson>=3',
     'pandas[excel]>=2.1',
     'pydantic>=2.7',
@@ -24,8 +26,7 @@ dependencies = [
     'tiktoken>=0.12',
     'transformers>=4',
     'typing-extensions>=4.10.0',
-    'unstructured[docx,epub,md,ppt,pptx]>=0.21',
-    'pypandoc>=1.13',
+    'unstructured[docx,md,ppt,pptx]>=0.21',
     'webvtt-py>=0.5',
 ]
 

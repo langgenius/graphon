@@ -1,5 +1,6 @@
 import io
 import json
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, ClassVar, Self
@@ -7,6 +8,8 @@ from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
+from odfdo import Document as OdfDocument
+from odfdo import Paragraph as OdfParagraph
 
 from graphon.nodes.document_extractor import node as document_extractor_node
 from graphon.nodes.document_extractor.entities import UnstructuredApiConfig
@@ -401,8 +404,6 @@ def test_excel_file_to_markdown_skips_invalid_sheet() -> None:
 
 
 def test_partition_unstructured_file_uses_local_partition() -> None:
-    prepared = []
-
     def load_partition() -> Any:
         return lambda **_kwargs: [SimpleNamespace(text="slide")]
 
@@ -412,11 +413,65 @@ def test_partition_unstructured_file_uses_local_partition() -> None:
         unstructured_api_config=UnstructuredApiConfig(),
         load_local_partition=load_partition,
         render_element=lambda element: element.text,
-        prepare=lambda: prepared.append(True),
     )
 
     assert extracted == "slide"
-    assert prepared == [True]
+
+
+def test_extract_text_from_epub_uses_spine_order() -> None:
+    epub = io.BytesIO()
+    with zipfile.ZipFile(epub, "w") as archive:
+        archive.writestr(
+            "META-INF/container.xml",
+            """<?xml version="1.0"?>
+            <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+              <rootfiles><rootfile full-path="OPS/package.opf"/></rootfiles>
+            </container>
+            """,
+        )
+        archive.writestr(
+            "OPS/package.opf",
+            """<?xml version="1.0"?>
+            <package xmlns="http://www.idpf.org/2007/opf">
+              <manifest>
+                <item id="second" href="Text/second.xhtml"/>
+                <item id="first" href="Text/first%20chapter.xhtml"/>
+              </manifest>
+              <spine><itemref idref="first"/><itemref idref="second"/></spine>
+            </package>
+            """,
+        )
+        archive.writestr(
+            "OPS/Text/second.xhtml",
+            "<html><body><h1>Second chapter</h1><p>Second body.</p></body></html>",
+        )
+        archive.writestr(
+            "OPS/Text/first chapter.xhtml",
+            "<html><body><h1>First chapter</h1><p>First body.</p></body></html>",
+        )
+
+    extracted = document_extractor_node._extract_text_from_epub(
+        epub.getvalue(),
+        unstructured_api_config=UnstructuredApiConfig(),
+    )
+
+    assert extracted == "First chapter\nFirst body.\nSecond chapter\nSecond body."
+
+
+def test_extract_text_from_odt_uses_document_order() -> None:
+    document = OdfDocument("text")
+    document.body.clear()
+    document.body.append(OdfParagraph("First paragraph."))
+    document.body.append(OdfParagraph("Second paragraph."))
+    odt = io.BytesIO()
+    document.save(odt)
+
+    extracted = document_extractor_node._extract_text_from_odt(
+        odt.getvalue(),
+        unstructured_api_config=UnstructuredApiConfig(),
+    )
+
+    assert extracted == "First paragraph.\n\nSecond paragraph."
 
 
 @pytest.mark.parametrize(
@@ -591,12 +646,40 @@ def test_partition_unstructured_file_uses_api_partition(
 
 
 @pytest.mark.parametrize(
+    ("extractor", "suffix"),
+    [
+        (document_extractor_node._extract_text_from_epub, ".epub"),
+        (document_extractor_node._extract_text_from_odt, ".odt"),
+    ],
+)
+def test_document_extractors_use_api_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+    extractor: Any,
+    suffix: str,
+) -> None:
+    partition = MagicMock(return_value=[SimpleNamespace(text="remote text")])
+    monkeypatch.setattr(
+        document_extractor_node,
+        "_partition_unstructured_file_via_api",
+        partition,
+    )
+    config = UnstructuredApiConfig(api_url="https://api.example")
+
+    extracted = extractor(b"document", unstructured_api_config=config)
+
+    assert extracted == "remote text"
+    partition.assert_called_once_with(
+        b"document",
+        suffix=suffix,
+        unstructured_api_config=config,
+    )
+
+
+@pytest.mark.parametrize(
     ("extractor", "label"),
     [
         (document_extractor_node._extract_text_from_ppt, "PPT"),
         (document_extractor_node._extract_text_from_pptx, "PPTX"),
-        (document_extractor_node._extract_text_from_epub, "EPUB"),
-        (document_extractor_node._extract_text_from_odt, "ODT"),
     ],
 )
 def test_unstructured_extractors_convert_partition_errors(
@@ -619,6 +702,24 @@ def test_unstructured_extractors_convert_partition_errors(
         match=f"Failed to extract text from {label}",
     ):
         extractor(b"data", unstructured_api_config=UnstructuredApiConfig())
+
+
+@pytest.mark.parametrize(
+    ("extractor", "label"),
+    [
+        (document_extractor_node._extract_text_from_epub, "EPUB"),
+        (document_extractor_node._extract_text_from_odt, "ODT"),
+    ],
+)
+def test_local_document_extractors_convert_parse_errors(
+    extractor: Any,
+    label: str,
+) -> None:
+    with pytest.raises(
+        TextExtractionError,
+        match=f"Failed to extract text from {label}",
+    ):
+        extractor(b"invalid", unstructured_api_config=UnstructuredApiConfig())
 
 
 def test_extract_text_from_properties_preserves_supported_line_shapes() -> None:

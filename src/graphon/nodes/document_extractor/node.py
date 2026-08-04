@@ -5,26 +5,29 @@ import io
 import json
 import logging
 import pathlib
+import posixpath
 import tempfile
 import threading
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, override
+from urllib.parse import unquote, urlsplit
 
 import charset_normalizer
 import docx
 import pandas as pd
-import pypandoc
 import pypdf
 import pypdfium2
 import webvtt
 import yaml
+from defusedxml import ElementTree
 from docx.document import Document
 from docx.oxml.table import CT_Tbl
 from docx.oxml.text.paragraph import CT_P
 from docx.table import Table
 from docx.text.paragraph import Paragraph
+from odfdo import Document as OdfDocument
 
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
@@ -913,17 +916,57 @@ def _extract_text_from_epub(
     unstructured_api_config: UnstructuredApiConfig,
 ) -> str:
     try:
-        return _partition_unstructured_file(
-            file_content,
-            suffix=".epub",
-            unstructured_api_config=unstructured_api_config,
-            load_local_partition=_load_partition_epub,
-            render_element=str,
-            prepare=pypandoc.download_pandoc,
-        )
+        if unstructured_api_config.api_url:
+            elements = _partition_unstructured_file_via_api(
+                file_content,
+                suffix=".epub",
+                unstructured_api_config=unstructured_api_config,
+            )
+            return "\n".join(
+                _render_unstructured_text_element(element) for element in elements
+            )
+        return _extract_epub_text(file_content)
     except Exception as e:
         msg = f"Failed to extract text from EPUB: {e!s}"
         raise TextExtractionError(msg) from e
+
+
+def _extract_epub_text(file_content: bytes) -> str:
+    from unstructured.partition.html import (  # ruff:ignore[import-outside-top-level]
+        partition_html,
+    )
+
+    with zipfile.ZipFile(io.BytesIO(file_content)) as archive:
+        container = ElementTree.fromstring(archive.read("META-INF/container.xml"))
+        rootfile = container.find(".//{*}rootfile")
+        package_path = rootfile.get("full-path") if rootfile is not None else None
+        if not package_path:
+            msg = "EPUB package path is missing"
+            raise ValueError(msg)
+
+        package_path = unquote(urlsplit(package_path).path).lstrip("/")
+        package = ElementTree.fromstring(archive.read(package_path))
+        manifest = {
+            item.attrib["id"]: item.attrib["href"]
+            for item in package.findall(".//{*}manifest/{*}item")
+            if "id" in item.attrib and "href" in item.attrib
+        }
+        extracted_text: list[str] = []
+        for itemref in package.findall(".//{*}spine/{*}itemref"):
+            href = manifest.get(itemref.get("idref", ""))
+            if href is None:
+                continue
+            chapter_path = posixpath.normpath(
+                posixpath.join(
+                    posixpath.dirname(package_path),
+                    unquote(urlsplit(href).path),
+                ),
+            ).lstrip("/")
+            with io.BytesIO(archive.read(chapter_path)) as chapter:
+                extracted_text.extend(
+                    str(element) for element in partition_html(file=chapter)
+                )
+        return "\n".join(extracted_text)
 
 
 def _extract_text_from_odt(
@@ -932,13 +975,17 @@ def _extract_text_from_odt(
     unstructured_api_config: UnstructuredApiConfig,
 ) -> str:
     try:
-        return _partition_unstructured_file(
-            file_content,
-            suffix=".odt",
-            unstructured_api_config=unstructured_api_config,
-            load_local_partition=_load_partition_odt,
-            render_element=_render_unstructured_text_element,
-        )
+        if unstructured_api_config.api_url:
+            elements = _partition_unstructured_file_via_api(
+                file_content,
+                suffix=".odt",
+                unstructured_api_config=unstructured_api_config,
+            )
+            return "\n".join(
+                _render_unstructured_text_element(element) for element in elements
+            )
+        with io.BytesIO(file_content) as file:
+            return OdfDocument(file).get_formatted_text().strip()
     except Exception as e:
         msg = f"Failed to extract text from ODT: {e!s}"
         raise TextExtractionError(msg) from e
@@ -951,7 +998,6 @@ def _partition_unstructured_file(
     unstructured_api_config: UnstructuredApiConfig,
     load_local_partition: Callable[[], Callable[..., Sequence[Any]]],
     render_element: Callable[[Any], str],
-    prepare: Callable[[], None] | None = None,
 ) -> str:
     if unstructured_api_config.api_url:
         elements = _partition_unstructured_file_via_api(
@@ -963,7 +1009,6 @@ def _partition_unstructured_file(
         elements = _partition_unstructured_file_locally(
             file_content,
             load_local_partition=load_local_partition,
-            prepare=prepare,
         )
     return "\n".join([render_element(element) for element in elements])
 
@@ -985,10 +1030,7 @@ def _partition_unstructured_file_locally(
     file_content: bytes,
     *,
     load_local_partition: Callable[[], Callable[..., Sequence[Any]]],
-    prepare: Callable[[], None] | None,
 ) -> Sequence[Any]:
-    if prepare is not None:
-        prepare()
     partition_file = load_local_partition()
     with io.BytesIO(file_content) as file:
         return partition_file(file=file)
@@ -1008,22 +1050,6 @@ def _load_partition_pptx() -> Callable[..., Sequence[Any]]:
     )
 
     return partition_pptx
-
-
-def _load_partition_epub() -> Callable[..., Sequence[Any]]:
-    from unstructured.partition.epub import (  # ruff:ignore[import-outside-top-level]
-        partition_epub,
-    )
-
-    return partition_epub
-
-
-def _load_partition_odt() -> Callable[..., Sequence[Any]]:
-    from unstructured.partition.odt import (  # ruff:ignore[import-outside-top-level]
-        partition_odt,
-    )
-
-    return partition_odt
 
 
 def _render_unstructured_text_element(element: Any) -> str:
