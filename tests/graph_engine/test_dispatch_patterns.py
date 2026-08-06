@@ -418,13 +418,13 @@ def test_worker_pool_drain_does_not_stop_worker_with_current_task() -> None:
     active_worker = WorkerStub(has_current_task=True)
     idle_worker = WorkerStub(has_current_task=False)
     pool = object.__new__(WorkerPool)
-    pool._lock = threading.RLock()
+    pool._lock = cast(Any, threading.RLock())
     pool._task_claim_lock = threading.Lock()
     pool._task_claiming = threading.Event()
     pool._task_claiming.set()
     pool._ready_queue = InMemoryReadyQueue()
     pool._running = True
-    pool._workers = [active_worker, idle_worker]
+    pool._workers = cast(Any, [active_worker, idle_worker])
 
     pool.drain()
 
@@ -432,7 +432,7 @@ def test_worker_pool_drain_does_not_stop_worker_with_current_task() -> None:
     assert idle_worker.stopped is True
 
 
-def test_worker_pool_drain_observes_task_claimed_during_pause() -> None:  # noqa: C901
+def test_worker_pool_drain_observes_task_claimed_during_pause() -> None:  # ruff: ignore[complex-structure]
     class BlockingReadyQueue:
         def __init__(self) -> None:
             self._queue = InMemoryReadyQueue()
@@ -1363,7 +1363,7 @@ def test_event_handler_processes_tagged_root_frame_success_before_collecting() -
     event_collector.collect.assert_called_once_with(event)
 
 
-def test_parallel_iteration_preserves_aggregate_and_response_order() -> None:  # noqa: PLR0914
+def test_parallel_iteration_preserves_aggregate_and_response_order() -> None:  # ruff: ignore[too-many-locals]
     graph_config = {
         "nodes": [
             {

@@ -8,7 +8,7 @@ from graphon.variables import (
 )
 from graphon.variables.sensitivity import is_sensitive
 
-SECRET = "sk-1234567890abcdef"  # noqa: S105
+SECRET = "sk-1234567890abcdef"  # ruff: ignore[hardcoded-password-string]
 
 
 def test_secret_variable_is_sensitive() -> None:
