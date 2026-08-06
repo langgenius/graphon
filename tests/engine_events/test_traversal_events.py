@@ -1,4 +1,5 @@
 from graphon.engine_events import (
+    EngineEvent,
     GraphEdgeSkippedEvent,
     GraphEdgeTakenEvent,
     GraphRunStartedEvent,
@@ -12,6 +13,9 @@ def test_graph_lifecycle_event_exports_container_context() -> None:
     )
 
 
+_ENVELOPE_FIELDS = {*EngineEvent.model_fields, "event_type"} - {"container_id"}
+
+
 def test_graph_edge_taken_event_exports_payload() -> None:
     event = GraphEdgeTakenEvent(
         frame_id="frame-1",
@@ -21,7 +25,7 @@ def test_graph_edge_taken_event_exports_payload() -> None:
         source_handle="success",
     )
 
-    assert event.model_dump() == {
+    assert event.model_dump(exclude=_ENVELOPE_FIELDS) == {
         "frame_id": "frame-1",
         "edge_id": "edge-1",
         "source_node_id": "source",
@@ -39,7 +43,7 @@ def test_graph_edge_skipped_event_exports_payload() -> None:
         target_node_id="other",
     )
 
-    assert event.model_dump() == {
+    assert event.model_dump(exclude=_ENVELOPE_FIELDS) == {
         "frame_id": "frame-2",
         "edge_id": "edge-2",
         "source_node_id": "source",

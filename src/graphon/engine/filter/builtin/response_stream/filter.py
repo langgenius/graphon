@@ -190,6 +190,8 @@ class ResponseStreamFilter:
         self._reset_run_state()
 
     def _reset_run_state(self) -> None:
+        self._graph_id = ""
+        self._execution_id = ""
         self._active_session: _ResponseSession | None = None
         self._waiting_sessions: deque[_ResponseSession] = deque()
         self._stream_buffers = _StreamBuffers()
@@ -230,12 +232,14 @@ class ResponseStreamFilter:
         self._ensure_initialized()
         match event:
             case GraphRunStartedEvent():
+                self._graph_id = event.graph_id
+                self._execution_id = event.execution_id
                 output: Iterable[EngineEvent] = [
                     event,
                     *self._activate_initial_sessions(),
                 ]
             case NodeRunStartedEvent():
-                self._node_execution_ids[event.node_id] = event.id
+                self._node_execution_ids[event.node_id] = event.node_execution_id
                 output = [event]
             case NodeRunStreamChunkEvent():
                 output = self._handle_stream_chunk(event)
@@ -267,6 +271,8 @@ class ResponseStreamFilter:
 
         state = v2.Snapshot(
             response_nodes=sorted(self._response_nodes),
+            graph_id=self._graph_id,
+            execution_id=self._execution_id,
             active_session=self._serialize_session(self._active_session),
             waiting_sessions=[
                 session_state
@@ -334,6 +340,8 @@ class ResponseStreamFilter:
             )
 
         self._active_session = active_session
+        self._graph_id = state.graph_id
+        self._execution_id = state.execution_id
         self._waiting_sessions = waiting_sessions
         self._stream_buffers = stream_buffers
         self._response_nodes = response_nodes
@@ -582,7 +590,7 @@ class ResponseStreamFilter:
             for segment in session.template.segments
         )
 
-    def _get_or_create_execution_id(self, node_id: _NodeID) -> str:
+    def _get_or_create_node_execution_id(self, node_id: _NodeID) -> str:
         if node_id not in self._node_execution_ids:
             self._node_execution_ids[node_id] = str(uuid4())
         return self._node_execution_ids[node_id]
@@ -590,7 +598,7 @@ class ResponseStreamFilter:
     def _create_stream_chunk_event(
         self,
         node_id: _NodeID,
-        execution_id: str,
+        node_execution_id: str,
         selector: Sequence[str],
         chunk: str,
         is_final: bool = False,
@@ -599,7 +607,9 @@ class ResponseStreamFilter:
         if selector and selector[0] not in graph.nodes and self._active_session:
             response_node = graph.nodes[self._active_session.node_id]
             return NodeRunStreamChunkEvent(
-                id=execution_id,
+                graph_id=self._graph_id,
+                execution_id=self._execution_id,
+                node_execution_id=node_execution_id,
                 node_id=response_node.id,
                 node_type=response_node.node_type,
                 selector=list(selector),
@@ -609,7 +619,9 @@ class ResponseStreamFilter:
 
         node = graph.nodes[node_id]
         return NodeRunStreamChunkEvent(
-            id=execution_id,
+            graph_id=self._graph_id,
+            execution_id=self._execution_id,
+            node_execution_id=node_execution_id,
             node_id=node.id,
             node_type=node.node_type,
             selector=list(selector),
@@ -630,7 +642,7 @@ class ResponseStreamFilter:
             output_node_id = self._active_session.node_id
         else:
             output_node_id = source_selector_prefix
-        execution_id = self._get_or_create_execution_id(output_node_id)
+        node_execution_id = self._get_or_create_node_execution_id(output_node_id)
         has_stream_events = self._stream_buffers.has_events(segment.selector)
 
         while self._stream_buffers.has_unread(segment.selector):
@@ -642,7 +654,9 @@ class ResponseStreamFilter:
                 response_node = self._bound_graph.nodes[self._active_session.node_id]
                 events.append(
                     NodeRunStreamChunkEvent(
-                        id=execution_id,
+                        graph_id=self._graph_id,
+                        execution_id=self._execution_id,
+                        node_execution_id=node_execution_id,
                         node_id=response_node.id,
                         node_type=response_node.node_type,
                         container_id=event.container_id,
@@ -667,7 +681,7 @@ class ResponseStreamFilter:
             events.append(
                 self._create_stream_chunk_event(
                     node_id=output_node_id,
-                    execution_id=execution_id,
+                    node_execution_id=node_execution_id,
                     selector=segment.selector,
                     chunk=value.markdown,
                     is_final=is_last_segment,
@@ -687,14 +701,16 @@ class ResponseStreamFilter:
             raise RuntimeError(msg)
 
         current_response_node = self._bound_graph.nodes[active_session.node_id]
-        execution_id = self._get_or_create_execution_id(current_response_node.id)
+        node_execution_id = self._get_or_create_node_execution_id(
+            current_response_node.id
+        )
         is_last_segment = (
             active_session.index == len(active_session.template.segments) - 1
         )
         return [
             self._create_stream_chunk_event(
                 node_id=current_response_node.id,
-                execution_id=execution_id,
+                node_execution_id=node_execution_id,
                 selector=self._get_text_segment_selector(current_response_node.id),
                 chunk=segment.text,
                 is_final=is_last_segment,

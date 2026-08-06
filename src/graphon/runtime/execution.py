@@ -73,6 +73,8 @@ class GraphExecutionState(BaseModel):
 
     version: Literal["2.0"]
     workflow_id: str
+    execution_id: str = Field(default_factory=lambda: str(uuid4()))
+    last_event_sequence: int = Field(default=0, ge=0)
     started: bool
     completed: bool
     aborted: bool
@@ -100,6 +102,8 @@ class GraphExecution:
     """
 
     workflow_id: str
+    execution_id: str = field(default_factory=lambda: str(uuid4()))
+    last_event_sequence: int = 0
     started: bool = False
     completed: bool = False
     aborted: bool = False
@@ -202,6 +206,11 @@ class GraphExecution:
             )
         return self.node_executions[key]
 
+    def next_event_sequence(self) -> int:
+        """Return the next sequence number for this graph execution."""
+        self.last_event_sequence += 1
+        return self.last_event_sequence
+
     def dumps(self) -> str:
         """Serialize the aggregate state into a JSON string."""
         node_states = [
@@ -217,6 +226,8 @@ class GraphExecution:
         state = GraphExecutionState(
             version="2.0",
             workflow_id=self.workflow_id,
+            execution_id=self.execution_id,
+            last_event_sequence=self.last_event_sequence,
             started=self.started,
             completed=self.completed,
             aborted=self.aborted,
@@ -280,6 +291,8 @@ class GraphExecution:
 
         return cls(
             workflow_id=state.workflow_id,
+            execution_id=state.execution_id,
+            last_event_sequence=state.last_event_sequence,
             started=state.started,
             completed=state.completed,
             aborted=state.aborted,

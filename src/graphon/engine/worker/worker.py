@@ -334,7 +334,10 @@ class Worker(threading.Thread):
                     )
                 )
                 return None, True
-            if isinstance(event, NodeRunStartedEvent) and event.id == node.execution_id:
+            if (
+                isinstance(event, NodeRunStartedEvent)
+                and event.node_execution_id == node.execution_id
+            ):
                 self._current_node_started_at = event.start_at
             self._dispatch_queue.put(
                 NodeEventTask(frame_id=self._current_frame_id, event=event)
@@ -385,7 +388,7 @@ class Worker(threading.Thread):
         failure_time = datetime.now(UTC).replace(tzinfo=None)
         error_message = str(error)
         return NodeRunFailedEvent(
-            id=node.execution_id,
+            node_execution_id=node.execution_id,
             node_id=node.id,
             node_type=node.node_type,
             error=error_message,

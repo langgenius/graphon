@@ -1,6 +1,3 @@
-# Agent events
-from .agent import NodeRunAgentLogEvent
-
 # Base events
 from .base import EngineEvent, NodeEvent
 
@@ -63,7 +60,6 @@ __all__ = [
     "GraphRunStartedEvent",
     "GraphRunSucceededEvent",
     "NodeEvent",
-    "NodeRunAgentLogEvent",
     "NodeRunExceptionEvent",
     "NodeRunFailedEvent",
     "NodeRunHumanInputFormFilledEvent",

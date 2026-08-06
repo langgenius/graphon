@@ -840,7 +840,7 @@ def test_worker_pool_pause_preserves_task_acquired_during_pause() -> None:  # ru
                 raise TimeoutError(msg)
             now = datetime.now(UTC).replace(tzinfo=None)
             yield NodeRunSucceededEvent(
-                id=self.execution_id,
+                node_execution_id=self.execution_id,
                 node_id=self.id,
                 node_type=self.node_type,
                 start_at=now,
@@ -926,7 +926,7 @@ def test_worker_pool_runs_queued_siblings_with_fixed_workers() -> None:
             barrier.wait(timeout=1)
             now = datetime.now(UTC).replace(tzinfo=None)
             yield NodeRunSucceededEvent(
-                id=self.execution_id,
+                node_execution_id=self.execution_id,
                 node_id=self.id,
                 node_type=self.node_type,
                 start_at=now,
@@ -1103,7 +1103,7 @@ def test_pause_requested_event_defers_current_task_for_resume() -> None:
         NodeEventTask(
             frame_id="child-frame",
             event=NodeRunPauseRequestedEvent(
-                id="human-run",
+                node_execution_id="human-run",
                 node_id="human",
                 node_type=BuiltinNodeTypes.HUMAN_INPUT,
                 reason=HitlRequired(
@@ -1453,7 +1453,7 @@ def test_worker_executes_node_from_ready_task() -> None:
 
         def run(self) -> Generator[NodeRunStartedEvent, None, None]:
             yield NodeRunStartedEvent(
-                id=self.execution_id,
+                node_execution_id=self.execution_id,
                 node_id=self.id,
                 node_type=self.node_type,
                 node_title="Start",
@@ -1513,7 +1513,7 @@ def test_worker_resolves_node_from_task_frame() -> None:
 
         def run(self) -> Generator[NodeRunStartedEvent, None, None]:
             yield NodeRunStartedEvent(
-                id=self.execution_id,
+                node_execution_id=self.execution_id,
                 node_id=self.id,
                 node_type=self.node_type,
                 node_title=self.title,
@@ -1581,7 +1581,7 @@ def test_worker_binds_node_execution_id_from_task_frame() -> None:
 
         def run(self) -> Generator[NodeRunStartedEvent, None, None]:
             yield NodeRunStartedEvent(
-                id=self.execution_id,
+                node_execution_id=self.execution_id,
                 node_id=self.id,
                 node_type=self.node_type,
                 node_title="Answer",
@@ -1631,13 +1631,13 @@ def test_worker_binds_node_execution_id_from_task_frame() -> None:
 
     assert isinstance(event, NodeEventTask)
     assert isinstance(event.event, NodeRunStartedEvent)
-    assert event.event.id != root_execution.execution_id
-    assert event.event.id == child_execution.execution_id
+    assert event.event.node_execution_id != root_execution.execution_id
+    assert event.event.node_execution_id == child_execution.execution_id
 
 
 def test_dispatcher_preserves_task_event_for_dispatch() -> None:
     event = NodeRunStartedEvent(
-        id="run-1",
+        node_execution_id="run-1",
         node_id="start",
         node_type=BuiltinNodeTypes.CODE,
         node_title="Start",
@@ -1930,7 +1930,7 @@ def test_resume_rejects_task_for_missing_container_invocation() -> None:
 
 def test_event_processor_dispatches_task_event_payload() -> None:
     event = NodeRunStartedEvent(
-        id="run-1",
+        node_execution_id="run-1",
         node_id="start",
         node_type=BuiltinNodeTypes.CODE,
         node_title="Start",
@@ -1999,7 +1999,7 @@ def test_event_processor_stamps_frame_owner_on_node_and_edge_events() -> None:
         frame_registry=frame_registry,
     )
     event = NodeRunSucceededEvent(
-        id="run-child",
+        node_execution_id="run-child",
         node_id="child",
         node_type=BuiltinNodeTypes.CODE,
         start_at=datetime.now(UTC).replace(tzinfo=None),
@@ -2158,7 +2158,7 @@ def test_parallel_iteration_preserves_aggregate_and_response_order() -> None:  #
         NodeEventTask(
             frame_id="iteration-invocation:iteration:1",
             event=NodeRunSucceededEvent(
-                id="iteration-start-run-1",
+                node_execution_id="iteration-start-run-1",
                 node_id="iteration-start",
                 node_type=BuiltinNodeTypes.ITERATION_START,
                 start_at=datetime.now(UTC).replace(tzinfo=None),
@@ -2187,7 +2187,7 @@ def test_parallel_iteration_preserves_aggregate_and_response_order() -> None:  #
         NodeEventTask(
             frame_id="iteration-invocation:iteration:2",
             event=NodeRunSucceededEvent(
-                id="iteration-start-run-2",
+                node_execution_id="iteration-start-run-2",
                 node_id="iteration-start",
                 node_type=BuiltinNodeTypes.ITERATION_START,
                 start_at=datetime.now(UTC).replace(tzinfo=None),
@@ -2204,7 +2204,7 @@ def test_parallel_iteration_preserves_aggregate_and_response_order() -> None:  #
         NodeEventTask(
             frame_id="iteration-invocation:iteration:0",
             event=NodeRunSucceededEvent(
-                id="iteration-start-run-0",
+                node_execution_id="iteration-start-run-0",
                 node_id="iteration-start",
                 node_type=BuiltinNodeTypes.ITERATION_START,
                 start_at=datetime.now(UTC).replace(tzinfo=None),
@@ -2390,7 +2390,7 @@ def test_execution_limits_layer_sends_abort_when_limit_is_exceeded(
 
     layer.on_event(
         NodeRunSucceededEvent(
-            id="node-run-1",
+            node_execution_id="node-run-1",
             node_id="node-1",
             node_type=BuiltinNodeTypes.CODE,
             start_at=datetime.now(UTC).replace(tzinfo=None),
@@ -2412,7 +2412,7 @@ def test_execution_limits_layer_matches_subclassed_node_start_event() -> None:
 
     layer.on_event(
         CustomNodeRunStartedEvent(
-            id="node-run-1",
+            node_execution_id="node-run-1",
             node_id="node-1",
             node_type=BuiltinNodeTypes.CODE,
             node_title="Code",

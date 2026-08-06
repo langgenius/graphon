@@ -9,7 +9,6 @@ from functools import singledispatchmethod
 from types import MappingProxyType
 from typing import Any, ClassVar, assert_never, get_args, get_origin
 
-from graphon.engine_events.agent import NodeRunAgentLogEvent
 from graphon.engine_events.base import NodeEvent
 from graphon.engine_events.iteration import (
     NodeRunIterationFailedEvent,
@@ -45,7 +44,6 @@ from graphon.enums import (
     NodeType,
     WorkflowNodeExecutionStatus,
 )
-from graphon.node_events.agent import AgentLogEvent
 from graphon.node_events.base import (
     NodeEventPayload,
     NodeRunResult,
@@ -644,7 +642,7 @@ class Node[NodeDataT: BaseNodeData](
 
         # Create and push start event with required fields
         start_event = NodeRunStartedEvent(
-            id=execution_id,
+            node_execution_id=execution_id,
             node_id=self._node_id,
             node_type=self.node_type,
             node_title=self.title,
@@ -717,7 +715,7 @@ class Node[NodeDataT: BaseNodeData](
         if isinstance(event, NodeEventPayload):
             return self._dispatch(event)
         if not event.container_id:
-            event.id = self.execution_id
+            event.node_execution_id = self.execution_id
         return event
 
     def _build_run_failed_event(self, error: Exception) -> NodeRunFailedEvent:
@@ -728,7 +726,7 @@ class Node[NodeDataT: BaseNodeData](
         )
         finished_at = datetime.now(UTC).replace(tzinfo=None)
         return NodeRunFailedEvent(
-            id=self.execution_id,
+            node_execution_id=self.execution_id,
             node_id=self._node_id,
             node_type=self.node_type,
             start_at=self._start_at,
@@ -825,7 +823,7 @@ class Node[NodeDataT: BaseNodeData](
         match status:
             case WorkflowNodeExecutionStatus.FAILED:
                 return NodeRunFailedEvent(
-                    id=self.execution_id,
+                    node_execution_id=self.execution_id,
                     node_id=self.id,
                     node_type=self.node_type,
                     start_at=self._start_at,
@@ -835,7 +833,7 @@ class Node[NodeDataT: BaseNodeData](
                 )
             case WorkflowNodeExecutionStatus.SUCCEEDED:
                 return NodeRunSucceededEvent(
-                    id=self.execution_id,
+                    node_execution_id=self.execution_id,
                     node_id=self.id,
                     node_type=self.node_type,
                     start_at=self._start_at,
@@ -863,7 +861,7 @@ class Node[NodeDataT: BaseNodeData](
     @_dispatch.register
     def _(self, event: StreamChunkEvent) -> NodeRunStreamChunkEvent:
         return NodeRunStreamChunkEvent(
-            id=self.execution_id,
+            node_execution_id=self.execution_id,
             node_id=self._node_id,
             node_type=self.node_type,
             selector=event.selector,
@@ -874,7 +872,7 @@ class Node[NodeDataT: BaseNodeData](
     @_dispatch.register
     def _(self, event: StreamReasoningEvent) -> NodeRunReasoningChunkEvent:
         return NodeRunReasoningChunkEvent(
-            id=self.execution_id,
+            node_execution_id=self.execution_id,
             node_id=self._node_id,
             node_type=self.node_type,
             selector=[self._node_id, "reasoning_content"],
@@ -885,7 +883,7 @@ class Node[NodeDataT: BaseNodeData](
     @_dispatch.register
     def _(self, event: ModelPollingProgressEvent) -> NodeRunModelPollingProgressEvent:
         return NodeRunModelPollingProgressEvent(
-            id=self.execution_id,
+            node_execution_id=self.execution_id,
             node_id=self._node_id,
             node_type=self.node_type,
             attempt=event.attempt,
@@ -903,7 +901,7 @@ class Node[NodeDataT: BaseNodeData](
         match status:
             case WorkflowNodeExecutionStatus.SUCCEEDED:
                 return NodeRunSucceededEvent(
-                    id=self.execution_id,
+                    node_execution_id=self.execution_id,
                     node_id=self._node_id,
                     node_type=self.node_type,
                     start_at=self._start_at,
@@ -912,7 +910,7 @@ class Node[NodeDataT: BaseNodeData](
                 )
             case WorkflowNodeExecutionStatus.FAILED:
                 return NodeRunFailedEvent(
-                    id=self.execution_id,
+                    node_execution_id=self.execution_id,
                     node_id=self._node_id,
                     node_type=self.node_type,
                     start_at=self._start_at,
@@ -936,7 +934,7 @@ class Node[NodeDataT: BaseNodeData](
     @_dispatch.register
     def _(self, event: VariableUpdatedEvent) -> NodeRunVariableUpdatedEvent:
         return NodeRunVariableUpdatedEvent(
-            id=self.execution_id,
+            node_execution_id=self.execution_id,
             node_id=self._node_id,
             node_type=self.node_type,
             variable=event.variable,
@@ -945,7 +943,7 @@ class Node[NodeDataT: BaseNodeData](
     @_dispatch.register
     def _(self, event: PauseRequestedEvent) -> NodeRunPauseRequestedEvent:
         return NodeRunPauseRequestedEvent(
-            id=self.execution_id,
+            node_execution_id=self.execution_id,
             node_id=self._node_id,
             node_type=self.node_type,
             node_run_result=NodeRunResult(status=WorkflowNodeExecutionStatus.PAUSED),
@@ -953,25 +951,9 @@ class Node[NodeDataT: BaseNodeData](
         )
 
     @_dispatch.register
-    def _(self, event: AgentLogEvent) -> NodeRunAgentLogEvent:
-        return NodeRunAgentLogEvent(
-            id=self.execution_id,
-            node_id=self._node_id,
-            node_type=self.node_type,
-            message_id=event.message_id,
-            label=event.label,
-            node_execution_id=event.node_execution_id,
-            parent_id=event.parent_id,
-            error=event.error,
-            status=event.status,
-            data=event.data,
-            metadata=event.metadata,
-        )
-
-    @_dispatch.register
     def _(self, event: HumanInputFormFilledEvent) -> NodeRunHumanInputFormFilledEvent:
         return NodeRunHumanInputFormFilledEvent(
-            id=self.execution_id,
+            node_execution_id=self.execution_id,
             node_id=self._node_id,
             node_type=self.node_type,
             node_title=event.node_title,
@@ -984,7 +966,7 @@ class Node[NodeDataT: BaseNodeData](
     @_dispatch.register
     def _(self, event: HumanInputFormTimeoutEvent) -> NodeRunHumanInputFormTimeoutEvent:
         return NodeRunHumanInputFormTimeoutEvent(
-            id=self.execution_id,
+            node_execution_id=self.execution_id,
             node_id=self._node_id,
             node_type=self.node_type,
             node_title=event.node_title,
@@ -994,7 +976,7 @@ class Node[NodeDataT: BaseNodeData](
     @_dispatch.register
     def _(self, event: LoopStartedEvent) -> NodeRunLoopStartedEvent:
         return NodeRunLoopStartedEvent(
-            id=self.execution_id,
+            node_execution_id=self.execution_id,
             node_id=self._node_id,
             node_type=self.node_type,
             node_title=self.node_data.title,
@@ -1007,7 +989,7 @@ class Node[NodeDataT: BaseNodeData](
     @_dispatch.register
     def _(self, event: LoopNextEvent) -> NodeRunLoopNextEvent:
         return NodeRunLoopNextEvent(
-            id=self.execution_id,
+            node_execution_id=self.execution_id,
             node_id=self._node_id,
             node_type=self.node_type,
             node_title=self.node_data.title,
@@ -1018,7 +1000,7 @@ class Node[NodeDataT: BaseNodeData](
     @_dispatch.register
     def _(self, event: LoopSucceededEvent) -> NodeRunLoopSucceededEvent:
         return NodeRunLoopSucceededEvent(
-            id=self.execution_id,
+            node_execution_id=self.execution_id,
             node_id=self._node_id,
             node_type=self.node_type,
             node_title=self.node_data.title,
@@ -1032,7 +1014,7 @@ class Node[NodeDataT: BaseNodeData](
     @_dispatch.register
     def _(self, event: LoopFailedEvent) -> NodeRunLoopFailedEvent:
         return NodeRunLoopFailedEvent(
-            id=self.execution_id,
+            node_execution_id=self.execution_id,
             node_id=self._node_id,
             node_type=self.node_type,
             node_title=self.node_data.title,
@@ -1047,7 +1029,7 @@ class Node[NodeDataT: BaseNodeData](
     @_dispatch.register
     def _(self, event: IterationStartedEvent) -> NodeRunIterationStartedEvent:
         return NodeRunIterationStartedEvent(
-            id=self.execution_id,
+            node_execution_id=self.execution_id,
             node_id=self._node_id,
             node_type=self.node_type,
             node_title=self.node_data.title,
@@ -1060,7 +1042,7 @@ class Node[NodeDataT: BaseNodeData](
     @_dispatch.register
     def _(self, event: IterationNextEvent) -> NodeRunIterationNextEvent:
         return NodeRunIterationNextEvent(
-            id=self.execution_id,
+            node_execution_id=self.execution_id,
             node_id=self._node_id,
             node_type=self.node_type,
             node_title=self.node_data.title,
@@ -1071,7 +1053,7 @@ class Node[NodeDataT: BaseNodeData](
     @_dispatch.register
     def _(self, event: IterationSucceededEvent) -> NodeRunIterationSucceededEvent:
         return NodeRunIterationSucceededEvent(
-            id=self.execution_id,
+            node_execution_id=self.execution_id,
             node_id=self._node_id,
             node_type=self.node_type,
             node_title=self.node_data.title,
@@ -1085,7 +1067,7 @@ class Node[NodeDataT: BaseNodeData](
     @_dispatch.register
     def _(self, event: IterationFailedEvent) -> NodeRunIterationFailedEvent:
         return NodeRunIterationFailedEvent(
-            id=self.execution_id,
+            node_execution_id=self.execution_id,
             node_id=self._node_id,
             node_type=self.node_type,
             node_title=self.node_data.title,
@@ -1100,7 +1082,7 @@ class Node[NodeDataT: BaseNodeData](
     @_dispatch.register
     def _(self, event: RunRetrieverResourceEvent) -> NodeRunRetrieverResourceEvent:
         return NodeRunRetrieverResourceEvent(
-            id=self.execution_id,
+            node_execution_id=self.execution_id,
             node_id=self._node_id,
             node_type=self.node_type,
             retriever_resources=event.retriever_resources,

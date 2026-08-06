@@ -44,7 +44,6 @@ class BuiltinNodeTypes:
     VARIABLE_ASSIGNER: ClassVar[NodeType] = "assigner"
     DOCUMENT_EXTRACTOR: ClassVar[NodeType] = "document-extractor"
     LIST_OPERATOR: ClassVar[NodeType] = "list-operator"
-    AGENT: ClassVar[NodeType] = "agent"
     HUMAN_INPUT: ClassVar[NodeType] = "human-input"
 
 
@@ -72,7 +71,6 @@ BUILT_IN_NODE_TYPES: tuple[NodeType, ...] = (
     BuiltinNodeTypes.VARIABLE_ASSIGNER,
     BuiltinNodeTypes.DOCUMENT_EXTRACTOR,
     BuiltinNodeTypes.LIST_OPERATOR,
-    BuiltinNodeTypes.AGENT,
     BuiltinNodeTypes.HUMAN_INPUT,
 )
 
@@ -211,7 +209,6 @@ class WorkflowNodeExecutionMetadataKey(StrEnum):
     TOTAL_PRICE = "total_price"
     CURRENCY = "currency"
     TOOL_INFO = "tool_info"
-    AGENT_LOG = "agent_log"
     ITERATION_ID = "iteration_id"
     ITERATION_INDEX = "iteration_index"
     LOOP_ID = "loop_id"

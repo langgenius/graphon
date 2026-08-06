@@ -40,6 +40,8 @@ class ResponseStreamFilterSnapshot(BaseModel):
     type: Literal["ResponseStreamFilter"] = "ResponseStreamFilter"
     version: str
     response_nodes: list[str] = Field(default_factory=list)
+    graph_id: str = ""
+    execution_id: str = ""
     active_session: ResponseSessionState | None = None
     waiting_sessions: list[ResponseSessionState] = Field(default_factory=list)
     pending_sessions: list[ResponseSessionState] = Field(default_factory=list)
