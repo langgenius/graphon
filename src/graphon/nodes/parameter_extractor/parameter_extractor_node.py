@@ -40,7 +40,6 @@ from graphon.nodes.llm.entities import (
     LLMNodeChatModelMessage,
     LLMNodeCompletionModelPromptTemplate,
 )
-from graphon.nodes.llm.node import LLMNode
 from graphon.nodes.llm.runtime_protocols import (
     LLMProtocol,
     PromptMessageSerializerProtocol,
@@ -1151,7 +1150,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         context: str | None = "",
         image_detail_config: ImagePromptMessageContent.DETAIL | None = None,
     ) -> list[PromptMessage]:
-        prompt_messages, _ = LLMNode.fetch_prompt_messages(
+        prompt_messages, _ = llm_utils.fetch_prompt_messages(
             sys_query="",
             sys_files=files,
             context=context or "",

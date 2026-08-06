@@ -28,7 +28,7 @@ from graphon.model_runtime.memory.prompt_message_memory import PromptMessageMemo
 from graphon.nodes.base.entities import VariableSelector
 from graphon.prompt_entities import MemoryConfig
 from graphon.runtime.variable_pool import VariablePool
-from graphon.template_rendering import Jinja2TemplateRenderer
+from graphon.template_rendering import Jinja2TemplateRenderer, TemplateRenderError
 from graphon.variables.segments import (
     ArrayAnySegment,
     ArrayFileSegment,
@@ -207,13 +207,11 @@ def _filter_prompt_messages(
     filtered_prompt_messages: list[PromptMessage] = []
     for prompt_message in prompt_messages:
         if isinstance(prompt_message.content, list):
-            prompt_message_content: list[PromptMessageContentUnionTypes] = []
-            for content_item in prompt_message.content:
-                if not model_schema.supports_prompt_content_type(content_item.type):
-                    continue
-                prompt_message_content.append(content_item)
-            if not prompt_message_content:
-                continue
+            prompt_message_content = [
+                content_item
+                for content_item in prompt_message.content
+                if model_schema.supports_prompt_content_type(content_item.type)
+            ]
             if (
                 len(prompt_message_content) == 1
                 and prompt_message_content[0].type == PromptMessageContentType.TEXT
@@ -221,9 +219,9 @@ def _filter_prompt_messages(
                 prompt_message.content = prompt_message_content[0].data
             else:
                 prompt_message.content = prompt_message_content
-            filtered_prompt_messages.append(prompt_message)
-        elif not prompt_message.is_empty():
-            filtered_prompt_messages.append(prompt_message)
+        if prompt_message.is_empty():
+            continue
+        filtered_prompt_messages.append(prompt_message)
 
     if len(filtered_prompt_messages) == 0:
         msg = (
@@ -250,8 +248,8 @@ def fetch_prompt_messages(
     vision_detail: ImagePromptMessageContent.DETAIL,
     variable_pool: VariablePool,
     jinja2_variables: Sequence[VariableSelector],
-    context_files: list[File] | None = None,
-    template_renderer: Jinja2TemplateRenderer | None = None,
+    context_files: Sequence[File] | None = None,
+    jinja2_template_renderer: Jinja2TemplateRenderer | None = None,
 ) -> tuple[Sequence[PromptMessage], Sequence[str] | None]:
     prompt_messages: list[PromptMessage] = []
     model_schema = fetch_model_schema(model_instance=model_instance)
@@ -265,7 +263,7 @@ def fetch_prompt_messages(
                     jinja2_variables=jinja2_variables,
                     variable_pool=variable_pool,
                     vision_detail_config=vision_detail,
-                    template_renderer=template_renderer,
+                    jinja2_template_renderer=jinja2_template_renderer,
                 ),
             )
             prompt_messages.extend(
@@ -290,7 +288,7 @@ def fetch_prompt_messages(
                         jinja2_variables=[],
                         variable_pool=variable_pool,
                         vision_detail_config=vision_detail,
-                        template_renderer=template_renderer,
+                        jinja2_template_renderer=jinja2_template_renderer,
                     ),
                 )
         case LLMNodeCompletionModelPromptTemplate():
@@ -300,7 +298,7 @@ def fetch_prompt_messages(
                     context=context,
                     jinja2_variables=jinja2_variables,
                     variable_pool=variable_pool,
-                    template_renderer=template_renderer,
+                    jinja2_template_renderer=jinja2_template_renderer,
                 ),
             )
 
@@ -345,7 +343,7 @@ def handle_list_messages(
     jinja2_variables: Sequence[VariableSelector],
     variable_pool: VariablePool,
     vision_detail_config: ImagePromptMessageContent.DETAIL,
-    template_renderer: Jinja2TemplateRenderer | None = None,
+    jinja2_template_renderer: Jinja2TemplateRenderer | None = None,
 ) -> Sequence[PromptMessage]:
     prompt_messages: list[PromptMessage] = []
     for message in messages:
@@ -354,7 +352,7 @@ def handle_list_messages(
                 template=message.jinja2_text or "",
                 jinja2_variables=jinja2_variables,
                 variable_pool=variable_pool,
-                template_renderer=template_renderer,
+                jinja2_template_renderer=jinja2_template_renderer,
             )
             prompt_messages.append(
                 combine_message_content_with_role(
@@ -421,13 +419,13 @@ def render_jinja2_message(
     template: str,
     jinja2_variables: Sequence[VariableSelector],
     variable_pool: VariablePool,
-    template_renderer: Jinja2TemplateRenderer | None = None,
+    jinja2_template_renderer: Jinja2TemplateRenderer | None = None,
 ) -> str:
     if not template:
         return ""
-    if template_renderer is None:
-        msg = "template_renderer is required for jinja2 prompt rendering"
-        raise ValueError(msg)
+    if jinja2_template_renderer is None:
+        msg = "LLM prompts require an injected jinja2_template_renderer."
+        raise TemplateRenderError(msg)
 
     jinja2_inputs: dict[str, Any] = {}
     for jinja2_variable in jinja2_variables:
@@ -435,7 +433,7 @@ def render_jinja2_message(
         jinja2_inputs[jinja2_variable.variable] = (
             variable.to_object() if variable else ""
         )
-    return template_renderer.render_template(template, jinja2_inputs)
+    return jinja2_template_renderer.render_template(template, jinja2_inputs)
 
 
 def handle_completion_template(
@@ -444,14 +442,14 @@ def handle_completion_template(
     context: str,
     jinja2_variables: Sequence[VariableSelector],
     variable_pool: VariablePool,
-    template_renderer: Jinja2TemplateRenderer | None = None,
+    jinja2_template_renderer: Jinja2TemplateRenderer | None = None,
 ) -> Sequence[PromptMessage]:
     if template.edition_type == "jinja2":
         result_text = render_jinja2_message(
             template=template.jinja2_text or "",
             jinja2_variables=jinja2_variables,
             variable_pool=variable_pool,
-            template_renderer=template_renderer,
+            jinja2_template_renderer=jinja2_template_renderer,
         )
     else:
         template_text = template.text.replace(CONTEXT_PLACEHOLDER, context)
