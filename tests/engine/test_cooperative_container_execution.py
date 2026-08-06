@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from threading import Event, Lock, Thread
 from types import SimpleNamespace
 from typing import cast
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -24,12 +25,15 @@ from graphon.engine.worker import (
 )
 from graphon.engine_events.base import EngineEvent, NodeEvent
 from graphon.engine_events.node import (
+    NodeRunExceptionEvent,
     NodeRunFailedEvent,
+    NodeRunRetryEvent,
     NodeRunStartedEvent,
     NodeRunSucceededEvent,
 )
 from graphon.enums import (
     BuiltinNodeTypes,
+    ErrorStrategy,
     NodeExecutionType,
     WorkflowNodeExecutionStatus,
 )
@@ -100,6 +104,44 @@ class _RecordingLayer(Layer):
         _ = node
         _ = error
         self.end_events.append(result_event)
+
+
+def test_error_handler_preserves_node_execution_but_not_event_id() -> None:
+    node = SimpleNamespace(
+        retry=True,
+        retry_config=SimpleNamespace(max_retries=1, retry_interval_seconds=0),
+        error_strategy=None,
+        title="Code",
+    )
+    graph_execution = MagicMock()
+    graph_execution.get_or_create_node_execution.return_value.retry_count = 0
+    handler = NodeFailureHandler(
+        cast(Graph, SimpleNamespace(nodes={"node": node})),
+        graph_execution,
+    )
+    failed = NodeRunFailedEvent(
+        id="failed-event",
+        node_execution_id="node-run",
+        node_id="node",
+        node_type=BuiltinNodeTypes.CODE,
+        error="failed",
+        start_at=datetime.now(UTC).replace(tzinfo=None),
+        node_run_result=NodeRunResult(
+            status=WorkflowNodeExecutionStatus.FAILED,
+            error="failed",
+        ),
+    )
+
+    retry = handler.handle(frame_id="root", event=failed)
+    assert isinstance(retry, NodeRunRetryEvent)
+
+    node.retry = False
+    node.error_strategy = ErrorStrategy.FAIL_BRANCH
+    exception = handler.handle(frame_id="root", event=failed)
+    assert isinstance(exception, NodeRunExceptionEvent)
+
+    assert retry.node_execution_id == exception.node_execution_id == "node-run"
+    assert len({failed.id, retry.id, exception.id}) == 3
 
 
 def test_ready_queue_round_trips_start_and_resume_tasks() -> None:
@@ -212,7 +254,7 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
         ) -> Generator[NodeEvent | LoopFrameRequest, object, None]:
             started_at = datetime.now(UTC).replace(tzinfo=None)
             yield NodeRunStartedEvent(
-                id=self.execution_id,
+                node_execution_id=self.execution_id,
                 node_id=self.id,
                 node_type=self.node_type,
                 node_title="Loop",
@@ -249,7 +291,7 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
                 },
             )
             yield NodeRunSucceededEvent(
-                id=self.execution_id,
+                node_execution_id=self.execution_id,
                 node_id=self.id,
                 node_type=self.node_type,
                 start_at=started_at,
@@ -309,7 +351,7 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
             frame_id=run_state.frame_id,
             node_id=run_state.node_id,
         )
-        assert node_execution.execution_id == started.event.id
+        assert node_execution.execution_id == started.event.node_execution_id
         assert run_state.started_at == started.event.start_at
         assert layer.end_events == []
 

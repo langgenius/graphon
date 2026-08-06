@@ -311,6 +311,7 @@ class TestGraphRuntimeState:
 
         assert isinstance(execution, GraphExecution)
         assert execution.workflow_id == "workflow"
+        assert execution.execution_id
         assert state.graph_execution is execution
 
     def test_graph_configuration_rejects_different_graph(self) -> None:
@@ -397,6 +398,9 @@ class TestGraphRuntimeState:
         state.ready_queue.put(StartTask(frame_id="root", node_id="node-A"))
 
         graph_execution = state.graph_execution
+        graph_execution.execution_id = "execution-123"
+        assert graph_execution.next_event_sequence() == 1
+        assert graph_execution.next_event_sequence() == 2
         graph_execution.exceptions_count = 4
         graph_execution.started = True
         graph_execution.error = ValueError("saved failure")
@@ -421,6 +425,9 @@ class TestGraphRuntimeState:
 
         restored_execution = restored.graph_execution
         assert restored_execution.workflow_id == "wf-123"
+        assert restored_execution.execution_id == "execution-123"
+        assert restored_execution.last_event_sequence == 2
+        assert restored_execution.next_event_sequence() == 3
         assert restored_execution.exceptions_count == 4
         assert restored_execution.started is True
         assert isinstance(restored_execution.error, RuntimeError)
@@ -479,6 +486,8 @@ class TestGraphRuntimeState:
         assert json.loads(migrated["ready_queue"])["version"] == "2.0"
         assert json.loads(migrated["deferred_ready_tasks"])["version"] == "2.0"
         assert json.loads(migrated["graph_execution"])["version"] == "2.0"
+        assert restored.graph_execution.execution_id
+        assert restored.graph_execution.last_event_sequence == 0
         assert migrated["graph_node_states"] == {"ready": NodeState.TAKEN}
         assert migrated["graph_edge_states"] == {"edge": NodeState.SKIPPED}
         assert restored.ready_queue.drain() == [
@@ -549,3 +558,25 @@ class TestGraphRuntimeState:
         assert restored_file.value.filename == "resume.pdf"
         assert isinstance(restored_files, ArrayFileSegment)
         assert restored_files.value[0].filename == "resume.pdf"
+
+
+def test_version_2_graph_execution_without_sequence_defaults_to_zero() -> None:
+    execution = GraphExecution.from_snapshot(
+        json.dumps({
+            "version": "2.0",
+            "workflow_id": "workflow",
+            "execution_id": "execution",
+            "started": True,
+            "completed": False,
+            "aborted": False,
+            "paused": True,
+            "pause_reasons": [],
+            "error": None,
+            "exceptions_count": 0,
+            "node_executions": [],
+        })
+    )
+
+    assert execution.execution_id == "execution"
+    assert execution.last_event_sequence == 0
+    assert execution.next_event_sequence() == 1
