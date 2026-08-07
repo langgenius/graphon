@@ -7,11 +7,11 @@ from typing import Any
 
 import pytest
 
+from graphon.engine_events.node import NodeRunSucceededEvent
 from graphon.enums import WorkflowNodeExecutionStatus
-from graphon.graph_events.node import NodeRunSucceededEvent
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.if_else.if_else_node import IfElseNode
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 
 from ...helpers import build_graph_init_params, build_variable_pool
 
@@ -203,7 +203,8 @@ def _run_if_else_node(
     data: dict[str, Any],
     variables: tuple[tuple[tuple[str, ...], Any], ...],
 ) -> tuple[NodeRunResult, list[warnings.WarningMessage]]:
-    runtime_state = GraphRuntimeState(
+    runtime_state = RuntimeState(
+        workflow_id="workflow",
         variable_pool=build_variable_pool(variables=variables),
         start_at=perf_counter(),
     )

@@ -6,8 +6,8 @@ from typing import cast
 
 import pytest
 
+from graphon.engine_events.node import NodeRunPauseRequestedEvent, NodeRunSucceededEvent
 from graphon.entities.pause_reason import HitlRequired
-from graphon.graph_events.node import NodeRunPauseRequestedEvent, NodeRunSucceededEvent
 from graphon.nodes.human_input.entities import (
     Completed,
     Expired,
@@ -17,7 +17,7 @@ from graphon.nodes.human_input.entities import (
     PauseRequested,
 )
 from graphon.nodes.human_input.human_input_node import HumanInputNode
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 from graphon.variables.segments import StringSegment
 
 from ...helpers import build_graph_init_params, build_variable_pool
@@ -39,7 +39,8 @@ def _build_node(
             graph_config={"nodes": [], "edges": []},
             run_context=run_context,
         ),
-        graph_runtime_state=GraphRuntimeState(
+        graph_runtime_state=RuntimeState(
+            workflow_id="workflow",
             variable_pool=build_variable_pool(),
             start_at=perf_counter(),
         ),

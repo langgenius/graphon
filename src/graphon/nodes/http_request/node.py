@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, assert_never, cast, override
 
-from graphon.entities.graph_init_params import GraphInitParams
+from graphon.entities.graph_init_params import InitParams
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.file.enums import FileTransferMethod
 from graphon.file.models import File
@@ -21,7 +21,7 @@ from graphon.nodes.protocols import (
     FileReferenceFactoryProtocol,
     ToolFileManagerProtocol,
 )
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 from graphon.variables.segments import ArrayFileSegment
 
 from .config import build_http_request_config, resolve_http_request_config
@@ -57,8 +57,8 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
         node_id: str,
         data: HttpRequestNodeData,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        graph_init_params: InitParams,
+        graph_runtime_state: RuntimeState,
         http_request_config: HttpRequestNodeConfig,
         dependencies: HttpRequestNodeDependencies | None = None,
         http_client: HttpClientProtocol | None = None,

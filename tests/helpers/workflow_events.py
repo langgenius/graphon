@@ -8,9 +8,9 @@ import pytest
 
 import graphon.dsl.node_factory as node_factory_module
 from graphon.dsl import loads
-from graphon.graph_events.base import GraphEngineEvent, GraphNodeEventBase
-from graphon.graph_events.graph import GraphRunSucceededEvent
-from graphon.graph_events.traversal import GraphEdgeTakenEvent
+from graphon.engine_events.base import EngineEvent, NodeEvent
+from graphon.engine_events.graph import GraphRunSucceededEvent
+from graphon.engine_events.traversal import GraphEdgeTakenEvent
 from graphon.model_runtime.entities.common_entities import I18nObject
 from graphon.model_runtime.entities.llm_entities import LLMResult, LLMUsage
 from graphon.model_runtime.entities.message_entities import (
@@ -139,7 +139,7 @@ def run_workflow(
     *,
     start_inputs: Mapping[str, Any] = _EMPTY_MAPPING,
     credentials: Mapping[str, Any] = _EMPTY_MAPPING,
-) -> list[GraphEngineEvent]:
+) -> list[EngineEvent]:
     engine = loads(
         dsl,
         start_inputs=dict(start_inputs),
@@ -149,31 +149,29 @@ def run_workflow(
 
 
 def event_path(
-    events: Sequence[GraphEngineEvent],
-) -> list[tuple[str, str, str, str]]:
+    events: Sequence[EngineEvent],
+) -> list[tuple[str, str, str]]:
     """Project events to stable fields while preserving the complete event order."""
-    path: list[tuple[str, str, str, str]] = []
+    path: list[tuple[str, str, str]] = []
     for event in events:
-        if isinstance(event, GraphNodeEventBase):
+        if isinstance(event, NodeEvent):
             path.append((
                 type(event).__name__,
                 event.node_id,
-                event.in_loop_id or "",
-                event.in_iteration_id or "",
+                event.container_id,
             ))
         elif isinstance(event, GraphEdgeTakenEvent):
             path.append((
                 type(event).__name__,
                 f"{event.source_node_id}->{event.target_node_id}",
-                "",
-                "",
+                event.container_id,
             ))
         else:
-            path.append((type(event).__name__, "", "", ""))
+            path.append((type(event).__name__, "", ""))
     return path
 
 
-def final_outputs(events: Sequence[GraphEngineEvent]) -> dict[str, object]:
+def final_outputs(events: Sequence[EngineEvent]) -> dict[str, object]:
     for event in reversed(events):
         if isinstance(event, GraphRunSucceededEvent):
             return event.outputs

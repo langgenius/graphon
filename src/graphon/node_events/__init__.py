@@ -1,5 +1,5 @@
 from .agent import AgentLogEvent
-from .base import NodeEventBase, NodeRunResult
+from .base import NodeEventPayload, NodeRunResult
 from .iteration import (
     IterationFailedEvent,
     IterationNextEvent,
@@ -40,7 +40,7 @@ __all__ = [
     "LoopSucceededEvent",
     "ModelInvokeCompletedEvent",
     "ModelPollingProgressEvent",
-    "NodeEventBase",
+    "NodeEventPayload",
     "NodeRunResult",
     "PauseRequestedEvent",
     "RunRetrieverResourceEvent",

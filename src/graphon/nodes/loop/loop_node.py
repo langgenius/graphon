@@ -9,7 +9,7 @@ from graphon.enums import (
     NodeExecutionType,
     WorkflowNodeExecutionStatus,
 )
-from graphon.node_events.base import NodeEventBase
+from graphon.node_events.base import NodeEventPayload
 from graphon.node_events.loop import (
     LoopFailedEvent,
     LoopNextEvent,
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 class LoopNode(Node[LoopNodeData]):
     """Loop node definition.
 
-    Loop execution is interpreted by GraphEngine. The node keeps only its
+    Loop execution is interpreted by Engine. The node keeps only its
     configuration, loop-variable initialization, and static variable mapping.
     """
 
@@ -54,7 +54,7 @@ class LoopNode(Node[LoopNodeData]):
     @override
     def _run(
         self,
-    ) -> Generator[NodeEventBase | LoopFrameRequest, None, None]:
+    ) -> Generator[NodeEventPayload | LoopFrameRequest, None, None]:
         loop_count = self.node_data.loop_count
         inputs: dict[str, object] = {"loop_count": loop_count}
         root_node_id = self.node_data.start_node_id
@@ -84,7 +84,7 @@ class LoopNode(Node[LoopNodeData]):
         self,
         *,
         result: ContainerRunResult,
-    ) -> Generator[NodeEventBase | LoopFrameRequest, None, None]:
+    ) -> Generator[NodeEventPayload | LoopFrameRequest, None, None]:
         if isinstance(result, LoopFrameRequest):
             yield LoopNextEvent(
                 index=result.index,
