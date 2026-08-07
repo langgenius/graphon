@@ -8,13 +8,13 @@ import pytest
 
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.entities.graph_config import NodeConfigDict
-from graphon.entities.graph_init_params import GraphInitParams
+from graphon.entities.graph_init_params import InitParams
 from graphon.enums import BuiltinNodeTypes, ErrorStrategy, NodeExecutionType, NodeType
 from graphon.graph.graph import Graph
 from graphon.graph.validation import GraphValidationError
-from graphon.node_events.base import NodeEventBase, NodeRunResult
+from graphon.node_events.base import NodeEventPayload, NodeRunResult
 from graphon.nodes.base.node import Node
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 
 from ..helpers import build_graph_init_params
@@ -38,8 +38,8 @@ class _TestNode(Node[_TestNodeData]):
         *,
         node_id: str,
         data: _TestNodeData,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        graph_init_params: InitParams,
+        graph_runtime_state: RuntimeState,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -52,7 +52,7 @@ class _TestNode(Node[_TestNodeData]):
         if isinstance(node_type_value, str):
             self.node_type = node_type_value
 
-    def _run(self) -> NodeRunResult | Generator[NodeEventBase, None, None]:
+    def _run(self) -> NodeRunResult | Generator[NodeEventPayload, None, None]:
         raise NotImplementedError
 
     def post_init(self) -> None:
@@ -72,8 +72,8 @@ class _TestNode(Node[_TestNodeData]):
 
 @dataclass(slots=True)
 class _SimpleNodeFactory:
-    graph_init_params: GraphInitParams
-    graph_runtime_state: GraphRuntimeState
+    graph_init_params: InitParams
+    graph_runtime_state: RuntimeState
 
     def create_node(self, node_config: NodeConfigDict) -> _TestNode:
         return _TestNode(
@@ -91,7 +91,8 @@ def graph_init_dependencies() -> tuple[_SimpleNodeFactory, dict[str, object]]:
         workflow_id="workflow",
         graph_config=graph_config,
     )
-    runtime_state = GraphRuntimeState(
+    runtime_state = RuntimeState(
+        workflow_id="workflow",
         variable_pool=VariablePool(),
         start_at=time.perf_counter(),
     )

@@ -7,8 +7,8 @@ from graphon.enums import WorkflowNodeExecutionMetadataKey, WorkflowNodeExecutio
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 
 
-class NodeEventBase(BaseModel):
-    """Base class for all node events"""
+class NodeEventPayload(BaseModel):
+    """Event payload emitted by a node before execution context is attached."""
 
 
 def _default_metadata() -> Mapping[WorkflowNodeExecutionMetadataKey, Any]:

@@ -5,7 +5,7 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from graphon.entities.graph_init_params import GraphInitParams
+from graphon.entities.graph_init_params import InitParams
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.variables import Variable
 
@@ -29,8 +29,8 @@ def build_graph_init_params(
     graph_config: Mapping[str, Any] | None = None,
     run_context: Mapping[str, Any] | None = None,
     call_depth: int = 0,
-) -> GraphInitParams:
-    return GraphInitParams(
+) -> InitParams:
+    return InitParams(
         workflow_id=workflow_id,
         graph_config=graph_config or {},
         run_context=run_context or {},

@@ -8,7 +8,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, assert_never, overload, override
 
-from graphon.entities.graph_init_params import GraphInitParams
+from graphon.entities.graph_init_params import InitParams
 from graphon.enums import (
     BuiltinNodeTypes,
     WorkflowNodeExecutionMetadataKey,
@@ -44,7 +44,7 @@ from graphon.nodes.llm.runtime_protocols import (
     LLMProtocol,
     PromptMessageSerializerProtocol,
 )
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.factory import build_segment_with_type
 from graphon.variables.template_resolution import convert_template
@@ -145,8 +145,8 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         node_id: str,
         data: ParameterExtractorNodeData,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        graph_init_params: InitParams,
+        graph_runtime_state: RuntimeState,
         dependencies: _ParameterExtractorNodeDependencies,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
@@ -161,8 +161,8 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         node_id: str,
         data: ParameterExtractorNodeData,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        graph_init_params: InitParams,
+        graph_runtime_state: RuntimeState,
         dependencies: None = None,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
@@ -177,8 +177,8 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         node_id: str,
         data: ParameterExtractorNodeData,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        graph_init_params: InitParams,
+        graph_runtime_state: RuntimeState,
         dependencies: _ParameterExtractorNodeDependencies | None = None,
         credentials_provider: object | None = None,
         model_factory: object | None = None,

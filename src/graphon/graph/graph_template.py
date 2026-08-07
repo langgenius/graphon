@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 class GraphTemplate(BaseModel):
     """Graph Template for container nodes and subgraph expansion
 
-    According to GraphEngine V2 spec, GraphTemplate contains:
+    According to Engine V2 spec, GraphTemplate contains:
     - nodes: mapping of node definitions
     - edges: mapping of edge definitions
     - root_ids: list of root node IDs

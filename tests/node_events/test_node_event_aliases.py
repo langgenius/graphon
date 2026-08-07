@@ -1,9 +1,9 @@
-from graphon.entities.pause_reason import SchedulingPause
-from graphon.enums import WorkflowNodeExecutionStatus
-from graphon.graph_events.node import (
+from graphon.engine_events.node import (
     NodeRunPauseRequestedEvent,
     NodeRunVariableUpdatedEvent,
 )
+from graphon.entities.pause_reason import SchedulingPause
+from graphon.enums import WorkflowNodeExecutionStatus
 from graphon.node_events.base import NodeRunResult
 from graphon.node_events.node import PauseRequestedEvent, VariableUpdatedEvent
 

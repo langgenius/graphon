@@ -15,7 +15,7 @@ from jsonschema import Draft7Validator, SchemaError, ValidationError
 from referencing import Registry
 from referencing.exceptions import Unresolvable
 
-from graphon.entities.graph_init_params import GraphInitParams
+from graphon.entities.graph_init_params import InitParams
 from graphon.enums import (
     BuiltinNodeTypes,
     WorkflowNodeExecutionMetadataKey,
@@ -47,7 +47,7 @@ from graphon.model_runtime.entities.model_entities import ModelFeature
 from graphon.model_runtime.memory.prompt_message_memory import PromptMessageMemory
 from graphon.model_runtime.utils.encoders import jsonable_encoder
 from graphon.node_events.base import (
-    NodeEventBase,
+    NodeEventPayload,
     NodeRunResult,
 )
 from graphon.node_events.node import (
@@ -74,7 +74,7 @@ from graphon.nodes.llm.runtime_protocols import (
     RetrieverAttachmentLoaderProtocol,
 )
 from graphon.prompt_entities import MemoryConfig
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 from graphon.template_rendering import Jinja2TemplateRenderer
 from graphon.variables.segments import (
     ArrayFileSegment,
@@ -154,8 +154,8 @@ class LLMNode(Node[LLMNodeData]):
         node_id: str,
         data: LLMNodeData,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        graph_init_params: InitParams,
+        graph_runtime_state: RuntimeState,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
         model_instance: LLMProtocol,
@@ -243,7 +243,7 @@ class LLMNode(Node[LLMNodeData]):
         *,
         node_inputs: dict[str, Any],
     ) -> Generator[
-        NodeEventBase,
+        NodeEventPayload,
         None,
         _PreparedRunPrompt,
     ]:
@@ -309,7 +309,7 @@ class LLMNode(Node[LLMNodeData]):
         self,
         *,
         node_inputs: dict[str, Any],
-    ) -> Generator[NodeEventBase, None, _CollectedRunContext]:
+    ) -> Generator[NodeEventPayload, None, _CollectedRunContext]:
         context = None
         context_files: Sequence[File] = ()
         for event in self._fetch_context(node_data=self.node_data):
@@ -362,7 +362,7 @@ class LLMNode(Node[LLMNodeData]):
         stop: Sequence[str] | None,
         model_provider: Any,
         model_name: str,
-    ) -> Generator[NodeEventBase, None, None]:
+    ) -> Generator[NodeEventPayload, None, None]:
         generator = self._invoke_llm_for_run(
             file_outputs=file_outputs,
             prompt_messages=prompt_messages,
@@ -450,7 +450,7 @@ class LLMNode(Node[LLMNodeData]):
         file_outputs: list[File],
         prompt_messages: Sequence[PromptMessage],
         stop: Sequence[str] | None,
-    ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
+    ) -> Generator[NodeEventPayload | LLMStructuredOutput, None, None]:
         polling_model = self._polling_model_instance()
         if polling_model is None:
             return LLMNode.invoke_llm(
@@ -484,7 +484,7 @@ class LLMNode(Node[LLMNodeData]):
         polling_model: LLMPollingCapableProtocol,
         prompt_messages: Sequence[PromptMessage],
         stop: Sequence[str] | None,
-    ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
+    ) -> Generator[NodeEventPayload | LLMStructuredOutput, None, None]:
         config = self._polling_config(polling_model)
         model_parameters = dict(self._model_instance.parameters)
         json_schema = (
@@ -741,7 +741,7 @@ class LLMNode(Node[LLMNodeData]):
         file_outputs: list[File],
         node_id: str,
         reasoning_format: Literal["separated", "tagged"] = "tagged",
-    ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
+    ) -> Generator[NodeEventPayload | LLMStructuredOutput, None, None]:
         model_parameters = model_instance.parameters
         invoke_model_parameters = dict(model_parameters)
         invoke_result: LLMResult | Generator[LLMResultChunk, None, None]
@@ -793,7 +793,7 @@ class LLMNode(Node[LLMNodeData]):
         reasoning_format: Literal["separated", "tagged"] = "tagged",
         request_start_time: float | None = None,
         json_schema: Mapping[str, Any] | None = None,
-    ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
+    ) -> Generator[NodeEventPayload | LLMStructuredOutput, None, None]:
         if isinstance(invoke_result, LLMResult):
             yield from LLMNode._yield_blocking_invoke_result(
                 invoke_result=invoke_result,
@@ -855,7 +855,7 @@ class LLMNode(Node[LLMNodeData]):
         reasoning_format: Literal["separated", "tagged"] = "tagged",
         request_start_time: float | None = None,
         json_schema: Mapping[str, Any] | None = None,
-    ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
+    ) -> Generator[NodeEventPayload | LLMStructuredOutput, None, None]:
         start_time = (
             request_start_time
             if request_start_time is not None
@@ -943,7 +943,7 @@ class LLMNode(Node[LLMNodeData]):
         file_saver: LLMFileSaver,
         file_outputs: list[File],
         node_id: str,
-    ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
+    ) -> Generator[NodeEventPayload | LLMStructuredOutput, None, None]:
         for result in invoke_result:
             yield from LLMNode._handle_stream_result(
                 result=result,
@@ -961,7 +961,7 @@ class LLMNode(Node[LLMNodeData]):
         file_saver: LLMFileSaver,
         file_outputs: list[File],
         node_id: str,
-    ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
+    ) -> Generator[NodeEventPayload | LLMStructuredOutput, None, None]:
         if isinstance(result, LLMResultChunkWithStructuredOutput):
             if result.structured_output is not None:
                 state.structured_output = dict(result.structured_output)

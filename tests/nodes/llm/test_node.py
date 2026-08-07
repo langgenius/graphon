@@ -8,15 +8,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from graphon.engine_events.node import (
+    NodeRunModelPollingProgressEvent,
+    NodeRunReasoningChunkEvent,
+)
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.enums import WorkflowNodeExecutionStatus
 from graphon.file import helpers as file_helpers
 from graphon.file.enums import FileTransferMethod, FileType
 from graphon.file.models import File
-from graphon.graph_events.node import (
-    NodeRunModelPollingProgressEvent,
-    NodeRunReasoningChunkEvent,
-)
 from graphon.model_runtime.entities.llm_entities import (
     LLMPollingConfig,
     LLMPollingResult,
@@ -35,7 +35,7 @@ from graphon.model_runtime.entities.message_entities import (
     VideoPromptMessageContent,
 )
 from graphon.model_runtime.entities.model_entities import ModelFeature
-from graphon.node_events.base import NodeEventBase
+from graphon.node_events.base import NodeEventPayload
 from graphon.node_events.node import (
     ModelInvokeCompletedEvent,
     ModelPollingProgressEvent,
@@ -47,7 +47,7 @@ from graphon.nodes.llm import LLMNode, LLMNodeData
 from graphon.nodes.llm.exc import LLMNodeError
 from graphon.nodes.llm.reasoning import split_reasoning
 from graphon.nodes.llm.runtime_protocols import LLMPollingCapableProtocol, LLMProtocol
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 
 from ...helpers import build_graph_init_params, build_variable_pool
 
@@ -166,7 +166,8 @@ def _build_llm_node(
             graph_config={"nodes": [], "edges": []},
             run_context=run_context,
         ),
-        graph_runtime_state=GraphRuntimeState(
+        graph_runtime_state=RuntimeState(
+            workflow_id="workflow",
             variable_pool=build_variable_pool(variables=prepared_variables),
             start_at=0.0,
         ),
@@ -495,7 +496,7 @@ def test_run_does_not_reuse_file_outputs_after_failure(
     def invoke(
         **kwargs: Any,
     ) -> Generator[
-        NodeEventBase | LLMStructuredOutput,
+        NodeEventPayload | LLMStructuredOutput,
         None,
         None,
     ]:
@@ -533,12 +534,12 @@ def test_run_does_not_reuse_file_outputs_after_failure(
     ("invoke_events", "expected_error"),
     [
         ([], "without a completion event"),
-        ([NodeEventBase()], "Unexpected LLM invocation event: NodeEventBase"),
+        ([NodeEventPayload()], "Unexpected LLM invocation event: NodeEventPayload"),
     ],
 )
 def test_run_rejects_invalid_invocation_event_sequence(
     monkeypatch: pytest.MonkeyPatch,
-    invoke_events: list[NodeEventBase],
+    invoke_events: list[NodeEventPayload],
     expected_error: str,
 ) -> None:
     node = _build_llm_node()
@@ -1079,7 +1080,7 @@ def _collect_stream_events(
     parts: Sequence[str],
     *,
     reasoning_format: Literal["separated", "tagged"],
-) -> list[NodeEventBase]:
+) -> list[NodeEventPayload]:
     """Stream ``parts`` through the LLM node and return every emitted event."""
     model = MagicMock(is_structured_output_parse_error=lambda _error: False)
     return [
@@ -1092,7 +1093,7 @@ def _collect_stream_events(
             model_instance=cast(LLMProtocol, model),
             reasoning_format=reasoning_format,
         )
-        if isinstance(event, NodeEventBase)
+        if isinstance(event, NodeEventPayload)
     ]
 
 

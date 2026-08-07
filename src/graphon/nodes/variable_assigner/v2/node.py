@@ -4,10 +4,10 @@ import json
 from collections.abc import Generator, Mapping, MutableMapping, Sequence
 from typing import Any, override
 
-from graphon.entities.graph_init_params import GraphInitParams
+from graphon.entities.graph_init_params import InitParams
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.node_events.base import (
-    NodeEventBase,
+    NodeEventPayload,
     NodeRunResult,
 )
 from graphon.node_events.node import (
@@ -17,7 +17,7 @@ from graphon.node_events.node import (
 from graphon.nodes.base.node import Node
 from graphon.nodes.variable_assigner.common import helpers as common_helpers
 from graphon.nodes.variable_assigner.common.exc import VariableOperatorNodeError
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 from graphon.variables.consts import SELECTORS_LENGTH
 from graphon.variables.types import SegmentType
 from graphon.variables.variables import VariableBase
@@ -81,8 +81,8 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
         node_id: str,
         data: VariableAssignerNodeData,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        graph_init_params: InitParams,
+        graph_runtime_state: RuntimeState,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -134,7 +134,7 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
         return var_mapping
 
     @override
-    def _run(self) -> Generator[NodeEventBase, None, None]:
+    def _run(self) -> Generator[NodeEventPayload, None, None]:
         inputs = self.node_data.model_dump()
         process_data: dict[str, Any] = {}
         # NOTE: This node has no outputs
