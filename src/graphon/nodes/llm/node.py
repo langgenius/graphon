@@ -11,6 +11,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, assert_never, override
 
+from jsonschema import Draft7Validator, SchemaError, ValidationError
+from referencing import Registry
+from referencing.exceptions import Unresolvable
+
 from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import (
     BuiltinNodeTypes,
@@ -39,6 +43,7 @@ from graphon.model_runtime.entities.message_entities import (
     PromptMessageContentUnionTypes,
     TextPromptMessageContent,
 )
+from graphon.model_runtime.entities.model_entities import ModelFeature
 from graphon.model_runtime.memory.prompt_message_memory import PromptMessageMemory
 from graphon.model_runtime.utils.encoders import jsonable_encoder
 from graphon.node_events.base import (
@@ -101,6 +106,7 @@ _MULTIMODAL_OUTPUT_FILE_TYPES: Mapping[PromptMessageContentType, FileType] = {
     PromptMessageContentType.AUDIO: FileType.AUDIO,
     PromptMessageContentType.DOCUMENT: FileType.DOCUMENT,
 }
+_NO_REMOTE_SCHEMA_REGISTRY = Registry()
 
 
 @dataclass(frozen=True)
@@ -262,6 +268,18 @@ class LLMNode(Node[LLMNodeData]):
             node_inputs=node_inputs,
         )
         model_instance = self._prepare_model_instance()
+        if self.node_data.structured_output_enabled:
+            model_schema = llm_utils.fetch_model_schema(model_instance=model_instance)
+            if (
+                model_schema.features is not None
+                and ModelFeature.STRUCTURED_OUTPUT not in model_schema.features
+            ):
+                msg = (
+                    "Structured output is not supported by model "
+                    f"{model_instance.provider}/{model_instance.model_name} "
+                    "(stage=capability)"
+                )
+                raise LLMNodeError(msg)
         node_inputs.update(
             llm_utils.build_model_identity_inputs(model_instance=model_instance),
         )
@@ -370,7 +388,7 @@ class LLMNode(Node[LLMNodeData]):
                 raise LLMNodeError(msg)
 
             completed_event = event
-            if completed_event.structured_output:
+            if completed_event.structured_output is not None:
                 structured_output = LLMStructuredOutput(
                     structured_output=completed_event.structured_output,
                 )
@@ -518,6 +536,7 @@ class LLMNode(Node[LLMNodeData]):
                         model_instance=self._model_instance,
                         reasoning_format=self.node_data.reasoning_format,
                         request_start_time=request_start_time,
+                        json_schema=json_schema,
                     )
                     return
                 case LLMPollingStatus.FAILED:
@@ -726,6 +745,7 @@ class LLMNode(Node[LLMNodeData]):
         model_parameters = model_instance.parameters
         invoke_model_parameters = dict(model_parameters)
         invoke_result: LLMResult | Generator[LLMResultChunk, None, None]
+        output_schema: dict[str, Any] | None = None
         if structured_output_enabled:
             output_schema = LLMNode.fetch_structured_output_schema(
                 structured_output=structured_output or {},
@@ -758,6 +778,7 @@ class LLMNode(Node[LLMNodeData]):
             model_instance=model_instance,
             reasoning_format=reasoning_format,
             request_start_time=request_start_time,
+            json_schema=output_schema,
         )
 
     @staticmethod
@@ -771,6 +792,7 @@ class LLMNode(Node[LLMNodeData]):
         model_instance: LLMProtocol,
         reasoning_format: Literal["separated", "tagged"] = "tagged",
         request_start_time: float | None = None,
+        json_schema: Mapping[str, Any] | None = None,
     ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
         if isinstance(invoke_result, LLMResult):
             yield from LLMNode._yield_blocking_invoke_result(
@@ -779,6 +801,7 @@ class LLMNode(Node[LLMNodeData]):
                 file_outputs=file_outputs,
                 reasoning_format=reasoning_format,
                 request_start_time=request_start_time,
+                json_schema=json_schema,
             )
             return
 
@@ -790,6 +813,7 @@ class LLMNode(Node[LLMNodeData]):
             model_instance=model_instance,
             reasoning_format=reasoning_format,
             request_start_time=request_start_time,
+            json_schema=json_schema,
         )
 
     @staticmethod
@@ -800,19 +824,25 @@ class LLMNode(Node[LLMNodeData]):
         file_outputs: list[File],
         reasoning_format: Literal["separated", "tagged"] = "tagged",
         request_start_time: float | None = None,
+        json_schema: Mapping[str, Any] | None = None,
     ) -> Generator[ModelInvokeCompletedEvent, None, None]:
         duration = None
         if request_start_time is not None:
             duration = time.perf_counter() - request_start_time
             invoke_result.usage.latency = round(duration, 3)
 
-        yield LLMNode.handle_blocking_result(
+        event = LLMNode.handle_blocking_result(
             invoke_result=invoke_result,
             saver=file_saver,
             file_outputs=file_outputs,
             reasoning_format=reasoning_format,
             request_latency=duration,
         )
+        LLMNode._validate_structured_output_result(
+            structured_output=event.structured_output,
+            json_schema=json_schema,
+        )
+        yield event
 
     @staticmethod
     def _yield_streaming_invoke_result(
@@ -824,6 +854,7 @@ class LLMNode(Node[LLMNodeData]):
         model_instance: LLMProtocol,
         reasoning_format: Literal["separated", "tagged"] = "tagged",
         request_start_time: float | None = None,
+        json_schema: Mapping[str, Any] | None = None,
     ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
         start_time = (
             request_start_time
@@ -847,10 +878,10 @@ class LLMNode(Node[LLMNodeData]):
                 model_instance=model_instance,
                 error=e,
             ):
-                msg = f"Failed to parse structured output: {e}"
+                msg = f"Failed to parse structured output (stage=result, path=$): {e}"
                 raise LLMNodeError(msg) from e
             if type(e).__name__ == "OutputParserError":
-                msg = f"Failed to parse structured output: {e}"
+                msg = f"Failed to parse structured output (stage=result, path=$): {e}"
                 raise LLMNodeError(msg) from e
             raise
 
@@ -887,6 +918,10 @@ class LLMNode(Node[LLMNodeData]):
             has_content=state.has_content,
             first_token_time=state.first_token_time,
             start_time=state.start_time,
+        )
+        LLMNode._validate_structured_output_result(
+            structured_output=state.structured_output,
+            json_schema=json_schema,
         )
 
         yield ModelInvokeCompletedEvent(
@@ -1050,6 +1085,38 @@ class LLMNode(Node[LLMNodeData]):
             callable(is_structured_output_parse_error)
             and is_structured_output_parse_error(error)
         )
+
+    @staticmethod
+    def _validate_structured_output_result(
+        *,
+        structured_output: Mapping[str, Any] | None,
+        json_schema: Mapping[str, Any] | None,
+    ) -> None:
+        if json_schema is None:
+            return
+        if structured_output is None:
+            msg = (
+                "Structured output validation failed "
+                "(stage=result, path=$): structured output is missing"
+            )
+            raise LLMNodeError(msg)
+        try:
+            Draft7Validator(
+                json_schema,
+                registry=_NO_REMOTE_SCHEMA_REGISTRY,
+            ).validate(structured_output)
+        except ValidationError as error:
+            msg = (
+                "Structured output validation failed "
+                f"(stage=result, path={error.json_path}): {error.message}"
+            )
+            raise LLMNodeError(msg) from error
+        except Unresolvable as error:
+            msg = (
+                "Structured output validation failed "
+                "(stage=result, path=$): schema reference could not be resolved"
+            )
+            raise LLMNodeError(msg) from error
 
     @staticmethod
     def _finalize_streaming_usage(
@@ -1602,27 +1669,23 @@ class LLMNode(Node[LLMNodeData]):
                 or not a JSON object.
 
         """
-        if not structured_output:
-            msg = "Please provide a valid structured output schema"
+        raw_schema = structured_output.get("schema")
+        if not isinstance(raw_schema, Mapping):
+            msg = (
+                "Invalid structured output schema "
+                "(stage=schema, path=$.schema): expected a JSON object"
+            )
             raise LLMNodeError(msg)
-        structured_output_schema = json.dumps(
-            structured_output.get("schema", {}),
-            ensure_ascii=False,
-        )
-        if not structured_output_schema:
-            msg = "Please provide a valid structured output schema"
-            raise LLMNodeError(msg)
-
+        schema = dict(raw_schema)
         try:
-            schema = json.loads(structured_output_schema)
-            if not isinstance(schema, dict):
-                msg = "structured_output_schema must be a JSON object"
-                raise LLMNodeError(msg)
-        except json.JSONDecodeError as error:
-            msg = "structured_output_schema is not valid JSON format"
+            Draft7Validator.check_schema(schema)
+        except SchemaError as error:
+            msg = (
+                "Invalid structured output schema "
+                f"(stage=schema, path={error.json_path}): {error.message}"
+            )
             raise LLMNodeError(msg) from error
-        else:
-            return schema
+        return schema
 
     @staticmethod
     def _save_multimodal_output_and_convert_result_to_markdown(

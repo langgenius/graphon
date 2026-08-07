@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from graphon.entities.base_node_data import BaseNodeData
 from graphon.enums import WorkflowNodeExecutionStatus
 from graphon.file import helpers as file_helpers
 from graphon.file.enums import FileTransferMethod, FileType
@@ -24,6 +25,7 @@ from graphon.model_runtime.entities.llm_entities import (
     LLMResultChunk,
     LLMResultChunkDelta,
     LLMResultChunkWithStructuredOutput,
+    LLMResultWithStructuredOutput,
     LLMStructuredOutput,
     LLMUsage,
 )
@@ -186,6 +188,229 @@ def _stub_simple_prompt(monkeypatch: pytest.MonkeyPatch, node: LLMNode) -> None:
         "graphon.nodes.llm.node.llm_utils.fetch_prompt_messages",
         lambda **_: ([], None),
     )
+
+
+@pytest.mark.parametrize(
+    "switch_values",
+    [
+        {"structured_output_enabled": True},
+        {"structured_output_switch_on": True},
+        {
+            "structured_output_enabled": False,
+            "structured_output_switch_on": True,
+        },
+    ],
+    ids=["legacy", "current", "current-wins-conflict"],
+)
+def test_structured_output_switch_survives_node_data_round_trip(
+    switch_values: dict[str, bool],
+) -> None:
+    payload = {
+        "type": "llm",
+        "model": {
+            "provider": "openai",
+            "name": "gpt-4o",
+            "mode": "chat",
+        },
+        "prompt_template": [{"role": "user", "text": "Hello"}],
+        "context": {"enabled": False},
+        "structured_output": {"schema": {"type": "object"}},
+        **switch_values,
+    }
+
+    node_data = LLMNode.validate_node_data(BaseNodeData.model_validate(payload))
+    restored = LLMNode.validate_node_data(node_data)
+    dumped = restored.model_dump(mode="python", by_alias=True)
+    restored_from_dump = LLMNode.validate_node_data(dumped)
+
+    assert restored.structured_output_switch_on is True
+    assert restored.structured_output_enabled is True
+    assert dumped["structured_output_switch_on"] is True
+    assert "structured_output_enabled" not in dumped
+    assert restored_from_dump.structured_output_switch_on is True
+
+
+def test_fetch_structured_output_schema_checks_draft7_schema() -> None:
+    with pytest.raises(LLMNodeError) as exc_info:
+        LLMNode.fetch_structured_output_schema(
+            structured_output={"schema": {"type": "not-a-json-schema-type"}},
+        )
+
+    assert "stage=schema" in str(exc_info.value)
+    assert "path=$.type" in str(exc_info.value)
+
+
+def test_final_structured_output_validation_disables_remote_ref_retrieval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_urlopen(*_args: Any, **_kwargs: Any) -> None:
+        pytest.fail("remote schema retrieval was attempted")
+
+    monkeypatch.setattr("urllib.request.urlopen", fail_urlopen)
+
+    with pytest.raises(LLMNodeError) as exc_info:
+        LLMNode._validate_structured_output_result(
+            structured_output={},
+            json_schema={"$ref": "http://127.0.0.1/schema"},
+        )
+
+    assert "stage=result" in str(exc_info.value)
+    assert "path=$" in str(exc_info.value)
+    assert "schema reference could not be resolved" in str(exc_info.value)
+
+
+def test_final_structured_output_validation_supports_local_refs() -> None:
+    schema = {
+        "definitions": {
+            "result": {
+                "type": "object",
+                "properties": {"ok": {"type": "boolean"}},
+                "required": ["ok"],
+            },
+        },
+        "$ref": "#/definitions/result",
+    }
+
+    LLMNode._validate_structured_output_result(
+        structured_output={"ok": True},
+        json_schema=schema,
+    )
+
+
+_RESULT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "profile": {
+            "type": "object",
+            "properties": {
+                "role": {"type": "string", "enum": ["admin"]},
+                "scores": {"type": "array", "items": {"type": "integer"}},
+            },
+            "required": ["role", "scores"],
+        },
+    },
+    "required": ["profile"],
+}
+
+
+@pytest.mark.parametrize(
+    ("structured_output", "path"),
+    [
+        (None, "$"),
+        ({}, "$"),
+        ({"profile": {}}, "$.profile"),
+        ({"profile": {"role": "viewer", "scores": [1]}}, "$.profile.role"),
+        (
+            {"profile": {"role": "admin", "scores": [1, "invalid"]}},
+            "$.profile.scores[1]",
+        ),
+    ],
+)
+def test_final_structured_output_is_validated_against_full_schema(
+    structured_output: dict[str, Any] | None,
+    path: str,
+) -> None:
+    chunk = LLMResultChunkWithStructuredOutput(
+        model="gpt-4o",
+        delta=LLMResultChunkDelta(
+            index=0,
+            message=AssistantPromptMessage(content=""),
+            usage=LLMUsage.empty_usage(),
+        ),
+        structured_output=structured_output,
+    )
+    model = MagicMock(is_structured_output_parse_error=lambda _error: False)
+
+    with pytest.raises(LLMNodeError) as exc_info:
+        list(
+            LLMNode.handle_invoke_result(
+                invoke_result=_stream_results(chunk),
+                file_saver=MagicMock(),
+                file_outputs=[],
+                node_id="llm",
+                model_instance=cast(LLMProtocol, model),
+                json_schema=_RESULT_SCHEMA,
+            ),
+        )
+
+    assert "stage=result" in str(exc_info.value)
+    assert f"path={path}" in str(exc_info.value)
+    if structured_output is None:
+        assert "structured output is missing" in str(exc_info.value)
+
+
+def test_blocking_structured_output_is_validated_against_schema() -> None:
+    result = LLMResultWithStructuredOutput(
+        model="gpt-4o",
+        message=AssistantPromptMessage(content=""),
+        usage=LLMUsage.empty_usage(),
+        structured_output={"profile": {"role": "admin", "scores": ["invalid"]}},
+    )
+
+    with pytest.raises(LLMNodeError, match=r"stage=result, path=\$\.profile\.scores"):
+        list(
+            LLMNode.handle_invoke_result(
+                invoke_result=result,
+                file_saver=MagicMock(),
+                file_outputs=[],
+                node_id="llm",
+                model_instance=cast(LLMProtocol, MagicMock()),
+                json_schema=_RESULT_SCHEMA,
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    ("features", "should_invoke"),
+    [
+        ([ModelFeature.STRUCTURED_OUTPUT], True),
+        ([], False),
+        (None, True),
+    ],
+    ids=["supported", "unsupported", "unknown"],
+)
+def test_structured_output_capability_is_tri_state(
+    features: list[ModelFeature] | None,
+    should_invoke: bool,
+) -> None:
+    model = MagicMock(
+        provider="openai",
+        model_name="gpt-4o",
+        parameters={},
+        stop=(),
+        is_structured_output_parse_error=lambda _error: False,
+    )
+    model.get_model_schema.return_value = SimpleNamespace(
+        features=features,
+        supports_prompt_content_type=lambda _content_type: True,
+    )
+    model.invoke_llm_with_structured_output.return_value = _stream_results(
+        LLMResultChunkWithStructuredOutput(
+            model="gpt-4o",
+            delta=LLMResultChunkDelta(
+                index=0,
+                message=AssistantPromptMessage(content=""),
+                usage=LLMUsage.empty_usage(),
+            ),
+            structured_output={},
+        ),
+    )
+    node = _build_llm_node(model_instance=model)
+    node.node_data.structured_output_switch_on = True
+    node.node_data.structured_output = {"schema": {"type": "object"}}
+
+    completed = next(
+        event for event in node._run() if isinstance(event, StreamCompletedEvent)
+    )
+
+    if should_invoke:
+        model.invoke_llm_with_structured_output.assert_called_once()
+        assert completed.node_run_result.status == WorkflowNodeExecutionStatus.SUCCEEDED
+        assert completed.node_run_result.outputs["structured_output"] == {}
+    else:
+        model.invoke_llm_with_structured_output.assert_not_called()
+        assert completed.node_run_result.status == WorkflowNodeExecutionStatus.FAILED
+        assert "stage=capability" in completed.node_run_result.error
 
 
 def test_run_emits_model_identity_in_node_result_inputs(

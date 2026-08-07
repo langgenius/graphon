@@ -200,12 +200,11 @@ class AIModelEntity(ProviderModel):
             ),
             None,
         )
-        if not schema_key:
+        # Explicit feature lists are authoritative; infer support only for legacy
+        # model schemas that omit the feature declaration.
+        if not schema_key or self.features is not None:
             return self
-        if self.features is None:
-            self.features = [ModelFeature.STRUCTURED_OUTPUT]
-        elif ModelFeature.STRUCTURED_OUTPUT not in self.features:
-            self.features.append(ModelFeature.STRUCTURED_OUTPUT)
+        self.features = [ModelFeature.STRUCTURED_OUTPUT]
         return self
 
 

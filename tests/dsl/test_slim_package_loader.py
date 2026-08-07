@@ -60,6 +60,51 @@ def test_slim_config_auto_discovers_uv_and_python(
     assert config.local.uv_path == "/usr/local/bin/uv"
 
 
+@pytest.mark.parametrize(
+    ("raw_features", "infer_from_rule", "expected_features"),
+    [
+        (None, False, None),
+        ([], True, []),
+        (None, True, [ModelFeature.STRUCTURED_OUTPUT]),
+        (
+            ["structured-output"],
+            False,
+            [ModelFeature.STRUCTURED_OUTPUT],
+        ),
+    ],
+    ids=["unknown", "unsupported", "inferred", "supported"],
+)
+def test_slim_package_loader_preserves_model_feature_tri_state(
+    tmp_path: Path,
+    raw_features: list[str] | None,
+    infer_from_rule: bool,
+    expected_features: list[ModelFeature] | None,
+) -> None:
+    loader = SlimPackageLoader(
+        SlimConfig(
+            bindings=[SlimProviderBinding(plugin_id="author/fake:0.0.1@test")],
+            local=SlimLocalSettings(folder=tmp_path),
+        ),
+    )
+    raw_model = {
+        "model": "chat-model",
+        "label": {"en_US": "Chat Model"},
+        "model_type": "llm",
+        "fetch_from": "predefined-model",
+        "model_properties": {},
+        "parameter_rules": (
+            [{"name": "json_schema", "type": "string"}] if infer_from_rule else []
+        ),
+    }
+    if raw_features is not None:
+        raw_model["features"] = raw_features
+
+    model = loader.convert_model_entity(raw_model)
+
+    assert model is not None
+    assert model.features == expected_features
+
+
 def _write_multi_provider_plugin(plugin_root: Path) -> None:
     (plugin_root / "_assets").mkdir(parents=True, exist_ok=True)
     (plugin_root / "provider").mkdir(parents=True, exist_ok=True)

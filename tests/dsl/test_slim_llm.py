@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
@@ -26,14 +27,16 @@ class _RecordingSlimClient:
         self.calls.append((plugin_id, action, data))
         if action == "get_llm_num_tokens":
             return [{"num_tokens": 7}]
-        return [
-            {
-                "delta": {
-                    "index": 0,
-                    "message": {"content": "hello"},
-                }
-            }
-        ]
+        chunk = {
+            "delta": {
+                "index": 0,
+                "message": {"content": "hello"},
+            },
+        }
+        model_parameters = data.get("model_parameters")
+        if isinstance(model_parameters, Mapping) and "json_schema" in model_parameters:
+            chunk["structured_output"] = {"ok": True}
+        return [chunk]
 
 
 class _FailingSlimClient:
@@ -177,6 +180,29 @@ def test_slim_llm_counts_tokens_and_collects_blocking_result(
         "temperature": 0.2,
         "max_tokens": 8,
     }
+
+
+def test_slim_llm_passes_merged_parameters_and_json_schema(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    client = _patch_recording_slim_client(monkeypatch)
+    llm = _build_llm(tmp_path)
+    schema = {"type": "object", "required": ["ok"]}
+
+    result = llm.invoke_llm_with_structured_output(
+        prompt_messages=[],
+        json_schema=schema,
+        model_parameters={"max_tokens": 8},
+        stop=None,
+        stream=False,
+    )
+
+    assert result.structured_output == {"ok": True}
+    model_parameters = client.calls[-1][2]["model_parameters"]
+    assert model_parameters["temperature"] == pytest.approx(0.2)
+    assert model_parameters["max_tokens"] == 8
+    assert json.loads(model_parameters["json_schema"]) == schema
 
 
 def test_slim_llm_preserves_slim_client_errors(
