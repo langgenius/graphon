@@ -47,11 +47,12 @@ dev = [
 ]
 
 [build-system]
-requires = ['uv_build~=0.11']
+requires = ['uv_build>=0.12.2,<0.13']
 build-backend = 'uv_build'
 
 [tool.uv]
 default-groups = ['dev']
+prerelease = 'disallow'
 
 [tool.ruff]
 fix = true

@@ -24,7 +24,7 @@ from graphon.nodes.http_request.executor import Executor
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables import SecretVariable
 
-SECRET = "sk-supersecret-123456"  # noqa: S105
+SECRET = "sk-supersecret-123456"  # ruff: ignore[hardcoded-password-string]
 # The obfuscated form per _obfuscated_token(): first 6 chars + 12 stars + last 2 chars.
 # len(SECRET) = 22 > 8, so: "sk-sup" + "************" + "56"
 OBFUSCATED = "sk-sup" + "*" * 12 + "56"

@@ -1,7 +1,7 @@
 from graphon.variables import SecretVariable, SegmentGroup, StringSegment
 from graphon.workflow_type_encoder import WorkflowRuntimeTypeConverter
 
-SECRET = "sk-1234567890abcdef"  # noqa: S105
+SECRET = "sk-1234567890abcdef"  # ruff: ignore[hardcoded-password-string]
 MASKED = "sk-123" + "*" * 12 + "ef"  # _obfuscated_token(SECRET)
 
 

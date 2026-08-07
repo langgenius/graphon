@@ -156,7 +156,7 @@ def _run_with_timeout(engine: GraphEngine) -> list[GraphEngineEvent]:
     def run() -> None:
         try:
             events.extend(engine.run())
-        except Exception as error:  # noqa: BLE001 - re-raised in the test thread.
+        except Exception as error:  # ruff: ignore[blind-except] - re-raised in the test thread.
             errors.append(error)
         finally:
             finished.set()
@@ -266,7 +266,7 @@ def test_resume_replays_tasks_through_a_bounded_ready_queue() -> None:
     def start_execution() -> None:
         try:
             engine._start_execution(resume=True)
-        except Exception as error:  # noqa: BLE001 - re-raised in the test thread.
+        except Exception as error:  # ruff: ignore[blind-except] - re-raised in the test thread.
             errors.append(error)
         finally:
             finished.set()
