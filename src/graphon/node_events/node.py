@@ -11,10 +11,10 @@ from graphon.node_events.base import NodeRunResult
 from graphon.variables.segments import Segment
 from graphon.variables.variables import Variable
 
-from .base import NodeEventBase
+from .base import NodeEventPayload
 
 
-class RunRetrieverResourceEvent(NodeEventBase):
+class RunRetrieverResourceEvent(NodeEventPayload):
     retriever_resources: Sequence[Mapping[str, Any]] = Field(
         ...,
         description="retriever resources",
@@ -23,7 +23,7 @@ class RunRetrieverResourceEvent(NodeEventBase):
     context_files: list[File] | None = Field(default=None, description="context files")
 
 
-class ModelInvokeCompletedEvent(NodeEventBase):
+class ModelInvokeCompletedEvent(NodeEventPayload):
     text: str
     usage: LLMUsage
     finish_reason: str | None = None
@@ -31,7 +31,7 @@ class ModelInvokeCompletedEvent(NodeEventBase):
     structured_output: dict | None = None
 
 
-class ModelPollingProgressEvent(NodeEventBase):
+class ModelPollingProgressEvent(NodeEventPayload):
     attempt: int = Field(..., ge=0, description="polling check attempt count")
     last_checked_at: datetime = Field(..., description="last polling check time")
     next_check_at: datetime | None = Field(
@@ -40,13 +40,13 @@ class ModelPollingProgressEvent(NodeEventBase):
     )
 
 
-class RunRetryEvent(NodeEventBase):
+class RunRetryEvent(NodeEventPayload):
     error: str = Field(..., description="error")
     retry_index: int = Field(..., description="Retry attempt number")
     start_at: datetime = Field(..., description="Retry start time")
 
 
-class StreamChunkEvent(NodeEventBase):
+class StreamChunkEvent(NodeEventPayload):
     # Spec-compliant fields
     selector: Sequence[str] = Field(
         ...,
@@ -61,7 +61,7 @@ class StreamChunkEvent(NodeEventBase):
     )
 
 
-class StreamReasoningEvent(NodeEventBase):
+class StreamReasoningEvent(NodeEventPayload):
     """Reasoning side-channel chunk scoped by selector visibility.
 
     This node-level selector is normalized by graph dispatch to
@@ -86,21 +86,21 @@ class StreamReasoningEvent(NodeEventBase):
     )
 
 
-class StreamCompletedEvent(NodeEventBase):
+class StreamCompletedEvent(NodeEventPayload):
     node_run_result: NodeRunResult = Field(..., description="run result")
 
 
-class VariableUpdatedEvent(NodeEventBase):
+class VariableUpdatedEvent(NodeEventPayload):
     """Notify the engine that a single variable should be applied to the shared pool."""
 
     variable: Variable = Field(..., description="Updated variable payload to apply.")
 
 
-class PauseRequestedEvent(NodeEventBase):
+class PauseRequestedEvent(NodeEventPayload):
     reason: PauseReason = Field(..., description="pause reason")
 
 
-class HumanInputFormFilledEvent(NodeEventBase):
+class HumanInputFormFilledEvent(NodeEventPayload):
     """Event emitted when a human input form is submitted."""
 
     node_title: str
@@ -114,7 +114,7 @@ class HumanInputFormFilledEvent(NodeEventBase):
     submitted_data: Mapping[str, Segment] = Field(default_factory=dict)
 
 
-class HumanInputFormTimeoutEvent(NodeEventBase):
+class HumanInputFormTimeoutEvent(NodeEventPayload):
     """Event emitted when a human input form times out."""
 
     node_title: str

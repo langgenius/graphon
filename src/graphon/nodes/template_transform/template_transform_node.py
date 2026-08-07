@@ -5,13 +5,13 @@ from typing import Any, override
 
 from typing_extensions import TypeIs
 
-from graphon.entities.graph_init_params import GraphInitParams
+from graphon.entities.graph_init_params import InitParams
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.entities import VariableSelector
 from graphon.nodes.base.node import Node
 from graphon.nodes.template_transform.entities import TemplateTransformNodeData
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 from graphon.template_rendering import (
     Jinja2TemplateRenderer,
     TemplateRenderError,
@@ -39,8 +39,8 @@ class TemplateTransformNode(Node[TemplateTransformNodeData]):
         node_id: str,
         data: TemplateTransformNodeData,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        graph_init_params: InitParams,
+        graph_runtime_state: RuntimeState,
         jinja2_template_renderer: Jinja2TemplateRenderer,
         max_output_length: int | None = None,
     ) -> None:

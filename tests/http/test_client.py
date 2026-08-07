@@ -36,7 +36,7 @@ from graphon.nodes.llm.node import LLMNode
 from graphon.nodes.question_classifier.question_classifier_node import (
     QuestionClassifierNode,
 )
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 
 from ..helpers import build_graph_init_params, build_variable_pool
 
@@ -111,8 +111,9 @@ class _StubHttpClient:
         raise AssertionError(msg)
 
 
-def _build_runtime_state() -> GraphRuntimeState:
-    return GraphRuntimeState(
+def _build_runtime_state() -> RuntimeState:
+    return RuntimeState(
+        workflow_id="workflow",
         variable_pool=build_variable_pool(),
         start_at=time.perf_counter(),
     )

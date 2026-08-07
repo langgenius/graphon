@@ -17,14 +17,14 @@ from graphon.dsl.entities import (
     PluginDependencyType,
 )
 from graphon.dsl.errors import DslError
-from graphon.entities.graph_config import NodeConfigDict
-from graphon.file.enums import FileTransferMethod, FileType
-from graphon.file.models import File
-from graphon.graph_events.node import (
+from graphon.engine_events.node import (
     NodeRunFailedEvent,
     NodeRunSucceededEvent,
     NodeRunVariableUpdatedEvent,
 )
+from graphon.entities.graph_config import NodeConfigDict
+from graphon.file.enums import FileTransferMethod, FileType
+from graphon.file.models import File
 from graphon.http import HttpResponse
 from graphon.model_runtime.entities.common_entities import I18nObject
 from graphon.model_runtime.entities.llm_entities import LLMResult, LLMUsage
@@ -55,7 +55,7 @@ from graphon.nodes.variable_assigner.v1.node import (
 from graphon.nodes.variable_assigner.v2.node import (
     VariableAssignerNode as VariableAssignerNodeV2,
 )
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 from tests.helpers import build_graph_init_params, build_variable_pool
 
 _OPENAI_PLUGIN_ID = "langgenius/openai:0.3.8@test"
@@ -364,7 +364,8 @@ def _dsl_node_factory(
         graph_init_params=build_graph_init_params(
             graph_config={"nodes": [], "edges": []},
         ),
-        graph_runtime_state=GraphRuntimeState(
+        graph_runtime_state=RuntimeState(
+            workflow_id="workflow",
             variable_pool=build_variable_pool(variables=variables),
             start_at=0,
         ),
@@ -474,11 +475,13 @@ def test_slim_dsl_node_factory_rebinds_graph_runtime_state() -> None:
         "edges": [],
     }
     graph_init_params = build_graph_init_params(graph_config=graph_config)
-    original_runtime_state = GraphRuntimeState(
+    original_runtime_state = RuntimeState(
+        workflow_id="workflow",
         variable_pool=build_variable_pool(variables=[(["start", "query"], "before")]),
         start_at=1,
     )
-    rebound_runtime_state = GraphRuntimeState(
+    rebound_runtime_state = RuntimeState(
+        workflow_id="workflow",
         variable_pool=build_variable_pool(variables=[(["start", "query"], "after")]),
         start_at=2,
     )

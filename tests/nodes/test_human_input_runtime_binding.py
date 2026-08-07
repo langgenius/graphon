@@ -10,7 +10,7 @@ from graphon.nodes.human_input.entities import (
     PauseRequested,
 )
 from graphon.nodes.human_input.human_input_node import HumanInputNode
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 
 from ..helpers import build_graph_init_params, build_variable_pool
 
@@ -35,7 +35,8 @@ def _build_human_input_node(
             graph_config={"nodes": [], "edges": []},
             run_context={"workflow_execution_id": "workflow-exec-1"},
         ),
-        graph_runtime_state=GraphRuntimeState(
+        graph_runtime_state=RuntimeState(
+            workflow_id="workflow",
             variable_pool=build_variable_pool(),
             start_at=perf_counter(),
         ),

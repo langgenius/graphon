@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field
 DIFY_RUN_CONTEXT_KEY = "_dify"
 
 
-class GraphInitParams(BaseModel):
-    """GraphInitParams encapsulates the configurations and contextual information
+class InitParams(BaseModel):
+    """InitParams encapsulates the configurations and contextual information
     that remain constant throughout a single execution of the graph engine.
 
     A single execution is defined as follows: as long as the execution has not reached

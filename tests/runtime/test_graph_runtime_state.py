@@ -5,16 +5,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from graphon.enums import ErrorHandleMode, NodeState
-from graphon.file import File, FileTransferMethod, FileType
-from graphon.graph_engine.domain.graph_execution import GraphExecution
-from graphon.graph_engine.ready_queue.in_memory import InMemoryReadyQueue
-from graphon.graph_engine.ready_queue.protocol import (
-    ROOT_FRAME_ID,
+from graphon.engine.ready_queue.entities import (
     ReadyTask,
     ResumeTask,
     StartTask,
 )
+from graphon.engine.ready_queue.in_memory import InMemoryReadyQueue
+from graphon.enums import ErrorHandleMode, NodeState
+from graphon.file import File, FileTransferMethod, FileType
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.nodes.container_effects import (
     IterationFrameRequest,
@@ -25,7 +23,8 @@ from graphon.runtime.container_state import (
     IterationFrameState,
     IterationRunState,
 )
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.execution import ROOT_FRAME_ID, GraphExecution
+from graphon.runtime.graph_runtime_state import RuntimeState
 from graphon.runtime.read_only_wrappers import ReadOnlyGraphRuntimeStateWrapper
 from graphon.runtime.ready_queue import ReadyQueue
 from graphon.runtime.variable_pool import VariablePool
@@ -64,9 +63,49 @@ class _PrefixedReadyQueue:
         self._queue.loads(data.removeprefix("prefixed:"))
 
 
+def test_graph_execution_supplies_existing_workflow_identity() -> None:
+    """A child runtime preserves the aggregate shared by its parent frame."""
+    execution = GraphExecution(workflow_id="workflow")
+
+    state = RuntimeState(
+        variable_pool=VariablePool(),
+        start_at=time(),
+        graph_execution=execution,
+    )
+
+    assert state.graph_execution is execution
+
+
+def test_runtime_state_requires_workflow_identity() -> None:
+    """Construction cannot silently create an anonymous execution aggregate."""
+    with pytest.raises(
+        ValueError,
+        match="workflow_id or graph_execution is required",
+    ):
+        RuntimeState(variable_pool=VariablePool(), start_at=time())
+
+
+def test_runtime_state_rejects_conflicting_workflow_identity() -> None:
+    """Two explicit identity sources must name the same workflow."""
+    execution = GraphExecution(workflow_id="existing-workflow")
+
+    with pytest.raises(
+        ValueError,
+        match=r"workflow_id must match graph_execution\.workflow_id",
+    ):
+        RuntimeState(
+            workflow_id="different-workflow",
+            graph_execution=execution,
+            variable_pool=VariablePool(),
+            start_at=time(),
+        )
+
+
 class TestGraphRuntimeState:
     def test_execution_context_defaults_to_empty_context(self) -> None:
-        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+        state = RuntimeState(
+            workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
+        )
 
         with state.execution_context:
             assert state.execution_context is not None
@@ -75,7 +114,9 @@ class TestGraphRuntimeState:
         variable_pool = VariablePool()
         start_time = time()
 
-        state = GraphRuntimeState(variable_pool=variable_pool, start_at=start_time)
+        state = RuntimeState(
+            workflow_id="workflow", variable_pool=variable_pool, start_at=start_time
+        )
 
         assert state.variable_pool == variable_pool
         assert state.start_at == start_time
@@ -83,7 +124,9 @@ class TestGraphRuntimeState:
         assert state.node_run_steps == 0
 
     def test_outputs_immutability(self) -> None:
-        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+        state = RuntimeState(
+            workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
+        )
 
         outputs1 = state.outputs
         outputs2 = state.outputs
@@ -98,7 +141,9 @@ class TestGraphRuntimeState:
         assert state.get_output("key1") == "value1"
 
     def test_merge_response_outputs_appends_answer_and_overwrites_others(self) -> None:
-        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+        state = RuntimeState(
+            workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
+        )
 
         state.merge_response_outputs({"answer": "Hello", "status": "draft"})
         state.merge_response_outputs({"answer": " world", "status": "final"})
@@ -107,7 +152,9 @@ class TestGraphRuntimeState:
         assert state.get_output("status") == "final"
 
     def test_llm_usage_immutability(self) -> None:
-        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+        state = RuntimeState(
+            workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
+        )
 
         usage1 = state.llm_usage
         usage2 = state.llm_usage
@@ -115,14 +162,17 @@ class TestGraphRuntimeState:
 
     def test_type_validation(self) -> None:
         with pytest.raises(ValueError, match="node_run_steps must be non-negative"):
-            GraphRuntimeState(
+            RuntimeState(
+                workflow_id="workflow",
                 variable_pool=VariablePool(),
                 start_at=time(),
                 node_run_steps=-1,
             )
 
     def test_helper_methods(self) -> None:
-        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+        state = RuntimeState(
+            workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
+        )
 
         initial_steps = state.node_run_steps
         state.increment_node_run_steps()
@@ -134,20 +184,24 @@ class TestGraphRuntimeState:
         assert state.llm_usage.total_tokens == 50
 
     def test_ready_queue_default_instantiation(self) -> None:
-        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+        state = RuntimeState(
+            workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
+        )
 
         queue = state.ready_queue
 
         assert isinstance(queue, InMemoryReadyQueue)
 
     def test_deferred_ready_tasks_round_trip_in_runtime_snapshot(self) -> None:
-        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+        state = RuntimeState(
+            workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
+        )
         first = StartTask(frame_id="root", node_id="a")
         second = StartTask(frame_id="child", node_id="b")
         state.defer_ready_task(first)
         state.defer_ready_task(second)
 
-        restored = GraphRuntimeState.from_snapshot(state.dumps())
+        restored = RuntimeState.from_snapshot(state.dumps())
 
         assert restored.drain_deferred_ready_tasks() == [first, second]
         assert restored.drain_deferred_ready_tasks() == []
@@ -155,7 +209,8 @@ class TestGraphRuntimeState:
     def test_custom_ready_queues_round_trip_with_supplied_factory(self) -> None:
         ready_queue: ReadyQueue = _PrefixedReadyQueue()
         deferred_ready_queue: ReadyQueue = _PrefixedReadyQueue()
-        state = GraphRuntimeState(
+        state = RuntimeState(
+            workflow_id="workflow",
             variable_pool=VariablePool(),
             start_at=time(),
             ready_queue=ready_queue,
@@ -166,7 +221,7 @@ class TestGraphRuntimeState:
         state.ready_queue.put(live_task)
         state.defer_ready_task(deferred_task)
 
-        restored = GraphRuntimeState.from_snapshot(
+        restored = RuntimeState.from_snapshot(
             state.dumps(),
             ready_queue_factory=_PrefixedReadyQueue,
         )
@@ -176,7 +231,9 @@ class TestGraphRuntimeState:
         assert restored.drain_deferred_ready_tasks() == [deferred_task]
 
     def test_container_runtime_state_preserves_file_values(self) -> None:
-        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+        state = RuntimeState(
+            workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
+        )
         file_value = File(
             file_id="file-1",
             file_type=FileType.DOCUMENT,
@@ -229,7 +286,7 @@ class TestGraphRuntimeState:
             ResumeTask(invocation_id=run.invocation_id, result=request),
         )
 
-        restored = GraphRuntimeState.from_snapshot(state.dumps())
+        restored = RuntimeState.from_snapshot(state.dumps())
 
         restored_run = restored.get_container_run("invocation-1")
         assert isinstance(restored_run, IterationRunState)
@@ -242,17 +299,24 @@ class TestGraphRuntimeState:
         assert restored_task.result.items[0].value == file_value
         assert restored.get_container_frame("exec-iteration:iteration:0") == frame
 
-    def test_graph_execution_lazy_instantiation(self) -> None:
-        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+    def test_workflow_id_creates_graph_execution(self) -> None:
+        """A root runtime creates its execution aggregate from its workflow ID."""
+        state = RuntimeState(
+            workflow_id="workflow",
+            variable_pool=VariablePool(),
+            start_at=time(),
+        )
 
         execution = state.graph_execution
 
         assert isinstance(execution, GraphExecution)
-        assert not execution.workflow_id
+        assert execution.workflow_id == "workflow"
         assert state.graph_execution is execution
 
     def test_graph_configuration_rejects_different_graph(self) -> None:
-        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+        state = RuntimeState(
+            workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
+        )
         mock_graph = MagicMock()
 
         state.attach_graph(mock_graph)
@@ -261,19 +325,41 @@ class TestGraphRuntimeState:
         other_graph = MagicMock()
         with pytest.raises(
             ValueError,
-            match="GraphRuntimeState already attached to a different graph instance",
+            match="RuntimeState already attached to a different graph instance",
         ):
             state.attach_graph(other_graph)
 
+    def test_attach_graph_rejects_a_different_materialized_scope(self) -> None:
+        state = RuntimeState(
+            workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
+        )
+        state.restore_graph_state(
+            node_states={
+                "root": NodeState.TAKEN,
+                "child": NodeState.SKIPPED,
+            },
+            edge_states={"child-edge": NodeState.SKIPPED},
+        )
+        graph = MagicMock(nodes={"root": MagicMock()}, edges={})
+
+        with pytest.raises(
+            RuntimeError,
+            match="Saved graph state does not match rebuilt graph",
+        ):
+            state.attach_graph(graph)
+
     def test_read_only_wrapper_exposes_additional_state(self) -> None:
-        state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time())
+        state = RuntimeState(
+            workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
+        )
         wrapper = ReadOnlyGraphRuntimeStateWrapper(state)
 
         assert wrapper.ready_queue_size == 0
         assert wrapper.exceptions_count == 0
 
     def test_read_only_wrapper_serializes_runtime_state(self) -> None:
-        state = GraphRuntimeState(
+        state = RuntimeState(
+            workflow_id="workflow",
             variable_pool=VariablePool(),
             start_at=time(),
             llm_usage=LLMUsage.from_metadata({"total_tokens": 5}),
@@ -300,7 +386,8 @@ class TestGraphRuntimeState:
             "currency": "USD",
             "latency": 0.5,
         })
-        state = GraphRuntimeState(
+        state = RuntimeState(
+            workflow_id="wf-123",
             variable_pool=variable_pool,
             start_at=time(),
             node_run_steps=3,
@@ -310,14 +397,13 @@ class TestGraphRuntimeState:
         state.ready_queue.put(StartTask(frame_id="root", node_id="node-A"))
 
         graph_execution = state.graph_execution
-        graph_execution.workflow_id = "wf-123"
         graph_execution.exceptions_count = 4
         graph_execution.started = True
         graph_execution.error = ValueError("saved failure")
 
         snapshot = state.dumps()
 
-        restored = GraphRuntimeState.from_snapshot(snapshot)
+        restored = RuntimeState.from_snapshot(snapshot)
 
         assert restored.total_tokens == 5
         assert restored.node_run_steps == 3
@@ -386,10 +472,10 @@ class TestGraphRuntimeState:
             },
         })
 
-        restored = GraphRuntimeState.from_snapshot(snapshot)
+        restored = RuntimeState.from_snapshot(snapshot)
         migrated = json.loads(restored.dumps())
 
-        assert migrated["version"] == "2.0"
+        assert migrated["version"] == "3.0"
         assert json.loads(migrated["ready_queue"])["version"] == "2.0"
         assert json.loads(migrated["deferred_ready_tasks"])["version"] == "2.0"
         assert json.loads(migrated["graph_execution"])["version"] == "2.0"
@@ -423,9 +509,11 @@ class TestGraphRuntimeState:
         )
         variable_pool.add((CONVERSATION_VARIABLE_NODE_ID, "session_name"), "after")
 
-        state = GraphRuntimeState(variable_pool=variable_pool, start_at=time())
+        state = RuntimeState(
+            workflow_id="workflow", variable_pool=variable_pool, start_at=time()
+        )
         snapshot = state.dumps()
-        restored = GraphRuntimeState.from_snapshot(snapshot)
+        restored = RuntimeState.from_snapshot(snapshot)
 
         restored_value = restored.variable_pool.get((
             CONVERSATION_VARIABLE_NODE_ID,
@@ -449,9 +537,11 @@ class TestGraphRuntimeState:
         variable_pool.add(("node", "attachment"), FileSegment(value=file_value))
         variable_pool.add(("node", "attachments"), ArrayFileSegment(value=[file_value]))
 
-        state = GraphRuntimeState(variable_pool=variable_pool, start_at=time())
+        state = RuntimeState(
+            workflow_id="workflow", variable_pool=variable_pool, start_at=time()
+        )
 
-        restored = GraphRuntimeState.from_snapshot(state.dumps())
+        restored = RuntimeState.from_snapshot(state.dumps())
 
         restored_file = restored.variable_pool.get(("node", "attachment"))
         restored_files = restored.variable_pool.get(("node", "attachments"))

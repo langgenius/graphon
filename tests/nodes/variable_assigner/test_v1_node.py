@@ -1,11 +1,14 @@
 import time
 from collections.abc import Sequence
 
-from graphon.graph_events.node import NodeRunSucceededEvent, NodeRunVariableUpdatedEvent
+from graphon.engine_events.node import (
+    NodeRunSucceededEvent,
+    NodeRunVariableUpdatedEvent,
+)
 from graphon.nodes.variable_assigner.common import helpers as common_helpers
 from graphon.nodes.variable_assigner.v1.node import VariableAssignerNode
 from graphon.nodes.variable_assigner.v1.node_data import VariableAssignerData, WriteMode
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.variables import (
     ArrayStringVariable,
@@ -24,7 +27,8 @@ def _build_node(
 ) -> VariableAssignerNode:
     graph_config = {"nodes": [], "edges": []}
     init_params = build_graph_init_params(graph_config=graph_config)
-    runtime_state = GraphRuntimeState(
+    runtime_state = RuntimeState(
+        workflow_id="workflow",
         variable_pool=variable_pool,
         start_at=time.perf_counter(),
     )

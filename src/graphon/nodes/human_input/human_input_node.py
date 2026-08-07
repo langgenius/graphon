@@ -3,17 +3,17 @@ from __future__ import annotations
 from collections.abc import Generator, Mapping, Sequence
 from typing import Any, override
 
-from graphon.entities.graph_init_params import GraphInitParams
+from graphon.entities.graph_init_params import InitParams
 from graphon.entities.pause_reason import HitlRequired
 from graphon.enums import (
     BuiltinNodeTypes,
     NodeExecutionType,
     WorkflowNodeExecutionStatus,
 )
-from graphon.node_events.base import NodeEventBase, NodeRunResult
+from graphon.node_events.base import NodeEventPayload, NodeRunResult
 from graphon.node_events.node import PauseRequestedEvent, StreamCompletedEvent
 from graphon.nodes.base.node import Node
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 from graphon.variables.segments import Segment
 
 from .entities import (
@@ -42,8 +42,8 @@ class HumanInputNode(Node[HumanInputNodeData]):
         node_id: str,
         data: HumanInputNodeData,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        graph_init_params: InitParams,
+        graph_runtime_state: RuntimeState,
         hitl_callback: HITLCallback,
     ) -> None:
         super().__init__(
@@ -60,7 +60,7 @@ class HumanInputNode(Node[HumanInputNodeData]):
         return "1"
 
     @override
-    def _run(self) -> Generator[NodeEventBase, None, None]:
+    def _run(self) -> Generator[NodeEventPayload, None, None]:
         decision = self._hitl_callback(
             HITLContext(
                 workflow_execution_id=self._resolve_workflow_execution_id(),

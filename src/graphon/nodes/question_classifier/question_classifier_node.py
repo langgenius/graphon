@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, override
 
-from graphon.entities.graph_init_params import GraphInitParams
+from graphon.entities.graph_init_params import InitParams
 from graphon.enums import (
     BuiltinNodeTypes,
     NodeExecutionType,
@@ -42,7 +42,7 @@ from graphon.nodes.llm.runtime_protocols import (
     LLMProtocol,
     PromptMessageSerializerProtocol,
 )
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 from graphon.template_rendering import Jinja2TemplateRenderer
 from graphon.utils.json_in_md_parser import parse_and_check_json_markdown
 from graphon.variables.template_resolution import convert_template
@@ -108,8 +108,8 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         node_id: str,
         data: QuestionClassifierNodeData,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        graph_init_params: InitParams,
+        graph_runtime_state: RuntimeState,
         dependencies: QuestionClassifierNodeDependencies | None = None,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
