@@ -13,7 +13,7 @@ from graphon.nodes.question_classifier import (
     QuestionClassifierNodeDependencies,
 )
 from graphon.nodes.question_classifier.question_classifier_node import llm_utils
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 
 from ...helpers import build_graph_init_params
 
@@ -78,7 +78,8 @@ def _build_question_classifier_node(
         graph_init_params=build_graph_init_params(
             graph_config={"nodes": [], "edges": []},
         ),
-        graph_runtime_state=GraphRuntimeState(
+        graph_runtime_state=RuntimeState(
+            workflow_id="workflow",
             variable_pool=variable_pool,
             start_at=0.0,
         ),
@@ -137,7 +138,8 @@ def test_question_classifier_constructor_accepts_dependency_bundle(
         graph_init_params=build_graph_init_params(
             graph_config={"nodes": [], "edges": []},
         ),
-        graph_runtime_state=GraphRuntimeState(
+        graph_runtime_state=RuntimeState(
+            workflow_id="workflow",
             variable_pool=variable_pool,
             start_at=0.0,
         ),
@@ -207,7 +209,8 @@ def test_question_classifier_constructor_rejects_mixed_dependency_inputs() -> No
             graph_init_params=build_graph_init_params(
                 graph_config={"nodes": [], "edges": []},
             ),
-            graph_runtime_state=GraphRuntimeState(
+            graph_runtime_state=RuntimeState(
+                workflow_id="workflow",
                 variable_pool=variable_pool,
                 start_at=0.0,
             ),

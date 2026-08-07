@@ -20,12 +20,11 @@ from examples.slim_llm.settings import (
     use_local_slim_binary,
 )
 from graphon.dsl.slim import SlimLLM
-from graphon.entities.graph_init_params import GraphInitParams
+from graphon.engine import Engine
+from graphon.entities.graph_init_params import InitParams
 from graphon.file.enums import FileType
 from graphon.file.models import File
 from graphon.graph.graph import Graph
-from graphon.graph_engine.command_channels import InMemoryChannel
-from graphon.graph_engine.graph_engine import GraphEngine
 from graphon.model_runtime.entities.llm_entities import LLMMode
 from graphon.model_runtime.entities.message_entities import (
     PromptMessage,
@@ -42,7 +41,7 @@ from graphon.nodes.llm import (
 from graphon.nodes.llm.entities import ContextConfig
 from graphon.nodes.start import StartNode
 from graphon.nodes.start.entities import StartNodeData
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 
 
@@ -79,9 +78,13 @@ def run(query: str) -> str:
     use_local_slim_binary()
     credentials = load_credentials()
     workflow_id = "slim-llm-code-example"
-    graph_state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time.time())
+    graph_state = RuntimeState(
+        workflow_id=workflow_id,
+        variable_pool=VariablePool(),
+        start_at=time.time(),
+    )
     graph_state.variable_pool.add(("start", "query"), query)
-    graph_init = GraphInitParams(
+    graph_init = InitParams(
         workflow_id=workflow_id,
         graph_config={"nodes": [], "edges": []},
         run_context={},
@@ -100,11 +103,9 @@ def run(query: str) -> str:
             parameters={},
         ),
     )
-    engine = GraphEngine(
-        workflow_id=workflow_id,
+    engine = Engine(
         graph=graph,
         graph_runtime_state=graph_state,
-        command_channel=InMemoryChannel(),
     )
 
     list(engine.run())
@@ -117,8 +118,8 @@ def run(query: str) -> str:
 
 def build_graph(
     *,
-    graph_init: GraphInitParams,
-    graph_state: GraphRuntimeState,
+    graph_init: InitParams,
+    graph_state: RuntimeState,
     llm: SlimLLM,
 ) -> Graph:
     start = StartNode(

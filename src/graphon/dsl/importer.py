@@ -10,15 +10,14 @@ from uuid import uuid4
 import yaml
 from pydantic import ValidationError
 
-from graphon.entities.graph_init_params import GraphInitParams
+from graphon.engine import Engine
+from graphon.engine.command import CommandChannel
+from graphon.engine.container_handler import ContainerHandlerFactory
+from graphon.entities.graph_init_params import InitParams
 from graphon.enums import BuiltinNodeTypes
 from graphon.graph.graph import Graph
 from graphon.graph.validation import GraphValidationError
-from graphon.graph_engine.command_channels import CommandChannel, InMemoryChannel
-from graphon.graph_engine.config import GraphEngineConfig
-from graphon.graph_engine.container_handlers import ContainerHandlerFactory
-from graphon.graph_engine.graph_engine import GraphEngine
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 
 from .entities import (
@@ -94,9 +93,9 @@ def loads(
     run_context: Mapping[str, Any] | None = None,
     start_inputs: Mapping[str, Any] | None = None,
     command_channel: CommandChannel | None = None,
-    config: GraphEngineConfig | None = None,
+    workers: int = 5,
     container_handler_factories: Sequence[ContainerHandlerFactory] = (),
-) -> GraphEngine:
+) -> Engine:
     plan = inspect(dsl, source_kind=source_kind)
     if plan.load_status == LoadStatus.UNSUPPORTED:
         raise _dsl_error(
@@ -128,18 +127,18 @@ def loads(
         run_context=run_context or {},
         start_inputs=start_inputs or {},
     )
-    graph_init_params = GraphInitParams(
+    graph_init_params = InitParams(
         workflow_id=workflow_id,
         graph_config=graph_config,
         run_context=run_context or {},
         call_depth=0,
     )
-    graph_runtime_state = GraphRuntimeState(
+    graph_runtime_state = RuntimeState(
         variable_pool=variable_pool,
         start_at=time.time(),
+        workflow_id=workflow_id,
     )
     parsed_credentials = _parse_credentials(credentials)
-    engine_config = config or GraphEngineConfig()
     node_factory = SlimDslNodeFactory(
         graph_config=graph_config,
         graph_init_params=graph_init_params,
@@ -170,12 +169,11 @@ def loads(
             kind=plan.document.kind,
         ) from error
 
-    return GraphEngine(
-        workflow_id=workflow_id,
+    return Engine(
         graph=graph,
         graph_runtime_state=graph_runtime_state,
-        command_channel=command_channel or InMemoryChannel(),
-        config=engine_config,
+        command_channel=command_channel,
+        workers=workers,
         container_handler_factories=container_handler_factories,
     )
 

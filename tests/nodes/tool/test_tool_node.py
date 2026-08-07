@@ -6,14 +6,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from graphon.enums import BuiltinNodeTypes
-from graphon.file.enums import FileTransferMethod, FileType
-from graphon.file.models import File
-from graphon.graph_events.node import (
+from graphon.engine_events.node import (
     NodeRunFailedEvent,
     NodeRunStartedEvent,
     NodeRunSucceededEvent,
 )
+from graphon.enums import BuiltinNodeTypes
+from graphon.file.enums import FileTransferMethod, FileType
+from graphon.file.models import File
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.node_events.node import StreamChunkEvent, StreamCompletedEvent
 from graphon.nodes.tool.entities import ToolNodeData, ToolProviderType
@@ -24,7 +24,7 @@ from graphon.nodes.tool_runtime_entities import (
     ToolRuntimeMessage,
     ToolRuntimeParameter,
 )
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 from tests.helpers.builders import build_graph_init_params, build_variable_pool
 
 
@@ -144,7 +144,8 @@ def _build_tool_node() -> tuple[ToolNode, _StubToolRuntime, _StubToolFileManager
         node_id="node-1",
         data=_tool_node_data(),
         graph_init_params=build_graph_init_params(),
-        graph_runtime_state=GraphRuntimeState(
+        graph_runtime_state=RuntimeState(
+            workflow_id="workflow",
             variable_pool=build_variable_pool(),
             start_at=time(),
         ),
@@ -161,7 +162,9 @@ def _build_run_tool_node(
     tool_node_version: str | None,
 ) -> tuple[ToolNode, object]:
     variable_pool = build_variable_pool(variables=[(["upstream", "answer"], "42")])
-    runtime_state = GraphRuntimeState(variable_pool=variable_pool, start_at=time())
+    runtime_state = RuntimeState(
+        workflow_id="workflow", variable_pool=variable_pool, start_at=time()
+    )
     node = ToolNode(
         node_id="node-1",
         data=_tool_node_data(tool_node_version=tool_node_version),

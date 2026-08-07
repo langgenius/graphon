@@ -3,10 +3,10 @@ from typing import Any
 
 from pydantic import Field
 
-from .base import NodeEventBase
+from .base import NodeEventPayload
 
 
-class AgentLogEvent(NodeEventBase):
+class AgentLogEvent(NodeEventPayload):
     message_id: str = Field(..., description="id")
     label: str = Field(..., description="label")
     node_execution_id: str = Field(..., description="node execution id")

@@ -1,5 +1,5 @@
 from .graph_runtime_state import (
-    GraphRuntimeState,
+    RuntimeState,
 )
 from .graph_runtime_state_protocol import (
     ReadOnlyGraphRuntimeState,
@@ -12,11 +12,11 @@ from .read_only_wrappers import (
 from .variable_pool import VariablePool, VariableValue
 
 __all__ = [
-    "GraphRuntimeState",
     "ReadOnlyGraphRuntimeState",
     "ReadOnlyGraphRuntimeStateWrapper",
     "ReadOnlyVariablePool",
     "ReadOnlyVariablePoolWrapper",
+    "RuntimeState",
     "VariablePool",
     "VariableValue",
 ]

@@ -25,7 +25,7 @@ from graphon.nodes.parameter_extractor.prompts import (
     FUNCTION_CALLING_EXTRACTOR_SYSTEM_PROMPT,
     FUNCTION_CALLING_EXTRACTOR_USER_TEMPLATE,
 )
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.types import SegmentType
 
@@ -44,7 +44,8 @@ def _build_dependencies(**kwargs: object) -> object:
 
 def _build_parameter_extractor_node() -> tuple[ParameterExtractorNode, VariablePool]:
     variable_pool = build_variable_pool(variables=[(("start", "rule"), "strictly")])
-    runtime_state = GraphRuntimeState(
+    runtime_state = RuntimeState(
+        workflow_id="workflow",
         variable_pool=variable_pool,
         start_at=time.perf_counter(),
     )
@@ -219,7 +220,8 @@ def test_parameter_extractor_run_emits_model_identity_in_inputs(
 
 def test_parameter_extractor_accepts_dependency_bundle() -> None:
     variable_pool = build_variable_pool(variables=[])
-    runtime_state = GraphRuntimeState(
+    runtime_state = RuntimeState(
+        workflow_id="workflow",
         variable_pool=variable_pool,
         start_at=time.perf_counter(),
     )
@@ -274,7 +276,8 @@ def test_parameter_extractor_rejects_mixed_dependency_styles() -> None:
             graph_init_params=build_graph_init_params(
                 graph_config={"nodes": [], "edges": []}
             ),
-            graph_runtime_state=GraphRuntimeState(
+            graph_runtime_state=RuntimeState(
+                workflow_id="workflow",
                 variable_pool=build_variable_pool(variables=[]),
                 start_at=time.perf_counter(),
             ),
@@ -289,7 +292,8 @@ def test_parameter_extractor_rejects_mixed_dependency_styles() -> None:
 
 def test_parameter_extractor_legacy_dependency_keywords_still_work() -> None:
     variable_pool = build_variable_pool(variables=[])
-    runtime_state = GraphRuntimeState(
+    runtime_state = RuntimeState(
+        workflow_id="workflow",
         variable_pool=variable_pool,
         start_at=time.perf_counter(),
     )

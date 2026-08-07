@@ -8,7 +8,7 @@ from graphon.enums import (
     NodeExecutionType,
     WorkflowNodeExecutionStatus,
 )
-from graphon.node_events.base import NodeEventBase, NodeRunResult
+from graphon.node_events.base import NodeEventPayload, NodeRunResult
 from graphon.node_events.iteration import (
     IterationFailedEvent,
     IterationNextEvent,
@@ -30,7 +30,7 @@ from graphon.variables.segments import ArrayAnySegment, ArraySegment, NoneSegmen
 class IterationNode(Node[IterationNodeData]):
     """Iteration node definition.
 
-    Iteration execution is interpreted by GraphEngine. The node keeps only its
+    Iteration execution is interpreted by Engine. The node keeps only its
     configuration and static variable-mapping behavior.
     """
 
@@ -62,7 +62,7 @@ class IterationNode(Node[IterationNodeData]):
     @override
     def _run(
         self,
-    ) -> Generator[NodeEventBase | IterationFrameRequest, None, None]:
+    ) -> Generator[NodeEventPayload | IterationFrameRequest, None, None]:
         variable = self.graph_runtime_state.variable_pool.get(
             self.node_data.iterator_selector,
         )
@@ -108,7 +108,7 @@ class IterationNode(Node[IterationNodeData]):
         self,
         *,
         result: ContainerRunResult,
-    ) -> Generator[NodeEventBase | IterationFrameRequest, None, None]:
+    ) -> Generator[NodeEventPayload | IterationFrameRequest, None, None]:
         if isinstance(result, IterationFrameRequest):
             for index in result.indexes:
                 yield IterationNextEvent(index=index)
@@ -158,7 +158,7 @@ class IterationNode(Node[IterationNodeData]):
         *,
         variable: NoneSegment | ArraySegment,
         started_at: datetime,
-    ) -> Generator[NodeEventBase, None, None]:
+    ) -> Generator[NodeEventPayload, None, None]:
         outputs = {"output": ArrayAnySegment(value=[])}
         if isinstance(variable, ArraySegment):
             outputs = {"output": variable.model_copy(update={"value": []})}

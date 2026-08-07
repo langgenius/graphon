@@ -3,10 +3,10 @@ from __future__ import annotations
 from collections.abc import Generator, Mapping, Sequence
 from typing import Any, assert_never, override
 
-from graphon.entities.graph_init_params import GraphInitParams
+from graphon.entities.graph_init_params import InitParams
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.node_events.base import (
-    NodeEventBase,
+    NodeEventPayload,
     NodeRunResult,
 )
 from graphon.node_events.node import (
@@ -16,7 +16,7 @@ from graphon.node_events.node import (
 from graphon.nodes.base.node import Node
 from graphon.nodes.variable_assigner.common import helpers as common_helpers
 from graphon.nodes.variable_assigner.common.exc import VariableOperatorNodeError
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 from graphon.variables.types import SegmentType
 from graphon.variables.variables import (
     ArrayAnyVariable,
@@ -39,8 +39,8 @@ class VariableAssignerNode(Node[VariableAssignerData]):
         node_id: str,
         data: VariableAssignerData,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        graph_init_params: InitParams,
+        graph_runtime_state: RuntimeState,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -88,7 +88,7 @@ class VariableAssignerNode(Node[VariableAssignerData]):
         return mapping
 
     @override
-    def _run(self) -> Generator[NodeEventBase, None, None]:
+    def _run(self) -> Generator[NodeEventPayload, None, None]:
         assigned_variable_selector = self.node_data.assigned_variable_selector
         # Should be String, Number, Object, ArrayString, ArrayNumber, ArrayObject
         original_variable = self.graph_runtime_state.variable_pool.get_variable(

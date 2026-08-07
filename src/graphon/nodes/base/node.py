@@ -9,31 +9,21 @@ from functools import singledispatchmethod
 from types import MappingProxyType
 from typing import Any, ClassVar, assert_never, get_args, get_origin
 
-from graphon.entities.base_node_data import BaseNodeData, RetryConfig
-from graphon.entities.graph_config import NodeConfigDict, NodeConfigDictAdapter
-from graphon.entities.graph_init_params import GraphInitParams
-from graphon.enums import (
-    ErrorStrategy,
-    NodeExecutionType,
-    NodeState,
-    NodeType,
-    WorkflowNodeExecutionStatus,
-)
-from graphon.graph_events.agent import NodeRunAgentLogEvent
-from graphon.graph_events.base import GraphNodeEventBase
-from graphon.graph_events.iteration import (
+from graphon.engine_events.agent import NodeRunAgentLogEvent
+from graphon.engine_events.base import NodeEvent
+from graphon.engine_events.iteration import (
     NodeRunIterationFailedEvent,
     NodeRunIterationNextEvent,
     NodeRunIterationStartedEvent,
     NodeRunIterationSucceededEvent,
 )
-from graphon.graph_events.loop import (
+from graphon.engine_events.loop import (
     NodeRunLoopFailedEvent,
     NodeRunLoopNextEvent,
     NodeRunLoopStartedEvent,
     NodeRunLoopSucceededEvent,
 )
-from graphon.graph_events.node import (
+from graphon.engine_events.node import (
     NodeRunFailedEvent,
     NodeRunHumanInputFormFilledEvent,
     NodeRunHumanInputFormTimeoutEvent,
@@ -46,9 +36,19 @@ from graphon.graph_events.node import (
     NodeRunSucceededEvent,
     NodeRunVariableUpdatedEvent,
 )
+from graphon.entities.base_node_data import BaseNodeData, RetryConfig
+from graphon.entities.graph_config import NodeConfigDict, NodeConfigDictAdapter
+from graphon.entities.graph_init_params import InitParams
+from graphon.enums import (
+    ErrorStrategy,
+    NodeExecutionType,
+    NodeState,
+    NodeType,
+    WorkflowNodeExecutionStatus,
+)
 from graphon.node_events.agent import AgentLogEvent
 from graphon.node_events.base import (
-    NodeEventBase,
+    NodeEventPayload,
     NodeRunResult,
 )
 from graphon.node_events.iteration import (
@@ -75,7 +75,7 @@ from graphon.node_events.node import (
     VariableUpdatedEvent,
 )
 from graphon.nodes.container_effects import ContainerAwaitRequest, ContainerRunResult
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 
 _MISSING_RUN_CONTEXT_VALUE = object()
 
@@ -335,8 +335,26 @@ class _NodeRuntimeMixin[NodeDataT: BaseNodeData]:
         """Optional hook for subclasses requiring extra initialization."""
         return
 
+    def bind_graph_config(
+        self: Node[NodeDataT],
+        graph_config: Mapping[str, Any],
+    ) -> None:
+        """Limit graph configuration visible to this node's execution frame.
+
+        Both public access paths are updated: ``node.graph_config`` and
+        ``node.graph_init_params.graph_config``. A private copy of
+        :class:`InitParams` prevents rebinding this node from changing the
+        factory-owned params shared by nodes in parent or sibling frames.
+
+        :param graph_config: current frame's container-subtree configuration
+        """
+        self.graph_config = graph_config
+        self._graph_init_params = self._graph_init_params.model_copy(
+            update={"graph_config": graph_config},
+        )
+
     @property
-    def graph_init_params(self: Node[NodeDataT]) -> GraphInitParams:
+    def graph_init_params(self: Node[NodeDataT]) -> InitParams:
         return self._graph_init_params
 
     @property
@@ -593,8 +611,8 @@ class Node[NodeDataT: BaseNodeData](
         node_id: str,
         data: NodeDataT,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        graph_init_params: InitParams,
+        graph_runtime_state: RuntimeState,
     ) -> None:
         if not node_id:
             msg = "node_id is required"
@@ -623,7 +641,7 @@ class Node[NodeDataT: BaseNodeData](
     ) -> (
         NodeRunResult
         | Generator[
-            NodeEventBase | GraphNodeEventBase | ContainerAwaitRequest,
+            NodeEventPayload | NodeEvent | ContainerAwaitRequest,
             None,
             None,
         ]
@@ -634,7 +652,7 @@ class Node[NodeDataT: BaseNodeData](
     def run(
         self,
     ) -> Generator[
-        GraphNodeEventBase | ContainerAwaitRequest,
+        NodeEvent | ContainerAwaitRequest,
         None,
         None,
     ]:
@@ -647,7 +665,6 @@ class Node[NodeDataT: BaseNodeData](
             node_id=self._node_id,
             node_type=self.node_type,
             node_title=self.title,
-            in_iteration_id=None,
             start_at=self._start_at,
         )
         try:
@@ -669,13 +686,13 @@ class Node[NodeDataT: BaseNodeData](
     def _run_events(
         self,
     ) -> Generator[
-        GraphNodeEventBase | ContainerAwaitRequest,
+        NodeEvent | ContainerAwaitRequest,
         None,
         None,
     ]:
         result = self._run()
         if isinstance(result, NodeRunResult):
-            yield self._convert_node_run_result_to_graph_node_event(result)
+            yield self._convert_node_run_result_to_node_event(result)
             return
 
         for event in result:
@@ -686,7 +703,7 @@ class Node[NodeDataT: BaseNodeData](
         *,
         result: ContainerRunResult,
         started_at: datetime,
-    ) -> Generator[GraphNodeEventBase | ContainerAwaitRequest, None, None]:
+    ) -> Generator[NodeEvent | ContainerAwaitRequest, None, None]:
         self._start_at = started_at
         try:
             for event in self._resume_container_events(result=result):
@@ -700,7 +717,7 @@ class Node[NodeDataT: BaseNodeData](
         *,
         result: ContainerRunResult,
     ) -> Generator[
-        NodeEventBase | GraphNodeEventBase | ContainerAwaitRequest,
+        NodeEventPayload | NodeEvent | ContainerAwaitRequest,
         None,
         None,
     ]:
@@ -710,13 +727,13 @@ class Node[NodeDataT: BaseNodeData](
 
     def _normalize_run_event(
         self,
-        event: NodeEventBase | GraphNodeEventBase | ContainerAwaitRequest,
-    ) -> GraphNodeEventBase | ContainerAwaitRequest:
+        event: NodeEventPayload | NodeEvent | ContainerAwaitRequest,
+    ) -> NodeEvent | ContainerAwaitRequest:
         if isinstance(event, ContainerAwaitRequest):
             return event
-        if isinstance(event, NodeEventBase):
+        if isinstance(event, NodeEventPayload):
             return self._dispatch(event)
-        if not event.in_iteration_id and not event.in_loop_id:
+        if not event.container_id:
             event.id = self.execution_id
         return event
 
@@ -816,10 +833,10 @@ class Node[NodeDataT: BaseNodeData](
         msg = "subclasses of BaseNode must implement `version` method."
         raise NotImplementedError(msg)
 
-    def _convert_node_run_result_to_graph_node_event(
+    def _convert_node_run_result_to_node_event(
         self,
         result: NodeRunResult,
-    ) -> GraphNodeEventBase:
+    ) -> NodeEvent:
         finished_at = datetime.now(UTC).replace(tzinfo=None)
         status = result.status
         match status:
@@ -856,7 +873,7 @@ class Node[NodeDataT: BaseNodeData](
                 assert_never(status)
 
     @singledispatchmethod
-    def _dispatch(self, event: NodeEventBase) -> GraphNodeEventBase:
+    def _dispatch(self, event: NodeEventPayload) -> NodeEvent:
         msg = f"Node {self._node_id} does not support event type {type(event)}"
         raise NotImplementedError(msg)
 
