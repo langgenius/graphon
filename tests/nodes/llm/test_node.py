@@ -240,49 +240,40 @@ def test_fetch_structured_output_schema_checks_draft7_schema() -> None:
     assert "path=$.type" in str(exc_info.value)
 
 
-@pytest.mark.parametrize(
-    ("schema", "path"),
-    [
-        (
-            {
-                "definitions": {"value": {"type": "string"}},
-                "$ref": "#/definitions/value",
-            },
-            "$['$ref']",
-        ),
-        (
-            {"allOf": [{"$ref": "http://127.0.0.1/schema"}]},
-            "$.allOf[0]['$ref']",
-        ),
-    ],
-    ids=["local", "nested-remote"],
-)
-def test_fetch_structured_output_schema_rejects_refs(
-    schema: dict[str, Any],
-    path: str,
+def test_final_structured_output_validation_disables_remote_ref_retrieval(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    def fail_urlopen(*_args: Any, **_kwargs: Any) -> None:
+        pytest.fail("remote schema retrieval was attempted")
+
+    monkeypatch.setattr("urllib.request.urlopen", fail_urlopen)
+
     with pytest.raises(LLMNodeError) as exc_info:
-        LLMNode.fetch_structured_output_schema(
-            structured_output={"schema": schema},
+        LLMNode._validate_structured_output_result(
+            structured_output={},
+            json_schema={"$ref": "http://127.0.0.1/schema"},
         )
 
-    assert "stage=schema" in str(exc_info.value)
-    assert f"path={path}" in str(exc_info.value)
-    assert "$ref is not supported" in str(exc_info.value)
+    assert "stage=result" in str(exc_info.value)
+    assert "path=$" in str(exc_info.value)
+    assert "schema reference could not be resolved" in str(exc_info.value)
 
 
-def test_fetch_structured_output_schema_allows_ref_as_output_field_name() -> None:
+def test_final_structured_output_validation_supports_local_refs() -> None:
     schema = {
-        "type": "object",
-        "properties": {"$ref": {"type": "string"}},
-        "enum": [{"$ref": "ordinary output value"}],
+        "definitions": {
+            "result": {
+                "type": "object",
+                "properties": {"ok": {"type": "boolean"}},
+                "required": ["ok"],
+            },
+        },
+        "$ref": "#/definitions/result",
     }
 
-    assert (
-        LLMNode.fetch_structured_output_schema(
-            structured_output={"schema": schema},
-        )
-        == schema
+    LLMNode._validate_structured_output_result(
+        structured_output={"ok": True},
+        json_schema=schema,
     )
 
 
