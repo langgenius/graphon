@@ -438,8 +438,10 @@ def test_run_passes_variable_pool_and_bound_execution_id_to_runtime(
     }
     assert node.execution_id == "bound-execution"
     assert isinstance(events[0], NodeRunStartedEvent)
-    assert events[0].id == "bound-execution"
+    assert events[0].node_execution_id == "bound-execution"
     assert isinstance(events[-1], NodeRunSucceededEvent)
+    assert events[-1].node_execution_id == "bound-execution"
+    assert events[0].id != events[-1].id
 
 
 def test_run_requires_runtime_adapter_to_accept_execution_id() -> None:

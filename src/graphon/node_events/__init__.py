@@ -1,4 +1,3 @@
-from .agent import AgentLogEvent
 from .base import NodeEventPayload, NodeRunResult
 from .iteration import (
     IterationFailedEvent,
@@ -27,7 +26,6 @@ from .node import (
 )
 
 __all__ = [
-    "AgentLogEvent",
     "HumanInputFormFilledEvent",
     "HumanInputFormTimeoutEvent",
     "IterationFailedEvent",

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import UTC
 from threading import Event, Thread
-from typing import Any
+from typing import Any, cast
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
@@ -11,6 +13,7 @@ from graphon.dsl import loads
 from graphon.engine import Engine
 from graphon.engine.container_handler import LoopContainerHandler
 from graphon.engine.frame import FrameRegistry
+from graphon.engine.layer import Layer
 from graphon.engine.ready_queue.entities import StartTask
 from graphon.engine.ready_queue.in_memory import InMemoryReadyQueue
 from graphon.engine_events.base import EngineEvent
@@ -224,7 +227,14 @@ def test_full_answer_graph_is_verified_from_events() -> None:
         edges=[_edge("start", "answer")],
     )
 
-    events = run_workflow(dsl, start_inputs={"name": "Graphon"})
+    engine = loads(
+        dsl,
+        workflow_id="workflow-envelope",
+        start_inputs={"name": "Graphon"},
+    )
+    layer = MagicMock(spec=Layer)
+    engine.add_layer(cast(Layer, layer))
+    events = list(engine.run())
 
     assert event_path(events) == [
         _event("GraphRunStartedEvent"),
@@ -235,6 +245,22 @@ def test_full_answer_graph_is_verified_from_events() -> None:
         _event("NodeRunSucceededEvent", "answer"),
         _event("GraphRunSucceededEvent"),
     ]
+    assert {event.graph_id for event in events} == {"workflow-envelope"}
+    assert len({event.execution_id for event in events}) == 1
+    assert events[0].execution_id
+    assert len({event.id for event in events}) == len(events)
+    assert [event.sequence for event in events] == list(range(1, len(events) + 1))
+    assert [event.event_type for event in events] == [
+        type(event).__name__ for event in events
+    ]
+    assert {event.schema_version for event in events} == {"1.0"}
+    assert all(event.emitted_at.tzinfo is UTC for event in events)
+    layer_events = [call.args[0] for call in layer.on_event.call_args_list]
+    assert len(layer_events) == len(events)
+    assert all(
+        layer_event is emitted_event
+        for layer_event, emitted_event in zip(layer_events, events, strict=True)
+    )
     outputs = final_outputs(events)
     assert set(outputs) == {"answer", "files"}
     assert outputs["answer"] == "Hello Graphon"

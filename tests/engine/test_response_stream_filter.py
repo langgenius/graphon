@@ -186,7 +186,7 @@ def _stream_chunk(
     is_final: bool = True,
 ) -> NodeRunStreamChunkEvent:
     return NodeRunStreamChunkEvent(
-        id=run_id,
+        node_execution_id=run_id,
         node_id=source_id,
         node_type=BuiltinNodeTypes.CODE,
         selector=list(selector or [source_id, "answer"]),
@@ -204,7 +204,7 @@ def _reasoning_chunk(
     is_final: bool = False,
 ) -> NodeRunReasoningChunkEvent:
     return NodeRunReasoningChunkEvent(
-        id=run_id,
+        node_execution_id=run_id,
         node_id=source_id,
         node_type=BuiltinNodeTypes.CODE,
         selector=list(selector or [source_id, "reasoning_content"]),
@@ -499,7 +499,7 @@ def test_response_stream_filter_reorders_buffered_stream_chunks_after_edge_taken
     event_filter.initialize(_context(graph))
 
     started = NodeRunStartedEvent(
-        id="source-run",
+        node_execution_id="source-run",
         node_id="source",
         node_type=BuiltinNodeTypes.CODE,
         node_title="Source",
@@ -555,7 +555,7 @@ def test_response_stream_filter_uses_retry_execution_id_for_scalar_value() -> No
     event_filter = ResponseStreamFilter()
     event_filter.initialize(_context(graph, variable_pool))
     retry = NodeRunRetryEvent(
-        id="retry-run",
+        node_execution_id="retry-run",
         node_id="source",
         node_type=BuiltinNodeTypes.CODE,
         node_title="Source",
@@ -568,7 +568,9 @@ def test_response_stream_filter_uses_retry_execution_id_for_scalar_value() -> No
     output = list(event_filter.on_event(_edge_taken()))
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
-    assert [(event.id, event.chunk) for event in chunks] == [("retry-run", "saved")]
+    assert [(event.node_execution_id, event.chunk) for event in chunks] == [
+        ("retry-run", "saved")
+    ]
 
 
 def test_response_stream_filter_initialize_resets_run_state() -> None:
@@ -610,6 +612,32 @@ def test_response_stream_filter_round_trips_resume_state() -> None:
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     assert [event.chunk for event in chunks] == ["resumed"]
+
+
+def test_response_stream_filter_restores_identity_for_synthesized_chunks() -> None:
+    graph = _variable_response_graph()
+    variable_pool = VariablePool()
+    variable_pool.add(["source", "answer"], StringSegment(value="resumed"))
+    context = _context(graph, variable_pool)
+    first_filter = ResponseStreamFilter()
+    first_filter.initialize(context)
+    started = GraphRunStartedEvent(
+        id="start-event",
+        graph_id="graph-1",
+        execution_id="execution-1",
+    )
+    assert list(first_filter.on_event(started)) == [started]
+
+    restored_filter = ResponseStreamFilter()
+    restored_filter.initialize(context)
+    restored_filter.loads(first_filter.dumps())
+    output = list(restored_filter.on_event(_edge_taken()))
+
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert len(chunks) == 1
+    assert chunks[0].graph_id == "graph-1"
+    assert chunks[0].execution_id == "execution-1"
+    assert chunks[0].id != started.id
 
 
 def test_response_stream_filter_can_load_before_filter_chain_initializes() -> None:
