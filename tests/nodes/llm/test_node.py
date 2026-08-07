@@ -240,6 +240,52 @@ def test_fetch_structured_output_schema_checks_draft7_schema() -> None:
     assert "path=$.type" in str(exc_info.value)
 
 
+@pytest.mark.parametrize(
+    ("schema", "path"),
+    [
+        (
+            {
+                "definitions": {"value": {"type": "string"}},
+                "$ref": "#/definitions/value",
+            },
+            "$['$ref']",
+        ),
+        (
+            {"allOf": [{"$ref": "http://127.0.0.1/schema"}]},
+            "$.allOf[0]['$ref']",
+        ),
+    ],
+    ids=["local", "nested-remote"],
+)
+def test_fetch_structured_output_schema_rejects_refs(
+    schema: dict[str, Any],
+    path: str,
+) -> None:
+    with pytest.raises(LLMNodeError) as exc_info:
+        LLMNode.fetch_structured_output_schema(
+            structured_output={"schema": schema},
+        )
+
+    assert "stage=schema" in str(exc_info.value)
+    assert f"path={path}" in str(exc_info.value)
+    assert "$ref is not supported" in str(exc_info.value)
+
+
+def test_fetch_structured_output_schema_allows_ref_as_output_field_name() -> None:
+    schema = {
+        "type": "object",
+        "properties": {"$ref": {"type": "string"}},
+        "enum": [{"$ref": "ordinary output value"}],
+    }
+
+    assert (
+        LLMNode.fetch_structured_output_schema(
+            structured_output={"schema": schema},
+        )
+        == schema
+    )
+
+
 _RESULT_SCHEMA = {
     "type": "object",
     "properties": {

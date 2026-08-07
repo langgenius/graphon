@@ -104,6 +104,37 @@ _MULTIMODAL_OUTPUT_FILE_TYPES: Mapping[PromptMessageContentType, FileType] = {
     PromptMessageContentType.AUDIO: FileType.AUDIO,
     PromptMessageContentType.DOCUMENT: FileType.DOCUMENT,
 }
+_DRAFT7_LITERAL_KEYWORDS = frozenset({"const", "default", "enum", "examples"})
+
+
+def _json_path_child(path: str, key: str | int) -> str:
+    if isinstance(key, int):
+        return f"{path}[{key}]"
+    if key.isidentifier():
+        return f"{path}.{key}"
+    return f"{path}[{key!r}]"
+
+
+def _find_draft7_ref_path(schema: Mapping[str, Any]) -> str | None:
+    pending: list[tuple[str, Any]] = [("$", schema)]
+    while pending:
+        path, candidate = pending.pop()
+        if not isinstance(candidate, Mapping):
+            continue
+        if isinstance(candidate.get("$ref"), str):
+            return _json_path_child(path, "$ref")
+        for key, child in candidate.items():
+            if key in _DRAFT7_LITERAL_KEYWORDS:
+                continue
+            child_path = _json_path_child(path, key)
+            if isinstance(child, Mapping):
+                pending.append((child_path, child))
+            elif isinstance(child, Sequence) and not isinstance(child, str):
+                pending.extend(
+                    (_json_path_child(child_path, index), item)
+                    for index, item in enumerate(child)
+                )
+    return None
 
 
 @dataclass(frozen=True)
@@ -1673,6 +1704,12 @@ class LLMNode(Node[LLMNodeData]):
                 f"(stage=schema, path={error.json_path}): {error.message}"
             )
             raise LLMNodeError(msg) from error
+        if ref_path := _find_draft7_ref_path(schema):
+            msg = (
+                "Invalid structured output schema "
+                f"(stage=schema, path={ref_path}): $ref is not supported"
+            )
+            raise LLMNodeError(msg)
         return schema
 
     @staticmethod
