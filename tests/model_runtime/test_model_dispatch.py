@@ -61,7 +61,7 @@ from graphon.model_runtime.model_providers.model_provider_factory import (
     ModelProviderFactory,
 )
 from graphon.model_runtime.protocols.llm_runtime import LLMModelRuntime
-from graphon.model_runtime.protocols.tts_runtime import TTSModelVoice
+from graphon.model_runtime.protocols.tts_runtime import TTSChunk, TTSModelVoice
 
 
 class _ProviderRuntimeStub:
@@ -447,9 +447,9 @@ class _TTSRuntimeStub(_ProviderRuntimeStub):
         content_text: str,
         voice: str,
         request_metadata: Mapping[str, object] | None = None,
-    ) -> list[bytes]:
+    ) -> list[TTSChunk]:
         _ = provider, model, credentials, content_text, voice, request_metadata
-        return [b"audio"]
+        return [TTSChunk(data=b"audio", mime_type="audio/wav")]
 
     def get_tts_model_voices(
         self,
@@ -801,7 +801,8 @@ def test_tts_model_accepts_tts_only_runtime_surface() -> None:
             content_text="hello",
             voice="nova",
         ),
-    ) == [b"audio"]
+    ) == [TTSChunk(data=b"audio", mime_type="audio/wav")]
+    assert TTSChunk(data=b"legacy", mime_type=None).mime_type is None
     assert model.get_tts_model_voices(
         model="voice-model",
         credentials={},

@@ -2,9 +2,18 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from typing import Any, Protocol, TypedDict, runtime_checkable
 
 from graphon.model_runtime.protocols.provider_runtime import ModelProviderRuntime
+
+
+@dataclass(frozen=True, slots=True)
+class TTSChunk:
+    """Audio chunk returned by TTS model runtimes."""
+
+    data: bytes
+    mime_type: str | None
 
 
 class TTSModelVoice(TypedDict):
@@ -28,7 +37,7 @@ class TTSModelRuntime(ModelProviderRuntime, Protocol):
         content_text: str,
         voice: str,
         request_metadata: Mapping[str, object] | None = None,
-    ) -> Iterable[bytes]: ...
+    ) -> Iterable[TTSChunk]: ...
 
     @abstractmethod
     def get_tts_model_voices(
