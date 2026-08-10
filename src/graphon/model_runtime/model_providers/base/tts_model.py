@@ -3,7 +3,11 @@ from collections.abc import Iterable, Mapping
 
 from graphon.model_runtime.entities.model_entities import ModelType
 from graphon.model_runtime.model_providers.base.ai_model import AIModel
-from graphon.model_runtime.protocols.tts_runtime import TTSModelRuntime, TTSModelVoice
+from graphon.model_runtime.protocols.tts_runtime import (
+    TTSChunk,
+    TTSModelRuntime,
+    TTSModelVoice,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +25,8 @@ class TTSModel(AIModel[TTSModelRuntime]):
         voice: str,
         *,
         request_metadata: Mapping[str, object] | None = None,
-    ) -> Iterable[bytes]:
-        """Invoke the TTS model and return an audio byte stream."""
+    ) -> Iterable[TTSChunk]:
+        """Invoke the TTS model and return an audio stream."""
         try:
             return self.model_runtime.invoke_tts(
                 provider=self.provider,
