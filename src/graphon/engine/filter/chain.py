@@ -18,20 +18,32 @@ def filter_engine_events(
     for event_filter in filter_list:
         event_filter.initialize(context)
 
+    last_sequence = 0
+
+    def sequence_output(event: EngineEvent) -> EngineEvent:
+        nonlocal last_sequence
+        next_sequence = max(last_sequence + 1, event.sequence)
+        last_sequence = next_sequence
+        if event.sequence == next_sequence:
+            return event
+        return event.model_copy(update={"sequence": next_sequence})
+
     for event in events:
-        yield from _apply_filters(
+        for output_event in _apply_filters(
             event,
             filters=filter_list,
             start_index=0,
-        )
+        ):
+            yield sequence_output(output_event)
 
     for index, event_filter in enumerate(filter_list):
         for event in event_filter.flush():
-            yield from _apply_filters(
+            for output_event in _apply_filters(
                 event,
                 filters=filter_list,
                 start_index=index + 1,
-            )
+            ):
+                yield sequence_output(output_event)
 
 
 def _apply_filters(

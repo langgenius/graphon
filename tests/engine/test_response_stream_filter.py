@@ -522,25 +522,28 @@ def test_response_stream_filter_reorders_buffered_stream_chunks_after_edge_taken
             VariableSegment(selector=["source", "answer"]),
         ],
     )
-    event_filter = ResponseStreamFilter()
-    event_filter.initialize(_context(graph))
-
     started = NodeRunStartedEvent(
         node_execution_id="source-run",
         node_id="source",
         node_type=BuiltinNodeTypes.CODE,
         node_title="Source",
         start_at=datetime.now(UTC).replace(tzinfo=None),
+        sequence=1,
     )
-    chunk = _stream_chunk("value")
-    taken = _edge_taken()
-
-    assert list(event_filter.on_event(started)) == [started]
-    assert list(event_filter.on_event(chunk)) == []
-    output = list(event_filter.on_event(taken))
+    chunk = _stream_chunk("value").model_copy(update={"sequence": 2})
+    taken = _edge_taken().model_copy(update={"sequence": 3})
+    output = list(
+        filter_engine_events(
+            [started, chunk, taken],
+            context=_context(graph),
+            filters=[ResponseStreamFilter()],
+        )
+    )
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     assert [event.chunk for event in chunks] == ["prefix ", "value"]
+    assert [event.sequence for event in output] == [1, 2, 3]
+    assert chunk.sequence == 2
 
 
 def test_response_stream_filter_ignores_child_frame_edge_id_collision() -> None:
