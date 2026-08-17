@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import queue
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -668,6 +669,54 @@ def test_loop_hitl_runtime_state_round_trip_preserves_progress() -> None:
     assert not any(
         isinstance(event, NodeRunLoopStartedEvent) for event in resumed_events
     )
+    assert final_outputs(resumed_events) == {"rounds": 3, "seed": "fixed"}
+
+
+def test_version_2_full_graph_snapshot_restores_scoped_loop_frames() -> None:
+    """Resume a legacy snapshot whose root and child each stored the full graph.
+
+    Version 2 materialized every execution frame from the complete workflow graph,
+    so both the root snapshot and each live container frame persisted states for
+    every node and edge. The scoped runtime must select only the entries belonging
+    to the rebuilt frame while preserving the original full-graph edge identities.
+    """
+    snapshot, _ = _snapshot_after_hitl_pause(
+        _hitl_engine(
+            _loop_dsl(),
+            runtime_state=_new_runtime_state({}),
+            callback=lambda _: PauseRequested(session_id="legacy-loop-pause"),
+        )
+    )
+    payload = json.loads(snapshot)
+    payload["version"] = "2.0"
+    assert set(payload["graph_edge_states"]) == {"edge_0", "edge_2"}
+    assert {
+        edge_id
+        for frame in payload["container_frames"]
+        for edge_id in frame["runtime_data"]["graph_edge_states"]
+    } == {"edge_1"}
+    full_node_states = dict(payload["graph_node_states"])
+    full_edge_states = dict(payload["graph_edge_states"])
+    for frame in payload["container_frames"]:
+        runtime_data = frame["runtime_data"]
+        full_node_states.update(runtime_data["graph_node_states"])
+        full_edge_states.update(runtime_data["graph_edge_states"])
+    assert set(full_edge_states) == {"edge_0", "edge_1", "edge_2"}
+    payload["graph_node_states"] = full_node_states
+    payload["graph_edge_states"] = full_edge_states
+    for frame in payload["container_frames"]:
+        runtime_data = frame["runtime_data"]
+        runtime_data["graph_node_states"] = full_node_states
+        runtime_data["graph_edge_states"] = full_edge_states
+
+    resumed_events = list(
+        _hitl_engine(
+            _loop_dsl(),
+            runtime_state=RuntimeState.from_snapshot(json.dumps(payload)),
+            callback=_complete_loop_hitl,
+        ).run()
+    )
+
     assert final_outputs(resumed_events) == {"rounds": 3, "seed": "fixed"}
 
 

@@ -262,7 +262,9 @@ class ResponseStreamFilter:
             case NodeRunReasoningChunkEvent():
                 output = self._handle_reasoning_chunk(event)
             case GraphEdgeTakenEvent():
-                output = self._handle_edge_taken(event.edge_id)
+                output = (
+                    [] if event.container_id else self._handle_edge_taken(event.edge_id)
+                )
             case GraphEdgeSkippedEvent():
                 output = []
             case NodeRunSucceededEvent() | NodeRunExceptionEvent():

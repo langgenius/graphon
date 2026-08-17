@@ -158,6 +158,79 @@ def test_graph_init_scopes_execution_and_retains_only_its_subtree_config() -> No
     }
 
 
+def test_scoped_graphs_preserve_full_config_edge_ids() -> None:
+    """Keep legacy edge ordinals stable across root, child, and nested frames.
+
+    Every materialized graph contains only the edges in its own execution scope,
+    but those edges must retain the ID assigned by their position in the initial
+    complete workflow config. This prevents child traversal events from reusing
+    root edge IDs and keeps persisted ``edge_N`` state compatible on restore.
+    """
+    graph_config = _scoped_graph_config()
+    node_factory = _RecordingNodeFactory()
+
+    root_graph = Graph.init(
+        graph_config=graph_config,
+        node_factory=node_factory,
+        root_node_id="start",
+    )
+    assert {
+        edge_id: (edge.tail, edge.head) for edge_id, edge in root_graph.edges.items()
+    } == {
+        "edge_0": ("start", "container-a"),
+        "edge_1": ("container-a", "container-b"),
+        "edge_2": ("container-b", "end"),
+    }
+
+    assert root_graph.graph_config is not None
+    child_graph = Graph.init(
+        graph_config=root_graph.graph_config,
+        node_factory=node_factory,
+        root_node_id="a-start",
+        container_id="container-a",
+    )
+    assert {
+        edge_id: (edge.tail, edge.head) for edge_id, edge in child_graph.edges.items()
+    } == {
+        "edge_3": ("a-start", "nested-container"),
+        "edge_4": ("nested-container", "a-end"),
+    }
+    assert child_graph.graph_config is not None
+    assert _config_edges(child_graph.graph_config) == {
+        ("a-start", "nested-container"),
+        ("nested-container", "a-end"),
+        ("nested-start", "nested-end"),
+    }
+
+    nested_graph = Graph.init(
+        graph_config=child_graph.graph_config,
+        node_factory=node_factory,
+        root_node_id="nested-start",
+        container_id="nested-container",
+    )
+    assert {
+        edge_id: (edge.tail, edge.head) for edge_id, edge in nested_graph.edges.items()
+    } == {"edge_5": ("nested-start", "nested-end")}
+    assert nested_graph.graph_config is not None
+    assert _config_edges(nested_graph.graph_config) == {
+        ("nested-start", "nested-end"),
+    }
+
+
+def test_graph_init_rejects_duplicate_stable_edge_ids() -> None:
+    """Reject private edge identities that would overwrite an existing edge."""
+    graph_config = _scoped_graph_config()
+    graph_config["edges"][0]["__graphon_edge_id"] = "edge-duplicate"
+    graph_config["edges"][1]["__graphon_edge_id"] = "edge-duplicate"
+
+    with pytest.raises(ValueError, match="Duplicate stable edge ID: edge-duplicate"):
+        Graph.init(
+            graph_config=graph_config,
+            node_factory=_RecordingNodeFactory(),
+            root_node_id="start",
+        )
+
+
 def test_graph_init_rejects_edges_crossing_container_scopes() -> None:
     graph_config = _scoped_graph_config()
     graph_config["edges"].append(_edge("container-a", "a-start"))

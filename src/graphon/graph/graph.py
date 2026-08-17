@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 _ListNodeConfigDict = TypeAdapter(list[NodeConfigDict])
 _ListObjectDict = TypeAdapter(list[dict[str, Any]])
+_STABLE_EDGE_ID_KEY = "__graphon_edge_id"
 
 
 class NodeFactory(Protocol):
@@ -111,12 +112,14 @@ class Graph:
         Returns:
             Tuple of `edges`, `in_edges`, and `out_edges` mappings.
 
+        Raises:
+            TypeError: If a scoped edge lacks its internally assigned stable ID.
+
         """
         edges: dict[str, Edge] = {}
         in_edges: dict[str, list[str]] = defaultdict(list)
         out_edges: dict[str, list[str]] = defaultdict(list)
 
-        edge_counter = 0
         for edge_config in edge_configs:
             source = edge_config.get("source")
             target = edge_config.get("target")
@@ -124,9 +127,10 @@ class Graph:
             if not isinstance(source, str) or not isinstance(target, str):
                 continue
 
-            # Create edge
-            edge_id = f"edge_{edge_counter}"
-            edge_counter += 1
+            edge_id = edge_config.get(_STABLE_EDGE_ID_KEY)
+            if not isinstance(edge_id, str):
+                msg = "Scoped edge config is missing its stable edge ID"
+                raise TypeError(msg)
 
             source_handle = edge_config.get("sourceHandle", "source")
             if not isinstance(source_handle, str):
@@ -144,6 +148,53 @@ class Graph:
             in_edges[target].append(edge_id)
 
         return edges, dict(in_edges), dict(out_edges)
+
+    @staticmethod
+    def _prepare_edge_configs(
+        graph_config: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Validate edge configs and preserve their full-graph legacy IDs.
+
+        The first materialization receives the complete workflow config and
+        assigns ``edge_N`` with the same counter rules used by the legacy graph.
+        Scoped configs retain the private ID field, so later child and nested
+        materializations keep that original identity even though parent and
+        sibling edges are no longer present. Each edge dictionary is copied
+        before annotation so the caller's input mapping is never mutated.
+
+        Args:
+            graph_config: Complete or previously scoped workflow graph config.
+
+        Returns:
+            Validated edge dictionaries carrying stable internal edge IDs.
+
+        Raises:
+            ValueError: If two valid edges carry the same stable internal ID.
+
+        """
+        edge_configs = [
+            dict(edge_config)
+            for edge_config in _ListObjectDict.validate_python(
+                graph_config.get("edges", []),
+            )
+        ]
+        edge_counter = 0
+        stable_edge_ids: set[str] = set()
+        for edge_config in edge_configs:
+            source = edge_config.get("source")
+            target = edge_config.get("target")
+            if not isinstance(source, str) or not isinstance(target, str):
+                continue
+            edge_id = edge_config.get(_STABLE_EDGE_ID_KEY)
+            if not isinstance(edge_id, str):
+                edge_id = f"edge_{edge_counter}"
+                edge_config[_STABLE_EDGE_ID_KEY] = edge_id
+            if edge_id in stable_edge_ids:
+                msg = f"Duplicate stable edge ID: {edge_id}"
+                raise ValueError(msg)
+            stable_edge_ids.add(edge_id)
+            edge_counter += 1
+        return edge_configs
 
     @classmethod
     def _create_node_instances(
@@ -476,7 +527,7 @@ class Graph:
 
         """
         # Parse configs
-        edge_configs = _ListObjectDict.validate_python(graph_config.get("edges", []))
+        edge_configs = cls._prepare_edge_configs(graph_config)
         raw_node_configs = _ListObjectDict.validate_python(
             graph_config.get("nodes", []),
         )
