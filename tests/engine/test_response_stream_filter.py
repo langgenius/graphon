@@ -168,12 +168,14 @@ def _edge_taken(
     edge_id: str = "edge-1",
     source_id: str = "source",
     answer_id: str = "answer",
+    container_id: str = "",
 ) -> GraphEdgeTakenEvent:
     return GraphEdgeTakenEvent(
         edge_id=edge_id,
         source_node_id=source_id,
         target_node_id=answer_id,
         source_handle="success",
+        container_id=container_id,
     )
 
 
@@ -514,6 +516,25 @@ def test_response_stream_filter_reorders_buffered_stream_chunks_after_edge_taken
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     assert [event.chunk for event in chunks] == ["prefix ", "value"]
+
+
+def test_response_stream_filter_ignores_child_edge_id_collision() -> None:
+    """Verify that a child traversal event cannot unblock a root response path.
+
+    The child event deliberately reuses the root edge ID and remains filtered;
+    only the matching root event may release the buffered response chunk.
+    """
+    graph = _variable_response_graph(edge_id="edge-1")
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+    chunk = _stream_chunk("root response")
+
+    assert list(event_filter.on_event(chunk)) == []
+    assert list(event_filter.on_event(_edge_taken(container_id="loop"))) == []
+
+    output = list(event_filter.on_event(_edge_taken()))
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert [event.chunk for event in chunks] == ["root response"]
 
 
 def test_response_stream_filter_reads_scalar_variable_values() -> None:

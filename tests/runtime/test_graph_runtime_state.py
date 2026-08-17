@@ -101,6 +101,43 @@ def test_runtime_state_rejects_conflicting_workflow_identity() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("node_states", "edge_states"),
+    [
+        ({}, {"root-edge": NodeState.TAKEN}),
+        ({"root": NodeState.TAKEN}, {}),
+    ],
+    ids=["missing-node", "missing-edge"],
+)
+def test_attach_graph_rejects_saved_state_missing_current_graph_entries(
+    node_states: dict[str, NodeState],
+    edge_states: dict[str, NodeState],
+) -> None:
+    """Verify snapshots must contain every entry in the current graph scope.
+
+    The two parameter cases omit either the current node or the current edge so
+    the subset validation cannot accidentally weaken the existing completeness
+    requirement while permitting unrelated saved entries.
+    """
+    state = RuntimeState(
+        workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
+    )
+    state.restore_graph_state(
+        node_states=node_states,
+        edge_states=edge_states,
+    )
+    graph = MagicMock(
+        nodes={"root": MagicMock()},
+        edges={"root-edge": MagicMock()},
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Saved graph state does not match rebuilt graph",
+    ):
+        state.attach_graph(graph)
+
+
 class TestGraphRuntimeState:
     def test_execution_context_defaults_to_empty_context(self) -> None:
         state = RuntimeState(
@@ -329,7 +366,13 @@ class TestGraphRuntimeState:
         ):
             state.attach_graph(other_graph)
 
-    def test_attach_graph_rejects_a_different_materialized_scope(self) -> None:
+    def test_attach_graph_accepts_saved_state_from_a_larger_scope(self) -> None:
+        """Verify a scoped graph restores from a legacy full-graph snapshot.
+
+        The saved mappings intentionally include child-scope entries. Attaching
+        the root graph must apply its own node and edge states without attempting
+        to index the graph with those extra child keys.
+        """
         state = RuntimeState(
             workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
         )
@@ -338,15 +381,22 @@ class TestGraphRuntimeState:
                 "root": NodeState.TAKEN,
                 "child": NodeState.SKIPPED,
             },
-            edge_states={"child-edge": NodeState.SKIPPED},
+            edge_states={
+                "root-edge": NodeState.TAKEN,
+                "child-edge": NodeState.SKIPPED,
+            },
         )
-        graph = MagicMock(nodes={"root": MagicMock()}, edges={})
+        root_node = MagicMock(state=NodeState.UNKNOWN)
+        root_edge = MagicMock(state=NodeState.UNKNOWN)
+        graph = MagicMock(
+            nodes={"root": root_node},
+            edges={"root-edge": root_edge},
+        )
 
-        with pytest.raises(
-            RuntimeError,
-            match="Saved graph state does not match rebuilt graph",
-        ):
-            state.attach_graph(graph)
+        state.attach_graph(graph)
+
+        assert root_node.state is NodeState.TAKEN
+        assert root_edge.state is NodeState.TAKEN
 
     def test_read_only_wrapper_exposes_additional_state(self) -> None:
         state = RuntimeState(

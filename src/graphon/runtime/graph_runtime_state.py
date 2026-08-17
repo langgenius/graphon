@@ -298,10 +298,12 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         """Stage persisted graph states for the graph attached to this runtime.
 
         Frame restoration constructs runtime state before constructing its
-        scoped graph. This method records the complete node and edge mappings;
-        :meth:`attach_graph` validates their topology and applies them atomically
-        before the frame becomes executable. Staging is rejected after graph
-        attachment so callers cannot overwrite a live graph accidentally.
+        scoped graph. This method records the persisted node and edge mappings,
+        which may include states from descendant scopes. :meth:`attach_graph`
+        validates that the current scoped graph is fully represented and applies
+        only that graph's states before the frame becomes executable. Staging is
+        rejected after graph attachment so callers cannot overwrite a live graph
+        accidentally.
 
         Args:
             node_states: Persisted node states keyed by node ID.
@@ -324,8 +326,8 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
             msg = "RuntimeState already attached to a different graph instance"
             raise ValueError(msg)
         if self._has_pending_graph_state and (
-            set(self._pending_graph_node_states) != set(graph.nodes)
-            or set(self._pending_graph_edge_states) != set(graph.edges)
+            not set(graph.nodes).issubset(self._pending_graph_node_states)
+            or not set(graph.edges).issubset(self._pending_graph_edge_states)
         ):
             msg = "Saved graph state does not match rebuilt graph"
             raise RuntimeError(msg)
@@ -333,12 +335,12 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         self._apply_pending_graph_state()
 
     def _apply_pending_graph_state(self) -> None:
-        if self._graph is None:
+        if self._graph is None or not self._has_pending_graph_state:
             return
-        for node_id, state in self._pending_graph_node_states.items():
-            self._graph.nodes[node_id].state = state
-        for edge_id, state in self._pending_graph_edge_states.items():
-            self._graph.edges[edge_id].state = state
+        for node_id, node in self._graph.nodes.items():
+            node.state = self._pending_graph_node_states[node_id]
+        for edge_id, edge in self._graph.edges.items():
+            edge.state = self._pending_graph_edge_states[edge_id]
         self._pending_graph_node_states.clear()
         self._pending_graph_edge_states.clear()
         self._has_pending_graph_state = False
