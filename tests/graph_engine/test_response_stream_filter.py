@@ -17,7 +17,7 @@ from graphon.graph_events.node import (
     NodeRunStartedEvent,
     NodeRunStreamChunkEvent,
 )
-from graphon.graph_events.traversal import GraphEdgeTakenEvent
+from graphon.graph_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTakenEvent
 from graphon.nodes.base.template import (
     Template,
     TemplateSegmentUnion,
@@ -702,3 +702,70 @@ def test_response_stream_filter_keeps_current_state_when_load_fails() -> None:
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     assert [event.chunk for event in chunks] == ["preserved"]
+
+
+# ---------------------------------------------------------------------------
+# Regression tests: GraphEdgeSkippedEvent must clear blocking-path entries
+# (dify#40865 — exclusive-brancher success edge stays blocked forever)
+# ---------------------------------------------------------------------------
+
+
+def test_response_stream_filter_activates_session_when_success_edge_skipped() -> None:
+    """When the exception branch fires and the success edge is emitted as
+    GraphEdgeSkippedEvent, the ResponseStreamFilter must remove that edge from
+    the paths_map so the downstream Answer session can activate and emit the
+    variable-pool fallback value.
+
+    Before the fix the handler was ``output = []``, leaving the success edge
+    in the blocking set forever and producing zero streaming output.
+    """
+    variable_pool = VariablePool()
+    # Pre-populate the variable-pool fallback that DEFAULT_VALUE would set.
+    variable_pool.add(["source", "answer"], StringSegment(value="default"))
+
+    graph = _variable_response_graph()
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph, variable_pool))
+
+    list(event_filter.on_event(GraphRunStartedEvent()))
+
+    # The success edge from "source" → "answer" is skipped (exception branch fired).
+    skipped = GraphEdgeSkippedEvent(
+        edge_id="edge-1",
+        source_node_id="source",
+        target_node_id="answer",
+        source_handle="success",
+    )
+    output = list(event_filter.on_event(skipped))
+
+    chunks = [e for e in output if isinstance(e, NodeRunStreamChunkEvent)]
+    assert chunks, "Expected at least one stream chunk after the success edge is skipped"
+    assert chunks[0].chunk == "default"
+
+
+def test_response_stream_filter_emits_nothing_for_genuinely_unrelated_skipped_edge() -> None:
+    """A skipped edge that is not part of any blocking path should not produce
+    stream output (no spurious activation).
+    """
+    variable_pool = VariablePool()
+    variable_pool.add(["source", "answer"], StringSegment(value="v"))
+
+    graph = _variable_response_graph()
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph, variable_pool))
+
+    list(event_filter.on_event(GraphRunStartedEvent()))
+
+    # A skipped edge from a completely unrelated part of the graph
+    # (edge-99 is not in any path to the answer node).
+    skipped_unrelated = GraphEdgeSkippedEvent(
+        edge_id="edge-99",
+        source_node_id="other-node",
+        target_node_id="another-node",
+        source_handle="success",
+    )
+    output = list(event_filter.on_event(skipped_unrelated))
+
+    chunks = [e for e in output if isinstance(e, NodeRunStreamChunkEvent)]
+    # No spurious activation — the answer session should still be waiting.
+    assert chunks == []
