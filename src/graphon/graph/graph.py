@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 _ListNodeConfigDict = TypeAdapter(list[NodeConfigDict])
 _ListObjectDict = TypeAdapter(list[dict[str, Any]])
-_STABLE_EDGE_ID_KEY = "__graphon_edge_id"
 
 
 class NodeFactory(Protocol):
@@ -113,10 +112,11 @@ class Graph:
             Tuple of `edges`, `in_edges`, and `out_edges` mappings.
 
         Raises:
-            TypeError: If a scoped edge lacks its internally assigned stable ID.
+            ValueError: If two edges in this graph use the same public ID.
 
         """
         edges: dict[str, Edge] = {}
+        edge_ids: set[str] = set()
         in_edges: dict[str, list[str]] = defaultdict(list)
         out_edges: dict[str, list[str]] = defaultdict(list)
 
@@ -127,10 +127,11 @@ class Graph:
             if not isinstance(source, str) or not isinstance(target, str):
                 continue
 
-            edge_id = edge_config.get(_STABLE_EDGE_ID_KEY)
-            if not isinstance(edge_id, str):
-                msg = "Scoped edge config is missing its stable edge ID"
-                raise TypeError(msg)
+            edge_id = edge_config["id"]
+            if edge_id in edge_ids:
+                msg = f"Duplicate graph edge ID: {edge_id}"
+                raise ValueError(msg)
+            edge_ids.add(edge_id)
 
             source_handle = edge_config.get("sourceHandle", "source")
             if not isinstance(source_handle, str):
@@ -153,23 +154,29 @@ class Graph:
     def _prepare_edge_configs(
         graph_config: Mapping[str, Any],
     ) -> list[dict[str, Any]]:
-        """Validate edge configs and preserve their full-graph legacy IDs.
+        """Copy edge configs and ensure every valid edge has a public DSL ID.
 
-        The first materialization receives the complete workflow config and
-        assigns ``edge_N`` with the same counter rules used by the legacy graph.
-        Scoped configs retain the private ID field, so later child and nested
-        materializations keep that original identity even though parent and
-        sibling edges are no longer present. Each edge dictionary is copied
-        before annotation so the caller's input mapping is never mutated.
+        An edge is valid for legacy numbering when both ``source`` and
+        ``target`` are strings. Missing IDs are filled with ``edge_N`` using
+        exactly that historical ordinal rule, including edges later ignored
+        because another field is invalid. The generated public ID is retained
+        in scoped graph configs, so child graphs use the same ID when they are
+        materialized later. Supplied IDs must be non-empty strings.
+
+        Duplicate IDs are deliberately not checked here because this method
+        sees a container subtree, not one materialized graph. ``_build_edges``
+        enforces uniqueness after scoping, allowing separate child graphs to
+        reuse the same local edge ID. Each edge dictionary is copied before an
+        ID is added, so the caller's config is never mutated.
 
         Args:
             graph_config: Complete or previously scoped workflow graph config.
 
         Returns:
-            Validated edge dictionaries carrying stable internal edge IDs.
+            Copied edge dictionaries carrying public DSL edge IDs.
 
         Raises:
-            ValueError: If two valid edges carry the same stable internal ID.
+            ValueError: If a supplied edge ID is not a non-empty string.
 
         """
         edge_configs = [
@@ -179,20 +186,18 @@ class Graph:
             )
         ]
         edge_counter = 0
-        stable_edge_ids: set[str] = set()
         for edge_config in edge_configs:
+            if "id" in edge_config and (
+                not isinstance(edge_config["id"], str) or not edge_config["id"]
+            ):
+                msg = "Graph edge ID must be a non-empty string"
+                raise ValueError(msg)
             source = edge_config.get("source")
             target = edge_config.get("target")
             if not isinstance(source, str) or not isinstance(target, str):
                 continue
-            edge_id = edge_config.get(_STABLE_EDGE_ID_KEY)
-            if not isinstance(edge_id, str):
-                edge_id = f"edge_{edge_counter}"
-                edge_config[_STABLE_EDGE_ID_KEY] = edge_id
-            if edge_id in stable_edge_ids:
-                msg = f"Duplicate stable edge ID: {edge_id}"
-                raise ValueError(msg)
-            stable_edge_ids.add(edge_id)
+            if "id" not in edge_config:
+                edge_config["id"] = f"edge_{edge_counter}"
             edge_counter += 1
         return edge_configs
 

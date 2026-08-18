@@ -49,7 +49,7 @@ def _node(
     }
 
 
-def _edge(source: str, target: str) -> dict[str, str]:
+def _edge(source: str, target: str) -> dict[str, Any]:
     return {"source": source, "target": target}
 
 
@@ -159,12 +159,11 @@ def test_graph_init_scopes_execution_and_retains_only_its_subtree_config() -> No
 
 
 def test_scoped_graphs_preserve_full_config_edge_ids() -> None:
-    """Keep legacy edge ordinals stable across root, child, and nested frames.
+    """Expose legacy fallback IDs and retain them in every scoped config.
 
-    Every materialized graph contains only the edges in its own execution scope,
-    but those edges must retain the ID assigned by their position in the initial
-    complete workflow config. This prevents child traversal events from reusing
-    root edge IDs and keeps persisted ``edge_N`` state compatible on restore.
+    Missing DSL IDs use their original full-config ordinal. Graph initialization
+    writes those IDs only to copied configs so callers are not mutated, while
+    later child and nested materializations reuse the public ``id`` field.
     """
     graph_config = _scoped_graph_config()
     node_factory = _RecordingNodeFactory()
@@ -181,8 +180,21 @@ def test_scoped_graphs_preserve_full_config_edge_ids() -> None:
         "edge_1": ("container-a", "container-b"),
         "edge_2": ("container-b", "end"),
     }
-
+    assert all("id" not in edge for edge in graph_config["edges"])
     assert root_graph.graph_config is not None
+    assert [edge["id"] for edge in root_graph.graph_config["edges"]] == [
+        "edge_0",
+        "edge_1",
+        "edge_2",
+        "edge_3",
+        "edge_4",
+        "edge_5",
+        "edge_6",
+    ]
+    assert all(
+        "__graphon_edge_id" not in edge for edge in root_graph.graph_config["edges"]
+    )
+
     child_graph = Graph.init(
         graph_config=root_graph.graph_config,
         node_factory=node_factory,
@@ -217,13 +229,76 @@ def test_scoped_graphs_preserve_full_config_edge_ids() -> None:
     }
 
 
-def test_graph_init_rejects_duplicate_stable_edge_ids() -> None:
-    """Reject private edge identities that would overwrite an existing edge."""
+def test_graph_init_preserves_public_edge_ids() -> None:
     graph_config = _scoped_graph_config()
-    graph_config["edges"][0]["__graphon_edge_id"] = "edge-duplicate"
-    graph_config["edges"][1]["__graphon_edge_id"] = "edge-duplicate"
+    graph_config["edges"][0]["id"] = "start-to-container"
+    graph_config["edges"][3]["id"] = "child-edge"
 
-    with pytest.raises(ValueError, match="Duplicate stable edge ID: edge-duplicate"):
+    root_graph = Graph.init(
+        graph_config=graph_config,
+        node_factory=_RecordingNodeFactory(),
+        root_node_id="start",
+    )
+    assert "start-to-container" in root_graph.edges
+    assert root_graph.graph_config is not None
+
+    child_graph = Graph.init(
+        graph_config=root_graph.graph_config,
+        node_factory=_RecordingNodeFactory(),
+        root_node_id="a-start",
+        container_id="container-a",
+    )
+    assert "child-edge" in child_graph.edges
+
+
+def test_graph_init_rejects_duplicate_edge_ids_in_one_scope() -> None:
+    graph_config = _scoped_graph_config()
+    graph_config["edges"][0]["id"] = "edge-duplicate"
+    graph_config["edges"][1]["id"] = "edge-duplicate"
+
+    with pytest.raises(ValueError, match="Duplicate graph edge ID: edge-duplicate"):
+        Graph.init(
+            graph_config=graph_config,
+            node_factory=_RecordingNodeFactory(),
+            root_node_id="start",
+        )
+
+
+def test_child_graphs_may_reuse_edge_ids() -> None:
+    graph_config = _scoped_graph_config()
+    graph_config["edges"][3]["id"] = "local-edge"
+    graph_config["edges"][6]["id"] = "local-edge"
+
+    root_graph = Graph.init(
+        graph_config=graph_config,
+        node_factory=_RecordingNodeFactory(),
+        root_node_id="start",
+    )
+    assert root_graph.graph_config is not None
+
+    child_a = Graph.init(
+        graph_config=root_graph.graph_config,
+        node_factory=_RecordingNodeFactory(),
+        root_node_id="a-start",
+        container_id="container-a",
+    )
+    child_b = Graph.init(
+        graph_config=root_graph.graph_config,
+        node_factory=_RecordingNodeFactory(),
+        root_node_id="b-start",
+        container_id="container-b",
+    )
+
+    assert "local-edge" in child_a.edges
+    assert "local-edge" in child_b.edges
+
+
+@pytest.mark.parametrize("edge_id", ["", None, 1])
+def test_graph_init_rejects_invalid_public_edge_ids(edge_id: object) -> None:
+    graph_config = _scoped_graph_config()
+    graph_config["edges"][0]["id"] = edge_id
+
+    with pytest.raises(ValueError, match="must be a non-empty string"):
         Graph.init(
             graph_config=graph_config,
             node_factory=_RecordingNodeFactory(),

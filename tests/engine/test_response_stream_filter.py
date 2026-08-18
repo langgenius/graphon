@@ -1,4 +1,5 @@
-from collections.abc import Sequence
+import json
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, ClassVar, cast
 
@@ -24,6 +25,7 @@ from graphon.nodes.base.template import (
     TextSegment,
     VariableSegment,
 )
+from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.graph_runtime_state import (
     EdgeProtocol,
     GraphProtocol,
@@ -94,10 +96,21 @@ class _TestGraph(GraphProtocol):
         nodes: dict[str, _TestNode],
         edges: dict[str, _TestEdge],
         root_node_id: str,
+        graph_config: Mapping[str, Any] | None = None,
     ) -> None:
         self._nodes = nodes
         self._edges = edges
         self._root_node = nodes[root_node_id]
+        self._graph_config = graph_config or {
+            "edges": [
+                {
+                    "id": edge.id,
+                    "source": edge.tail,
+                    "target": edge.head,
+                }
+                for edge in edges.values()
+            ]
+        }
 
     @property
     def nodes(self) -> dict[str, _TestNode]:
@@ -106,6 +119,16 @@ class _TestGraph(GraphProtocol):
     @property
     def edges(self) -> dict[str, _TestEdge]:
         return self._edges
+
+    @property
+    def graph_config(self) -> Mapping[str, Any]:
+        """Return the edge definition used by snapshot compatibility tests."""
+        return self._graph_config
+
+    @graph_config.setter
+    def graph_config(self, value: Mapping[str, Any]) -> None:
+        """Replace the edge definition for a compatibility test scenario."""
+        self._graph_config = value
 
     @property
     def root_node(self) -> _TestNode:
@@ -168,14 +191,14 @@ def _edge_taken(
     edge_id: str = "edge-1",
     source_id: str = "source",
     answer_id: str = "answer",
-    container_id: str = "",
+    frame_id: str = ROOT_FRAME_ID,
 ) -> GraphEdgeTakenEvent:
     return GraphEdgeTakenEvent(
+        frame_id=frame_id,
         edge_id=edge_id,
         source_node_id=source_id,
         target_node_id=answer_id,
         source_handle="success",
-        container_id=container_id,
     )
 
 
@@ -315,6 +338,7 @@ def test_response_stream_filter_filters_reasoning_before_branch_is_reached() -> 
     edge_output = list(
         event_filter.on_event(
             GraphEdgeTakenEvent(
+                frame_id=ROOT_FRAME_ID,
                 edge_id="branch-source",
                 source_node_id="branch",
                 target_node_id="source",
@@ -365,6 +389,7 @@ def test_response_stream_filter_filters_reasoning_from_skipped_merge_branch() ->
     list(
         event_filter.on_event(
             GraphEdgeTakenEvent(
+                frame_id=ROOT_FRAME_ID,
                 edge_id="branch-chosen",
                 source_node_id="branch",
                 target_node_id="chosen",
@@ -518,7 +543,7 @@ def test_response_stream_filter_reorders_buffered_stream_chunks_after_edge_taken
     assert [event.chunk for event in chunks] == ["prefix ", "value"]
 
 
-def test_response_stream_filter_ignores_child_edge_id_collision() -> None:
+def test_response_stream_filter_ignores_child_frame_edge_id_collision() -> None:
     """Verify that a child traversal event cannot unblock a root response path.
 
     The child event deliberately reuses the root edge ID and remains filtered;
@@ -530,7 +555,7 @@ def test_response_stream_filter_ignores_child_edge_id_collision() -> None:
     chunk = _stream_chunk("root response")
 
     assert list(event_filter.on_event(chunk)) == []
-    assert list(event_filter.on_event(_edge_taken(container_id="loop"))) == []
+    assert list(event_filter.on_event(_edge_taken(frame_id="loop-frame"))) == []
 
     output = list(event_filter.on_event(_edge_taken()))
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
@@ -614,6 +639,108 @@ def test_response_stream_filter_initialize_resets_run_state() -> None:
         event for event in second_output if isinstance(event, NodeRunStreamChunkEvent)
     ]
     assert [event.chunk for event in second_chunks] == ["second"]
+
+
+def test_response_stream_filter_writes_version_2_snapshot() -> None:
+    graph = _variable_response_graph()
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+
+    snapshot = json.loads(event_filter.dumps())
+
+    assert snapshot["version"] == "2.0"
+    assert "_graphon_loaded_from_v1" not in snapshot
+
+
+def test_response_stream_filter_migrates_v1_root_state_after_graph_binding() -> None:
+    graph = _variable_response_graph(edge_id="shared-edge")
+    graph.graph_config = {
+        "edges": [
+            {
+                "id": "shared-edge",
+                "source": "child-source",
+                "target": "child-answer",
+            },
+            {
+                "id": "shared-edge",
+                "source": "source",
+                "target": "answer",
+            },
+        ]
+    }
+    first_filter = ResponseStreamFilter()
+    first_filter.initialize(_context(graph))
+    snapshot = json.loads(first_filter.dumps())
+    snapshot.update({
+        "version": "1.0",
+        "response_nodes": ["answer", "child-answer"],
+        "active_session": {"node_id": "child-answer", "index": 0},
+        "waiting_sessions": [{"node_id": "answer", "index": 0}],
+        "pending_sessions": [{"node_id": "child-answer", "index": 0}],
+        "node_execution_ids": {
+            "source": "root-run",
+            "child-source": "child-run",
+        },
+        "paths_map": {
+            "answer": [["edge_1"]],
+            "child-answer": [["edge_0"]],
+        },
+    })
+
+    restored_filter = ResponseStreamFilter()
+    restored_filter.loads(json.dumps(snapshot))
+    with pytest.raises(RuntimeError, match="must be initialized"):
+        restored_filter.dumps()
+    restored_filter.initialize(_context(graph))
+
+    assert restored_filter._response_nodes == {"answer"}
+    assert restored_filter._active_session is not None
+    assert restored_filter._active_session.node_id == "answer"
+    assert list(restored_filter._waiting_sessions) == []
+    assert restored_filter._response_sessions == {}
+    assert restored_filter._node_execution_ids == {"source": "root-run"}
+    assert [path.edges for path in restored_filter._paths_maps["answer"]] == [
+        ["shared-edge"]
+    ]
+    assert json.loads(restored_filter.dumps())["version"] == "2.0"
+
+
+def test_response_stream_filter_does_not_migrate_version_2_edge_ids() -> None:
+    graph = _variable_response_graph(edge_id="public-edge")
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+    snapshot = json.loads(event_filter.dumps())
+    snapshot["paths_map"] = {"answer": [["edge_0"]]}
+
+    restored_filter = ResponseStreamFilter()
+    restored_filter.initialize(_context(graph))
+    restored_filter.loads(json.dumps(snapshot))
+    assert list(restored_filter.on_event(_stream_chunk("value"))) == []
+
+    assert list(restored_filter.on_event(_edge_taken(edge_id="public-edge"))) == []
+    output = list(restored_filter.on_event(_edge_taken(edge_id="edge_0")))
+
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert [event.chunk for event in chunks] == ["value"]
+
+
+def test_response_stream_filter_v2_cannot_inject_v1_compatibility_marker() -> None:
+    graph = _variable_response_graph(edge_id="public-edge")
+    first_filter = ResponseStreamFilter()
+    first_filter.initialize(_context(graph))
+    snapshot = json.loads(first_filter.dumps())
+    snapshot["compatibility_marker"] = True
+    snapshot["_graphon_loaded_from_v1"] = True
+
+    restored_filter = ResponseStreamFilter()
+    restored_filter.loads(json.dumps(snapshot))
+    assert json.loads(restored_filter.dumps())["version"] == "2.0"
+    restored_filter.initialize(_context(graph))
+
+    assert list(restored_filter.on_event(_stream_chunk("value"))) == []
+    output = list(restored_filter.on_event(_edge_taken(edge_id="public-edge")))
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert [event.chunk for event in chunks] == ["value"]
 
 
 def test_response_stream_filter_round_trips_resume_state() -> None:

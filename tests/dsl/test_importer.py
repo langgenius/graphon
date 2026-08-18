@@ -7,6 +7,7 @@ import yaml
 
 from graphon.dsl import inspect as inspect_dsl
 from graphon.dsl.entities import LoadStatus
+from graphon.dsl.errors import DslError
 
 _OPENAI_PLUGIN_ID = "langgenius/openai:0.3.8@test"
 
@@ -254,3 +255,70 @@ def test_container_nodes_are_loadable_by_default(node_type: str) -> None:
 
     assert plan.load_status == LoadStatus.LOADABLE
     assert plan.load_reason is None
+
+
+@pytest.mark.parametrize("edge_id", ["", None, 1])
+def test_graph_edge_id_must_be_a_non_empty_string(edge_id: object) -> None:
+    dsl = _graph_dsl_for_nodes(
+        nodes=[{"id": "node", "data": {"type": "answer"}}],
+        edges=[{"id": edge_id, "source": "start", "target": "node"}],
+    )
+
+    with pytest.raises(DslError) as exc_info:
+        inspect_dsl(dsl)
+
+    assert exc_info.value.code == "graph.invalid_edge_id"
+    assert exc_info.value.path == "/workflow/graph/edges/0/id"
+
+
+def test_graph_edge_id_must_be_unique_within_one_graph() -> None:
+    dsl = _graph_dsl_for_nodes(
+        nodes=[
+            {"id": "left", "data": {"type": "answer"}},
+            {"id": "right", "data": {"type": "answer"}},
+        ],
+        edges=[
+            {"id": "shared", "source": "start", "target": "left"},
+            {"id": "shared", "source": "start", "target": "right"},
+        ],
+    )
+
+    with pytest.raises(DslError) as exc_info:
+        inspect_dsl(dsl)
+
+    assert exc_info.value.code == "graph.duplicate_edge_id"
+    assert exc_info.value.path == "/workflow/graph/edges/1/id"
+
+
+@pytest.mark.parametrize("owner_field", ["container_id", "iteration_id", "loop_id"])
+def test_sibling_graphs_may_reuse_edge_ids(owner_field: str) -> None:
+    dsl = _graph_dsl_for_nodes(
+        nodes=[
+            {"id": "left", "data": {"type": "loop"}},
+            {"id": "right", "data": {"type": "loop"}},
+            {
+                "id": "left-start",
+                "data": {"type": "answer", owner_field: "left"},
+            },
+            {
+                "id": "left-end",
+                "data": {"type": "answer", owner_field: "left"},
+            },
+            {
+                "id": "right-start",
+                "data": {"type": "answer", owner_field: "right"},
+            },
+            {
+                "id": "right-end",
+                "data": {"type": "answer", owner_field: "right"},
+            },
+        ],
+        edges=[
+            {"id": "shared", "source": "left-start", "target": "left-end"},
+            {"id": "shared", "source": "right-start", "target": "right-end"},
+        ],
+    )
+
+    plan = inspect_dsl(dsl)
+
+    assert plan.load_status == LoadStatus.LOADABLE

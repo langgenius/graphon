@@ -11,8 +11,14 @@ from graphon.engine.ready_queue.entities import (
     StartTask,
 )
 from graphon.engine.ready_queue.in_memory import InMemoryReadyQueue
-from graphon.enums import ErrorHandleMode, NodeState
+from graphon.enums import (
+    BuiltinNodeTypes,
+    ErrorHandleMode,
+    NodeExecutionType,
+    NodeState,
+)
 from graphon.file import File, FileTransferMethod, FileType
+from graphon.graph.graph import Graph
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.nodes.container_effects import (
     IterationFrameRequest,
@@ -138,7 +144,7 @@ def test_attach_graph_rejects_saved_state_missing_current_graph_entries(
         state.attach_graph(graph)
 
 
-class TestGraphRuntimeState:
+class TestGraphRuntimeState:  # ruff:ignore[too-many-public-methods]
     def test_execution_context_defaults_to_empty_context(self) -> None:
         state = RuntimeState(
             workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
@@ -366,13 +372,8 @@ class TestGraphRuntimeState:
         ):
             state.attach_graph(other_graph)
 
-    def test_attach_graph_accepts_saved_state_from_a_larger_scope(self) -> None:
-        """Verify a scoped graph restores from a legacy full-graph snapshot.
-
-        The saved mappings intentionally include child-scope entries. Attaching
-        the root graph must apply its own node and edge states without attempting
-        to index the graph with those extra child keys.
-        """
+    def test_attach_graph_rejects_current_state_from_a_larger_scope(self) -> None:
+        """Version 3 state must describe exactly the graph being attached."""
         state = RuntimeState(
             workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
         )
@@ -393,10 +394,161 @@ class TestGraphRuntimeState:
             edges={"root-edge": root_edge},
         )
 
-        state.attach_graph(graph)
+        with pytest.raises(
+            RuntimeError,
+            match="Saved graph state does not match rebuilt graph",
+        ):
+            state.attach_graph(graph)
 
-        assert root_node.state is NodeState.TAKEN
+    def test_version_2_state_migrates_only_after_graph_attachment(self) -> None:
+        """Legacy positional IDs are converted without relaxing version 3 reads.
+
+        Root and child scopes intentionally reuse the same public edge ID. The
+        version 2 state is a full-graph map keyed by global positional IDs; graph
+        attachment must select only the root entry before writing version 3.
+        """
+        state = RuntimeState(
+            workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
+        )
+        payload = json.loads(state.dumps())
+        payload.update({
+            "version": "2.0",
+            "graph_node_states": {
+                "start": NodeState.TAKEN,
+                "end": NodeState.UNKNOWN,
+                "child-start": NodeState.TAKEN,
+                "child-end": NodeState.UNKNOWN,
+            },
+            "graph_edge_states": {
+                "edge_1": NodeState.TAKEN,
+                "edge_2": NodeState.SKIPPED,
+            },
+        })
+        restored = RuntimeState.from_snapshot(json.dumps(payload))
+
+        with pytest.raises(
+            RuntimeError,
+            match="must attach its graph before serialization",
+        ):
+            restored.dumps()
+
+        start = MagicMock(state=NodeState.UNKNOWN)
+        end = MagicMock(state=NodeState.UNKNOWN)
+        root_edge = MagicMock(state=NodeState.UNKNOWN)
+        graph = MagicMock(
+            nodes={"start": start, "end": end},
+            edges={"shared-edge": root_edge},
+            graph_config={
+                "nodes": [
+                    {"id": "start", "data": {}},
+                    {"id": "end", "data": {}},
+                    {"id": "child-start", "data": {"container_id": "container"}},
+                    {"id": "child-end", "data": {"container_id": "container"}},
+                ],
+                "edges": [
+                    {
+                        "id": "ignored-edge",
+                        "source": "start",
+                        "target": "end",
+                        "sourceHandle": 1,
+                    },
+                    {"id": "shared-edge", "source": "start", "target": "end"},
+                    {
+                        "id": "shared-edge",
+                        "source": "child-start",
+                        "target": "child-end",
+                    },
+                ],
+            },
+        )
+
+        restored.attach_graph(graph)
+        migrated = json.loads(restored.dumps())
+
+        assert start.state is NodeState.TAKEN
+        assert end.state is NodeState.UNKNOWN
         assert root_edge.state is NodeState.TAKEN
+        assert migrated["version"] == "3.0"
+        assert migrated["graph_edge_states"] == {"shared-edge": NodeState.TAKEN}
+        assert "compatibility_marker" not in migrated
+
+    def test_version_2_graph_builder_state_migrates_without_graph_config(self) -> None:
+        """Keep legacy generated IDs when a programmatic graph matches exactly."""
+        root = MagicMock(
+            id="start",
+            node_type=BuiltinNodeTypes.START,
+            execution_type=NodeExecutionType.ROOT,
+            state=NodeState.TAKEN,
+        )
+        end = MagicMock(
+            id="end",
+            node_type=BuiltinNodeTypes.END,
+            execution_type=NodeExecutionType.EXECUTABLE,
+            state=NodeState.UNKNOWN,
+        )
+        graph = Graph.new().add_root(root).add_node(end).build()
+        assert graph.graph_config is None
+
+        state = RuntimeState(
+            workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
+        )
+        state.attach_graph(graph)
+        payload = json.loads(state.dumps())
+        payload["version"] = "2.0"
+
+        restored = RuntimeState.from_snapshot(json.dumps(payload))
+        restored.attach_graph(graph)
+
+        assert json.loads(restored.dumps())["version"] == "3.0"
+        assert root.state is NodeState.TAKEN
+        assert end.state is NodeState.UNKNOWN
+
+    def test_failed_version_2_migration_does_not_commit_compatibility_state(
+        self,
+    ) -> None:
+        """Leave legacy state retryable when the rebuilt root graph does not match."""
+        state = RuntimeState(
+            workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
+        )
+        payload = json.loads(state.dumps())
+        payload.update({
+            "version": "2.0",
+            "graph_node_states": {"start": NodeState.TAKEN},
+            "graph_edge_states": {"edge_0": NodeState.SKIPPED},
+        })
+        restored = RuntimeState.from_snapshot(json.dumps(payload))
+        graph_config = {
+            "nodes": [{"id": "start", "data": {}}],
+            "edges": [{"id": "public-edge", "source": "start", "target": "start"}],
+        }
+        mismatched_graph = MagicMock(
+            nodes={"other": MagicMock(state=NodeState.UNKNOWN)},
+            edges={"public-edge": MagicMock(state=NodeState.UNKNOWN)},
+            graph_config=graph_config,
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match="Saved graph state does not match rebuilt graph",
+        ):
+            restored.attach_graph(mismatched_graph)
+        with pytest.raises(
+            RuntimeError,
+            match="must attach its graph before serialization",
+        ):
+            restored.dumps()
+
+        matching_node = MagicMock(state=NodeState.UNKNOWN)
+        matching_edge = MagicMock(state=NodeState.UNKNOWN)
+        restored.attach_graph(
+            MagicMock(
+                nodes={"start": matching_node},
+                edges={"public-edge": matching_edge},
+                graph_config=graph_config,
+            )
+        )
+        assert matching_node.state is NodeState.TAKEN
+        assert matching_edge.state is NodeState.SKIPPED
 
     def test_read_only_wrapper_exposes_additional_state(self) -> None:
         state = RuntimeState(
@@ -476,7 +628,7 @@ class TestGraphRuntimeState:
         assert isinstance(restored_execution.error, RuntimeError)
         assert str(restored_execution.error) == "saved failure"
 
-    def test_version_1_snapshot_migrates_to_frame_aware_version_2(self) -> None:
+    def test_version_1_snapshot_migrates_to_current_frame_state(self) -> None:
         variable_pool = VariablePool()
         variable_pool.add(("legacy", "value"), "preserved")
         usage = LLMUsage.from_metadata({"total_tokens": 5})
@@ -518,11 +670,29 @@ class TestGraphRuntimeState:
             "deferred_nodes": ["deferred", "paused"],
             "graph_state": {
                 "nodes": {"ready": NodeState.TAKEN},
-                "edges": {"edge": NodeState.SKIPPED},
+                "edges": {"edge_0": NodeState.SKIPPED},
             },
         })
 
         restored = RuntimeState.from_snapshot(snapshot)
+        ready_node = MagicMock(state=NodeState.UNKNOWN)
+        approved_edge = MagicMock(state=NodeState.UNKNOWN)
+        restored.attach_graph(
+            MagicMock(
+                nodes={"ready": ready_node},
+                edges={"approved-edge": approved_edge},
+                graph_config={
+                    "nodes": [{"id": "ready", "data": {}}],
+                    "edges": [
+                        {
+                            "id": "approved-edge",
+                            "source": "ready",
+                            "target": "ready",
+                        },
+                    ],
+                },
+            ),
+        )
         migrated = json.loads(restored.dumps())
 
         assert migrated["version"] == "3.0"
@@ -530,7 +700,11 @@ class TestGraphRuntimeState:
         assert json.loads(migrated["deferred_ready_tasks"])["version"] == "2.0"
         assert json.loads(migrated["graph_execution"])["version"] == "2.0"
         assert migrated["graph_node_states"] == {"ready": NodeState.TAKEN}
-        assert migrated["graph_edge_states"] == {"edge": NodeState.SKIPPED}
+        assert migrated["graph_edge_states"] == {
+            "approved-edge": NodeState.SKIPPED,
+        }
+        assert ready_node.state is NodeState.TAKEN
+        assert approved_edge.state is NodeState.SKIPPED
         assert restored.ready_queue.drain() == [
             StartTask(frame_id=ROOT_FRAME_ID, node_id="ready"),
         ]

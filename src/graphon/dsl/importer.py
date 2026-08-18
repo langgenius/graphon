@@ -616,7 +616,40 @@ def _canonical_vendor(provider: str | None) -> str | None:
     return parts[-1] if parts else provider
 
 
-def _normalize_edges(
+def _node_owner_for_edge_validation(node: Mapping[str, Any]) -> str | None:
+    """Resolve a node's direct graph owner for scoped edge-ID validation.
+
+    ``container_id`` is authoritative when present. Otherwise one non-empty
+    legacy ``iteration_id`` or ``loop_id`` is accepted, matching Graph's
+    ownership rules. Invalid or ambiguous ownership returns ``None`` so this
+    importer does not mask the more specific error raised when Graph is built.
+
+    Returns:
+        The direct container ID, ``""`` for the root graph, or ``None`` when
+        ownership cannot be resolved safely.
+    """
+    data = node.get("data")
+    if not isinstance(data, Mapping):
+        return None
+    if "container_id" in data:
+        container_id = data["container_id"]
+        return container_id if isinstance(container_id, str) else None
+
+    legacy_owners: set[str] = set()
+    for key in ("iteration_id", "loop_id"):
+        owner = data.get(key)
+        if owner is None:
+            continue
+        if not isinstance(owner, str):
+            return None
+        if owner:
+            legacy_owners.add(owner)
+    if len(legacy_owners) > 1:
+        return None
+    return next(iter(legacy_owners), "")
+
+
+def _normalize_edges(  # ruff:ignore[complex-structure]
     edges: object,
     *,
     nodes: Sequence[Mapping[str, Any]],
@@ -638,8 +671,11 @@ def _normalize_edges(
         for node in nodes
         if isinstance(node.get("data"), Mapping)
     }
+    node_owners = {
+        str(node["id"]): _node_owner_for_edge_validation(node) for node in nodes
+    }
     normalized_edges: list[dict[str, Any]] = []
-    seen_edge_ids: set[str] = set()
+    seen_edge_ids: set[tuple[str, str]] = set()
     for index, edge in enumerate(edges):
         path = f"/workflow/graph/edges/{index}"
         if not isinstance(edge, Mapping):
@@ -670,18 +706,29 @@ def _normalize_edges(
                 kind=kind,
                 details={"source": source, "target": target},
             )
-        edge_id = edge_mapping.get("id")
-        if isinstance(edge_id, str):
-            if edge_id in seen_edge_ids:
-                msg = f"Duplicate graph edge id: {edge_id}"
+        if "id" in edge_mapping:
+            edge_id = edge_mapping["id"]
+            if not isinstance(edge_id, str) or not edge_id:
+                msg = "Graph edge id must be a non-empty string."
                 raise _dsl_error(
                     msg,
-                    code="graph.duplicate_edge_id",
+                    code="graph.invalid_edge_id",
                     path=f"{path}/id",
                     kind=kind,
-                    details={"edge_id": edge_id},
                 )
-            seen_edge_ids.add(edge_id)
+            source_owner = node_owners[source]
+            if source_owner is not None and source_owner == node_owners[target]:
+                scoped_edge_id = (source_owner, edge_id)
+                if scoped_edge_id in seen_edge_ids:
+                    msg = f"Duplicate graph edge id: {edge_id}"
+                    raise _dsl_error(
+                        msg,
+                        code="graph.duplicate_edge_id",
+                        path=f"{path}/id",
+                        kind=kind,
+                        details={"edge_id": edge_id},
+                    )
+                seen_edge_ids.add(scoped_edge_id)
 
         normalized_edge = deepcopy(dict(edge_mapping))
         data = dict(normalized_edge.get("data") or {})
