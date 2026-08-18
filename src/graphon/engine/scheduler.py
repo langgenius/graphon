@@ -365,9 +365,12 @@ class Scheduler:
             events.extend(self._skip_edge_path(edge))
         return events
 
-    @staticmethod
-    def _build_taken_event(edge: Edge) -> GraphEdgeTakenEvent:
+    def _build_taken_event(self, edge: Edge) -> GraphEdgeTakenEvent:
         """Build the public traversal event for an edge marked as taken.
+
+        Edge IDs are unique only inside one graph. The scheduler owns the
+        frame executing that graph, so it adds the frame ID as a separate
+        field instead of encoding both identities into one string.
 
         Args:
             edge: Taken graph edge to describe.
@@ -377,15 +380,19 @@ class Scheduler:
 
         """
         return GraphEdgeTakenEvent(
+            frame_id=self._frame_id,
             edge_id=edge.id,
             source_node_id=edge.tail,
             target_node_id=edge.head,
             source_handle=edge.source_handle,
         )
 
-    @staticmethod
-    def _build_skipped_event(edge: Edge) -> GraphEdgeSkippedEvent:
+    def _build_skipped_event(self, edge: Edge) -> GraphEdgeSkippedEvent:
         """Build the public traversal event for an edge marked as skipped.
+
+        Edge IDs are unique only inside one graph. The scheduler owns the
+        frame executing that graph, so it adds the frame ID as a separate
+        field instead of encoding both identities into one string.
 
         Args:
             edge: Skipped graph edge to describe.
@@ -395,6 +402,7 @@ class Scheduler:
 
         """
         return GraphEdgeSkippedEvent(
+            frame_id=self._frame_id,
             edge_id=edge.id,
             source_node_id=edge.tail,
             target_node_id=edge.head,

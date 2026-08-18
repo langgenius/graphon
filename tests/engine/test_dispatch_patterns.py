@@ -1495,11 +1495,13 @@ def test_event_processor_stamps_frame_owner_on_node_and_edge_events() -> None:
     event_stream = MagicMock()
     scheduler = MagicMock()
     taken = GraphEdgeTakenEvent(
+        frame_id="root",
         edge_id="taken",
         source_node_id="child",
         target_node_id="next",
     )
     skipped = GraphEdgeSkippedEvent(
+        frame_id="root",
         edge_id="skipped",
         source_node_id="child",
         target_node_id="other",

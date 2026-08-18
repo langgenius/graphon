@@ -5,9 +5,9 @@ from abc import abstractmethod
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from copy import deepcopy
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, Protocol
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, TypeAdapter
 
 from graphon.enums import NodeExecutionType, NodeState, NodeType
 from graphon.model_runtime.entities.llm_entities import LLMUsage
@@ -101,7 +101,7 @@ class _GraphRuntimeStateSnapshot(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    version: Literal["2.0", "3.0"]
+    version: Literal["3.0"]
     start_at: float
     node_run_steps: int = Field(ge=0)
     llm_usage: LLMUsage
@@ -114,14 +114,257 @@ class _GraphRuntimeStateSnapshot(BaseModel):
     container_frames: tuple[ContainerFrameState, ...]
     graph_node_states: dict[str, NodeState]
     graph_edge_states: dict[str, NodeState]
+    compatibility_marker: object | None = Field(default=None, exclude=True, repr=False)
+
+
+_V2_SNAPSHOT_MARKER = object()
+
+
+def _normalize_v2_snapshot(value: object) -> object:
+    """Normalize one version 2 runtime snapshot for the version 3 reader.
+
+    Version 2 and version 3 share the same outer payload shape, but version 2
+    edge-state keys are positional ``edge_N`` values while version 3 keys are
+    public DSL edge IDs. Pydantic runs this function before discriminating the
+    snapshot union, so it can reuse the version 3 schema without exposing a
+    second long-lived snapshot model. The in-memory marker cannot be supplied by
+    JSON and tells :class:`RuntimeState` to defer edge migration until the full
+    graph configuration is attached.
+
+    TODO(runtime-snapshot-v2): Remove this validator, ``_V2_SNAPSHOT_MARKER``,
+    the excluded ``compatibility_marker`` field, and RuntimeState's legacy
+    migration branch together when restoring version 1/2 snapshots is no longer
+    supported. None of these details are part of serialized version 3 data or the
+    public graph model.
+
+    Args:
+        value: Parsed JSON value presented to the snapshot adapter.
+
+    Returns:
+        A shallow version 3-compatible copy for version 2 input, otherwise the
+        original value unchanged.
+
+    """
+    if not isinstance(value, Mapping) or value.get("version") != "2.0":
+        return value
+    normalized = dict(value)
+    normalized["version"] = "3.0"
+    normalized["compatibility_marker"] = _V2_SNAPSHOT_MARKER
+    return normalized
 
 
 _GRAPH_RUNTIME_STATE_SNAPSHOT_ADAPTER = TypeAdapter(
     Annotated[
-        _GraphRuntimeStateSnapshotV1 | _GraphRuntimeStateSnapshot,
-        Field(discriminator="version"),
+        Annotated[
+            _GraphRuntimeStateSnapshotV1 | _GraphRuntimeStateSnapshot,
+            Field(discriminator="version"),
+        ],
+        BeforeValidator(_normalize_v2_snapshot),
     ],
 )
+
+
+def _legacy_container_id(node_id: str, data: object) -> str:
+    """Resolve one node's direct owner for snapshot compatibility only.
+
+    Current graphs use ``container_id``. Version 1/2 snapshots may accompany a
+    graph that still uses the former ``iteration_id`` or ``loop_id`` spelling,
+    so this removable helper mirrors that narrow fallback while rejecting an
+    ambiguous owner instead of guessing.
+
+    Args:
+        node_id: Node ID used to make validation failures actionable.
+        data: Raw node data from the attached full graph configuration.
+
+    Returns:
+        The direct container ID, or an empty string for a root node.
+
+    Raises:
+        TypeError: If an ownership field is not a string.
+        RuntimeError: If legacy ownership is ambiguous.
+
+    """
+    if not isinstance(data, Mapping):
+        return ""
+    if "container_id" in data:
+        container_id = data["container_id"]
+        if not isinstance(container_id, str):
+            msg = f"Node {node_id!r} has an invalid container_id"
+            raise TypeError(msg)
+        return container_id
+    legacy_owners: set[str] = set()
+    for key in ("iteration_id", "loop_id"):
+        legacy_owner = data.get(key)
+        if legacy_owner is None:
+            continue
+        if not isinstance(legacy_owner, str):
+            msg = f"Node {node_id!r} has an invalid {key}"
+            raise TypeError(msg)
+        if legacy_owner:
+            legacy_owners.add(legacy_owner)
+    if len(legacy_owners) > 1:
+        msg = f"Node {node_id!r} has ambiguous legacy container owners"
+        raise RuntimeError(msg)
+    return next(iter(legacy_owners), "")
+
+
+def _legacy_edges_by_owner(
+    raw_edges: list[object],
+    node_owners: Mapping[str, str],
+) -> dict[str, dict[str, str]]:
+    """Map legacy positional edge IDs to frame-local public edge IDs.
+
+    The ordinal advances only for entries with string ``source`` and ``target``
+    values, exactly matching the version 2 graph builder. Public IDs are checked
+    within their owning graph rather than globally because sibling graphs may
+    intentionally reuse the same edge ID.
+
+    Args:
+        raw_edges: Full graph edge list in persisted DSL order.
+        node_owners: Direct container owner indexed by node ID.
+
+    Returns:
+        Positional-to-public edge mappings grouped by direct container ID.
+
+    Raises:
+        RuntimeError: If an edge cannot be assigned unambiguously to one graph.
+
+    """
+    edges_by_owner: dict[str, dict[str, str]] = {}
+    edge_ordinal = 0
+    for edge_config in raw_edges:
+        if not isinstance(edge_config, Mapping):
+            continue
+        source = edge_config.get("source")
+        target = edge_config.get("target")
+        if not isinstance(source, str) or not isinstance(target, str):
+            continue
+        legacy_edge_id = f"edge_{edge_ordinal}"
+        edge_ordinal += 1
+        if not isinstance(edge_config.get("sourceHandle", "source"), str):
+            continue
+        public_edge_id = edge_config.get("id")
+        if not isinstance(public_edge_id, str) or not public_edge_id:
+            msg = f"Legacy {legacy_edge_id} has no public DSL edge ID"
+            raise RuntimeError(msg)
+        source_owner = node_owners.get(source)
+        target_owner = node_owners.get(target)
+        if source_owner is None or target_owner is None or source_owner != target_owner:
+            msg = f"Legacy {legacy_edge_id} does not belong to one graph scope"
+            raise RuntimeError(msg)
+        scoped_edges = edges_by_owner.setdefault(source_owner, {})
+        if public_edge_id in scoped_edges.values():
+            msg = (
+                f"Duplicate edge ID {public_edge_id!r} in graph scope {source_owner!r}"
+            )
+            raise RuntimeError(msg)
+        scoped_edges[legacy_edge_id] = public_edge_id
+    return edges_by_owner
+
+
+def _legacy_graph_scopes(
+    graph_config: Mapping[str, Any],
+) -> tuple[dict[str, set[str]], dict[str, dict[str, str]]]:
+    """Build frame-local node and edge identities for a legacy snapshot.
+
+    Version 2 stored full-graph state in every frame while current edge IDs are
+    local to one graph. This compatibility helper groups nodes and positional
+    edges by their direct owner so each frame can be converted independently.
+
+    This helper is intentionally private and used only by the removable version
+    1/2 compatibility path described in :func:`_normalize_v2_snapshot`.
+
+    Args:
+        graph_config: Full root graph configuration after normal graph import.
+
+    Returns:
+        Node IDs by direct container ID and, for each direct container, a mapping
+        from legacy positional edge ID to public DSL edge ID.
+
+    Raises:
+        TypeError: If graph config does not contain node and edge lists.
+
+    """
+    raw_nodes = graph_config.get("nodes", [])
+    raw_edges = graph_config.get("edges", [])
+    if not isinstance(raw_nodes, list) or not isinstance(raw_edges, list):
+        msg = "Attached graph config cannot migrate legacy runtime state"
+        raise TypeError(msg)
+
+    node_owners: dict[str, str] = {}
+    nodes_by_owner: dict[str, set[str]] = {}
+    for node_config in raw_nodes:
+        if not isinstance(node_config, Mapping):
+            continue
+        node_id = node_config.get("id")
+        if not isinstance(node_id, str):
+            continue
+        owner = _legacy_container_id(node_id, node_config.get("data"))
+        node_owners[node_id] = owner
+        nodes_by_owner.setdefault(owner, set()).add(node_id)
+    return nodes_by_owner, _legacy_edges_by_owner(raw_edges, node_owners)
+
+
+def _select_legacy_scope_state(
+    *,
+    owner: str,
+    node_states: Mapping[str, NodeState],
+    edge_states: Mapping[str, NodeState],
+    nodes_by_owner: Mapping[str, set[str]],
+    edges_by_owner: Mapping[str, Mapping[str, str]],
+) -> tuple[dict[str, NodeState], dict[str, NodeState]]:
+    """Convert and select one frame's state from a legacy full-graph snapshot.
+
+    Legacy snapshots may contain states for parent, child, and sibling graphs in
+    every frame. Only entries owned by ``owner`` are retained. Edge keys are
+    converted from their full-graph positional IDs to the public IDs local to
+    that frame. All required source entries are checked before any RuntimeState
+    field is changed, which lets the caller replace every frame atomically.
+
+    This helper belongs exclusively to the removable version 1/2 compatibility
+    path documented in :func:`_normalize_v2_snapshot`.
+
+    Args:
+        owner: Direct container node ID, or an empty string for the root graph.
+        node_states: Saved node states, possibly covering the complete graph.
+        edge_states: Saved positional edge states, possibly covering all scopes.
+        nodes_by_owner: Node identities grouped by direct container ID.
+        edges_by_owner: Positional-to-public edge mappings grouped by owner.
+
+    Returns:
+        Exact node and edge state dictionaries for the requested graph scope.
+
+    Raises:
+        RuntimeError: If the legacy snapshot omits required scope state or
+            contains identities absent from the attached graph definition.
+
+    """
+    expected_nodes = nodes_by_owner.get(owner, set())
+    scoped_edges = edges_by_owner.get(owner, {})
+    missing_nodes = expected_nodes.difference(node_states)
+    missing_edges = set(scoped_edges).difference(edge_states)
+    known_nodes = set().union(*nodes_by_owner.values())
+    known_edges = {
+        legacy_edge_id for scope in edges_by_owner.values() for legacy_edge_id in scope
+    }
+    unknown_nodes = set(node_states).difference(known_nodes)
+    unknown_edges = set(edge_states).difference(known_edges)
+    if missing_nodes or missing_edges or unknown_nodes or unknown_edges:
+        msg = (
+            f"Legacy graph state does not match scope {owner!r}: "
+            f"missing_nodes={sorted(missing_nodes)}, "
+            f"missing_edges={sorted(missing_edges)}, "
+            f"unknown_nodes={sorted(unknown_nodes)}, "
+            f"unknown_edges={sorted(unknown_edges)}"
+        )
+        raise RuntimeError(msg)
+    return (
+        {node_id: node_states[node_id] for node_id in expected_nodes},
+        {
+            public_edge_id: edge_states[legacy_edge_id]
+            for legacy_edge_id, public_edge_id in scoped_edges.items()
+        },
+    )
 
 
 def _new_ready_queue() -> ReadyQueue:
@@ -219,6 +462,7 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         self._pending_graph_node_states: dict[str, NodeState] = {}
         self._pending_graph_edge_states: dict[str, NodeState] = {}
         self._has_pending_graph_state = False
+        self._legacy_snapshot_version: Literal["1.0", "2.0"] | None = None
         self._container_state_lock = threading.Lock()
 
     @property
@@ -298,12 +542,12 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         """Stage persisted graph states for the graph attached to this runtime.
 
         Frame restoration constructs runtime state before constructing its
-        scoped graph. This method records the persisted node and edge mappings,
-        which may include states from descendant scopes. :meth:`attach_graph`
-        validates that the current scoped graph is fully represented and applies
-        only that graph's states before the frame becomes executable. Staging is
-        rejected after graph attachment so callers cannot overwrite a live graph
-        accidentally.
+        scoped graph. This method records the exact node and edge mappings for
+        that frame; :meth:`attach_graph` rejects both missing and unrelated
+        entries before the frame becomes executable. Legacy full-graph snapshots
+        are the only exception and are normalized by the private compatibility
+        path before this exact check. Staging is rejected after graph attachment
+        so callers cannot overwrite a live graph accidentally.
 
         Args:
             node_states: Persisted node states keyed by node ID.
@@ -321,18 +565,122 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         self._has_pending_graph_state = True
 
     def attach_graph(self, graph: GraphProtocol) -> None:
-        """Attach the materialized graph to the runtime state."""
+        """Attach the materialized graph and apply any staged snapshot state.
+
+        Current version 3 snapshots must match this graph exactly. Versions 1
+        and 2 are the sole compatibility exception: before validation they are
+        atomically converted from full-graph ``edge_N`` maps into exact,
+        frame-local maps using the attached root graph configuration. Keeping
+        that exception behind ``_legacy_snapshot_version`` prevents relaxed
+        validation from affecting newly written snapshots or normal callers.
+
+        TODO(runtime-snapshot-v2): Delete the legacy branch together with the
+        validator and helpers documented by :func:`_normalize_v2_snapshot` once
+        old snapshots no longer need to resume.
+
+        Args:
+            graph: Materialized graph owned by this runtime frame.
+
+        Raises:
+            ValueError: If another graph instance is already attached.
+            RuntimeError: If saved state cannot be migrated or does not exactly
+                match the attached graph after migration.
+
+        """
         if self._graph is not None and self._graph is not graph:
             msg = "RuntimeState already attached to a different graph instance"
             raise ValueError(msg)
+        if self._legacy_snapshot_version is not None:
+            self._migrate_legacy_graph_state(graph)
         if self._has_pending_graph_state and (
-            not set(graph.nodes).issubset(self._pending_graph_node_states)
-            or not set(graph.edges).issubset(self._pending_graph_edge_states)
+            set(graph.nodes) != set(self._pending_graph_node_states)
+            or set(graph.edges) != set(self._pending_graph_edge_states)
         ):
             msg = "Saved graph state does not match rebuilt graph"
             raise RuntimeError(msg)
         self._graph = graph
         self._apply_pending_graph_state()
+
+    def _migrate_legacy_graph_state(self, graph: GraphProtocol) -> None:
+        """Migrate every saved legacy frame against one full graph definition.
+
+        Migration cannot run in the Pydantic validator because positional
+        ``edge_N`` keys only become meaningful once the persisted workflow graph
+        is rebuilt. The root graph retains the complete container tree, allowing
+        this method to map and trim root state plus every saved container frame
+        in one pass. All replacement models are computed before assignment, so a
+        malformed later frame leaves the RuntimeState wholly in its legacy form.
+        Programmatically built graphs have no graph config; when they contain no
+        saved child frames, exact node and edge key equality proves that their
+        generated ``edge_N`` identities need no translation.
+
+        This method is private compatibility code. Remove it together with
+        ``_legacy_snapshot_version`` and the version 2 adapter validator when
+        version 1/2 snapshot restoration is retired.
+
+        Args:
+            graph: Materialized root graph used to validate and translate state.
+
+        Raises:
+            RuntimeError: If graph config is required but unavailable, a saved
+                frame has no matching container run, or any scope cannot be
+                converted fully.
+
+        """
+        graph_config = getattr(graph, "graph_config", None)
+        if graph_config is None:
+            if not self._container_frames and (
+                set(graph.nodes) == set(self._pending_graph_node_states)
+                and set(graph.edges) == set(self._pending_graph_edge_states)
+            ):
+                self._legacy_snapshot_version = None
+                return
+            msg = "Attached graph must retain graph_config to migrate legacy state"
+            raise RuntimeError(msg)
+        nodes_by_owner, edges_by_owner = _legacy_graph_scopes(graph_config)
+        root_node_states, root_edge_states = _select_legacy_scope_state(
+            owner="",
+            node_states=self._pending_graph_node_states,
+            edge_states=self._pending_graph_edge_states,
+            nodes_by_owner=nodes_by_owner,
+            edges_by_owner=edges_by_owner,
+        )
+        if set(graph.nodes) != set(root_node_states) or set(graph.edges) != set(
+            root_edge_states
+        ):
+            msg = "Saved graph state does not match rebuilt graph"
+            raise RuntimeError(msg)
+
+        with self._container_state_lock:
+            migrated_frames: dict[str, ContainerFrameState] = {}
+            for frame in self._container_frames.values():
+                run = self._container_runs.get(frame.parent_invocation_id)
+                if run is None:
+                    msg = (
+                        f"Legacy frame {frame.frame_id!r} has no matching container run"
+                    )
+                    raise RuntimeError(msg)
+                node_states, edge_states = _select_legacy_scope_state(
+                    owner=run.node_id,
+                    node_states=frame.runtime_data.graph_node_states,
+                    edge_states=frame.runtime_data.graph_edge_states,
+                    nodes_by_owner=nodes_by_owner,
+                    edges_by_owner=edges_by_owner,
+                )
+                runtime_data = frame.runtime_data.model_copy(
+                    update={
+                        "graph_node_states": node_states,
+                        "graph_edge_states": edge_states,
+                    },
+                )
+                migrated_frames[frame.frame_id] = frame.model_copy(
+                    update={"runtime_data": runtime_data},
+                )
+
+            self._pending_graph_node_states = root_node_states
+            self._pending_graph_edge_states = root_edge_states
+            self._container_frames = migrated_frames
+            self._legacy_snapshot_version = None
 
     def _apply_pending_graph_state(self) -> None:
         if self._graph is None or not self._has_pending_graph_state:
@@ -346,7 +694,22 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         self._has_pending_graph_state = False
 
     def dumps(self) -> str:
-        """Serialize runtime state into a JSON string."""
+        """Serialize runtime state into a version 3 JSON string.
+
+        A restored version 1/2 state must first attach its graph so positional
+        edge IDs can be converted safely. Refusing to serialize before that point
+        prevents an unmigrated legacy map from being mislabeled as version 3.
+
+        Returns:
+            The complete version 3 runtime snapshot as JSON.
+
+        Raises:
+            RuntimeError: If a legacy snapshot has not yet attached its graph.
+
+        """
+        if self._legacy_snapshot_version is not None:
+            msg = "Legacy runtime state must attach its graph before serialization"
+            raise RuntimeError(msg)
         with self._container_state_lock:
             container_runs = tuple(self._container_runs.values())
             container_frames = tuple(self._container_frames.values())
@@ -426,6 +789,10 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         )
         state._container_runs = {run.invocation_id: run for run in container_runs}
         state._container_frames = {frame.frame_id: frame for frame in container_frames}
+        if isinstance(snapshot, _GraphRuntimeStateSnapshotV1):
+            state._legacy_snapshot_version = "1.0"
+        elif snapshot.compatibility_marker is _V2_SNAPSHOT_MARKER:
+            state._legacy_snapshot_version = "2.0"
         state.restore_graph_state(
             node_states=graph_node_states,
             edge_states=graph_edge_states,

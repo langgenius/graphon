@@ -68,6 +68,7 @@ class _FlushFilter:
     def flush(self) -> Iterable[EngineEvent]:
         return (
             GraphEdgeTakenEvent(
+                frame_id="root",
                 edge_id="flush-edge",
                 source_node_id="a",
                 target_node_id="b",
@@ -97,6 +98,7 @@ def test_filter_chain_passes_events_when_no_filters() -> None:
 def test_filter_chain_initializes_and_chains_drop_and_split() -> None:
     pass_through = _PassThroughFilter()
     edge = GraphEdgeTakenEvent(
+        frame_id="root",
         edge_id="edge-1",
         source_node_id="start",
         target_node_id="answer",

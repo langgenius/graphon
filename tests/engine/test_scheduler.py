@@ -64,7 +64,7 @@ def _branch_scheduler() -> Scheduler:
         state=RuntimeState(
             workflow_id="workflow", variable_pool=VariablePool(), start_at=0
         ),
-        frame_id="root",
+        frame_id="branch-frame",
     )
 
 
@@ -85,6 +85,7 @@ def test_scheduler_emits_taken_and_skipped_events_for_branch() -> None:
     assert ready_nodes == ["selected"]
     assert any(isinstance(event, GraphEdgeTakenEvent) for event in events)
     assert any(isinstance(event, GraphEdgeSkippedEvent) for event in events)
+    assert {event.frame_id for event in events} == {"branch-frame"}
     assert _edge_payloads(events) == [
         ("edge-skipped", "branch", "skipped", "no"),
         ("edge-propagated", "skipped", "skipped_child", "success"),

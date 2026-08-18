@@ -98,8 +98,11 @@ def _end_node(outputs: list[dict[str, Any]]) -> dict[str, Any]:
     return {"id": "end", "data": {"type": "end", "outputs": outputs}}
 
 
-def _edge(source: str, target: str) -> dict[str, str]:
-    return {"source": source, "target": target}
+def _edge(source: str, target: str, *, edge_id: str | None = None) -> dict[str, str]:
+    edge = {"source": source, "target": target}
+    if edge_id is not None:
+        edge["id"] = edge_id
+    return edge
 
 
 def _loop_dsl() -> str:
@@ -143,9 +146,13 @@ def _loop_dsl() -> str:
             ]),
         ],
         edges=[
-            _edge("start", "loop"),
-            _edge("loop-start", "human-input"),
-            _edge("loop", "end"),
+            _edge("start", "loop", edge_id="start-to-loop"),
+            _edge(
+                "loop-start",
+                "human-input",
+                edge_id="loop-start-to-human-input",
+            ),
+            _edge("loop", "end", edge_id="loop-to-end"),
         ],
     )
 
@@ -677,8 +684,8 @@ def test_version_2_full_graph_snapshot_restores_scoped_loop_frames() -> None:
 
     Version 2 materialized every execution frame from the complete workflow graph,
     so both the root snapshot and each live container frame persisted states for
-    every node and edge. The scoped runtime must select only the entries belonging
-    to the rebuilt frame while preserving the original full-graph edge identities.
+    every node and positional ``edge_N``. The frozen DSL uses explicit public edge
+    IDs; migration must select each frame's scope and restore those public IDs.
     """
     snapshot, _ = _snapshot_after_hitl_pause(
         _hitl_engine(
@@ -689,12 +696,30 @@ def test_version_2_full_graph_snapshot_restores_scoped_loop_frames() -> None:
     )
     payload = json.loads(snapshot)
     payload["version"] = "2.0"
-    assert set(payload["graph_edge_states"]) == {"edge_0", "edge_2"}
+    public_to_legacy = {
+        "start-to-loop": "edge_0",
+        "loop-start-to-human-input": "edge_1",
+        "loop-to-end": "edge_2",
+    }
+    assert set(payload["graph_edge_states"]) == {
+        "start-to-loop",
+        "loop-to-end",
+    }
     assert {
         edge_id
         for frame in payload["container_frames"]
         for edge_id in frame["runtime_data"]["graph_edge_states"]
-    } == {"edge_1"}
+    } == {"loop-start-to-human-input"}
+    payload["graph_edge_states"] = {
+        public_to_legacy[edge_id]: state
+        for edge_id, state in payload["graph_edge_states"].items()
+    }
+    for frame in payload["container_frames"]:
+        runtime_data = frame["runtime_data"]
+        runtime_data["graph_edge_states"] = {
+            public_to_legacy[edge_id]: state
+            for edge_id, state in runtime_data["graph_edge_states"].items()
+        }
     full_node_states = dict(payload["graph_node_states"])
     full_edge_states = dict(payload["graph_edge_states"])
     for frame in payload["container_frames"]:
