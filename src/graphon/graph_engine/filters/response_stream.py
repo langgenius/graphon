@@ -267,6 +267,8 @@ class ResponseStreamFilter:
             case GraphEdgeSkippedEvent():
                 output = []
             case NodeRunSucceededEvent() | NodeRunExceptionEvent():
+                if isinstance(event, NodeRunExceptionEvent):
+                    self._close_streams_for_node(event.node_id)
                 output = [*self._try_flush(), event]
             case _:
                 output = [event]
@@ -553,6 +555,20 @@ class ResponseStreamFilter:
         if self._pass_unmatched_chunks:
             return [event]
         return []
+
+    def _close_streams_for_node(self, node_id: NodeID) -> None:
+        """Close open streams for a node that finished via exception.
+
+        When a node fails (e.g. error_strategy=DEFAULT_VALUE) after streaming
+        partial output, the terminal ``is_final`` chunk is never emitted, so
+        buffered streams stay open and the response session wedges. Closing
+        them lets ``_try_flush`` drain remaining chunks and complete the
+        segment. Streams that never received chunks are left untouched so the
+        variable-pool fallback can still emit default values.
+        """
+        for selector in list(self._stream_buffers.events.keys()):
+            if selector[0] == node_id:
+                self._stream_buffers.close(list(selector))
 
     def _handle_reasoning_chunk(
         self,
