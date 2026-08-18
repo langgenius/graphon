@@ -29,7 +29,7 @@ from docx.table import Table
 from docx.text.paragraph import Paragraph
 from odfdo import Document as OdfDocument
 
-from graphon.entities.graph_init_params import GraphInitParams
+from graphon.entities.graph_init_params import InitParams
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.file import file_manager
 from graphon.file.enums import FileTransferMethod
@@ -37,7 +37,7 @@ from graphon.file.models import File
 from graphon.http import HttpClientProtocol, get_http_client
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.node import Node
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 from graphon.variables.segments import ArrayFileSegment, ArrayStringSegment, FileSegment
 
 from .entities import DocumentExtractorNodeData, UnstructuredApiConfig
@@ -288,8 +288,8 @@ class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
         node_id: str,
         data: DocumentExtractorNodeData,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        graph_init_params: InitParams,
+        graph_runtime_state: RuntimeState,
         unstructured_api_config: UnstructuredApiConfig | None = None,
         http_client: HttpClientProtocol | None = None,
     ) -> None:

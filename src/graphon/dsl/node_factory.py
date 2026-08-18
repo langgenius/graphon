@@ -66,7 +66,7 @@ from graphon.nodes.variable_assigner.v2.entities import VariableAssignerNodeData
 from graphon.nodes.variable_assigner.v2.node import (
     VariableAssignerNode as VariableAssignerNodeV2,
 )
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.graph_runtime_state import RuntimeState
 from graphon.template_rendering import Jinja2TemplateRenderer, TemplateRenderError
 
 from .code_runtime import SandboxCodeExecutor
@@ -418,7 +418,7 @@ type _NodeBuilder = Callable[[Any, _NodeBuildRequest], Node]
 class SlimDslNodeFactory:
     graph_config: Mapping[str, Any]
     graph_init_params: Any
-    graph_runtime_state: GraphRuntimeState
+    graph_runtime_state: RuntimeState
     credentials: DslCredentials
     dependencies: list[DslDependency]
     slim_client_config: SlimClientConfig = field(init=False)
@@ -442,7 +442,7 @@ class SlimDslNodeFactory:
 
     def with_runtime_state(
         self,
-        graph_runtime_state: GraphRuntimeState,
+        graph_runtime_state: RuntimeState,
     ) -> SlimDslNodeFactory:
         return replace(self, graph_runtime_state=graph_runtime_state)
 

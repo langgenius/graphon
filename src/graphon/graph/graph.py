@@ -111,12 +111,15 @@ class Graph:
         Returns:
             Tuple of `edges`, `in_edges`, and `out_edges` mappings.
 
+        Raises:
+            ValueError: If two edges in this graph use the same public ID.
+
         """
         edges: dict[str, Edge] = {}
+        edge_ids: set[str] = set()
         in_edges: dict[str, list[str]] = defaultdict(list)
         out_edges: dict[str, list[str]] = defaultdict(list)
 
-        edge_counter = 0
         for edge_config in edge_configs:
             source = edge_config.get("source")
             target = edge_config.get("target")
@@ -124,9 +127,11 @@ class Graph:
             if not isinstance(source, str) or not isinstance(target, str):
                 continue
 
-            # Create edge
-            edge_id = f"edge_{edge_counter}"
-            edge_counter += 1
+            edge_id = edge_config["id"]
+            if edge_id in edge_ids:
+                msg = f"Duplicate graph edge ID: {edge_id}"
+                raise ValueError(msg)
+            edge_ids.add(edge_id)
 
             source_handle = edge_config.get("sourceHandle", "source")
             if not isinstance(source_handle, str):
@@ -144,6 +149,57 @@ class Graph:
             in_edges[target].append(edge_id)
 
         return edges, dict(in_edges), dict(out_edges)
+
+    @staticmethod
+    def _prepare_edge_configs(
+        graph_config: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Copy edge configs and ensure every valid edge has a public DSL ID.
+
+        An edge is valid for legacy numbering when both ``source`` and
+        ``target`` are strings. Missing IDs are filled with ``edge_N`` using
+        exactly that historical ordinal rule, including edges later ignored
+        because another field is invalid. The generated public ID is retained
+        in scoped graph configs, so child graphs use the same ID when they are
+        materialized later. Supplied IDs must be non-empty strings.
+
+        Duplicate IDs are deliberately not checked here because this method
+        sees a container subtree, not one materialized graph. ``_build_edges``
+        enforces uniqueness after scoping, allowing separate child graphs to
+        reuse the same local edge ID. Each edge dictionary is copied before an
+        ID is added, so the caller's config is never mutated.
+
+        Args:
+            graph_config: Complete or previously scoped workflow graph config.
+
+        Returns:
+            Copied edge dictionaries carrying public DSL edge IDs.
+
+        Raises:
+            ValueError: If a supplied edge ID is not a non-empty string.
+
+        """
+        edge_configs = [
+            dict(edge_config)
+            for edge_config in _ListObjectDict.validate_python(
+                graph_config.get("edges", []),
+            )
+        ]
+        edge_counter = 0
+        for edge_config in edge_configs:
+            if "id" in edge_config and (
+                not isinstance(edge_config["id"], str) or not edge_config["id"]
+            ):
+                msg = "Graph edge ID must be a non-empty string"
+                raise ValueError(msg)
+            source = edge_config.get("source")
+            target = edge_config.get("target")
+            if not isinstance(source, str) or not isinstance(target, str):
+                continue
+            if "id" not in edge_config:
+                edge_config["id"] = f"edge_{edge_counter}"
+            edge_counter += 1
+        return edge_configs
 
     @classmethod
     def _create_node_instances(
@@ -201,6 +257,155 @@ class Graph:
                 continue
             filtered_node_configs.append(dict(node_config))
         return filtered_node_configs
+
+    @staticmethod
+    def _node_container_id(node_config: Mapping[str, Any]) -> str:
+        """Resolve the ID of the container that directly owns a node.
+
+        ``data.container_id`` is authoritative. An empty or absent owner places
+        the node in the root graph. During migration, one non-empty legacy
+        ``iteration_id`` or ``loop_id`` is accepted; nested legacy ownership is
+        ambiguous and must therefore be expressed with ``container_id``.
+
+        :param node_config: raw node configuration from the workflow graph
+
+        Returns:
+            The direct container node ID, or ``""`` for a root node.
+
+        Raises:
+            TypeError: If an ownership field is not a string.
+            ValueError: If legacy fields name different containers.
+
+        """
+        data = node_config.get("data")
+        if not isinstance(data, Mapping):
+            return ""
+
+        if "container_id" in data:
+            value = data["container_id"]
+            if not isinstance(value, str):
+                msg = "Node data.container_id must be a string"
+                raise TypeError(msg)
+            return value
+
+        # Transitional support for existing single-level Loop/Iteration configs.
+        legacy_ids: set[str] = set()
+        for field in ("iteration_id", "loop_id"):
+            value = data.get(field)
+            if value is None:
+                continue
+            if not isinstance(value, str):
+                msg = f"Node data.{field} must be a string"
+                raise TypeError(msg)
+            if not value:
+                continue
+            legacy_ids.add(value)
+        if len(legacy_ids) > 1:
+            msg = "Nested container nodes must set data.container_id"
+            raise ValueError(msg)
+        return next(iter(legacy_ids), "")
+
+    @classmethod
+    def _scope_graph_config(
+        cls,
+        *,
+        graph_config: Mapping[str, Any],
+        node_configs: list[dict[str, Any]],
+        edge_configs: list[dict[str, Any]],
+        container_id: str,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+        """Split a workflow graph into one frame's executable and visible scope.
+
+        The direct node and edge lists contain only objects owned by
+        ``container_id`` and are used to construct the frame's executable
+        :class:`Graph`. The returned graph config also retains recursively nested
+        containers so the frame can later construct its children, while excluding
+        every parent and sibling scope. Edges between different direct owners are
+        invalid because they would bypass the owning container node.
+
+        :param graph_config: complete config visible to the parent frame
+        :param node_configs: validated raw node dictionaries from that config
+        :param edge_configs: validated raw edge dictionaries from that config
+        :param container_id: direct owner to materialize, or ``""`` for root
+
+        Returns:
+            Direct nodes, direct edges, and the container subtree config.
+
+        Raises:
+            ValueError: If scopes are orphaned, cyclic, or joined by an edge.
+
+        """
+        container_ids = {
+            node_id: cls._node_container_id(node_config)
+            for node_config in node_configs
+            if isinstance((node_id := node_config.get("id")), str)
+        }
+        direct_node_ids = {
+            node_id
+            for node_id, owning_container_id in container_ids.items()
+            if owning_container_id == container_id
+        }
+        subtree_node_ids = set(direct_node_ids)
+        while descendants := {
+            node_id
+            for node_id, owning_container_id in container_ids.items()
+            if owning_container_id in subtree_node_ids
+            and node_id not in subtree_node_ids
+        }:
+            subtree_node_ids.update(descendants)
+        if not container_id and subtree_node_ids != set(container_ids):
+            orphan_node_ids = sorted(set(container_ids) - subtree_node_ids)
+            msg = f"Nodes reference unknown or cyclic containers: {orphan_node_ids}"
+            raise ValueError(msg)
+
+        direct_edge_configs: list[dict[str, Any]] = []
+        subtree_edge_configs: list[dict[str, Any]] = []
+        for edge_config in edge_configs:
+            source = edge_config.get("source")
+            target = edge_config.get("target")
+            if not isinstance(source, str) or not isinstance(target, str):
+                continue
+
+            if (
+                source in container_ids
+                and target in container_ids
+                and container_ids[source] != container_ids[target]
+            ):
+                msg = (
+                    f"Edge '{source}->{target}' crosses container scopes "
+                    f"'{container_ids[source]}' and '{container_ids[target]}'"
+                )
+                raise ValueError(msg)
+
+            has_unknown_endpoint = (
+                source not in container_ids or target not in container_ids
+            )
+            if (
+                source in direct_node_ids
+                or target in direct_node_ids
+                or (not container_id and has_unknown_endpoint)
+            ):
+                direct_edge_configs.append(edge_config)
+            if (
+                source in subtree_node_ids
+                or target in subtree_node_ids
+                or (not container_id and has_unknown_endpoint)
+            ):
+                subtree_edge_configs.append(edge_config)
+
+        scoped_graph_config = dict(graph_config)
+        scoped_graph_config["nodes"] = [
+            node_config
+            for node_config in node_configs
+            if node_config.get("id") in subtree_node_ids
+        ]
+        scoped_graph_config["edges"] = subtree_edge_configs
+        direct_node_configs = [
+            node_config
+            for node_config in node_configs
+            if node_config.get("id") in direct_node_ids
+        ]
+        return direct_node_configs, direct_edge_configs, scoped_graph_config
 
     @classmethod
     def _promote_fail_branch_nodes(cls, nodes: dict[str, Node]) -> None:
@@ -309,6 +514,7 @@ class Graph:
         graph_config: Mapping[str, Any],
         node_factory: NodeFactory,
         root_node_id: str,
+        container_id: str = "",
         skip_validation: bool = False,
     ) -> Graph:
         """Initialize a graph with an explicit execution entry point.
@@ -316,6 +522,7 @@ class Graph:
         :param graph_config: graph config containing nodes and edges
         :param node_factory: factory for creating node instances from config data
         :param root_node_id: active root node id
+        :param container_id: direct container scope to materialize; empty for root
 
         Returns:
             Initialized graph instance rooted at `root_node_id`.
@@ -325,13 +532,20 @@ class Graph:
 
         """
         # Parse configs
-        edge_configs = graph_config.get("edges", [])
-        node_configs = graph_config.get("nodes", [])
-
-        edge_configs = _ListObjectDict.validate_python(edge_configs)
-        node_configs = _ListObjectDict.validate_python(node_configs)
-        node_configs = cls._filter_canvas_only_nodes(node_configs)
-        node_configs = _ListNodeConfigDict.validate_python(node_configs)
+        edge_configs = cls._prepare_edge_configs(graph_config)
+        raw_node_configs = _ListObjectDict.validate_python(
+            graph_config.get("nodes", []),
+        )
+        raw_node_configs = cls._filter_canvas_only_nodes(raw_node_configs)
+        direct_node_configs, direct_edge_configs, scoped_graph_config = (
+            cls._scope_graph_config(
+                graph_config=graph_config,
+                node_configs=raw_node_configs,
+                edge_configs=edge_configs,
+                container_id=container_id,
+            )
+        )
+        node_configs = _ListNodeConfigDict.validate_python(direct_node_configs)
 
         if not node_configs:
             msg = "Graph must have at least one node"
@@ -345,10 +559,14 @@ class Graph:
             raise ValueError(msg)
 
         # Build edges
-        edges, in_edges, out_edges = cls._build_edges(edge_configs)
+        edges, in_edges, out_edges = cls._build_edges(direct_edge_configs)
 
         # Create node instances
         nodes = cls._create_node_instances(node_configs_map, node_factory)
+        for node in nodes.values():
+            node.graph_config = scoped_graph_config
+            if isinstance(node, Node):
+                node.bind_graph_config(scoped_graph_config)
 
         # Promote fail-branch nodes to branch execution type at graph level
         cls._promote_fail_branch_nodes(nodes)
@@ -372,7 +590,7 @@ class Graph:
             in_edges=in_edges,
             out_edges=out_edges,
             root_node=root_node,
-            graph_config=graph_config,
+            graph_config=scoped_graph_config,
             node_factory=node_factory,
         )
 
