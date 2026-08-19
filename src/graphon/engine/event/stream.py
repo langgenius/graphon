@@ -2,9 +2,9 @@
 
 import logging
 import threading
-import time
-from collections.abc import Generator
-from contextlib import contextmanager
+from collections import deque
+from collections.abc import Callable, Generator
+from datetime import UTC, datetime
 from typing import final
 
 from graphon.engine_events.base import EngineEvent
@@ -15,171 +15,80 @@ _logger = logging.getLogger(__name__)
 
 
 @final
-class ReadWriteLock:
-    """A read-write lock implementation that allows multiple concurrent readers
-    but only one writer at a time.
-    """
-
-    def __init__(self) -> None:
-        self._read_ready = threading.Condition(threading.RLock())
-        self._readers = 0
-
-    def acquire_read(self) -> None:
-        """Acquire a read lock."""
-        _ = self._read_ready.acquire()
-        try:
-            self._readers += 1
-        finally:
-            self._read_ready.release()
-
-    def release_read(self) -> None:
-        """Release a read lock."""
-        _ = self._read_ready.acquire()
-        try:
-            self._readers -= 1
-            if self._readers == 0:
-                self._read_ready.notify_all()
-        finally:
-            self._read_ready.release()
-
-    def acquire_write(self) -> None:
-        """Acquire a write lock."""
-        _ = self._read_ready.acquire()
-        while self._readers > 0:
-            _ = self._read_ready.wait()
-
-    def release_write(self) -> None:
-        """Release a write lock."""
-        self._read_ready.release()
-
-    @contextmanager
-    def read_lock(self) -> Generator:
-        """Return a context manager for read locking."""
-        self.acquire_read()
-        try:
-            yield
-        finally:
-            self.release_read()
-
-    @contextmanager
-    def write_lock(self) -> Generator:
-        """Return a context manager for write locking."""
-        self.acquire_write()
-        try:
-            yield
-        finally:
-            self.release_write()
-
-
-@final
 class EventStream:
-    """Collect, buffer, and stream engine events.
+    """Collect, buffer, and stream engine events."""
 
-    The stream is the single event boundary between the engine and external
-    consumers. It also notifies the engine's layers as events arrive.
-    """
-
-    def __init__(self, layers: list[Layer]) -> None:
-        """Initialize an event stream bound to the engine's live layer list.
-
-        The list is retained by reference so layers registered after engine
-        construction are visible to the stream without a second configuration
-        phase. Collected events are buffered until :meth:`emit_events` yields
-        them, while lifecycle events can notify the same layers without being
-        added to that buffer.
-
-        Args:
-            layers: Mutable list of layers owned by the engine.
-
-        """
-        self._events: list[EngineEvent] = []
-        self._lock = ReadWriteLock()
+    def __init__(
+        self,
+        layers: list[Layer],
+        graph_id: str = "",
+        execution_id: str = "",
+        next_sequence: Callable[[], int] | None = None,
+    ) -> None:
+        self._graph_id = graph_id
+        self._execution_id = execution_id
+        self._events: deque[EngineEvent] = deque()
+        self._condition = threading.Condition()
         self._layers = layers
-        self._execution_complete = threading.Event()
+        self._execution_complete = False
+        self._next_sequence = next_sequence
+        self._local_sequence = 0
 
     def notify_layers(self, event: EngineEvent) -> None:
-        """Notify all layers about an event without buffering it.
+        """Stamp an unbuffered lifecycle event and notify registered layers."""
+        with self._condition:
+            self._stamp(event)
+            self._notify_layers(event)
 
-        Layer exceptions are caught and logged so one extension cannot disrupt
-        event delivery to the remaining layers or the engine itself.
+    def collect(self, event: EngineEvent) -> None:
+        """Buffer one event and wake its consumer."""
+        with self._condition:
+            if self._execution_complete:
+                msg = "Cannot collect events after execution is complete"
+                raise RuntimeError(msg)
+            self._stamp(event)
+            self._events.append(event)
+            # Layers observe stream order before the consumer can wake.
+            self._notify_layers(event)
+            self._condition.notify()
 
-        Args:
-            event: Event to send to every registered layer.
+    def mark_complete(self) -> None:
+        """Mark execution complete and wake all waiting consumers."""
+        with self._condition:
+            self._execution_complete = True
+            self._condition.notify_all()
 
-        """
+    def reset(self) -> None:
+        """Discard buffered events and completion state from the previous run."""
+        with self._condition:
+            self._events.clear()
+            self._execution_complete = False
+
+    def emit_events(self) -> Generator[EngineEvent, None, None]:
+        """Yield events in collection order, releasing each after consumption."""
+        while True:
+            with self._condition:
+                self._condition.wait_for(
+                    lambda: self._events or self._execution_complete
+                )
+                if not self._events:
+                    return
+                event = self._events.popleft()
+            yield event  # ruff:ignore[unnecessary-assign-before-yield]
+
+    def _stamp(self, event: EngineEvent) -> None:
+        event.graph_id = self._graph_id
+        event.execution_id = self._execution_id
+        if self._next_sequence is None:
+            self._local_sequence += 1
+            event.sequence = self._local_sequence
+        else:
+            event.sequence = self._next_sequence()
+        event.emitted_at = datetime.now(UTC)
+
+    def _notify_layers(self, event: EngineEvent) -> None:
         for layer in self._layers:
             try:
                 layer.on_event(event)
             except Exception:
                 _logger.exception("Error in layer on_event, layer_type=%s", type(layer))
-
-    def collect(self, event: EngineEvent) -> None:
-        """Thread-safe method to collect an event.
-
-        Args:
-            event: The event to collect
-
-        """
-        with self._lock.write_lock():
-            self._events.append(event)
-
-        # NOTE: `notify_layers` is intentionally called outside the critical section
-        # to minimize lock contention and avoid blocking other readers or writers.
-        self.notify_layers(event)
-
-    def _get_new_events(self, start_index: int) -> list[EngineEvent]:
-        """Get new events starting from a specific index.
-
-        Args:
-            start_index: The index to start from
-
-        Returns:
-            List of new events
-
-        """
-        with self._lock.read_lock():
-            return list(self._events[start_index:])
-
-    def _event_count(self) -> int:
-        """Get the current count of collected events.
-
-        Returns:
-            Number of collected events
-
-        """
-        with self._lock.read_lock():
-            return len(self._events)
-
-    def mark_complete(self) -> None:
-        """Mark execution as complete to stop the event emission generator."""
-        self._execution_complete.set()
-
-    def reset(self) -> None:
-        """Discard events and completion state from the previous engine run."""
-        with self._lock.write_lock():
-            self._events.clear()
-            self._execution_complete.clear()
-
-    def emit_events(self) -> Generator[EngineEvent, None, None]:
-        """Generator that yields events as they're collected.
-
-        Yields:
-            EngineEvent instances as they're processed
-
-        """
-        yielded_count = 0
-
-        while (
-            not self._execution_complete.is_set() or yielded_count < self._event_count()
-        ):
-            # Get new events since last yield
-            new_events = self._get_new_events(yielded_count)
-
-            # Yield any new events
-            for event in new_events:
-                yield event
-                yielded_count += 1
-
-            # Small sleep to avoid busy waiting
-            if not self._execution_complete.is_set() and not new_events:
-                time.sleep(0.001)

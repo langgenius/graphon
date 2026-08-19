@@ -21,7 +21,7 @@ def test_variable_alias_still_validates_in_event_models() -> None:
     node_event = VariableUpdatedEvent.model_validate(payload)
     graph_event = NodeRunVariableUpdatedEvent.model_validate({
         **payload,
-        "id": "evt-1",
+        "node_execution_id": "node-execution-1",
         "node_id": "start",
         "node_type": "start",
         "node_run_result": NodeRunResult(
@@ -39,7 +39,7 @@ def test_pause_reason_alias_still_validates_in_event_models() -> None:
     node_event = PauseRequestedEvent.model_validate(payload)
     graph_event = NodeRunPauseRequestedEvent.model_validate({
         **payload,
-        "id": "evt-2",
+        "node_execution_id": "node-execution-2",
         "node_id": "start",
         "node_type": "start",
         "node_run_result": NodeRunResult(

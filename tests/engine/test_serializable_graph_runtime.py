@@ -239,6 +239,7 @@ def _hitl_engine(
     *,
     runtime_state: RuntimeState,
     callback: HITLCallback,
+    execution_id: str | None = None,
 ) -> Engine:
     plan = inspect(dsl)
     graph_config = plan.document.graph_config
@@ -270,6 +271,7 @@ def _hitl_engine(
         graph=graph,
         graph_runtime_state=runtime_state,
         workers=2,
+        execution_id=execution_id,
     )
 
 
@@ -607,6 +609,7 @@ def test_loop_hitl_runtime_state_round_trip_preserves_progress() -> None:
             _loop_dsl(),
             runtime_state=_new_runtime_state({}),
             callback=pause_after_one_round,
+            execution_id="explicit-execution",
         )
     )
     paused_state = RuntimeState.from_snapshot(snapshot)
@@ -672,7 +675,14 @@ def test_loop_hitl_runtime_state_round_trip_preserves_progress() -> None:
     ] == [0, 1, 2]
     assert len(paused_successes) == 1
     assert len(resumed_successes) == 2
-    assert loop_started.id == loop_succeeded.id
+    assert loop_started.node_execution_id == loop_succeeded.node_execution_id
+    all_events = [*paused_events, *resumed_events]
+    assert {event.graph_id for event in all_events} == {"workflow"}
+    assert {event.execution_id for event in all_events} == {"explicit-execution"}
+    assert len({event.id for event in all_events}) == len(all_events)
+    assert [event.sequence for event in all_events] == list(
+        range(1, len(all_events) + 1)
+    )
     assert not any(
         isinstance(event, NodeRunLoopStartedEvent) for event in resumed_events
     )
@@ -764,6 +774,10 @@ def test_paused_engine_can_resume_same_instance() -> None:
     paused_events = list(engine.run())
     resumed_events = list(engine.run())
 
+    all_events = [*paused_events, *resumed_events]
+    assert [event.sequence for event in all_events] == list(
+        range(1, len(all_events) + 1)
+    )
     assert isinstance(paused_events[-1], GraphRunPausedEvent)
     assert isinstance(resumed_events[0], GraphRunStartedEvent)
     assert resumed_events[0].reason == WorkflowStartReason.RESUMPTION
@@ -871,11 +885,11 @@ def test_parallel_iteration_hitl_runtime_state_round_trip_preserves_order() -> N
         for event in resumed_successes
     ) == [1, 2]
     assert next(
-        event.id
+        event.node_execution_id
         for event in paused_events
         if isinstance(event, NodeRunIterationStartedEvent)
     ) == next(
-        event.id
+        event.node_execution_id
         for event in resumed_events
         if isinstance(event, NodeRunIterationSucceededEvent)
     )

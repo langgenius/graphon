@@ -72,7 +72,7 @@ def test_event_processor_collects_raw_stream_chunk_without_coordinator() -> None
         ),
     )
     chunk = NodeRunStreamChunkEvent(
-        id="run-1",
+        node_execution_id="run-1",
         node_id="node-1",
         node_type=BuiltinNodeTypes.CODE,
         selector=["node-1", "answer"],
@@ -102,7 +102,7 @@ def test_event_processor_collects_reasoning_chunk_without_warning(
         ),
     )
     chunk = NodeRunReasoningChunkEvent(
-        id="run-1",
+        node_execution_id="run-1",
         node_id="node-1",
         node_type=BuiltinNodeTypes.CODE,
         selector=["node-1", "reasoning_content"],
@@ -151,7 +151,7 @@ def test_event_processor_collects_traversal_events_before_node_success() -> None
         ),
     )
     success = NodeRunSucceededEvent(
-        id="run-1",
+        node_execution_id="run-1",
         node_id="node-1",
         node_type=BuiltinNodeTypes.CODE,
         start_at=_now(),

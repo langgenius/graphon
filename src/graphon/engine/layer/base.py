@@ -114,7 +114,7 @@ class Layer:
         """Called after a node finishes execution.
 
         The node's execution ID is available via `node._node_execution_id` and matches
-        the `id` field in all events emitted by this node execution.
+        the `node_execution_id` field in all events emitted by this node execution.
 
         Args:
             node: The node instance that just finished execution
