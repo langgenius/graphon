@@ -110,10 +110,11 @@ def test_runtime_state_rejects_conflicting_workflow_identity() -> None:
 @pytest.mark.parametrize(
     ("node_states", "edge_states"),
     [
+        ({}, {}),
         ({}, {"root-edge": NodeState.TAKEN}),
         ({"root": NodeState.TAKEN}, {}),
     ],
-    ids=["missing-node", "missing-edge"],
+    ids=["missing-both", "missing-node", "missing-edge"],
 )
 def test_attach_graph_rejects_saved_state_missing_current_graph_entries(
     node_states: dict[str, NodeState],
@@ -248,6 +249,44 @@ class TestGraphRuntimeState:  # ruff:ignore[too-many-public-methods]
 
         assert restored.drain_deferred_ready_tasks() == [first, second]
         assert restored.drain_deferred_ready_tasks() == []
+
+    @pytest.mark.parametrize("version", ["2.0", "3.0"])
+    def test_snapshot_before_graph_attachment_accepts_rebuilt_graph(
+        self,
+        version: str,
+    ) -> None:
+        """Restore an unattached snapshot before binding a nonempty graph.
+
+        Both version 2 and version 3 encode the absence of an attached graph as
+        empty node and edge maps. Those maps must not become an exact empty-graph
+        constraint when the runtime is deserialized.
+        """
+        state = RuntimeState(
+            workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
+        )
+        payload = json.loads(state.dumps())
+        payload["version"] = version
+        root = MagicMock(
+            id="start",
+            node_type=BuiltinNodeTypes.START,
+            execution_type=NodeExecutionType.ROOT,
+            state=NodeState.UNKNOWN,
+        )
+        end = MagicMock(
+            id="end",
+            node_type=BuiltinNodeTypes.END,
+            execution_type=NodeExecutionType.EXECUTABLE,
+            state=NodeState.UNKNOWN,
+        )
+        graph = Graph.new().add_root(root).add_node(end).build()
+
+        restored = RuntimeState.from_snapshot(json.dumps(payload))
+        restored.attach_graph(graph)
+
+        assert json.loads(restored.dumps())["graph_node_states"] == {
+            "start": NodeState.UNKNOWN,
+            "end": NodeState.UNKNOWN,
+        }
 
     def test_custom_ready_queues_round_trip_with_supplied_factory(self) -> None:
         ready_queue: ReadyQueue = _PrefixedReadyQueue()

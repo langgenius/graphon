@@ -789,14 +789,20 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         )
         state._container_runs = {run.invocation_id: run for run in container_runs}
         state._container_frames = {frame.frame_id: frame for frame in container_frames}
-        if isinstance(snapshot, _GraphRuntimeStateSnapshotV1):
-            state._legacy_snapshot_version = "1.0"
-        elif snapshot.compatibility_marker is _V2_SNAPSHOT_MARKER:
-            state._legacy_snapshot_version = "2.0"
-        state.restore_graph_state(
-            node_states=graph_node_states,
-            edge_states=graph_edge_states,
-        )
+        # Snapshots written before graph attachment contain two empty mappings.
+        # They carry no graph state to validate or migrate, so preserve the
+        # original ability to attach any valid graph after restoration. Keep
+        # this compatibility rule at the deserialization boundary rather than
+        # weakening restore_graph_state() for explicit callers.
+        if graph_node_states or graph_edge_states:
+            if isinstance(snapshot, _GraphRuntimeStateSnapshotV1):
+                state._legacy_snapshot_version = "1.0"
+            elif snapshot.compatibility_marker is _V2_SNAPSHOT_MARKER:
+                state._legacy_snapshot_version = "2.0"
+            state.restore_graph_state(
+                node_states=graph_node_states,
+                edge_states=graph_edge_states,
+            )
         return state
 
     def defer_ready_task(self, task: ReadyTask) -> None:

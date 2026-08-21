@@ -81,7 +81,7 @@ class Engine:
             ValueError: If ``workers`` is not a positive integer.
 
         """
-        if workers < 1:
+        if not isinstance(workers, int) or isinstance(workers, bool) or workers < 1:
             msg = "workers must be a positive integer"
             raise ValueError(msg)
 

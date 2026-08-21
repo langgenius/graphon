@@ -251,6 +251,64 @@ def test_graph_init_preserves_public_edge_ids() -> None:
     assert "child-edge" in child_graph.edges
 
 
+@pytest.mark.parametrize(
+    ("explicit_index", "explicit_id", "expected_edge_ids"),
+    [
+        (0, "edge_1", {"edge_1", "edge_2", "edge_3"}),
+        (1, "edge_0", {"edge_0", "edge_1", "edge_2"}),
+    ],
+)
+def test_generated_edge_ids_reserve_explicit_ids(
+    explicit_index: int,
+    explicit_id: str,
+    expected_edge_ids: set[str],
+) -> None:
+    """Keep fallback IDs distinct from every supplied public edge ID.
+
+    Mixed DSLs may give stable IDs to only some edges. Graph initialization
+    must reserve all supplied IDs before filling omissions so both an explicit
+    ID before an unnamed edge and one later in the config remain loadable.
+    """
+    graph_config = _scoped_graph_config()
+    graph_config["edges"][explicit_index]["id"] = explicit_id
+
+    graph = Graph.init(
+        graph_config=graph_config,
+        node_factory=_RecordingNodeFactory(),
+        root_node_id="start",
+    )
+
+    assert set(graph.edges) == expected_edge_ids
+
+
+def test_generated_edge_ids_reserve_explicit_ids_only_in_their_graph() -> None:
+    """Allow a child graph's explicit ID to match a root fallback ID.
+
+    Edge IDs are local to a graph and become globally addressable only when
+    paired with a frame ID. Reserving a child's public ID must therefore not
+    renumber an otherwise stable root fallback ID.
+    """
+    graph_config = _scoped_graph_config()
+    graph_config["edges"][3]["id"] = "edge_0"
+
+    root_graph = Graph.init(
+        graph_config=graph_config,
+        node_factory=_RecordingNodeFactory(),
+        root_node_id="start",
+    )
+    assert root_graph.edges["edge_0"].tail == "start"
+    assert root_graph.graph_config is not None
+
+    child_graph = Graph.init(
+        graph_config=root_graph.graph_config,
+        node_factory=_RecordingNodeFactory(),
+        root_node_id="a-start",
+        container_id="container-a",
+    )
+
+    assert child_graph.edges["edge_0"].tail == "a-start"
+
+
 def test_graph_init_rejects_duplicate_edge_ids_in_one_scope() -> None:
     graph_config = _scoped_graph_config()
     graph_config["edges"][0]["id"] = "edge-duplicate"

@@ -154,15 +154,20 @@ class Graph:
     @staticmethod
     def _prepare_edge_configs(
         graph_config: Mapping[str, Any],
+        node_configs: Sequence[Mapping[str, Any]],
     ) -> list[dict[str, Any]]:
         """Copy edge configs and ensure every valid edge has a public DSL ID.
 
         An edge is valid for legacy numbering when both ``source`` and
-        ``target`` are strings. Missing IDs are filled with ``edge_N`` using
-        exactly that historical ordinal rule, including edges later ignored
-        because another field is invalid. The generated public ID is retained
-        in scoped graph configs, so child graphs use the same ID when they are
-        materialized later. Supplied IDs must be non-empty strings.
+        ``target`` are strings. Missing IDs start with the historical
+        ``edge_N`` ordinal, including edges later ignored because another field
+        is invalid, and advance only when that ID was supplied or generated
+        elsewhere. Supplied IDs are reserved within their owning graph before
+        generation, making mixed explicit and fallback IDs independent of
+        config order without preventing separate graphs from reusing a local
+        ID. The generated public ID is retained in scoped graph configs, so
+        child graphs use the same ID when they are materialized later. Supplied
+        IDs must be non-empty strings.
 
         Duplicate IDs are deliberately not checked here because this method
         sees a container subtree, not one materialized graph. ``_build_edges``
@@ -172,6 +177,8 @@ class Graph:
 
         Args:
             graph_config: Complete or previously scoped workflow graph config.
+            node_configs: Raw executable node configs used to resolve each
+                edge's direct graph owner.
 
         Returns:
             Copied edge dictionaries carrying public DSL edge IDs.
@@ -186,8 +193,37 @@ class Graph:
                 graph_config.get("edges", []),
             )
         ]
-        edge_counter = 0
+        node_configs_by_id = {
+            node_id: node_config
+            for node_config in node_configs
+            if isinstance((node_id := node_config.get("id")), str)
+        }
+        node_owners = {
+            node_id: resolve_container_id(
+                node_config,
+                nodes_by_id=node_configs_by_id,
+            )
+            for node_id, node_config in node_configs_by_id.items()
+        }
+        edge_owners: list[str | None] = []
+        reserved_edge_ids: defaultdict[str | None, set[str]] = defaultdict(set)
         for edge_config in edge_configs:
+            source = edge_config.get("source")
+            target = edge_config.get("target")
+            source_owner = node_owners.get(source) if isinstance(source, str) else None
+            target_owner = node_owners.get(target) if isinstance(target, str) else None
+            edge_owner = (
+                source_owner
+                if source_owner is not None and source_owner == target_owner
+                else None
+            )
+            edge_owners.append(edge_owner)
+            edge_id = edge_config.get("id")
+            if isinstance(edge_id, str) and edge_id:
+                reserved_edge_ids[edge_owner].add(edge_id)
+
+        edge_counter = 0
+        for edge_config, edge_owner in zip(edge_configs, edge_owners, strict=True):
             if "id" in edge_config and (
                 not isinstance(edge_config["id"], str) or not edge_config["id"]
             ):
@@ -198,7 +234,13 @@ class Graph:
             if not isinstance(source, str) or not isinstance(target, str):
                 continue
             if "id" not in edge_config:
-                edge_config["id"] = f"edge_{edge_counter}"
+                fallback_index = edge_counter
+                edge_id = f"edge_{fallback_index}"
+                while edge_id in reserved_edge_ids[edge_owner]:
+                    fallback_index += 1
+                    edge_id = f"edge_{fallback_index}"
+                edge_config["id"] = edge_id
+                reserved_edge_ids[edge_owner].add(edge_id)
             edge_counter += 1
         return edge_configs
 
@@ -493,11 +535,11 @@ class Graph:
 
         """
         # Parse configs
-        edge_configs = cls._prepare_edge_configs(graph_config)
         raw_node_configs = _ListObjectDict.validate_python(
             graph_config.get("nodes", []),
         )
         raw_node_configs = cls._filter_canvas_only_nodes(raw_node_configs)
+        edge_configs = cls._prepare_edge_configs(graph_config, raw_node_configs)
         direct_node_configs, direct_edge_configs, scoped_graph_config = (
             cls._scope_graph_config(
                 graph_config=graph_config,
