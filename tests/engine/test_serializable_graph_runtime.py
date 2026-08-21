@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from typing import Any, ClassVar, cast
 from unittest.mock import MagicMock, call
 
+import pytest
 import yaml
 
 from graphon.dsl import inspect
@@ -24,7 +25,10 @@ from graphon.engine.ready_queue.in_memory import InMemoryReadyQueue
 from graphon.engine.scheduler import Scheduler
 from graphon.engine.worker import DispatchTask, NodeEventTask, Worker
 from graphon.engine_events.base import EngineEvent
-from graphon.engine_events.graph import GraphRunPausedEvent, GraphRunStartedEvent
+from graphon.engine_events.graph import (
+    GraphRunPausedEvent,
+    GraphRunStartedEvent,
+)
 from graphon.engine_events.iteration import (
     NodeRunIterationStartedEvent,
     NodeRunIterationSucceededEvent,
@@ -743,6 +747,42 @@ def test_version_2_full_graph_snapshot_restores_scoped_loop_frames() -> None:
     )
 
     assert final_outputs(resumed_events) == {"rounds": 3, "seed": "fixed"}
+
+
+def test_version_1_child_task_is_rejected_before_worker_start() -> None:
+    initial_state = _new_runtime_state({})
+    snapshot = json.loads(initial_state.dumps())
+    snapshot.update({
+        "version": "1.0",
+        "paused_nodes": ["human-input"],
+        "deferred_nodes": [],
+        "graph_state": {
+            "nodes": dict.fromkeys(
+                ("start", "loop", "loop-start", "human-input", "end"),
+                NodeState.UNKNOWN,
+            ),
+            "edges": {
+                "edge_0": NodeState.UNKNOWN,
+                "edge_1": NodeState.UNKNOWN,
+                "edge_2": NodeState.UNKNOWN,
+            },
+        },
+    })
+    restored = RuntimeState.from_snapshot(json.dumps(snapshot))
+
+    with pytest.raises(
+        RuntimeError,
+        match="child-frame tasks that cannot be restored without frame state",
+    ):
+        _hitl_engine(
+            _loop_dsl(),
+            runtime_state=restored,
+            callback=_complete_loop_hitl,
+        )
+
+    assert restored.drain_deferred_ready_tasks() == [
+        StartTask(frame_id="root", node_id="human-input")
+    ]
 
 
 def test_paused_engine_can_resume_same_instance() -> None:

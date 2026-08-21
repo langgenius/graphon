@@ -669,20 +669,34 @@ class TestGraphRuntimeState:  # ruff:ignore[too-many-public-methods]
             "paused_nodes": ["paused"],
             "deferred_nodes": ["deferred", "paused"],
             "graph_state": {
-                "nodes": {"ready": NodeState.TAKEN},
+                "nodes": {
+                    "ready": NodeState.TAKEN,
+                    "paused": NodeState.TAKEN,
+                    "deferred": NodeState.TAKEN,
+                },
                 "edges": {"edge_0": NodeState.SKIPPED},
             },
         })
 
         restored = RuntimeState.from_snapshot(snapshot)
         ready_node = MagicMock(state=NodeState.UNKNOWN)
+        paused_node = MagicMock(state=NodeState.UNKNOWN)
+        deferred_node = MagicMock(state=NodeState.UNKNOWN)
         approved_edge = MagicMock(state=NodeState.UNKNOWN)
         restored.attach_graph(
             MagicMock(
-                nodes={"ready": ready_node},
+                nodes={
+                    "ready": ready_node,
+                    "paused": paused_node,
+                    "deferred": deferred_node,
+                },
                 edges={"approved-edge": approved_edge},
                 graph_config={
-                    "nodes": [{"id": "ready", "data": {}}],
+                    "nodes": [
+                        {"id": "ready", "data": {}},
+                        {"id": "paused", "data": {}},
+                        {"id": "deferred", "data": {}},
+                    ],
                     "edges": [
                         {
                             "id": "approved-edge",
@@ -699,7 +713,11 @@ class TestGraphRuntimeState:  # ruff:ignore[too-many-public-methods]
         assert json.loads(migrated["ready_queue"])["version"] == "2.0"
         assert json.loads(migrated["deferred_ready_tasks"])["version"] == "2.0"
         assert json.loads(migrated["graph_execution"])["version"] == "2.0"
-        assert migrated["graph_node_states"] == {"ready": NodeState.TAKEN}
+        assert migrated["graph_node_states"] == {
+            "ready": NodeState.TAKEN,
+            "paused": NodeState.TAKEN,
+            "deferred": NodeState.TAKEN,
+        }
         assert migrated["graph_edge_states"] == {
             "approved-edge": NodeState.SKIPPED,
         }

@@ -164,50 +164,6 @@ _GRAPH_RUNTIME_STATE_SNAPSHOT_ADAPTER = TypeAdapter(
 )
 
 
-def _legacy_container_id(node_id: str, data: object) -> str:
-    """Resolve one node's direct owner for snapshot compatibility only.
-
-    Current graphs use ``container_id``. Version 1/2 snapshots may accompany a
-    graph that still uses the former ``iteration_id`` or ``loop_id`` spelling,
-    so this removable helper mirrors that narrow fallback while rejecting an
-    ambiguous owner instead of guessing.
-
-    Args:
-        node_id: Node ID used to make validation failures actionable.
-        data: Raw node data from the attached full graph configuration.
-
-    Returns:
-        The direct container ID, or an empty string for a root node.
-
-    Raises:
-        TypeError: If an ownership field is not a string.
-        RuntimeError: If legacy ownership is ambiguous.
-
-    """
-    if not isinstance(data, Mapping):
-        return ""
-    if "container_id" in data:
-        container_id = data["container_id"]
-        if not isinstance(container_id, str):
-            msg = f"Node {node_id!r} has an invalid container_id"
-            raise TypeError(msg)
-        return container_id
-    legacy_owners: set[str] = set()
-    for key in ("iteration_id", "loop_id"):
-        legacy_owner = data.get(key)
-        if legacy_owner is None:
-            continue
-        if not isinstance(legacy_owner, str):
-            msg = f"Node {node_id!r} has an invalid {key}"
-            raise TypeError(msg)
-        if legacy_owner:
-            legacy_owners.add(legacy_owner)
-    if len(legacy_owners) > 1:
-        msg = f"Node {node_id!r} has ambiguous legacy container owners"
-        raise RuntimeError(msg)
-    return next(iter(legacy_owners), "")
-
-
 def _legacy_edges_by_owner(
     raw_edges: list[object],
     node_owners: Mapping[str, str],
@@ -285,21 +241,26 @@ def _legacy_graph_scopes(
         TypeError: If graph config does not contain node and edge lists.
 
     """
+    from graphon.graph.scoping import (  # ruff:ignore[import-outside-top-level]
+        resolve_container_id,
+    )
+
     raw_nodes = graph_config.get("nodes", [])
     raw_edges = graph_config.get("edges", [])
     if not isinstance(raw_nodes, list) or not isinstance(raw_edges, list):
         msg = "Attached graph config cannot migrate legacy runtime state"
         raise TypeError(msg)
 
+    nodes_by_id = {
+        node_id: node_config
+        for node_config in raw_nodes
+        if isinstance(node_config, Mapping)
+        and isinstance((node_id := node_config.get("id")), str)
+    }
     node_owners: dict[str, str] = {}
     nodes_by_owner: dict[str, set[str]] = {}
-    for node_config in raw_nodes:
-        if not isinstance(node_config, Mapping):
-            continue
-        node_id = node_config.get("id")
-        if not isinstance(node_id, str):
-            continue
-        owner = _legacy_container_id(node_id, node_config.get("data"))
+    for node_id, node_config in nodes_by_id.items():
+        owner = resolve_container_id(node_config, nodes_by_id=nodes_by_id)
         node_owners[node_id] = owner
         nodes_by_owner.setdefault(owner, set()).add(node_id)
     return nodes_by_owner, _legacy_edges_by_owner(raw_edges, node_owners)
@@ -601,7 +562,10 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         self._graph = graph
         self._apply_pending_graph_state()
 
-    def _migrate_legacy_graph_state(self, graph: GraphProtocol) -> None:
+    def _migrate_legacy_graph_state(
+        self,
+        graph: GraphProtocol,
+    ) -> None:
         """Migrate every saved legacy frame against one full graph definition.
 
         Migration cannot run in the Pydantic validator because positional
@@ -650,6 +614,42 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         ):
             msg = "Saved graph state does not match rebuilt graph"
             raise RuntimeError(msg)
+
+        if self._legacy_snapshot_version == "1.0":
+            from graphon.engine.ready_queue import (  # ruff:ignore[import-outside-top-level]
+                StartTask,
+            )
+
+            # V1 stored only node IDs from child pauses. It did not store the
+            # child runtime, owning invocation, Loop round, Iteration item, or
+            # suspended container continuation. Running such an ID in the old
+            # full root graph silently reported success without finishing its
+            # container, so reject it before workers can lose the task or hang.
+            invalid_tasks: list[str] = []
+            for task_queue in (self._ready_queue, self._deferred_ready_queue):
+                tasks = task_queue.drain()
+                try:
+                    invalid_tasks.extend(
+                        (
+                            f"{task.frame_id}:{task.node_id}"
+                            if isinstance(task, StartTask)
+                            else task.kind
+                        )
+                        for task in tasks
+                        if not isinstance(task, StartTask)
+                        or task.frame_id != ROOT_FRAME_ID
+                        or task.node_id not in graph.nodes
+                    )
+                finally:
+                    for task in tasks:
+                        task_queue.put(task)
+            if invalid_tasks:
+                msg = (
+                    "Version 1 snapshot contains child-frame tasks that cannot "
+                    "be restored without frame state: "
+                    f"{invalid_tasks}"
+                )
+                raise RuntimeError(msg)
 
         with self._container_state_lock:
             migrated_frames: dict[str, ContainerFrameState] = {}

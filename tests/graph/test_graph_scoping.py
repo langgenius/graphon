@@ -344,23 +344,32 @@ def test_graph_init_rejects_orphan_scopes_and_unknown_edges() -> None:
         )
 
 
-def test_graph_init_requires_container_id_for_nested_legacy_fields() -> None:
+@pytest.mark.parametrize(
+    ("outer_id", "outer_type", "inner_id", "inner_type", "inner_owner_field"),
+    [
+        ("loop", "loop", "iteration", "iteration", "loop_id"),
+        ("iteration", "iteration", "loop", "loop", "iteration_id"),
+    ],
+)
+def test_graph_init_accepts_nested_legacy_fields_without_container_id(
+    outer_id: str,
+    outer_type: str,
+    inner_id: str,
+    inner_type: str,
+    inner_owner_field: str,
+) -> None:
+    inner_start_id = f"{inner_id}-start"
     graph_config = {
         "nodes": [
-            {"id": "start", "data": {"type": "start"}},
-            {"id": "loop", "data": {"type": "loop"}},
+            {"id": outer_id, "data": {"type": outer_type}},
             {
-                "id": "loop-start",
-                "data": {"type": "loop-start", "loop_id": "loop"},
+                "id": inner_id,
+                "data": {"type": inner_type, inner_owner_field: outer_id},
             },
             {
-                "id": "iteration",
-                "data": {"type": "iteration", "loop_id": "loop"},
-            },
-            {
-                "id": "iteration-start",
+                "id": inner_start_id,
                 "data": {
-                    "type": "iteration-start",
+                    "type": f"{inner_type}-start",
                     "loop_id": "loop",
                     "iteration_id": "iteration",
                 },
@@ -375,19 +384,43 @@ def test_graph_init_requires_container_id_for_nested_legacy_fields() -> None:
             },
         ],
         "edges": [
-            _edge("start", "loop"),
-            _edge("loop-start", "iteration"),
-            _edge("iteration-start", "stop"),
+            _edge(inner_start_id, "stop"),
         ],
     }
 
-    with pytest.raises(
-        ValueError,
-        match=r"Nested container nodes must set data\.container_id",
-    ):
+    graph = Graph.init(
+        graph_config=graph_config,
+        node_factory=_RecordingNodeFactory(),
+        root_node_id=inner_start_id,
+        container_id=inner_id,
+    )
+
+    assert set(graph.nodes) == {inner_start_id, "stop"}
+    assert _graph_edges(graph) == {(inner_start_id, "stop")}
+
+
+def test_graph_init_rejects_unrelated_legacy_container_owners() -> None:
+    """Reject two legacy owners when neither container encloses the other."""
+    graph_config = {
+        "nodes": [
+            {"id": "loop", "data": {"type": "loop"}},
+            {"id": "iteration", "data": {"type": "iteration"}},
+            {
+                "id": "nested",
+                "data": {
+                    "type": "start",
+                    "loop_id": "loop",
+                    "iteration_id": "iteration",
+                },
+            },
+        ],
+        "edges": [],
+    }
+
+    with pytest.raises(ValueError, match="ambiguous legacy container owners"):
         Graph.init(
             graph_config=graph_config,
             node_factory=_RecordingNodeFactory(),
-            root_node_id="iteration-start",
+            root_node_id="nested",
             container_id="iteration",
         )

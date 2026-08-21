@@ -16,6 +16,7 @@ from graphon.engine.container_handler import ContainerHandlerFactory
 from graphon.entities.graph_init_params import InitParams
 from graphon.enums import BuiltinNodeTypes
 from graphon.graph.graph import Graph
+from graphon.graph.scoping import resolve_container_id
 from graphon.graph.validation import GraphValidationError
 from graphon.runtime.graph_runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
@@ -616,37 +617,25 @@ def _canonical_vendor(provider: str | None) -> str | None:
     return parts[-1] if parts else provider
 
 
-def _node_owner_for_edge_validation(node: Mapping[str, Any]) -> str | None:
+def _node_owner_for_edge_validation(
+    node: Mapping[str, Any],
+    *,
+    nodes_by_id: Mapping[str, Mapping[str, Any]],
+) -> str | None:
     """Resolve a node's direct graph owner for scoped edge-ID validation.
 
-    ``container_id`` is authoritative when present. Otherwise one non-empty
-    legacy ``iteration_id`` or ``loop_id`` is accepted, matching Graph's
-    ownership rules. Invalid or ambiguous ownership returns ``None`` so this
-    importer does not mask the more specific error raised when Graph is built.
+    The graph scoping resolver owns canonical and legacy hierarchy semantics.
+    Invalid or genuinely ambiguous ownership returns ``None`` here so edge-ID
+    normalization does not mask the more actionable error raised by Graph.
 
     Returns:
         The direct container ID, ``""`` for the root graph, or ``None`` when
         ownership cannot be resolved safely.
     """
-    data = node.get("data")
-    if not isinstance(data, Mapping):
+    try:
+        return resolve_container_id(node, nodes_by_id=nodes_by_id)
+    except (TypeError, ValueError):
         return None
-    if "container_id" in data:
-        container_id = data["container_id"]
-        return container_id if isinstance(container_id, str) else None
-
-    legacy_owners: set[str] = set()
-    for key in ("iteration_id", "loop_id"):
-        owner = data.get(key)
-        if owner is None:
-            continue
-        if not isinstance(owner, str):
-            return None
-        if owner:
-            legacy_owners.add(owner)
-    if len(legacy_owners) > 1:
-        return None
-    return next(iter(legacy_owners), "")
 
 
 def _normalize_edges(  # ruff:ignore[complex-structure]
@@ -671,8 +660,13 @@ def _normalize_edges(  # ruff:ignore[complex-structure]
         for node in nodes
         if isinstance(node.get("data"), Mapping)
     }
+    nodes_by_id = {str(node["id"]): node for node in nodes}
     node_owners = {
-        str(node["id"]): _node_owner_for_edge_validation(node) for node in nodes
+        node_id: _node_owner_for_edge_validation(
+            node,
+            nodes_by_id=nodes_by_id,
+        )
+        for node_id, node in nodes_by_id.items()
     }
     normalized_edges: list[dict[str, Any]] = []
     seen_edge_ids: set[tuple[str, str]] = set()

@@ -27,7 +27,10 @@ from graphon.engine_events.loop import (
     NodeRunLoopFailedEvent,
     NodeRunLoopSucceededEvent,
 )
-from graphon.engine_events.node import NodeRunSucceededEvent
+from graphon.engine_events.node import (
+    NodeRunSucceededEvent,
+    NodeRunVariableUpdatedEvent,
+)
 from graphon.variables.segments import Segment
 from tests.helpers.workflow_events import (
     event_path,
@@ -467,6 +470,205 @@ def test_full_loop_graph_breaks_at_the_configured_condition(
     assert final_outputs(events) == {"counter": completed_rounds}
 
 
+def test_full_loop_graph_persists_variable_assignments_between_rounds() -> None:
+    dsl = _graph_dsl(
+        nodes=[
+            _start_node(),
+            {
+                "id": "loop",
+                "data": {
+                    "type": "loop",
+                    "loop_count": 2,
+                    "start_node_id": "loop-start",
+                    "break_conditions": [],
+                    "logical_operator": "and",
+                },
+            },
+            {
+                "id": "loop-start",
+                "data": {"type": "loop-start", "container_id": "loop"},
+            },
+            {
+                "id": "local",
+                "data": {
+                    "type": "template-transform",
+                    "container_id": "loop",
+                    "variables": [],
+                    "template": "before",
+                },
+            },
+            {
+                "id": "increment",
+                "data": {
+                    "type": "assigner",
+                    "version": "2",
+                    "container_id": "loop",
+                    "items": [
+                        {
+                            "variable_selector": ["local", "output"],
+                            "input_type": "constant",
+                            "operation": "over-write",
+                            "value": "after",
+                        },
+                        {
+                            "variable_selector": ["start", "counter"],
+                            "input_type": "constant",
+                            "operation": "+=",
+                            "value": 1,
+                        },
+                    ],
+                },
+            },
+            _end_node([
+                {
+                    "variable": "counter",
+                    "value_selector": ["start", "counter"],
+                },
+            ]),
+        ],
+        edges=[
+            _edge("start", "loop"),
+            _edge("loop-start", "local"),
+            _edge("local", "increment"),
+            _edge("loop", "end"),
+        ],
+    )
+
+    engine = loads(dsl, start_inputs={"counter": 0})
+    events = list(engine.run())
+
+    assert [
+        event.variable.value
+        for event in events
+        if isinstance(event, NodeRunVariableUpdatedEvent)
+        and tuple(event.variable.selector) == ("start", "counter")
+    ] == [1, 2]
+    assert final_outputs(events) == {"counter": 2}
+    assert engine.graph_runtime_state.variable_pool.get(["local", "output"]) is None
+
+
+def test_nested_containers_stop_variable_updates_at_iteration_boundary() -> None:
+    """Propagate assignments through nested loops but not through an iteration.
+
+    The inner Loop first increments the inherited root variable from zero to one,
+    proving that consecutive Loop handlers write it through both parent frames.
+    The following Iteration sees that value and emits an increment to two inside
+    its private pool, but its handler must stop the event before the outer Loop
+    can write it back to the root.
+    """
+    dsl = _graph_dsl(
+        nodes=[
+            _start_node(),
+            {
+                "id": "outer-loop",
+                "data": {
+                    "type": "loop",
+                    "loop_count": 1,
+                    "start_node_id": "outer-start",
+                    "break_conditions": [],
+                    "logical_operator": "and",
+                },
+            },
+            {
+                "id": "outer-start",
+                "data": {"type": "loop-start", "container_id": "outer-loop"},
+            },
+            {
+                "id": "inner-loop",
+                "data": {
+                    "type": "loop",
+                    "container_id": "outer-loop",
+                    "loop_count": 1,
+                    "start_node_id": "inner-start",
+                    "break_conditions": [],
+                    "logical_operator": "and",
+                },
+            },
+            {
+                "id": "inner-start",
+                "data": {"type": "loop-start", "container_id": "inner-loop"},
+            },
+            {
+                "id": "loop-increment",
+                "data": {
+                    "type": "assigner",
+                    "version": "2",
+                    "container_id": "inner-loop",
+                    "items": [
+                        {
+                            "variable_selector": ["start", "counter"],
+                            "input_type": "constant",
+                            "operation": "+=",
+                            "value": 1,
+                        }
+                    ],
+                },
+            },
+            {
+                "id": "iteration",
+                "data": {
+                    "type": "iteration",
+                    "container_id": "outer-loop",
+                    "iterator_selector": ["start", "items"],
+                    "output_selector": ["iteration", "item"],
+                    "start_node_id": "iteration-start",
+                    "is_parallel": False,
+                    "parallel_nums": 1,
+                    "error_handle_mode": "terminated",
+                    "flatten_output": False,
+                },
+            },
+            {
+                "id": "iteration-start",
+                "data": {
+                    "type": "iteration-start",
+                    "container_id": "iteration",
+                },
+            },
+            {
+                "id": "iteration-increment",
+                "data": {
+                    "type": "assigner",
+                    "version": "2",
+                    "container_id": "iteration",
+                    "items": [
+                        {
+                            "variable_selector": ["start", "counter"],
+                            "input_type": "constant",
+                            "operation": "+=",
+                            "value": 1,
+                        }
+                    ],
+                },
+            },
+            _end_node([
+                {
+                    "variable": "counter",
+                    "value_selector": ["start", "counter"],
+                },
+            ]),
+        ],
+        edges=[
+            _edge("start", "outer-loop"),
+            _edge("outer-start", "inner-loop"),
+            _edge("inner-start", "loop-increment"),
+            _edge("inner-loop", "iteration"),
+            _edge("iteration-start", "iteration-increment"),
+            _edge("outer-loop", "end"),
+        ],
+    )
+
+    events = run_workflow(dsl, start_inputs={"counter": 0, "items": ["only"]})
+
+    assert [
+        event.variable.value
+        for event in events
+        if isinstance(event, NodeRunVariableUpdatedEvent)
+        and tuple(event.variable.selector) == ("start", "counter")
+    ] == [1, 2]
+    assert final_outputs(events) == {"counter": 1}
+
+
 def test_full_loop_graph_stops_at_loop_end_node() -> None:
     dsl = _graph_dsl(
         nodes=[
@@ -483,11 +685,11 @@ def test_full_loop_graph_stops_at_loop_end_node() -> None:
             },
             {
                 "id": "loop-start",
-                "data": {"type": "loop-start", "loop_id": "loop"},
+                "data": {"type": "loop-start", "container_id": "loop"},
             },
             {
                 "id": "stop",
-                "data": {"type": "loop-end", "loop_id": "loop"},
+                "data": {"type": "loop-end", "container_id": "loop"},
             },
             _end_node([]),
         ],
@@ -589,13 +791,12 @@ def test_nested_iteration_loop_end_stops_ancestor_loop() -> None:
             },
             {
                 "id": "loop-start",
-                "data": {"type": "loop-start", "loop_id": "loop"},
+                "data": {"type": "loop-start", "container_id": "loop"},
             },
             {
                 "id": "iteration",
                 "data": {
                     "type": "iteration",
-                    "loop_id": "loop",
                     "container_id": "loop",
                     "iterator_selector": ["start", "items"],
                     "output_selector": ["iteration", "item"],
@@ -610,8 +811,6 @@ def test_nested_iteration_loop_end_stops_ancestor_loop() -> None:
                 "id": "iteration-start",
                 "data": {
                     "type": "iteration-start",
-                    "loop_id": "loop",
-                    "iteration_id": "iteration",
                     "container_id": "iteration",
                 },
             },
@@ -619,8 +818,6 @@ def test_nested_iteration_loop_end_stops_ancestor_loop() -> None:
                 "id": "stop",
                 "data": {
                     "type": "loop-end",
-                    "loop_id": "loop",
-                    "iteration_id": "iteration",
                     "container_id": "iteration",
                 },
             },

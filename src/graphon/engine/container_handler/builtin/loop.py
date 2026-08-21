@@ -7,7 +7,11 @@ from datetime import UTC, datetime
 from typing import final
 
 from graphon.engine_events.base import NodeEvent
-from graphon.engine_events.node import NodeRunFailedEvent, NodeRunSucceededEvent
+from graphon.engine_events.node import (
+    NodeRunFailedEvent,
+    NodeRunSucceededEvent,
+    NodeRunVariableUpdatedEvent,
+)
 from graphon.enums import (
     BuiltinNodeTypes,
     WorkflowNodeExecutionMetadataKey,
@@ -149,6 +153,16 @@ class LoopContainerHandler:
         if not isinstance(run_state, LoopRunState):
             msg = f"loop frame cannot belong to {run_state.kind} run"
             raise TypeError(msg)
+        # Frame creation deep-copies variables. Identity therefore survives only
+        # across Loop write-backs and naturally stops at isolated containers.
+        if (
+            isinstance(event, NodeRunVariableUpdatedEvent)
+            and frame.state.variable_pool.get_variable(event.variable.selector)
+            is event.variable
+        ):
+            parent_pool = self._frame_registry[run_state.frame_id].state.variable_pool
+            if parent_pool.get_variable(event.variable.selector) is not None:
+                parent_pool.add(event.variable.selector, event.variable)
         loop_metadata = {
             WorkflowNodeExecutionMetadataKey.LOOP_ID: run_state.node_id,
             WorkflowNodeExecutionMetadataKey.LOOP_INDEX: frame_state.index,

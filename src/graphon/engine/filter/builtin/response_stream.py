@@ -415,7 +415,7 @@ class ResponseStreamFilter:
         self._referenced_selectors = referenced_selectors
         self._pending_state = None
 
-    def _migrate_v1_state(  # ruff:ignore[complex-structure]
+    def _migrate_v1_state(  # ruff:ignore[complex-structure, too-many-branches]
         self,
         state: _ResponseStreamFilterState,
     ) -> _ResponseStreamFilterState:
@@ -429,11 +429,13 @@ class ResponseStreamFilter:
         buffers and execution IDs.
 
         The legacy graph assigned ``edge_N`` across the full config after accepting
-        each edge whose source and target were strings. The bound graph retains that
-        config plus each public DSL edge ID. Replaying the old counter and matching
-        each config edge against the bound root graph produces the exact root-only
-        mapping, including when a child graph reuses the same public edge ID. Unknown
-        IDs fail instead of being guessed, preventing an incorrect response release.
+        each edge whose source and target were strings. For imported graphs, replaying
+        that counter against the retained config produces the exact root-only mapping,
+        including when a child graph reuses the same public edge ID. Programmatic
+        graphs have no config, so they are accepted only when their complete edge-key
+        set is already the contiguous legacy ``edge_0..edge_N`` set and every mapping
+        key equals its edge object's ID. Unknown or renamed IDs fail instead of being
+        guessed, preventing an incorrect response release.
 
         TODO: Delete this method together with
         ``_normalize_response_stream_filter_state``, ``_V1_STATE_MARKER``, and
@@ -444,51 +446,65 @@ class ResponseStreamFilter:
             A version 2 state containing only data owned by the bound root graph.
 
         Raises:
-            TypeError: If the bound graph config has an invalid container type.
-            ValueError: If a referenced legacy edge cannot be mapped exactly.
+            TypeError: If the bound graph or edge config has an invalid shape.
+            ValueError: If stable legacy IDs cannot be proven or mapped exactly.
         """
-        graph_config = getattr(self._bound_graph, "graph_config", None)
-        if not isinstance(graph_config, Mapping):
-            msg = "Version 1 ResponseStreamFilter state requires graph config"
-            raise TypeError(msg)
-
-        edge_configs = graph_config.get("edges")
-        if not isinstance(edge_configs, Sequence) or isinstance(
-            edge_configs, (str, bytes)
-        ):
-            msg = "Version 1 ResponseStreamFilter state requires graph edge config"
-            raise TypeError(msg)
-
         bound_graph = self._bound_graph
         root_response_nodes = {
             node_id
             for node_id, node in bound_graph.nodes.items()
             if node.execution_type == NodeExecutionType.RESPONSE
         }
-        legacy_edge_ids: dict[str, str] = {}
-        edge_index = 0
-        for edge_config in edge_configs:
-            if not isinstance(edge_config, Mapping):
-                msg = "Graph edge config must be a mapping"
-                raise TypeError(msg)
-            if not isinstance(edge_config.get("source"), str) or not isinstance(
-                edge_config.get("target"), str
+        graph_config = getattr(bound_graph, "graph_config", None)
+        if graph_config is None:
+            expected_edge_ids = {
+                f"edge_{edge_index}" for edge_index in range(len(bound_graph.edges))
+            }
+            if set(bound_graph.edges) != expected_edge_ids or any(
+                edge_id != edge.id for edge_id, edge in bound_graph.edges.items()
             ):
-                continue
-
-            edge_id = edge_config.get("id")
-            if not isinstance(edge_id, str):
-                msg = "Graph edge config is missing its public edge ID"
+                msg = (
+                    "Version 1 ResponseStreamFilter state without graph config "
+                    "requires stable edge_N IDs"
+                )
+                raise ValueError(msg)
+            legacy_edge_ids = {edge_id: edge_id for edge_id in expected_edge_ids}
+        else:
+            if not isinstance(graph_config, Mapping):
+                msg = "Version 1 ResponseStreamFilter state requires graph config"
                 raise TypeError(msg)
 
-            bound_edge = bound_graph.edges.get(edge_id)
-            if (
-                bound_edge is not None
-                and bound_edge.tail == edge_config["source"]
-                and bound_edge.head == edge_config["target"]
+            edge_configs = graph_config.get("edges")
+            if not isinstance(edge_configs, Sequence) or isinstance(
+                edge_configs, (str, bytes)
             ):
-                legacy_edge_ids[f"edge_{edge_index}"] = edge_id
-            edge_index += 1
+                msg = "Version 1 ResponseStreamFilter state requires graph edge config"
+                raise TypeError(msg)
+
+            legacy_edge_ids = {}
+            edge_index = 0
+            for edge_config in edge_configs:
+                if not isinstance(edge_config, Mapping):
+                    msg = "Graph edge config must be a mapping"
+                    raise TypeError(msg)
+                if not isinstance(edge_config.get("source"), str) or not isinstance(
+                    edge_config.get("target"), str
+                ):
+                    continue
+
+                edge_id = edge_config.get("id")
+                if not isinstance(edge_id, str):
+                    msg = "Graph edge config is missing its public edge ID"
+                    raise TypeError(msg)
+
+                bound_edge = bound_graph.edges.get(edge_id)
+                if (
+                    bound_edge is not None
+                    and bound_edge.tail == edge_config["source"]
+                    and bound_edge.head == edge_config["target"]
+                ):
+                    legacy_edge_ids[f"edge_{edge_index}"] = edge_id
+                edge_index += 1
 
         try:
             paths_map = {

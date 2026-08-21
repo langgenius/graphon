@@ -106,6 +106,23 @@ class WorkerPool:
         with self._lock:
             return any(worker.has_current_task for worker in self._workers)
 
+    def is_idle(self) -> bool:
+        """Return whether no worker owns or can claim a ready task.
+
+        The claim lock makes the ready-queue size and each worker's ownership
+        flag one consistent observation. Dispatcher uses this after its own
+        queue times out to distinguish a transient wait from an execution that
+        has unfinished scheduler state but no possible source of progress.
+
+        Returns:
+            ``True`` when the ready queue is empty and every worker is idle.
+
+        """
+        with self._lock, self._task_claim_lock:
+            return self._ready_queue.qsize() == 0 and not any(
+                worker.has_current_task for worker in self._workers
+            )
+
     def _create_worker(self, worker_id: int) -> None:
         """Create and start a new worker."""
         worker = Worker(

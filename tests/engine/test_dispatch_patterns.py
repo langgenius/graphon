@@ -1452,6 +1452,50 @@ def test_dispatcher_preserves_task_event_for_dispatch() -> None:
     assert event_processor.dispatched_events == [task_event]
 
 
+def test_dispatcher_fails_when_unfinished_execution_has_no_work() -> None:
+    graph_execution = MagicMock(aborted=False, paused=False, error=None)
+    scheduler = MagicMock()
+    scheduler.is_execution_complete.return_value = False
+    worker_pool = MagicMock()
+    worker_pool.is_idle.return_value = True
+    dispatcher = Dispatcher(
+        dispatch_queue=queue.Queue(),
+        event_processor=MagicMock(),
+        graph_execution=graph_execution,
+        scheduler=scheduler,
+        command_processor=MagicMock(),
+        worker_pool=worker_pool,
+        event_stream=MagicMock(),
+    )
+
+    with pytest.raises(RuntimeError, match="Execution stalled"):
+        dispatcher._dispatch_next_event()
+
+
+def test_dispatcher_rechecks_events_after_workers_become_idle() -> None:
+    dispatch_queue = queue.Queue()
+    worker_pool = MagicMock()
+
+    def publish_last_event() -> bool:
+        dispatch_queue.put(MagicMock())
+        return True
+
+    worker_pool.is_idle.side_effect = publish_last_event
+    dispatcher = Dispatcher(
+        dispatch_queue=dispatch_queue,
+        event_processor=MagicMock(),
+        graph_execution=MagicMock(aborted=False, paused=False, error=None),
+        scheduler=MagicMock(is_execution_complete=MagicMock(return_value=False)),
+        command_processor=MagicMock(),
+        worker_pool=worker_pool,
+        event_stream=MagicMock(),
+    )
+
+    dispatcher._dispatch_next_event()
+
+    assert dispatch_queue.qsize() == 1
+
+
 def test_event_processor_dispatches_task_event_payload() -> None:
     event = NodeRunStartedEvent(
         id="run-1",

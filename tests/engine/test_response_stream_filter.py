@@ -19,6 +19,7 @@ from graphon.engine_events.node import (
 )
 from graphon.engine_events.traversal import GraphEdgeTakenEvent
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType, NodeState, NodeType
+from graphon.graph.graph import Graph
 from graphon.nodes.base.template import (
     Template,
     TemplateSegmentUnion,
@@ -101,7 +102,7 @@ class _TestGraph(GraphProtocol):
         self._nodes = nodes
         self._edges = edges
         self._root_node = nodes[root_node_id]
-        self._graph_config = graph_config or {
+        self._graph_config: Mapping[str, Any] | None = graph_config or {
             "edges": [
                 {
                     "id": edge.id,
@@ -121,12 +122,12 @@ class _TestGraph(GraphProtocol):
         return self._edges
 
     @property
-    def graph_config(self) -> Mapping[str, Any]:
+    def graph_config(self) -> Mapping[str, Any] | None:
         """Return the edge definition used by snapshot compatibility tests."""
         return self._graph_config
 
     @graph_config.setter
-    def graph_config(self, value: Mapping[str, Any]) -> None:
+    def graph_config(self, value: Mapping[str, Any] | None) -> None:
         """Replace the edge definition for a compatibility test scenario."""
         self._graph_config = value
 
@@ -142,7 +143,7 @@ class _TestGraph(GraphProtocol):
 
 
 def _context(
-    graph: _TestGraph,
+    graph: GraphProtocol,
     variable_pool: VariablePool | None = None,
 ) -> EngineEventFilterContext:
     state = RuntimeState(
@@ -653,16 +654,16 @@ def test_response_stream_filter_writes_version_2_snapshot() -> None:
 
 
 def test_response_stream_filter_migrates_v1_root_state_after_graph_binding() -> None:
-    graph = _variable_response_graph(edge_id="shared-edge")
+    graph = _variable_response_graph(edge_id="edge_0")
     graph.graph_config = {
         "edges": [
             {
-                "id": "shared-edge",
+                "id": "edge_0",
                 "source": "child-source",
                 "target": "child-answer",
             },
             {
-                "id": "shared-edge",
+                "id": "edge_0",
                 "source": "source",
                 "target": "answer",
             },
@@ -700,9 +701,50 @@ def test_response_stream_filter_migrates_v1_root_state_after_graph_binding() -> 
     assert restored_filter._response_sessions == {}
     assert restored_filter._node_execution_ids == {"source": "root-run"}
     assert [path.edges for path in restored_filter._paths_maps["answer"]] == [
-        ["shared-edge"]
+        ["edge_0"]
     ]
     assert json.loads(restored_filter.dumps())["version"] == "2.0"
+
+
+def test_response_stream_filter_migrates_v1_graph_builder_state() -> None:
+    source = _TestNode("source", execution_type=NodeExecutionType.ROOT)
+    answer = _TestNode(
+        "answer",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template(
+            segments=[VariableSegment(selector=["source", "answer"])],
+        ),
+    )
+    graph = Graph.new().add_root(cast(Any, source)).add_node(cast(Any, answer)).build()
+    assert graph.graph_config is None
+
+    first_filter = ResponseStreamFilter()
+    first_filter.initialize(_context(graph))
+    snapshot = json.loads(first_filter.dumps())
+    snapshot["version"] = "1.0"
+
+    restored_filter = ResponseStreamFilter()
+    restored_filter.loads(json.dumps(snapshot))
+    restored_filter.initialize(_context(graph))
+
+    assert [path.edges for path in restored_filter._paths_maps["answer"]] == [
+        ["edge_0"]
+    ]
+
+
+def test_response_stream_filter_rejects_v1_graph_without_stable_legacy_ids() -> None:
+    graph = _variable_response_graph(edge_id="public-edge")
+    graph.graph_config = None
+    first_filter = ResponseStreamFilter()
+    first_filter.initialize(_context(graph))
+    snapshot = json.loads(first_filter.dumps())
+    snapshot.update({"version": "1.0", "paths_map": {"answer": [["edge_0"]]}})
+
+    restored_filter = ResponseStreamFilter()
+    restored_filter.loads(json.dumps(snapshot))
+
+    with pytest.raises(ValueError, match="requires stable edge_N IDs"):
+        restored_filter.initialize(_context(graph))
 
 
 def test_response_stream_filter_does_not_migrate_version_2_edge_ids() -> None:

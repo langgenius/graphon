@@ -123,7 +123,17 @@ class Dispatcher:
             task = self._dispatch_queue.get(timeout=0.1)
         except queue.Empty:
             self._process_commands()
-            return
+            if (
+                self._graph_execution.aborted
+                or self._graph_execution.paused
+                or self._graph_execution.error is not None
+                or self._scheduler.is_execution_complete()
+            ):
+                return
+            if not self._worker_pool.is_idle() or not self._dispatch_queue.empty():
+                return
+            msg = "Execution stalled with unfinished nodes but no runnable tasks"
+            raise RuntimeError(msg) from None
         event = self._dispatch_task(task)
         self._dispatch_queue.task_done()
         self._process_commands(event)

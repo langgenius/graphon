@@ -36,7 +36,14 @@ class ContainerHandler(Protocol):
         *,
         frame: ExecutionFrame,
         event: NodeEvent,
-    ) -> None: ...
+    ) -> None:
+        """Prepare a child event before it is exposed outside the container.
+
+        Variable-update events have already been applied to ``frame.state``
+        when this hook runs, so handlers may inspect or propagate the resulting
+        value. Implementations may also add container metadata to the event.
+        """
+        ...
 
     def should_emit(
         self,

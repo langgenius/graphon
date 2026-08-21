@@ -9,6 +9,7 @@ from graphon.enums import (
     NodeExecutionType,
     WorkflowNodeExecutionStatus,
 )
+from graphon.graph.scoping import resolve_container_id
 from graphon.node_events.base import NodeEventPayload
 from graphon.node_events.loop import (
     LoopFailedEvent,
@@ -182,7 +183,7 @@ class LoopNode(Node[LoopNodeData]):
             node["id"]: node for node in graph_config.get("nodes", []) if "id" in node
         }
         for sub_node_id, sub_node_config in node_configs.items():
-            if sub_node_config.get("data", {}).get("loop_id") != node_id:
+            if sub_node_id not in loop_node_ids:
                 continue
 
             sub_node_variable_mapping = cls._extract_mapping_from_node_config(
@@ -217,14 +218,50 @@ class LoopNode(Node[LoopNodeData]):
         graph_config: Mapping[str, Any],
         loop_node_id: str,
     ) -> set[str]:
+        """Return nodes governed by the nearest enclosing Loop.
+
+        Legacy nodes identify their Loop directly, while canonical nodes only
+        identify their immediate container. Walking that container hierarchy
+        lets a Loop End nested in an Iteration still stop its surrounding Loop.
+        The walk stops at a different Loop so an inner Loop End never breaks an
+        outer Loop.
+
+        Args:
+            graph_config: Container subtree visible to the Loop node.
+            loop_node_id: Loop whose governed node IDs are requested.
+
+        Returns:
+            IDs of nodes whose nearest Loop ancestor is ``loop_node_id``.
+
+        """
         loop_node_ids = set()
-        nodes = graph_config.get("nodes", [])
-        for node in nodes:
-            node_data = node.get("data", {})
-            if node_data.get("loop_id") == loop_node_id:
-                node_id = node.get("id")
-                if node_id:
+        node_configs = {
+            node_id: node
+            for node in graph_config.get("nodes", [])
+            if isinstance(node, Mapping)
+            and isinstance((node_id := node.get("id")), str)
+        }
+        for node_id, node_config in node_configs.items():
+            owner = resolve_container_id(node_config, nodes_by_id=node_configs)
+            visited: set[str] = set()
+            while owner and owner not in visited:
+                if owner == loop_node_id:
                     loop_node_ids.add(node_id)
+                    break
+                visited.add(owner)
+                owner_config = node_configs.get(owner)
+                if owner_config is None:
+                    break
+                owner_data = owner_config.get("data")
+                if (
+                    isinstance(owner_data, Mapping)
+                    and owner_data.get("type") == BuiltinNodeTypes.LOOP
+                ):
+                    break
+                owner = resolve_container_id(
+                    owner_config,
+                    nodes_by_id=node_configs,
+                )
         return loop_node_ids
 
     @staticmethod

@@ -160,7 +160,13 @@ class Scheduler:
         Args:
             node_id: The ID of the unfinished node
 
+        Raises:
+            KeyError: If persisted state references a node outside this frame.
+
         """
+        if node_id not in self._graph.nodes:
+            msg = f"Cannot restore unknown node {node_id!r} in frame {self._frame_id!r}"
+            raise KeyError(msg)
         self._unfinished_nodes.add(node_id)
 
     def finish_execution(self, node_id: str) -> None:

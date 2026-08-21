@@ -1,4 +1,15 @@
-from graphon.engine_events import GraphEdgeSkippedEvent, GraphEdgeTakenEvent
+from graphon.engine_events import (
+    GraphEdgeSkippedEvent,
+    GraphEdgeTakenEvent,
+    GraphRunStartedEvent,
+)
+
+
+def test_graph_lifecycle_event_exports_container_context() -> None:
+    assert GraphRunStartedEvent().container_id == ""
+    assert GraphRunStartedEvent(container_id="loop").model_dump()["container_id"] == (
+        "loop"
+    )
 
 
 def test_graph_edge_taken_event_exports_payload() -> None:

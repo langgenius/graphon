@@ -9,7 +9,6 @@ class _GraphEdgeTraversalEvent(EngineEvent):
     source_node_id: str = Field(..., description="source node id")
     target_node_id: str = Field(..., description="target node id")
     source_handle: str | None = Field(default=None, description="source handle")
-    container_id: str = ""
 
 
 class GraphEdgeTakenEvent(_GraphEdgeTraversalEvent):

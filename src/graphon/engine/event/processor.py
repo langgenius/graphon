@@ -150,6 +150,8 @@ class NodeEventProcessor:
     def _dispatch_event(self, *, frame_id: str, event: NodeEvent) -> None:
         frame = self._frame_registry[frame_id]
         event.container_id = frame.container_id
+        if isinstance(event, NodeRunVariableUpdatedEvent):
+            frame.state.variable_pool.add(event.variable.selector, event.variable)
         for container_frame, handler in self._container_ancestors(frame_id):
             handler.prepare_frame_event(frame=container_frame, event=event)
         self._dispatch(event, frame=frame)
@@ -210,15 +212,11 @@ class NodeEventProcessor:
 
     @_dispatch.register
     def _(self, event: NodeRunVariableUpdatedEvent, *, frame: ExecutionFrame) -> None:
-        """Apply a node-requested variable mutation before downstream observers run.
+        """Publish a node-requested variable mutation after frame propagation.
 
-        The event is collected like other node events so parent/container engines can
-        forward the updated payload to outer layers, including persistence listeners.
+        ``_dispatch_event`` applies the mutation before container handlers inspect
+        it. This handler only collects the resulting event for outer observers.
         """
-        frame.state.variable_pool.add(
-            event.variable.selector,
-            event.variable,
-        )
         self._collect(frame=frame, event=event)
 
     @_dispatch.register

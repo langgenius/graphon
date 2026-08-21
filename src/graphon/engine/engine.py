@@ -294,7 +294,7 @@ class Engine:
                     layer.__class__.__name__,
                 )
 
-    def _start_execution(self, *, resume: bool) -> None:
+    def _start_execution(self, *, resume: bool) -> None:  # ruff:ignore[complex-structure]
         """Start execution subsystems."""
         ready_tasks = []
         if resume:
@@ -312,15 +312,21 @@ class Engine:
                 self._frame_registry[run_state.frame_id].scheduler.track_unfinished(
                     run_state.node_id
                 )
-            ready_tasks = [
-                *self._graph_runtime_state.ready_queue.drain(),
-                *self._graph_runtime_state.drain_deferred_ready_tasks(),
-            ]
-            for task in ready_tasks:
-                if isinstance(task, StartTask):
-                    self._frame_registry[task.frame_id].scheduler.track_unfinished(
-                        task.node_id,
-                    )
+            queued_tasks = self._graph_runtime_state.ready_queue.drain()
+            deferred_tasks = self._graph_runtime_state.drain_deferred_ready_tasks()
+            ready_tasks = [*queued_tasks, *deferred_tasks]
+            try:
+                for task in ready_tasks:
+                    if isinstance(task, StartTask):
+                        self._frame_registry[task.frame_id].scheduler.track_unfinished(
+                            task.node_id,
+                        )
+            except Exception:
+                for task in queued_tasks:
+                    self._graph_runtime_state.ready_queue.put(task)
+                for task in deferred_tasks:
+                    self._graph_runtime_state.defer_ready_task(task)
+                raise
 
         # ReadyQueue.put() may block, so consumers must exist before scheduling.
         self._worker_pool.start()

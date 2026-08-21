@@ -13,6 +13,7 @@ from graphon.enums import ErrorStrategy, NodeExecutionType, NodeState
 from graphon.nodes.base.node import Node
 
 from .edge import Edge
+from .scoping import resolve_container_id
 from .validation import get_graph_validator
 
 logger = logging.getLogger(__name__)
@@ -258,53 +259,6 @@ class Graph:
             filtered_node_configs.append(dict(node_config))
         return filtered_node_configs
 
-    @staticmethod
-    def _node_container_id(node_config: Mapping[str, Any]) -> str:
-        """Resolve the ID of the container that directly owns a node.
-
-        ``data.container_id`` is authoritative. An empty or absent owner places
-        the node in the root graph. During migration, one non-empty legacy
-        ``iteration_id`` or ``loop_id`` is accepted; nested legacy ownership is
-        ambiguous and must therefore be expressed with ``container_id``.
-
-        :param node_config: raw node configuration from the workflow graph
-
-        Returns:
-            The direct container node ID, or ``""`` for a root node.
-
-        Raises:
-            TypeError: If an ownership field is not a string.
-            ValueError: If legacy fields name different containers.
-
-        """
-        data = node_config.get("data")
-        if not isinstance(data, Mapping):
-            return ""
-
-        if "container_id" in data:
-            value = data["container_id"]
-            if not isinstance(value, str):
-                msg = "Node data.container_id must be a string"
-                raise TypeError(msg)
-            return value
-
-        # Transitional support for existing single-level Loop/Iteration configs.
-        legacy_ids: set[str] = set()
-        for field in ("iteration_id", "loop_id"):
-            value = data.get(field)
-            if value is None:
-                continue
-            if not isinstance(value, str):
-                msg = f"Node data.{field} must be a string"
-                raise TypeError(msg)
-            if not value:
-                continue
-            legacy_ids.add(value)
-        if len(legacy_ids) > 1:
-            msg = "Nested container nodes must set data.container_id"
-            raise ValueError(msg)
-        return next(iter(legacy_ids), "")
-
     @classmethod
     def _scope_graph_config(
         cls,
@@ -335,10 +289,17 @@ class Graph:
             ValueError: If scopes are orphaned, cyclic, or joined by an edge.
 
         """
-        container_ids = {
-            node_id: cls._node_container_id(node_config)
+        node_configs_by_id = {
+            node_id: node_config
             for node_config in node_configs
             if isinstance((node_id := node_config.get("id")), str)
+        }
+        container_ids = {
+            node_id: resolve_container_id(
+                node_config,
+                nodes_by_id=node_configs_by_id,
+            )
+            for node_id, node_config in node_configs_by_id.items()
         }
         direct_node_ids = {
             node_id
