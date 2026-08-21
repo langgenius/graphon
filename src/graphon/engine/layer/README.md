@@ -32,8 +32,9 @@ class MetricsLayer(Layer):
 
     def on_event(self, event: EngineEvent) -> None:
         """Record elapsed time when a node run succeeds."""
-        if isinstance(event, NodeRunSucceededEvent):
-            self.metrics[event.node_id] = event.node_run_result.elapsed_time
+        if isinstance(event, NodeRunSucceededEvent) and event.finished_at is not None:
+            duration = event.finished_at - event.start_at
+            self.metrics[event.node_id] = duration.total_seconds()
 ```
 
 `engine.add_layer()` binds the read-only runtime state before execution, so

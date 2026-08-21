@@ -8,6 +8,7 @@ from graphon.enums import (
     NodeExecutionType,
     WorkflowNodeExecutionStatus,
 )
+from graphon.graph.scoping import resolve_container_id
 from graphon.node_events.base import NodeEventPayload, NodeRunResult
 from graphon.node_events.iteration import (
     IterationFailedEvent,
@@ -195,21 +196,20 @@ class IterationNode(Node[IterationNodeData]):
         variable_mapping: dict[str, Sequence[str]] = {
             f"{node_id}.input_selector": node_data.iterator_selector,
         }
-        iteration_node_ids = set()
-
-        nodes = graph_config.get("nodes", [])
-        for node in nodes:
-            node_config_data = node.get("data", {})
-            if node_config_data.get("iteration_id") == node_id:
-                in_iteration_node_id = node.get("id")
-                if in_iteration_node_id:
-                    iteration_node_ids.add(in_iteration_node_id)
-
         node_configs = {
             node["id"]: node for node in graph_config.get("nodes", []) if "id" in node
         }
+        iteration_node_ids = {
+            sub_node_id
+            for sub_node_id, sub_node_config in node_configs.items()
+            if resolve_container_id(
+                sub_node_config,
+                nodes_by_id=node_configs,
+            )
+            == node_id
+        }
         for sub_node_id, sub_node_config in node_configs.items():
-            if sub_node_config.get("data", {}).get("iteration_id") != node_id:
+            if sub_node_id not in iteration_node_ids:
                 continue
 
             sub_node_variable_mapping = cls._extract_mapping_from_node_config(

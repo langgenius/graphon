@@ -1,3 +1,4 @@
+import json
 import queue
 import threading
 from collections.abc import Generator
@@ -348,6 +349,45 @@ def test_redis_channel_migrates_wrapped_variable_updates() -> None:
 
     assert isinstance(command, UpdateVariablesCommand)
     assert list(command.updates) == [variable]
+
+
+def test_redis_channel_writes_legacy_marker_and_variable_update_payload() -> None:
+    """Keep commands readable by old consumers throughout a rolling deployment.
+
+    The legacy consumer ignores the list unless its pending marker exists and
+    validates variable updates only when each variable is nested below ``value``.
+    The exact pipeline calls and round-trip through the new consumer protect both
+    sides of that compatibility contract.
+    """
+    redis_client = MagicMock()
+    pipeline = redis_client.pipeline.return_value.__enter__.return_value
+    variable = StringVariable(
+        name="answer",
+        selector=["node", "answer"],
+        value="updated",
+    )
+    command = UpdateVariablesCommand(updates=[variable])
+    channel = RedisChannel(
+        redis_client=redis_client,
+        channel_key="test-channel",
+        command_ttl=60,
+    )
+
+    channel.send_command(command)
+
+    command_json = pipeline.rpush.call_args.args[1]
+    payload = json.loads(command_json)
+    assert payload == {
+        "command_type": "update_variables",
+        "updates": [{"value": variable.model_dump(mode="json")}],
+    }
+    assert channel.deserialize_command(payload) == command
+    assert pipeline.method_calls == [
+        call.rpush("test-channel", command_json),
+        call.expire("test-channel", 60),
+        call.set("test-channel:pending", "1", ex=60),
+        call.execute(),
+    ]
 
 
 def test_command_processor_directly_handles_builtin_commands() -> None:

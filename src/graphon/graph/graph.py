@@ -566,6 +566,29 @@ class Graph:
 
         # Create node instances
         nodes = cls._create_node_instances(node_configs_map, node_factory)
+        node_configs_by_id = {
+            node_id: node_config
+            for node_config in raw_node_configs
+            if isinstance((node_id := node_config.get("id")), str)
+        }
+        # Child nodes are omitted from this frame. Their direct owner must be a
+        # container node that can materialize them in a child frame later.
+        for owner_id in sorted(
+            {
+                owner_id
+                for node_config in raw_node_configs
+                if (
+                    owner_id := resolve_container_id(
+                        node_config,
+                        nodes_by_id=node_configs_by_id,
+                    )
+                )
+            }
+            & nodes.keys(),
+        ):
+            if nodes[owner_id].execution_type != NodeExecutionType.CONTAINER:
+                msg = f"Node '{owner_id}' owns child nodes but is not a container"
+                raise ValueError(msg)
         for node in nodes.values():
             node.graph_config = scoped_graph_config
             if isinstance(node, Node):

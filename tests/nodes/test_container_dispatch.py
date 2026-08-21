@@ -51,7 +51,7 @@ def test_iteration_variable_mapping_filters_container_internal_selectors() -> No
                 "id": "child",
                 "data": {
                     "type": AnswerNode.node_type,
-                    "iteration_id": "iteration",
+                    "container_id": "iteration",
                     "answer": (
                         "{{#source.value#}} {{#iteration.item#}} {{#nested.answer#}}"
                     ),
@@ -62,7 +62,7 @@ def test_iteration_variable_mapping_filters_container_internal_selectors() -> No
                 "data": {
                     "type": AnswerNode.node_type,
                     "iteration_id": "iteration",
-                    "answer": "{{#source.other#}}",
+                    "answer": "{{#child.answer#}} {{#source.other#}}",
                 },
             },
         ],

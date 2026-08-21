@@ -68,6 +68,8 @@ class RedisPipelineProtocol(Protocol):
 
     def expire(self, name: str, time: int) -> Any: ...
 
+    def set(self, name: str, value: str, ex: int | None = None) -> Any: ...
+
 
 class RedisClientProtocol(Protocol):
     """Redis client contract required by the command channel."""
@@ -100,6 +102,7 @@ class RedisChannel:
         self._redis = redis_client
         self._key = channel_key
         self._command_ttl = command_ttl
+        self._pending_key = f"{channel_key}:pending"
 
     def fetch_commands(self) -> list[Command]:
         """Fetch all pending commands from Redis.
@@ -132,18 +135,32 @@ class RedisChannel:
         return commands
 
     def send_command(self, command: Command) -> None:
-        """Send a command to Redis.
+        """Send a command using the wire format understood by both engine versions.
+
+        Pre-refactor consumers require a separate pending marker before reading the
+        command list and expect variable updates to wrap each variable in a
+        ``{"value": variable}`` object. New consumers accept that legacy payload at
+        deserialization, so retaining the old producer format keeps rolling
+        deployments bidirectionally compatible without duplicating commands.
 
         Args:
             command: The command to send
 
         """
-        command_json = json.dumps(command.model_dump())
+        # Remove the legacy marker and wrapper after pre-refactor consumers have
+        # been retired for at least one command TTL.
+        command_data = command.model_dump(mode="json")
+        if command.command_type == "update_variables":
+            command_data["updates"] = [
+                {"value": update} for update in command_data["updates"]
+            ]
+        command_json = json.dumps(command_data)
 
         # Push to list and set expiry
         with self._redis.pipeline() as pipe:
             pipe.rpush(self._key, command_json)
             pipe.expire(self._key, self._command_ttl)
+            pipe.set(self._pending_key, "1", ex=self._command_ttl)
             pipe.execute()
 
     def deserialize_command(

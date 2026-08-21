@@ -27,11 +27,12 @@ class _RecordingNodeFactory:
         node = cast(Any, Mock(spec=Node))
         node.id = node_id
         node.node_type = node_type
-        node.execution_type = (
-            NodeExecutionType.ROOT
-            if node_type in {"start", "iteration-start", "loop-start"}
-            else NodeExecutionType.EXECUTABLE
-        )
+        if node_type in {"loop", "iteration", "custom-container"}:
+            node.execution_type = NodeExecutionType.CONTAINER
+        elif node_type in {"start", "iteration-start", "loop-start"}:
+            node.execution_type = NodeExecutionType.ROOT
+        else:
+            node.execution_type = NodeExecutionType.EXECUTABLE
         node.error_strategy = None
         node.state = NodeState.UNKNOWN
         return node
@@ -395,6 +396,74 @@ def test_graph_init_rejects_orphan_scopes_and_unknown_edges() -> None:
     graph_config = _scoped_graph_config()
     graph_config["edges"].append(_edge("ghost-a", "ghost-b"))
     with pytest.raises(GraphValidationError):
+        Graph.init(
+            graph_config=graph_config,
+            node_factory=_RecordingNodeFactory(),
+            root_node_id="start",
+        )
+
+
+@pytest.mark.parametrize(
+    ("owner_type", "ownership_field"),
+    [
+        ("custom-container", "container_id"),
+        ("loop", "loop_id"),
+    ],
+)
+def test_graph_init_accepts_container_scope_owners(
+    owner_type: str,
+    ownership_field: str,
+) -> None:
+    """Accept canonical and legacy child ownership for any container node.
+
+    Container semantics come from the node factory's ``execution_type`` rather
+    than a hard-coded node type, so downstream container implementations remain
+    valid while legacy Loop ownership continues to load during migration.
+    """
+    graph_config = {
+        "nodes": [
+            {"id": "start", "data": {"type": "start"}},
+            {"id": "owner", "data": {"type": owner_type}},
+            {
+                "id": "child",
+                "data": {"type": "answer", ownership_field: "owner"},
+            },
+        ],
+        "edges": [_edge("start", "owner")],
+    }
+
+    graph = Graph.init(
+        graph_config=graph_config,
+        node_factory=_RecordingNodeFactory(),
+        root_node_id="start",
+    )
+
+    assert set(graph.nodes) == {"start", "owner"}
+
+
+def test_graph_init_rejects_non_container_scope_owner() -> None:
+    """Reject a child scope whose direct owner cannot create a child frame.
+
+    Scoping removes child nodes from the parent's executable graph. Allowing an
+    ordinary node to own that scope would therefore make execution succeed while
+    silently skipping the child, so Graph initialization must fail first.
+    """
+    graph_config = {
+        "nodes": [
+            {"id": "start", "data": {"type": "start"}},
+            {"id": "ordinary", "data": {"type": "answer"}},
+            {
+                "id": "child",
+                "data": {"type": "answer", "container_id": "ordinary"},
+            },
+        ],
+        "edges": [_edge("start", "ordinary")],
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="Node 'ordinary' owns child nodes but is not a container",
+    ):
         Graph.init(
             graph_config=graph_config,
             node_factory=_RecordingNodeFactory(),
