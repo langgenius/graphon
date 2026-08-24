@@ -265,7 +265,7 @@ class ResponseStreamFilter:
             case GraphEdgeTakenEvent():
                 output = self._handle_edge_taken(event.edge_id)
             case GraphEdgeSkippedEvent():
-                output = []
+                output = self._handle_edge_taken(event.edge_id)
             case NodeRunSucceededEvent() | NodeRunExceptionEvent():
                 output = [*self._try_flush(), event]
             case _:
