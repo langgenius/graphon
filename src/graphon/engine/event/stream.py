@@ -4,7 +4,6 @@ import logging
 import threading
 import time
 from collections.abc import Generator
-from contextlib import contextmanager
 from typing import final
 
 from graphon.engine_events.base import EngineEvent
@@ -12,63 +11,6 @@ from graphon.engine_events.base import EngineEvent
 from ..layer import Layer
 
 _logger = logging.getLogger(__name__)
-
-
-@final
-class ReadWriteLock:
-    """A read-write lock implementation that allows multiple concurrent readers
-    but only one writer at a time.
-    """
-
-    def __init__(self) -> None:
-        self._read_ready = threading.Condition(threading.RLock())
-        self._readers = 0
-
-    def acquire_read(self) -> None:
-        """Acquire a read lock."""
-        _ = self._read_ready.acquire()
-        try:
-            self._readers += 1
-        finally:
-            self._read_ready.release()
-
-    def release_read(self) -> None:
-        """Release a read lock."""
-        _ = self._read_ready.acquire()
-        try:
-            self._readers -= 1
-            if self._readers == 0:
-                self._read_ready.notify_all()
-        finally:
-            self._read_ready.release()
-
-    def acquire_write(self) -> None:
-        """Acquire a write lock."""
-        _ = self._read_ready.acquire()
-        while self._readers > 0:
-            _ = self._read_ready.wait()
-
-    def release_write(self) -> None:
-        """Release a write lock."""
-        self._read_ready.release()
-
-    @contextmanager
-    def read_lock(self) -> Generator:
-        """Return a context manager for read locking."""
-        self.acquire_read()
-        try:
-            yield
-        finally:
-            self.release_read()
-
-    @contextmanager
-    def write_lock(self) -> Generator:
-        """Return a context manager for write locking."""
-        self.acquire_write()
-        try:
-            yield
-        finally:
-            self.release_write()
 
 
 @final
@@ -93,7 +35,7 @@ class EventStream:
 
         """
         self._events: list[EngineEvent] = []
-        self._lock = ReadWriteLock()
+        self._lock = threading.Lock()
         self._layers = layers
         self._execution_complete = threading.Event()
 
@@ -120,7 +62,7 @@ class EventStream:
             event: The event to collect
 
         """
-        with self._lock.write_lock():
+        with self._lock:
             self._events.append(event)
 
         # NOTE: `notify_layers` is intentionally called outside the critical section
@@ -137,7 +79,7 @@ class EventStream:
             List of new events
 
         """
-        with self._lock.read_lock():
+        with self._lock:
             return list(self._events[start_index:])
 
     def _event_count(self) -> int:
@@ -147,7 +89,7 @@ class EventStream:
             Number of collected events
 
         """
-        with self._lock.read_lock():
+        with self._lock:
             return len(self._events)
 
     def mark_complete(self) -> None:
@@ -156,7 +98,7 @@ class EventStream:
 
     def reset(self) -> None:
         """Discard events and completion state from the previous engine run."""
-        with self._lock.write_lock():
+        with self._lock:
             self._events.clear()
             self._execution_complete.clear()
 
