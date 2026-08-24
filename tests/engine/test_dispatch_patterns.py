@@ -1,7 +1,7 @@
 import json
 import queue
 import threading
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import time
@@ -242,6 +242,18 @@ class _FrameNode:
 
 
 class _FrameFactory:
+    def with_graph_config(
+        self,
+        graph_config: Mapping[str, Any],
+    ) -> "_FrameFactory":
+        """Accept graph scoping for this stateless frame test factory."""
+        _ = graph_config
+        return self
+
+    def validate_node(self, node_config: dict[str, object]) -> None:
+        """Accept the minimal frame configs used by dispatcher tests."""
+        _ = node_config
+
     def with_runtime_state(
         self,
         graph_runtime_state: RuntimeState,
@@ -998,6 +1010,18 @@ def test_frame_registry_creates_child_frame_with_rebound_runtime() -> None:
             graph_runtime_state: RuntimeState,
         ) -> "RuntimeBoundFactory":
             return RuntimeBoundFactory(graph_runtime_state)
+
+        def with_graph_config(
+            self,
+            graph_config: Mapping[str, Any],
+        ) -> "RuntimeBoundFactory":
+            """Accept graph scoping without changing runtime-state binding."""
+            _ = graph_config
+            return self
+
+        def validate_node(self, node_config: dict[str, object]) -> None:
+            """Accept the minimal config used to test runtime-state rebinding."""
+            _ = node_config
 
         def create_node(self, node_config: dict[str, object]) -> RuntimeBoundNode:
             return RuntimeBoundNode(str(node_config["id"]), self.runtime_state)

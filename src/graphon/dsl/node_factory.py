@@ -10,6 +10,7 @@ from typing import Any, ClassVar
 
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.entities.graph_config import NodeConfigDict
+from graphon.entities.graph_init_params import InitParams
 from graphon.enums import BuiltinNodeTypes
 from graphon.file.enums import FileType
 from graphon.file.models import File
@@ -417,7 +418,7 @@ type _NodeBuilder = Callable[[Any, _NodeBuildRequest], Node]
 @dataclass(slots=True)
 class SlimDslNodeFactory:
     graph_config: Mapping[str, Any]
-    graph_init_params: Any
+    graph_init_params: InitParams
     graph_runtime_state: RuntimeState
     credentials: DslCredentials
     dependencies: list[DslDependency]
@@ -445,6 +446,85 @@ class SlimDslNodeFactory:
         graph_runtime_state: RuntimeState,
     ) -> SlimDslNodeFactory:
         return replace(self, graph_runtime_state=graph_runtime_state)
+
+    def with_graph_config(
+        self,
+        graph_config: Mapping[str, Any],
+    ) -> SlimDslNodeFactory:
+        """Return an independent factory bound to one materialized graph scope.
+
+        ``Node.__init__`` invokes ``post_init()`` immediately, so both legacy
+        ``factory.graph_config`` access and the canonical
+        ``node.graph_init_params.graph_config`` path must already point at the
+        scoped config before ``create_node()`` runs. Copying the Pydantic model
+        also keeps parent and sibling factories isolated.
+
+        Args:
+            graph_config: Container-subtree configuration visible to new nodes.
+
+        Returns:
+            A copied factory carrying copied, scope-correct initialization params.
+
+        """
+        return replace(
+            self,
+            graph_config=graph_config,
+            graph_init_params=self.graph_init_params.model_copy(
+                update={"graph_config": graph_config},
+            ),
+        )
+
+    def validate_node(
+        self,
+        node_config: NodeConfigDict,
+    ) -> None:
+        """Validate a DSL node without constructing runtime collaborators.
+
+        This method follows the same type and legacy Variable Assigner version
+        dispatch as :meth:`create_node`, then stops after concrete Pydantic
+        validation. It deliberately avoids builders because builders construct
+        Nodes, invoke ``post_init()``, and may initialize Slim or sandbox runtime
+        dependencies. Graph can therefore validate nested nodes before any
+        executable node is created.
+
+        Args:
+            node_config: Base-validated node configuration from the graph loader.
+
+        Raises:
+            DslError: If model metadata, the node type, or a legacy Variable
+                Assigner payload is unsupported.
+
+        """
+        request = self._node_request(node_config)
+        model_node_labels = {
+            BuiltinNodeTypes.LLM: "LLM",
+            BuiltinNodeTypes.QUESTION_CLASSIFIER: "Question classifier",
+            BuiltinNodeTypes.PARAMETER_EXTRACTOR: "Parameter extractor",
+        }
+        if node_type_label := model_node_labels.get(request.node_type):
+            model = request.data_payload.get("model")
+            provider = model.get("provider") if isinstance(model, Mapping) else None
+            if not provider:
+                msg = f"{node_type_label} node is missing model provider."
+                raise DslError(
+                    msg,
+                    code="node.llm_missing_provider",
+                    path=f"/nodes/{request.node_id}/data/model/provider",
+                    details={"node_id": request.node_id},
+                )
+        if request.node_type == BuiltinNodeTypes.VARIABLE_ASSIGNER:
+            self._validate_variable_assigner_data(request)
+            return
+
+        if request.node_type not in self.NODE_BUILDERS:
+            raise self._unsupported_node_error(request)
+        node_mapping = Node.get_node_type_classes_mapping()
+        node_classes = node_mapping.get(request.node_type)
+        node_version = str(request.data_payload.get("version") or "1")
+        node_cls = node_classes.get(node_version) if node_classes is not None else None
+        if node_cls is None:
+            raise self._unsupported_node_error(request)
+        node_cls.validate_node_data(request.data)
 
     def create_node(self, node_config: NodeConfigDict) -> Node:
         request = self._node_request(node_config)
@@ -637,40 +717,63 @@ class SlimDslNodeFactory:
             details={"node_id": request.node_id, "node_type": request.node_type},
         )
 
+    def _validate_variable_assigner_data(
+        self,
+        request: _NodeBuildRequest,
+    ) -> VariableAssignerData | VariableAssignerNodeData:
+        """Resolve and validate one legacy or current Variable Assigner payload.
+
+        Variable Assigner versions use different payload shapes and older DSLs
+        are not always explicitly versioned. Keeping shape detection and concrete
+        Pydantic validation here gives preflight validation and node construction
+        exactly one dispatch rule without creating a Node or runtime dependency.
+
+        Args:
+            request: Normalized node ID and data prepared by this factory.
+
+        Returns:
+            Concrete version 1 or version 2 node data ready for construction.
+
+        Raises:
+            DslError: If the payload matches neither supported version.
+
+        """
+        data = request.data_payload
+        version = str(data.get("version") or "")
+        if "items" in data or version == VariableAssignerNodeV2.version():
+            return VariableAssignerNodeData.model_validate(data)
+        if {
+            "assigned_variable_selector",
+            "write_mode",
+            "input_variable_selector",
+        }.issubset(data):
+            return VariableAssignerData.model_validate(data)
+
+        msg = "Variable assigner DSL node data is not recognized."
+        raise DslError(
+            msg,
+            code="node.assigner_invalid_payload",
+            path=f"/nodes/{request.node_id}/data",
+            details={"node_id": request.node_id},
+        )
+
     def _create_variable_assigner_node(
         self,
         request: _NodeBuildRequest,
     ) -> VariableAssignerNodeV1 | VariableAssignerNodeV2:
-        node_id = request.node_id
-        data = request.data_payload
-        version = str(data.get("version") or "")
-        if "items" in data or version == VariableAssignerNodeV2.version():
+        data = self._validate_variable_assigner_data(request)
+        if isinstance(data, VariableAssignerNodeData):
             return VariableAssignerNodeV2(
-                node_id=node_id,
-                data=VariableAssignerNodeData.model_validate(data),
+                node_id=request.node_id,
+                data=data,
                 graph_init_params=self.graph_init_params,
                 graph_runtime_state=self.graph_runtime_state,
             )
-
-        v1_fields = {
-            "assigned_variable_selector",
-            "write_mode",
-            "input_variable_selector",
-        }
-        if v1_fields.issubset(data):
-            return VariableAssignerNodeV1(
-                node_id=node_id,
-                data=VariableAssignerData.model_validate(data),
-                graph_init_params=self.graph_init_params,
-                graph_runtime_state=self.graph_runtime_state,
-            )
-
-        msg = "Variable assigner DSL node data is not recognized."
-        raise _dsl_error(
-            msg,
-            code="node.assigner_invalid_payload",
-            path=f"/nodes/{node_id}/data",
-            details={"node_id": node_id},
+        return VariableAssignerNodeV1(
+            node_id=request.node_id,
+            data=data,
+            graph_init_params=self.graph_init_params,
+            graph_runtime_state=self.graph_runtime_state,
         )
 
     def _create_question_classifier_node(

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Generator
-from dataclasses import dataclass
+from collections.abc import Generator, Mapping
+from dataclasses import dataclass, replace
+from typing import Any, cast
 
 import pytest
 
@@ -28,6 +29,7 @@ class _TestNodeData(BaseNodeData):
 class _TestNode(Node[_TestNodeData]):
     node_type = BuiltinNodeTypes.ANSWER
     execution_type = NodeExecutionType.EXECUTABLE
+    post_init_graph_config: Mapping[str, Any]
 
     @classmethod
     def version(cls) -> str:
@@ -57,6 +59,7 @@ class _TestNode(Node[_TestNodeData]):
 
     def post_init(self) -> None:
         super().post_init()
+        self.post_init_graph_config = self.graph_init_params.graph_config
         self._maybe_override_execution_type()
         self.data = dict(self.node_data.model_dump())
 
@@ -74,6 +77,22 @@ class _TestNode(Node[_TestNodeData]):
 class _SimpleNodeFactory:
     graph_init_params: InitParams
     graph_runtime_state: RuntimeState
+
+    def with_graph_config(
+        self,
+        graph_config: Mapping[str, Any],
+    ) -> _SimpleNodeFactory:
+        """Copy this test factory with scope-correct node initialization params."""
+        return replace(
+            self,
+            graph_init_params=self.graph_init_params.model_copy(
+                update={"graph_config": graph_config},
+            ),
+        )
+
+    def validate_node(self, node_config: NodeConfigDict) -> None:
+        """Validate test payloads through the concrete node data used here."""
+        _TestNode.validate_node_data(node_config["data"])
 
     def create_node(self, node_config: NodeConfigDict) -> _TestNode:
         return _TestNode(
@@ -130,6 +149,78 @@ def test_graph_initialization_runs_default_validators(
 
     assert graph.root_node.id == "start"
     assert "answer" in graph.nodes
+
+
+def test_child_post_init_sees_only_its_scoped_graph_config(
+    graph_init_dependencies: tuple[_SimpleNodeFactory, dict[str, object]],
+) -> None:
+    """Bind child InitParams before construction invokes the post-init hook.
+
+    The root factory retains the whole root subtree so it can materialize the
+    container later. A child factory must receive the narrowed container subtree
+    before constructing any child node; otherwise custom ``post_init()`` hooks can
+    cache parent and sibling nodes permanently.
+    """
+    node_factory, graph_config = graph_init_dependencies
+    graph_config["nodes"] = [
+        {
+            "id": "root",
+            "data": {
+                "type": BuiltinNodeTypes.ANSWER,
+                "execution_type": NodeExecutionType.ROOT,
+            },
+        },
+        {
+            "id": "container",
+            "data": {
+                "type": BuiltinNodeTypes.ANSWER,
+                "execution_type": NodeExecutionType.CONTAINER,
+            },
+        },
+        {"id": "sibling", "data": {"type": BuiltinNodeTypes.ANSWER}},
+        {
+            "id": "child-start",
+            "data": {
+                "type": BuiltinNodeTypes.ANSWER,
+                "container_id": "container",
+                "execution_type": NodeExecutionType.ROOT,
+            },
+        },
+        {
+            "id": "child-end",
+            "data": {
+                "type": BuiltinNodeTypes.ANSWER,
+                "container_id": "container",
+            },
+        },
+    ]
+    graph_config["edges"] = [
+        {"source": "root", "target": "container"},
+        {"source": "container", "target": "sibling"},
+        {"source": "child-start", "target": "child-end"},
+    ]
+
+    root_graph = Graph.init(
+        graph_config=graph_config,
+        node_factory=node_factory,
+        root_node_id="root",
+    )
+    assert root_graph.graph_config is not None
+    assert root_graph.node_factory is not None
+    child_graph = Graph.init(
+        graph_config=root_graph.graph_config,
+        node_factory=root_graph.node_factory,
+        root_node_id="child-start",
+        container_id="container",
+    )
+
+    child_start = cast(_TestNode, child_graph.nodes["child-start"])
+    assert child_start.graph_config is child_graph.graph_config
+    assert child_start.post_init_graph_config is child_graph.graph_config
+    assert {node["id"] for node in child_start.post_init_graph_config["nodes"]} == {
+        "child-start",
+        "child-end",
+    }
 
 
 def test_node_data_from_mapping_returns_typed_node_data() -> None:

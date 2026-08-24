@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, cast
 from unittest.mock import Mock
 
@@ -17,6 +17,18 @@ from graphon.nodes.base.node import Node
 @dataclass(slots=True)
 class _RecordingNodeFactory:
     created_node_ids: list[str] = field(default_factory=list)
+    graph_config: Mapping[str, Any] | None = None
+
+    def with_graph_config(
+        self,
+        graph_config: Mapping[str, Any],
+    ) -> _RecordingNodeFactory:
+        """Copy this test factory while sharing its node creation record."""
+        return replace(self, graph_config=graph_config)
+
+    def validate_node(self, node_config: NodeConfigDict) -> None:
+        """Accept intentionally minimal configs used only to exercise scoping."""
+        _ = node_config
 
     def create_node(self, node_config: NodeConfigDict) -> Node:
         node_id = node_config["id"]
@@ -35,6 +47,7 @@ class _RecordingNodeFactory:
             node.execution_type = NodeExecutionType.EXECUTABLE
         node.error_strategy = None
         node.state = NodeState.UNKNOWN
+        node.graph_config = self.graph_config
         return node
 
 

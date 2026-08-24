@@ -335,24 +335,6 @@ class _NodeRuntimeMixin[NodeDataT: BaseNodeData]:
         """Optional hook for subclasses requiring extra initialization."""
         return
 
-    def bind_graph_config(
-        self: Node[NodeDataT],
-        graph_config: Mapping[str, Any],
-    ) -> None:
-        """Limit graph configuration visible to this node's execution frame.
-
-        Both public access paths are updated: ``node.graph_config`` and
-        ``node.graph_init_params.graph_config``. A private copy of
-        :class:`InitParams` prevents rebinding this node from changing the
-        factory-owned params shared by nodes in parent or sibling frames.
-
-        :param graph_config: current frame's container-subtree configuration
-        """
-        self.graph_config = graph_config
-        self._graph_init_params = self._graph_init_params.model_copy(
-            update={"graph_config": graph_config},
-        )
-
     @property
     def graph_init_params(self: Node[NodeDataT]) -> InitParams:
         return self._graph_init_params

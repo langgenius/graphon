@@ -566,6 +566,57 @@ def test_variable_assigner_invalid_payload_raises_dsl_error() -> None:
     assert exc_info.value.path == "/nodes/node/data"
 
 
+def test_loads_validates_malformed_descendant_before_constructing_nodes(
+    mocker: Any,
+) -> None:
+    """Reject a malformed child schema before any root node is constructed.
+
+    Container children are materialized only after their owner runs. Loading must
+    nevertheless validate their concrete schemas up front so a bad child cannot
+    fail after already constructed root nodes initialize runtime collaborators or
+    ``post_init()`` hooks.
+    """
+    create_node = mocker.spy(node_factory_module.SlimDslNodeFactory, "create_node")
+    dsl = _graph_dsl_for_nodes(
+        nodes=[
+            {
+                "id": "loop",
+                "data": {
+                    "type": "loop",
+                    "start_node_id": "loop-start",
+                    "loop_count": 1,
+                    "break_conditions": [],
+                    "logical_operator": "and",
+                },
+            },
+            {
+                "id": "loop-start",
+                "data": {
+                    "type": "loop-start",
+                    "container_id": "loop",
+                },
+            },
+            {
+                "id": "malformed-code",
+                "data": {
+                    "type": "code",
+                    "container_id": "loop",
+                },
+            },
+        ],
+        edges=[
+            {"source": "start", "target": "loop"},
+            {"source": "loop-start", "target": "malformed-code"},
+        ],
+    )
+
+    with pytest.raises(DslError) as exc_info:
+        loads(dsl)
+
+    assert exc_info.value.code == "graph.build_failed"
+    create_node.assert_not_called()
+
+
 @pytest.mark.parametrize(
     ("node_data", "expected_type", "model_name"),
     [

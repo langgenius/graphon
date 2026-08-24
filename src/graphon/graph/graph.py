@@ -30,6 +30,49 @@ class NodeFactory(Protocol):
     """
 
     @abstractmethod
+    def with_graph_config(
+        self,
+        graph_config: Mapping[str, Any],
+    ) -> NodeFactory:
+        """Return a factory whose nodes receive one frame's scoped graph config.
+
+        Graph scopes are established before node construction because
+        :meth:`Node.post_init` runs inside the node constructor. Implementations
+        must copy any factory-owned :class:`InitParams` and replace its
+        ``graph_config`` rather than mutating configuration shared with parent or
+        sibling frames.
+
+        Args:
+            graph_config: Container-subtree configuration visible to the frame.
+
+        Returns:
+            A factory ready to construct nodes for exactly that graph scope.
+
+        """
+        ...
+
+    @abstractmethod
+    def validate_node(self, node_config: NodeConfigDict) -> None:
+        """Validate one node against the concrete schema selected by this factory.
+
+        Validation must resolve the same implementation and version as
+        :meth:`create_node`, but it must not construct a node, initialize runtime
+        dependencies, invoke ``post_init()``, or mutate execution state. Graph
+        calls this method for every node in the visible container subtree before
+        constructing any direct-frame node, which makes malformed descendants
+        fail before workflow execution can produce side effects.
+
+        Args:
+            node_config: Base-validated node configuration to resolve and validate.
+
+        Raises:
+            ValueError: If the node implementation is unknown or its concrete data
+                schema is invalid.
+
+        """
+        ...
+
+    @abstractmethod
     def create_node(self, node_config: NodeConfigDict) -> Node:
         """Create a Node instance from node configuration data.
 
@@ -548,14 +591,18 @@ class Graph:
                 container_id=container_id,
             )
         )
-        node_configs = _ListNodeConfigDict.validate_python(direct_node_configs)
+        node_factory = node_factory.with_graph_config(scoped_graph_config)
+        for node_config in _ListNodeConfigDict.validate_python(
+            scoped_graph_config["nodes"],
+        ):
+            node_factory.validate_node(node_config)
+        node_configs_map = cls._parse_node_configs(
+            _ListNodeConfigDict.validate_python(direct_node_configs),
+        )
 
-        if not node_configs:
+        if not node_configs_map:
             msg = "Graph must have at least one node"
             raise ValueError(msg)
-
-        # Parse node configurations
-        node_configs_map = cls._parse_node_configs(node_configs)
 
         if root_node_id not in node_configs_map:
             msg = f"Root node id {root_node_id} not found in the graph"
@@ -589,11 +636,6 @@ class Graph:
             if nodes[owner_id].execution_type != NodeExecutionType.CONTAINER:
                 msg = f"Node '{owner_id}' owns child nodes but is not a container"
                 raise ValueError(msg)
-        for node in nodes.values():
-            node.graph_config = scoped_graph_config
-            if isinstance(node, Node):
-                node.bind_graph_config(scoped_graph_config)
-
         # Promote fail-branch nodes to branch execution type at graph level
         cls._promote_fail_branch_nodes(nodes)
 

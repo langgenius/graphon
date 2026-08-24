@@ -208,6 +208,23 @@ class _HitlNodeFactory:
     base_factory: SlimDslNodeFactory
     callback: HITLCallback
 
+    def with_graph_config(
+        self,
+        graph_config: Mapping[str, Any],
+    ) -> _HitlNodeFactory:
+        """Copy the wrapper while preserving the base factory's graph scope."""
+        return _HitlNodeFactory(
+            base_factory=self.base_factory.with_graph_config(graph_config),
+            callback=self.callback,
+        )
+
+    def validate_node(self, node_config: NodeConfigDict) -> None:
+        """Validate built-ins and the wrapper's custom Human Input node."""
+        if node_config["data"].type == BuiltinNodeTypes.HUMAN_INPUT:
+            HumanInputNode.validate_node_data(node_config["data"])
+            return
+        self.base_factory.validate_node(node_config)
+
     def with_runtime_state(
         self,
         graph_runtime_state: RuntimeState,
@@ -321,6 +338,18 @@ def _execution_frame(
 
 
 class _FrameFactory:
+    def with_graph_config(
+        self,
+        graph_config: Mapping[str, Any],
+    ) -> _FrameFactory:
+        """Accept graph scoping for this stateless frame test factory."""
+        _ = graph_config
+        return self
+
+    def validate_node(self, node_config: NodeConfigDict) -> None:
+        """Accept the minimal frame configs used by scheduler restoration tests."""
+        _ = node_config
+
     def with_runtime_state(
         self,
         graph_runtime_state: RuntimeState,
