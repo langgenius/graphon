@@ -52,7 +52,7 @@ class NodeFactory(Protocol):
         ...
 
     @abstractmethod
-    def validate_node(self, node_config: NodeConfigDict) -> None:
+    def validate_node(self, node_config: NodeConfigDict) -> NodeExecutionType:
         """Validate one node against the concrete schema selected by this factory.
 
         Validation must resolve the same implementation and version as
@@ -64,6 +64,9 @@ class NodeFactory(Protocol):
 
         Args:
             node_config: Base-validated node configuration to resolve and validate.
+
+        Returns:
+            The execution type declared by the resolved node implementation.
 
         Raises:
             ValueError: If the node implementation is unknown or its concrete data
@@ -582,20 +585,48 @@ class Graph:
             graph_config.get("nodes", []),
         )
         raw_node_configs = cls._filter_canvas_only_nodes(raw_node_configs)
-        edge_configs = cls._prepare_edge_configs(graph_config, raw_node_configs)
         direct_node_configs, direct_edge_configs, scoped_graph_config = (
             cls._scope_graph_config(
                 graph_config=graph_config,
                 node_configs=raw_node_configs,
-                edge_configs=edge_configs,
+                edge_configs=cls._prepare_edge_configs(
+                    graph_config,
+                    raw_node_configs,
+                ),
                 container_id=container_id,
             )
         )
         node_factory = node_factory.with_graph_config(scoped_graph_config)
-        for node_config in _ListNodeConfigDict.validate_python(
+        scoped_node_configs = _ListNodeConfigDict.validate_python(
             scoped_graph_config["nodes"],
+        )
+        execution_types = {
+            node_config["id"]: node_factory.validate_node(node_config)
+            for node_config in scoped_node_configs
+        }
+        raw_node_configs_by_id = {
+            node_id: node_config
+            for node_config in raw_node_configs
+            if isinstance((node_id := node_config.get("id")), str)
+        }
+        # Every descendant is prevalidated above, so container ownership can be
+        # checked before direct-frame nodes run constructors or post-init hooks.
+        for owner_id in sorted(
+            {
+                owner_id
+                for node_config in scoped_node_configs
+                if (
+                    owner_id := resolve_container_id(
+                        node_config,
+                        nodes_by_id=raw_node_configs_by_id,
+                    )
+                )
+            }
+            & execution_types.keys(),
         ):
-            node_factory.validate_node(node_config)
+            if execution_types[owner_id] != NodeExecutionType.CONTAINER:
+                msg = f"Node '{owner_id}' owns child nodes but is not a container"
+                raise ValueError(msg)
         node_configs_map = cls._parse_node_configs(
             _ListNodeConfigDict.validate_python(direct_node_configs),
         )
@@ -613,34 +644,8 @@ class Graph:
 
         # Create node instances
         nodes = cls._create_node_instances(node_configs_map, node_factory)
-        node_configs_by_id = {
-            node_id: node_config
-            for node_config in raw_node_configs
-            if isinstance((node_id := node_config.get("id")), str)
-        }
-        # Child nodes are omitted from this frame. Their direct owner must be a
-        # container node that can materialize them in a child frame later.
-        for owner_id in sorted(
-            {
-                owner_id
-                for node_config in raw_node_configs
-                if (
-                    owner_id := resolve_container_id(
-                        node_config,
-                        nodes_by_id=node_configs_by_id,
-                    )
-                )
-            }
-            & nodes.keys(),
-        ):
-            if nodes[owner_id].execution_type != NodeExecutionType.CONTAINER:
-                msg = f"Node '{owner_id}' owns child nodes but is not a container"
-                raise ValueError(msg)
         # Promote fail-branch nodes to branch execution type at graph level
         cls._promote_fail_branch_nodes(nodes)
-
-        # Get root node instance
-        root_node = nodes[root_node_id]
 
         # Mark inactive root branches as skipped
         cls._mark_inactive_root_branches(
@@ -657,7 +662,7 @@ class Graph:
             edges=edges,
             in_edges=in_edges,
             out_edges=out_edges,
-            root_node=root_node,
+            root_node=nodes[root_node_id],
             graph_config=scoped_graph_config,
             node_factory=node_factory,
         )

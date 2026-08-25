@@ -7,11 +7,18 @@ from unittest.mock import Mock
 
 import pytest
 
-from graphon.entities.graph_config import NodeConfigDict
+from graphon.entities.base_node_data import BaseNodeData
+from graphon.entities.graph_config import NodeConfigDict, NodeConfigDictAdapter
 from graphon.enums import NodeExecutionType, NodeState
 from graphon.graph.graph import Graph
 from graphon.graph.validation import GraphValidationError
 from graphon.nodes.base.node import Node
+
+
+class _NodeDataWithContainerDefault(BaseNodeData):
+    """Concrete downstream data model that declares canonical ownership."""
+
+    container_id: str = ""
 
 
 @dataclass(slots=True)
@@ -26,9 +33,14 @@ class _RecordingNodeFactory:
         """Copy this test factory while sharing its node creation record."""
         return replace(self, graph_config=graph_config)
 
-    def validate_node(self, node_config: NodeConfigDict) -> None:
-        """Accept intentionally minimal configs used only to exercise scoping."""
-        _ = node_config
+    def validate_node(self, node_config: NodeConfigDict) -> NodeExecutionType:
+        """Resolve execution type for intentionally minimal scoping configs."""
+        node_type = node_config["data"].type
+        if node_type in {"loop", "iteration", "custom-container"}:
+            return NodeExecutionType.CONTAINER
+        if node_type in {"start", "iteration-start", "loop-start"}:
+            return NodeExecutionType.ROOT
+        return NodeExecutionType.EXECUTABLE
 
     def create_node(self, node_config: NodeConfigDict) -> Node:
         node_id = node_config["id"]
@@ -138,6 +150,67 @@ def test_graph_init_materializes_only_root_scope_by_default() -> None:
         node["id"] for node in graph_config["nodes"]
     }
     assert graph.graph_config["viewport"] == graph_config["viewport"]
+
+
+def test_graph_init_preserves_typed_node_container_ownership() -> None:
+    """Keep ownership when callers provide already validated node configs.
+
+    ``NodeConfigDictAdapter`` stores ``data`` as ``BaseNodeData`` rather than a
+    plain mapping. Scope resolution must read compatibility extras from that
+    model so a typed child stays in its container instead of being materialized
+    and executed in the root frame.
+    """
+    graph_config = {
+        "nodes": [
+            NodeConfigDictAdapter.validate_python(_node("start", node_type="start")),
+            NodeConfigDictAdapter.validate_python(_node("owner", node_type="loop")),
+            NodeConfigDictAdapter.validate_python(
+                _node("child", container_id="owner"),
+            ),
+        ],
+        "edges": [_edge("start", "owner")],
+    }
+
+    graph = Graph.init(
+        graph_config=graph_config,
+        node_factory=_RecordingNodeFactory(),
+        root_node_id="start",
+    )
+
+    assert set(graph.nodes) == {"start", "owner"}
+
+
+def test_typed_node_default_does_not_hide_explicit_legacy_ownership() -> None:
+    """Ignore an unset canonical default when a typed node has a legacy owner.
+
+    Downstream concrete models may declare ``container_id`` with an empty default
+    while loading an older DSL that explicitly sets only ``loop_id``. Converting
+    that model for scope resolution must retain the user's field-set distinction;
+    otherwise the injected empty default incorrectly materializes the child in the
+    root frame.
+    """
+    graph_config = {
+        "nodes": [
+            _node("start", node_type="start"),
+            _node("owner", node_type="loop"),
+            {
+                "id": "child",
+                "data": _NodeDataWithContainerDefault(
+                    type="answer",
+                    loop_id="owner",
+                ),
+            },
+        ],
+        "edges": [_edge("start", "owner")],
+    }
+
+    graph = Graph.init(
+        graph_config=graph_config,
+        node_factory=_RecordingNodeFactory(),
+        root_node_id="start",
+    )
+
+    assert set(graph.nodes) == {"start", "owner"}
 
 
 def test_graph_init_scopes_execution_and_retains_only_its_subtree_config() -> None:
@@ -482,6 +555,38 @@ def test_graph_init_rejects_non_container_scope_owner() -> None:
             node_factory=_RecordingNodeFactory(),
             root_node_id="start",
         )
+
+
+def test_nested_non_container_owner_is_rejected_before_construction() -> None:
+    """Reject an invalid owner anywhere in the subtree during root preflight.
+
+    A nested ordinary node cannot create the frame containing its descendants.
+    Checking every factory-resolved execution type before construction prevents
+    the root and outer container from running before this structural error is
+    discovered.
+    """
+    factory = _RecordingNodeFactory()
+    graph_config = {
+        "nodes": [
+            _node("start", node_type="start"),
+            _node("outer", node_type="loop"),
+            _node("ordinary", container_id="outer"),
+            _node("grandchild", container_id="ordinary"),
+        ],
+        "edges": [_edge("start", "outer")],
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="Node 'ordinary' owns child nodes but is not a container",
+    ):
+        Graph.init(
+            graph_config=graph_config,
+            node_factory=factory,
+            root_node_id="start",
+        )
+
+    assert factory.created_node_ids == []
 
 
 @pytest.mark.parametrize(

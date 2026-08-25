@@ -9,8 +9,10 @@ import yaml
 
 from graphon.dsl import loads
 from graphon.engine import Engine
+from graphon.engine.command import UpdateVariablesCommand
 from graphon.engine.container_handler import LoopContainerHandler
 from graphon.engine.frame import FrameRegistry
+from graphon.engine.layer import Layer
 from graphon.engine.ready_queue.entities import StartTask
 from graphon.engine.ready_queue.in_memory import InMemoryReadyQueue
 from graphon.engine_events.base import EngineEvent
@@ -31,6 +33,7 @@ from graphon.engine_events.node import (
     NodeRunSucceededEvent,
     NodeRunVariableUpdatedEvent,
 )
+from graphon.variables.factory import build_segment, segment_to_variable
 from graphon.variables.segments import Segment
 from tests.helpers.workflow_events import (
     event_path,
@@ -353,12 +356,19 @@ def test_parallel_iteration_with_one_worker_and_a_bounded_ready_queue() -> None:
 
 
 @pytest.mark.parametrize(
-    ("break_value", "completed_rounds"),
-    [("0", 0), ("2", 2)],
+    ("break_value", "completed_rounds", "external_update", "expected_counter"),
+    [
+        ("0", 0, None, 0),
+        ("2", 2, None, 2),
+        ("1", 1, 10, 10),
+        ("11", 2, 10, 11),
+    ],
 )
 def test_full_loop_graph_breaks_at_the_configured_condition(
     break_value: str,
     completed_rounds: int,
+    external_update: int | None,
+    expected_counter: int,
 ) -> None:
     dsl = _graph_dsl(
         nodes=[
@@ -426,7 +436,49 @@ def test_full_loop_graph_breaks_at_the_configured_condition(
         ],
     )
 
-    events = run_workflow(dsl)
+    engine = loads(dsl)
+
+    if external_update is not None:
+        update_sent = False
+
+        class UpdateAfterFirstRound(Layer):
+            def on_event(self, event: EngineEvent) -> None:
+                """Queue one external update as the first loop round completes.
+
+                A node success is a command-poll boundary. Sending from this
+                callback applies the update after the first round captures its
+                output snapshot and before the next child frame is created.
+
+                Args:
+                    event: Engine event currently being published to this layer.
+
+                """
+                nonlocal update_sent
+                if (
+                    update_sent
+                    or not isinstance(event, NodeRunSucceededEvent)
+                    or event.node_id != "increment"
+                ):
+                    return
+                command_channel = self.command_channel
+                assert command_channel is not None
+                command_channel.send_command(
+                    UpdateVariablesCommand(
+                        updates=[
+                            segment_to_variable(
+                                segment=build_segment(external_update),
+                                selector=("loop", "counter"),
+                            )
+                        ],
+                    )
+                )
+                update_sent = True
+
+        engine.add_layer(UpdateAfterFirstRound())
+
+    events = list(engine.run())
+    if external_update is not None:
+        assert update_sent
 
     expected_path = [
         _event("GraphRunStartedEvent"),
@@ -464,10 +516,12 @@ def test_full_loop_graph_breaks_at_the_configured_condition(
     assert event_path(events) == expected_path
     assert succeeded.steps == (0 if completed_rounds == 0 else 5)
     assert succeeded.outputs == (
-        {} if completed_rounds == 0 else {"counter": 2, "loop_round": 2}
+        {}
+        if completed_rounds == 0
+        else {"counter": expected_counter, "loop_round": completed_rounds}
     )
     assert succeeded.metadata["completed_reason"] == "loop_break"
-    assert final_outputs(events) == {"counter": completed_rounds}
+    assert final_outputs(events) == {"counter": expected_counter}
 
 
 def test_full_loop_graph_persists_variable_assignments_between_rounds() -> None:

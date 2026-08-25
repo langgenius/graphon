@@ -132,7 +132,11 @@ class Dispatcher:
         self._process_commands()
         if paused:
             self._drain_dispatch_tasks_until_idle()
-            self._event_processor.snapshot_frames()
+            if (
+                not self._graph_execution.aborted
+                and self._graph_execution.error is None
+            ):
+                self._event_processor.snapshot_frames()
         else:
             self._drain_dispatch_queue()
 
@@ -150,10 +154,15 @@ class Dispatcher:
             self._dispatch_queue.task_done()
 
     def _drain_dispatch_tasks_until_idle(self) -> None:
-        while not self._stop_event.is_set():
+        while (
+            not self._stop_event.is_set()
+            and not self._graph_execution.aborted
+            and self._graph_execution.error is None
+        ):
             try:
                 task = self._dispatch_queue.get(timeout=0.1)
             except queue.Empty:
+                self._process_commands()
                 if not self._worker_pool.has_current_tasks():
                     break
                 continue

@@ -38,7 +38,7 @@ from .event.processor import NodeEventProcessor
 from .event.stream import EventStream
 from .frame import FrameRegistry
 from .layer import Layer
-from .ready_queue import StartTask
+from .ready_queue import ResumeTask, StartTask
 from .worker import DispatchTask, WorkerPool
 
 logger = logging.getLogger(__name__)
@@ -237,20 +237,6 @@ class Engine:
         yield from self._emit_terminal_events()
 
     def _emit_terminal_events(self) -> Generator[EngineEvent, None, None]:
-        if self._graph_execution.paused:
-            pause_reasons = self._graph_execution.pause_reasons
-            if not pause_reasons:
-                msg = "pause_reasons should not be empty when execution is paused."
-                raise RuntimeError(msg)
-            # Ensure we have a valid PauseReason for the event
-            paused_event = GraphRunPausedEvent(
-                reasons=pause_reasons,
-                outputs=self._graph_runtime_state.outputs,
-            )
-            self._event_stream.notify_layers(paused_event)
-            yield paused_event
-            return
-
         if self._graph_execution.aborted:
             abort_reason = "Workflow execution aborted by user command"
             if self._graph_execution.error:
@@ -265,6 +251,20 @@ class Engine:
 
         if self._graph_execution.error is not None:
             raise self._graph_execution.error
+
+        if self._graph_execution.paused:
+            pause_reasons = self._graph_execution.pause_reasons
+            if not pause_reasons:
+                msg = "pause_reasons should not be empty when execution is paused."
+                raise RuntimeError(msg)
+            # Ensure we have a valid PauseReason for the event
+            paused_event = GraphRunPausedEvent(
+                reasons=pause_reasons,
+                outputs=self._graph_runtime_state.outputs,
+            )
+            self._event_stream.notify_layers(paused_event)
+            yield paused_event
+            return
 
         outputs = self._graph_runtime_state.outputs
         exceptions_count = self._graph_execution.exceptions_count
@@ -321,6 +321,8 @@ class Engine:
                         self._frame_registry[task.frame_id].scheduler.track_unfinished(
                             task.node_id,
                         )
+                    elif isinstance(task, ResumeTask):
+                        self._graph_runtime_state.get_container_run(task.invocation_id)
             except Exception:
                 for task in queued_tasks:
                     self._graph_runtime_state.ready_queue.put(task)

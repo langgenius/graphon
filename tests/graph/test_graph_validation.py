@@ -90,9 +90,12 @@ class _SimpleNodeFactory:
             ),
         )
 
-    def validate_node(self, node_config: NodeConfigDict) -> None:
-        """Validate test payloads through the concrete node data used here."""
-        _TestNode.validate_node_data(node_config["data"])
+    def validate_node(self, node_config: NodeConfigDict) -> NodeExecutionType:
+        """Validate test data and report its configured execution semantics."""
+        data = _TestNode.validate_node_data(node_config["data"])
+        if data.execution_type is None:
+            return _TestNode.execution_type
+        return NodeExecutionType(data.execution_type)
 
     def create_node(self, node_config: NodeConfigDict) -> _TestNode:
         return _TestNode(

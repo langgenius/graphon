@@ -3,8 +3,12 @@
 from collections.abc import Mapping
 from typing import Any
 
+from graphon.entities.base_node_data import BaseNodeData
 
-def _container_candidates(node_config: Mapping[str, Any]) -> tuple[str, ...]:
+
+def _container_candidates(  # ruff:ignore[complex-structure]
+    node_config: Mapping[str, Any],
+) -> tuple[str, ...]:
     """Return all possible direct owners encoded by one node configuration.
 
     New graphs have one authoritative ``data.container_id``. Older Dify graphs
@@ -25,7 +29,9 @@ def _container_candidates(node_config: Mapping[str, Any]) -> tuple[str, ...]:
     node_id = node_config.get("id")
     node_label = repr(node_id) if isinstance(node_id, str) else "<unknown>"
     data = node_config.get("data")
-    if not isinstance(data, Mapping):
+    if isinstance(data, BaseNodeData):
+        data = data.model_dump(mode="python", exclude_unset=True)
+    elif not isinstance(data, Mapping):
         data = {}
 
     if "container_id" in data:

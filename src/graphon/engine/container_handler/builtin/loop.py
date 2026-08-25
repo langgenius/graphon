@@ -334,10 +334,9 @@ class LoopContainerHandler:
         )
         for node_id in request.loop_node_ids:
             variable_pool.remove([node_id])
-        for key, selector in run_state.loop_variable_selectors.items():
-            value = run_state.outputs.get(key)
-            if value is not None:
-                variable_pool.add(selector, value)
+        # The parent pool is authoritative: loop assignments are written back as
+        # events, and external commands may update it between completed rounds.
+        # ``run_state.outputs`` is only a reporting snapshot of the prior round.
         child_frame_id = f"{run_state.invocation_id}:loop:{request.index}"
         child_frame = self._frame_registry.create_child(
             frame_id=child_frame_id,

@@ -11,7 +11,7 @@ from typing import Any, ClassVar
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.entities.graph_config import NodeConfigDict
 from graphon.entities.graph_init_params import InitParams
-from graphon.enums import BuiltinNodeTypes
+from graphon.enums import BuiltinNodeTypes, NodeExecutionType
 from graphon.file.enums import FileType
 from graphon.file.models import File
 from graphon.model_runtime.entities.llm_entities import LLMMode
@@ -76,6 +76,7 @@ from .entities import (
     DslCredentials,
     DslDependency,
     DslModelCredential,
+    DslToolCredential,
 )
 from .errors import DslError
 from .slim import SlimClientConfig, SlimLLM
@@ -477,22 +478,26 @@ class SlimDslNodeFactory:
     def validate_node(
         self,
         node_config: NodeConfigDict,
-    ) -> None:
+    ) -> NodeExecutionType:
         """Validate a DSL node without constructing runtime collaborators.
 
         This method follows the same type and legacy Variable Assigner version
-        dispatch as :meth:`create_node`, then stops after concrete Pydantic
-        validation. It deliberately avoids builders because builders construct
-        Nodes, invoke ``post_init()``, and may initialize Slim or sandbox runtime
-        dependencies. Graph can therefore validate nested nodes before any
-        executable node is created.
+        dispatch as :meth:`create_node`, validates the concrete Pydantic schema,
+        and resolves static plugin and credential settings. It deliberately avoids
+        builders because builders construct Nodes, invoke ``post_init()``, and may
+        initialize Slim or sandbox runtimes. Graph can therefore validate nested
+        nodes before any executable node is created.
 
         Args:
             node_config: Base-validated node configuration from the graph loader.
 
+        Returns:
+            The execution type of the concrete node implementation selected by
+            the same type and version dispatch used for construction.
+
         Raises:
-            DslError: If model metadata, the node type, or a legacy Variable
-                Assigner payload is unsupported.
+            DslError: If the node type, payload, plugin dependency, or required
+                credentials cannot be resolved.
 
         """
         request = self._node_request(node_config)
@@ -513,8 +518,13 @@ class SlimDslNodeFactory:
                     details={"node_id": request.node_id},
                 )
         if request.node_type == BuiltinNodeTypes.VARIABLE_ASSIGNER:
-            self._validate_variable_assigner_data(request)
-            return
+            data = self._validate_variable_assigner_data(request)
+            node_cls = (
+                VariableAssignerNodeV2
+                if isinstance(data, VariableAssignerNodeData)
+                else VariableAssignerNodeV1
+            )
+            return node_cls.execution_type
 
         if request.node_type not in self.NODE_BUILDERS:
             raise self._unsupported_node_error(request)
@@ -525,6 +535,17 @@ class SlimDslNodeFactory:
         if node_cls is None:
             raise self._unsupported_node_error(request)
         node_cls.validate_node_data(request.data)
+        if request.node_type in model_node_labels:
+            self._resolve_slim_llm_settings(
+                node_id=request.node_id,
+                data=request.data_payload,
+                node_type_label=model_node_labels[request.node_type],
+            )
+        elif request.node_type == BuiltinNodeTypes.TOOL:
+            self._resolve_tool_runtime_settings(
+                ToolNodeData.model_validate(request.data_payload),
+            )
+        return node_cls.execution_type
 
     def create_node(self, node_config: NodeConfigDict) -> Node:
         request = self._node_request(node_config)
@@ -840,40 +861,14 @@ class SlimDslNodeFactory:
         data: Mapping[str, Any],
         node_type_label: str,
     ) -> tuple[dict[str, Any], SlimLLM]:
-        normalized_data = dict(data)
-        model = dict(normalized_data.get("model") or {})
-        raw_provider = str(model.get("provider") or "")
-        vendor = _canonical_vendor(raw_provider)
-        if not vendor:
-            msg = f"{node_type_label} node is missing model provider."
-            raise _dsl_error(
-                msg,
-                code="node.llm_missing_provider",
-                path=f"/nodes/{node_id}/data/model/provider",
-                details={"node_id": node_id},
+        normalized_data, vendor, plugin_id, credentials = (
+            self._resolve_slim_llm_settings(
+                node_id=node_id,
+                data=data,
+                node_type_label=node_type_label,
             )
-        model["provider"] = vendor
-        normalized_data["model"] = model
-
-        plugin_id = _find_plugin_id(
-            provider=raw_provider,
-            dependencies=self.dependencies,
         )
-        if plugin_id is None:
-            msg = f"{node_type_label} node dependency could not be resolved."
-            raise _dsl_error(
-                msg,
-                code="dependency.missing_plugin",
-                path=f"/nodes/{node_id}/data/model/provider",
-                details={"node_id": node_id, "provider": raw_provider},
-            )
-
-        credentials = _resolve_credentials(
-            credentials=self.credentials,
-            provider=raw_provider,
-            vendor=vendor,
-            plugin_id=plugin_id,
-        )
+        model = normalized_data["model"]
         try:
             model_instance = SlimLLM(
                 config=self.slim_client_config,
@@ -892,7 +887,106 @@ class SlimDslNodeFactory:
             ) from error
         return normalized_data, model_instance
 
+    def _resolve_slim_llm_settings(
+        self,
+        *,
+        node_id: str,
+        data: Mapping[str, Any],
+        node_type_label: str,
+    ) -> tuple[dict[str, Any], str, str, dict[str, Any]]:
+        """Resolve model identity and credentials without creating a runtime.
+
+        Both graph preflight and node construction use this path so descendant
+        nodes fail on missing providers, plugin dependencies, or required model
+        credentials before any root node is constructed. The returned values are
+        plain configuration data; this method does not create a ``SlimClient``,
+        initialize a Node, invoke ``post_init()``, or mutate runtime state.
+
+        Args:
+            node_id: Persisted node ID used in actionable DSL error paths.
+            data: Concrete-schema-compatible model node payload.
+            node_type_label: Human-readable node kind for error messages.
+
+        Returns:
+            Normalized node data, provider vendor, resolved plugin ID, and the
+            credential values to pass to the eventual Slim runtime.
+
+        Raises:
+            DslError: If provider, dependency, or required credentials cannot be
+                resolved from the imported DSL and supplied credentials.
+
+        """
+        normalized_data = dict(data)
+        model = dict(normalized_data.get("model") or {})
+        raw_provider = str(model.get("provider") or "")
+        vendor = _canonical_vendor(raw_provider)
+        if not vendor:
+            msg = f"{node_type_label} node is missing model provider."
+            raise DslError(
+                msg,
+                code="node.llm_missing_provider",
+                path=f"/nodes/{node_id}/data/model/provider",
+                details={"node_id": node_id},
+            )
+        model["provider"] = vendor
+        normalized_data["model"] = model
+
+        plugin_id = _find_plugin_id(
+            provider=raw_provider,
+            dependencies=self.dependencies,
+        )
+        if plugin_id is None:
+            msg = f"{node_type_label} node dependency could not be resolved."
+            raise DslError(
+                msg,
+                code="dependency.missing_plugin",
+                path=f"/nodes/{node_id}/data/model/provider",
+                details={"node_id": node_id, "provider": raw_provider},
+            )
+
+        credentials = _resolve_credentials(
+            credentials=self.credentials,
+            provider=raw_provider,
+            vendor=vendor,
+            plugin_id=plugin_id,
+        )
+        return normalized_data, vendor, plugin_id, credentials
+
     def _create_tool_runtime(self, node_data: ToolNodeData) -> SlimToolNodeRuntime:
+        plugin_id, provider, tool_credential = self._resolve_tool_runtime_settings(
+            node_data,
+        )
+        return SlimToolNodeRuntime(
+            config=self.slim_client_config,
+            plugin_id=plugin_id,
+            provider=provider,
+            provider_id=node_data.provider_id,
+            tool_name=node_data.tool_name,
+            credentials=tool_credential.values,
+            credential_type=tool_credential.credential_type,
+        )
+
+    def _resolve_tool_runtime_settings(
+        self,
+        node_data: ToolNodeData,
+    ) -> tuple[str, str, DslToolCredential]:
+        """Resolve a tool plugin and credential without creating its runtime.
+
+        This pure resolver is shared by descendant preflight and direct-node
+        construction. It checks the imported dependency list and applies the
+        same credential selectors used at runtime, while deliberately avoiding
+        ``SlimToolNodeRuntime`` and its client initialization.
+
+        Args:
+            node_data: Concrete, Pydantic-validated tool configuration.
+
+        Returns:
+            Resolved plugin ID, canonical provider name, and selected credential.
+
+        Raises:
+            DslError: If the tool's plugin dependency or provider is missing.
+
+        """
         plugin_dependencies = [
             dependency
             for dependency in self.dependencies
@@ -904,7 +998,7 @@ class SlimDslNodeFactory:
         )
         if plugin_id is None:
             msg = "Tool node dependency could not be resolved."
-            raise _dsl_error(
+            raise DslError(
                 msg,
                 code="dependency.missing_plugin",
                 details={"node_type": BuiltinNodeTypes.TOOL},
@@ -914,7 +1008,7 @@ class SlimDslNodeFactory:
         )
         if provider is None:
             msg = "Tool node is missing provider."
-            raise _dsl_error(
+            raise DslError(
                 msg,
                 code="node.tool_missing_provider",
                 details={"node_type": BuiltinNodeTypes.TOOL},
@@ -926,16 +1020,7 @@ class SlimDslNodeFactory:
             provider=provider,
             tool_name=node_data.tool_name,
         )
-
-        return SlimToolNodeRuntime(
-            config=self.slim_client_config,
-            plugin_id=plugin_id,
-            provider=provider,
-            provider_id=node_data.provider_id,
-            tool_name=node_data.tool_name,
-            credentials=tool_credential.values,
-            credential_type=tool_credential.credential_type,
-        )
+        return plugin_id, provider, tool_credential
 
     NODE_BUILDERS: ClassVar[Mapping[Any, _NodeBuilder]] = {
         BuiltinNodeTypes.START: _create_start_node,

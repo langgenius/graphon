@@ -218,12 +218,12 @@ class _HitlNodeFactory:
             callback=self.callback,
         )
 
-    def validate_node(self, node_config: NodeConfigDict) -> None:
+    def validate_node(self, node_config: NodeConfigDict) -> NodeExecutionType:
         """Validate built-ins and the wrapper's custom Human Input node."""
         if node_config["data"].type == BuiltinNodeTypes.HUMAN_INPUT:
             HumanInputNode.validate_node_data(node_config["data"])
-            return
-        self.base_factory.validate_node(node_config)
+            return HumanInputNode.execution_type
+        return self.base_factory.validate_node(node_config)
 
     def with_runtime_state(
         self,
@@ -346,9 +346,10 @@ class _FrameFactory:
         _ = graph_config
         return self
 
-    def validate_node(self, node_config: NodeConfigDict) -> None:
-        """Accept the minimal frame configs used by scheduler restoration tests."""
+    def validate_node(self, node_config: NodeConfigDict) -> NodeExecutionType:
+        """Accept minimal frame configs and report executable semantics."""
         _ = node_config
+        return NodeExecutionType.EXECUTABLE
 
     def with_runtime_state(
         self,

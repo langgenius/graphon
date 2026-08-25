@@ -438,6 +438,30 @@ def _model(name: str) -> dict[str, Any]:
     }
 
 
+def _llm_data() -> dict[str, Any]:
+    """Build the smallest concrete LLM payload accepted by the default factory."""
+    return {
+        "type": "llm",
+        "model": _model("chat-model"),
+        "prompt_template": [{"role": "user", "text": "Hello"}],
+        "context": {"enabled": False},
+    }
+
+
+def _tool_data() -> dict[str, Any]:
+    """Build a valid plugin-tool payload whose dependency can be preflighted."""
+    return {
+        "type": "tool",
+        "provider_id": "langgenius/search/search",
+        "provider_type": "plugin",
+        "provider_name": "langgenius/search/search",
+        "tool_name": "web_search",
+        "tool_label": "Web search",
+        "tool_configurations": {},
+        "tool_parameters": {},
+    }
+
+
 def _question_classifier_data() -> dict[str, Any]:
     return {
         "type": "question-classifier",
@@ -614,6 +638,59 @@ def test_loads_validates_malformed_descendant_before_constructing_nodes(
         loads(dsl)
 
     assert exc_info.value.code == "graph.build_failed"
+    create_node.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("node_data", "expected_code"),
+    [
+        (_llm_data(), "credential.missing_required_key"),
+        (_tool_data(), "dependency.missing_plugin"),
+    ],
+)
+def test_loads_resolves_descendant_dependencies_before_constructing_nodes(
+    mocker: Any,
+    node_data: dict[str, Any],
+    expected_code: str,
+) -> None:
+    """Resolve nested model/tool dependencies during side-effect-free preflight.
+
+    The outer loop is executable from the root frame, while the tested node is
+    materialized only in its child frame. Import must still reject a missing LLM
+    credential or tool plugin before constructing the root Start or Loop node.
+    """
+    create_node = mocker.spy(node_factory_module.SlimDslNodeFactory, "create_node")
+    dsl = _graph_dsl_for_nodes(
+        nodes=[
+            {
+                "id": "loop",
+                "data": {
+                    "type": "loop",
+                    "start_node_id": "loop-start",
+                    "loop_count": 1,
+                    "break_conditions": [],
+                    "logical_operator": "and",
+                },
+            },
+            {
+                "id": "loop-start",
+                "data": {"type": "loop-start", "container_id": "loop"},
+            },
+            {
+                "id": "nested",
+                "data": {**node_data, "container_id": "loop"},
+            },
+        ],
+        edges=[
+            {"source": "start", "target": "loop"},
+            {"source": "loop-start", "target": "nested"},
+        ],
+    )
+
+    with pytest.raises(DslError) as exc_info:
+        loads(dsl)
+
+    assert exc_info.value.code == expected_code
     create_node.assert_not_called()
 
 

@@ -33,6 +33,7 @@ from graphon.engine_events.node import (
     NodeRunVariableUpdatedEvent,
 )
 from graphon.enums import (
+    BuiltinNodeTypes,
     ErrorStrategy,
     NodeExecutionType,
     NodeState,
@@ -188,6 +189,12 @@ class NodeEventProcessor:
         *,
         frame: ExecutionFrame,
     ) -> None:
+        if isinstance(event, NodeRunLoopSucceededEvent):
+            event.outputs = self._current_loop_outputs(
+                frame=frame,
+                node_id=event.node_id,
+                outputs=event.outputs,
+            )
         self._collect(frame=frame, event=event)
 
     @_dispatch.register
@@ -317,6 +324,12 @@ class NodeEventProcessor:
         event: NodeRunSucceededEvent | NodeRunExceptionEvent,
         follow_branch: bool,
     ) -> None:
+        if event.node_type == BuiltinNodeTypes.LOOP:
+            event.node_run_result.outputs = self._current_loop_outputs(
+                frame=frame,
+                node_id=event.node_id,
+                outputs=event.node_run_result.outputs,
+            )
         frame.state.add_llm_usage(event.node_run_result.llm_usage)
         self._store_node_outputs(
             frame=frame,
@@ -346,6 +359,38 @@ class NodeEventProcessor:
             )
         frame.scheduler.finish_execution(event.node_id)
         self._collect(frame=frame, event=event)
+
+    @staticmethod
+    def _current_loop_outputs(
+        *,
+        frame: ExecutionFrame,
+        node_id: str,
+        outputs: Mapping[str, object],
+    ) -> dict[str, object]:
+        """Merge a completed Loop result with its authoritative parent values.
+
+        Loop child frames operate on copies, while child variable-update events and
+        external commands are serialized into the parent frame's variable pool.
+        A queued Loop result may therefore carry an older child snapshot. For keys
+        already present in that result, this method reads the parent value at event
+        dispatch time so the most recently processed update wins. Unknown keys are
+        not added, preserving the existing zero-round output contract.
+
+        Args:
+            frame: Parent execution frame that owns the Loop node.
+            node_id: ID used as the first component of each Loop output selector.
+            outputs: Snapshot carried by the completed Loop result.
+
+        Returns:
+            A mutable output mapping with current parent values where available.
+
+        """
+        current_outputs = dict(outputs)
+        for key in outputs:
+            value = frame.state.variable_pool.get((node_id, key))
+            if value is not None:
+                current_outputs[key] = value.to_object()
+        return current_outputs
 
     def _store_node_outputs(
         self,

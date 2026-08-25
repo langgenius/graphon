@@ -43,6 +43,7 @@ from graphon.engine.worker import (
     Worker,
     WorkerPool,
 )
+from graphon.engine_events.graph import GraphRunAbortedEvent
 from graphon.engine_events.node import (
     NodeRunPauseRequestedEvent,
     NodeRunStartedEvent,
@@ -66,6 +67,7 @@ from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.container_effects import (
     ContainerExecutionResult,
+    ContainerNodeRunResult,
     IterationFrameRequest,
     build_container_value,
 )
@@ -250,9 +252,13 @@ class _FrameFactory:
         _ = graph_config
         return self
 
-    def validate_node(self, node_config: dict[str, object]) -> None:
-        """Accept the minimal frame configs used by dispatcher tests."""
+    def validate_node(
+        self,
+        node_config: dict[str, object],
+    ) -> NodeExecutionType:
+        """Accept minimal frame configs and report their execution semantics."""
         _ = node_config
+        return _FrameNode.execution_type
 
     def with_runtime_state(
         self,
@@ -1019,9 +1025,13 @@ def test_frame_registry_creates_child_frame_with_rebound_runtime() -> None:
             _ = graph_config
             return self
 
-        def validate_node(self, node_config: dict[str, object]) -> None:
-            """Accept the minimal config used to test runtime-state rebinding."""
+        def validate_node(
+            self,
+            node_config: dict[str, object],
+        ) -> NodeExecutionType:
+            """Accept the minimal config and report its root execution type."""
             _ = node_config
+            return RuntimeBoundNode.execution_type
 
         def create_node(self, node_config: dict[str, object]) -> RuntimeBoundNode:
             return RuntimeBoundNode(str(node_config["id"]), self.runtime_state)
@@ -1537,6 +1547,125 @@ def test_dispatcher_keeps_polling_when_no_dispatch_event_is_available() -> None:
     dispatcher._dispatch_next_event()
 
     command_processor.process_commands.assert_called_once_with()
+
+
+def test_dispatcher_polls_commands_while_draining_active_workers() -> None:
+    """Abort pause draining without snapshotting a still-active worker.
+
+    The first command poll starts pause draining. The empty dispatch queue must
+    remain a polling point, so the second poll observes the abort even though the
+    worker is deliberately reported active forever. Because that worker may still
+    mutate frame state, the aborted execution must not create a pause snapshot.
+    """
+    graph_execution = GraphExecution(workflow_id="workflow")
+    command_processor = MagicMock()
+
+    def process_commands() -> None:
+        """Abort on the drain poll after the initial pre-drain command poll."""
+        if command_processor.process_commands.call_count == 2:
+            graph_execution.abort("stop")
+
+    command_processor.process_commands.side_effect = process_commands
+    worker_pool = MagicMock()
+    worker_pool.has_current_tasks.return_value = True
+    event_processor = MagicMock()
+    dispatcher = Dispatcher(
+        dispatch_queue=queue.Queue(),
+        event_processor=event_processor,
+        graph_execution=graph_execution,
+        scheduler=MagicMock(),
+        command_processor=command_processor,
+        worker_pool=worker_pool,
+        event_stream=MagicMock(),
+    )
+
+    dispatcher._drain_after_exit(paused=True)
+
+    assert graph_execution.aborted
+    assert command_processor.process_commands.call_count == 2
+    event_processor.snapshot_frames.assert_not_called()
+
+
+def test_engine_terminal_failure_takes_precedence_over_pause() -> None:
+    """Raise a fatal worker error even when pause draining already set paused.
+
+    A pause is resumable, whereas a fatal error is terminal. Testing both flags on
+    the aggregate reproduces the race without threads and ensures terminal event
+    selection cannot hide the error behind ``GraphRunPausedEvent``.
+    """
+    graph_execution = GraphExecution(workflow_id="workflow", started=True)
+    graph_execution.pause(SchedulingPause(message="wait"))
+    failure = RuntimeError("fatal")
+    graph_execution.fail(failure)
+    engine = object.__new__(Engine)
+    engine._graph_execution = graph_execution
+    engine._graph_runtime_state = cast(RuntimeState, SimpleNamespace(outputs={}))
+    engine._event_stream = MagicMock()
+
+    with pytest.raises(RuntimeError, match="fatal") as exc_info:
+        list(engine._emit_terminal_events())
+
+    assert exc_info.value is failure
+
+
+def test_engine_terminal_abort_takes_precedence_over_pause() -> None:
+    """Emit an abort rather than a pause when both lifecycle flags are set.
+
+    Abort can arrive while the dispatcher drains workers for an earlier pause.
+    The completed run must expose the irreversible abort as its terminal result so
+    callers do not persist it as resumable state.
+    """
+    graph_execution = GraphExecution(workflow_id="workflow", started=True)
+    graph_execution.pause(SchedulingPause(message="wait"))
+    graph_execution.abort("stop")
+    engine = object.__new__(Engine)
+    engine._graph_execution = graph_execution
+    engine._graph_runtime_state = cast(RuntimeState, SimpleNamespace(outputs={}))
+    engine._event_stream = MagicMock()
+
+    events = list(engine._emit_terminal_events())
+
+    assert len(events) == 1
+    assert isinstance(events[0], GraphRunAbortedEvent)
+
+
+def test_resume_rejects_task_for_missing_container_invocation() -> None:
+    """Reject an orphaned ResumeTask before any worker can claim it.
+
+    Resume tasks depend on persisted container-run state. Preflight must resolve
+    that invocation synchronously, restore the drained queue on failure, and leave
+    workers stopped; otherwise a worker dies on ``KeyError`` and the dispatcher can
+    incorrectly observe an empty scheduler as successful completion.
+    """
+    ready_queue = InMemoryReadyQueue()
+    runtime_state = RuntimeState(
+        workflow_id="workflow",
+        variable_pool=VariablePool(),
+        start_at=0,
+        ready_queue=ready_queue,
+    )
+    resume_task = ResumeTask(
+        invocation_id="missing-invocation",
+        result=ContainerExecutionResult(
+            metadata={},
+            steps=0,
+            node_run_result=ContainerNodeRunResult(),
+        ),
+    )
+    ready_queue.put(resume_task)
+    worker_pool = MagicMock()
+    engine = object.__new__(Engine)
+    engine._graph_runtime_state = runtime_state
+    engine._frame_registry = FrameRegistry()
+    engine._worker_pool = worker_pool
+    engine._dispatcher = MagicMock()
+
+    with pytest.raises(KeyError, match="missing-invocation"):
+        engine._start_execution(resume=True)
+
+    assert ready_queue.get(timeout=0.01) == resume_task
+    worker_pool.start.assert_not_called()
+    engine._dispatcher.start.assert_not_called()
 
 
 def test_event_processor_dispatches_task_event_payload() -> None:
