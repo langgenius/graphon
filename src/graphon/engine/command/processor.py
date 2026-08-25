@@ -4,9 +4,9 @@ import logging
 from typing import final
 
 from graphon.entities.pause_reason import SchedulingPause
-from graphon.runtime.execution import GraphExecution
-from graphon.runtime.variable_pool import VariablePool
+from graphon.runtime.execution import ROOT_FRAME_ID, GraphExecution
 
+from ..frame import FrameRegistry
 from .entities import (
     AbortCommand,
     Command,
@@ -29,19 +29,19 @@ class CommandProcessor:
         self,
         command_channel: CommandChannel,
         graph_execution: GraphExecution,
-        variable_pool: VariablePool,
+        frame_registry: FrameRegistry,
     ) -> None:
         """Initialize the command processor.
 
         Args:
             command_channel: Channel for receiving commands
             graph_execution: Graph execution aggregate
-            variable_pool: Runtime variables updated by external commands
+            frame_registry: Live execution frames updated by external commands
 
         """
         self._command_channel = command_channel
         self._graph_execution = graph_execution
-        self._variable_pool = variable_pool
+        self._frame_registry = frame_registry
 
     def process_commands(self) -> None:
         """Check for and process any pending commands."""
@@ -89,7 +89,18 @@ class CommandProcessor:
             case UpdateVariablesCommand():
                 for variable in command.updates:
                     try:
-                        self._variable_pool.add(variable.selector, variable)
+                        for frame in self._frame_registry.frames():
+                            variable_pool = frame.state.variable_pool
+                            if (
+                                frame.frame_id != ROOT_FRAME_ID
+                                and variable_pool.get_variable(variable.selector)
+                                is None
+                            ):
+                                continue
+                            variable_pool.add(
+                                variable.selector,
+                                variable.model_copy(deep=True),
+                            )
                         logger.debug(
                             "Updated variable %s for workflow %s",
                             variable.selector,

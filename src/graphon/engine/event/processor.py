@@ -228,6 +228,12 @@ class NodeEventProcessor:
 
     @_dispatch.register
     def _(self, event: NodeRunSucceededEvent, *, frame: ExecutionFrame) -> None:
+        if event.node_type == BuiltinNodeTypes.LOOP:
+            event.node_run_result.outputs = self._current_loop_outputs(
+                frame=frame,
+                node_id=event.node_id,
+                outputs=event.node_run_result.outputs,
+            )
         node = frame.graph.nodes[event.node_id]
         self._complete_node(
             frame=frame,
@@ -324,12 +330,6 @@ class NodeEventProcessor:
         event: NodeRunSucceededEvent | NodeRunExceptionEvent,
         follow_branch: bool,
     ) -> None:
-        if event.node_type == BuiltinNodeTypes.LOOP:
-            event.node_run_result.outputs = self._current_loop_outputs(
-                frame=frame,
-                node_id=event.node_id,
-                outputs=event.node_run_result.outputs,
-            )
         frame.state.add_llm_usage(event.node_run_result.llm_usage)
         self._store_node_outputs(
             frame=frame,

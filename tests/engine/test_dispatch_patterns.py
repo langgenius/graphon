@@ -45,6 +45,7 @@ from graphon.engine.worker import (
 )
 from graphon.engine_events.graph import GraphRunAbortedEvent
 from graphon.engine_events.node import (
+    NodeRunExceptionEvent,
     NodeRunPauseRequestedEvent,
     NodeRunStartedEvent,
     NodeRunSucceededEvent,
@@ -58,6 +59,7 @@ from graphon.entities.pause_reason import HitlRequired, SchedulingPause
 from graphon.enums import (
     BuiltinNodeTypes,
     ErrorHandleMode,
+    ErrorStrategy,
     NodeExecutionType,
     NodeState,
     NodeType,
@@ -412,12 +414,38 @@ def test_command_processor_directly_handles_builtin_commands() -> None:
     """Verify direct command matching preserves every built-in command behavior.
 
     The processor must skip an invalid variable update without dropping the valid
-    update that follows it, then apply pause and abort commands from the same
-    channel batch. This is the behavior previously split across handler classes.
+    update that follows it, propagate inherited variables without injecting them
+    into unrelated frames, then apply pause and abort commands from the same batch.
+    This is the behavior previously split across handler classes.
     """
     channel = InMemoryChannel()
     execution = GraphExecution(workflow_id="workflow")
     variable_pool = VariablePool()
+    nested_variable_pool = VariablePool()
+    nested_variable_pool.add(("node", "answer"), "stale")
+    isolated_variable_pool = VariablePool()
+    frame_registry = FrameRegistry()
+    frame_registry.register(
+        _execution_frame(
+            frame_id="root",
+            graph=cast(Graph, MagicMock()),
+            graph_runtime_state=SimpleNamespace(variable_pool=variable_pool),
+        ),
+    )
+    frame_registry.register(
+        _execution_frame(
+            frame_id="nested",
+            graph=cast(Graph, MagicMock()),
+            graph_runtime_state=SimpleNamespace(variable_pool=nested_variable_pool),
+        ),
+    )
+    frame_registry.register(
+        _execution_frame(
+            frame_id="isolated",
+            graph=cast(Graph, MagicMock()),
+            graph_runtime_state=SimpleNamespace(variable_pool=isolated_variable_pool),
+        ),
+    )
     channel.send_command(
         UpdateVariablesCommand(
             updates=[
@@ -440,12 +468,17 @@ def test_command_processor_directly_handles_builtin_commands() -> None:
     CommandProcessor(
         command_channel=channel,
         graph_execution=execution,
-        variable_pool=variable_pool,
+        frame_registry=frame_registry,
     ).process_commands()
 
     updated = variable_pool.get(["node", "answer"])
     assert updated is not None
     assert updated.to_object() == "updated"
+    nested_updated = nested_variable_pool.get(["node", "answer"])
+    assert nested_updated is not None
+    assert nested_updated.to_object() == "updated"
+    assert nested_updated is not updated
+    assert isolated_variable_pool.get(["node", "answer"]) is None
     assert execution.paused
     pause_reason = execution.pause_reasons[0]
     assert isinstance(pause_reason, SchedulingPause)
@@ -1760,6 +1793,57 @@ def test_event_processor_stamps_frame_owner_on_node_and_edge_events() -> None:
         call(skipped),
         call(event),
     ]
+
+
+def test_loop_exception_preserves_default_outputs() -> None:
+    """Keep configured Loop fallbacks authoritative after a partial run.
+
+    A failed Loop may already have written partial values into its parent variable
+    pool. The exception event represents the configured default-value continuation,
+    so dispatch must store and emit that fallback instead of reconciling it with the
+    stale partial value as successful Loop completion does.
+    """
+    graph = MagicMock()
+    graph.nodes = {
+        "loop": MagicMock(
+            error_strategy=ErrorStrategy.DEFAULT_VALUE,
+            execution_type=NodeExecutionType.CONTAINER,
+        ),
+    }
+    runtime_state = MagicMock()
+    runtime_state.variable_pool = VariablePool()
+    runtime_state.variable_pool.add(("loop", "counter"), 1)
+    event_stream = MagicMock()
+    frame_registry = FrameRegistry()
+    frame_registry.register(
+        _execution_frame(
+            frame_id="root",
+            graph=cast(Graph, graph),
+            graph_runtime_state=runtime_state,
+        ),
+    )
+    processor = _event_processor(
+        graph_execution=MagicMock(),
+        event_stream=cast(EventStream, event_stream),
+        frame_registry=frame_registry,
+    )
+    event = NodeRunExceptionEvent(
+        id="loop-run",
+        node_id="loop",
+        node_type=BuiltinNodeTypes.LOOP,
+        start_at=datetime.now(UTC).replace(tzinfo=None),
+        finished_at=datetime.now(UTC).replace(tzinfo=None),
+        node_run_result=NodeRunResult(outputs={"counter": 99}),
+        error="loop failed",
+    )
+
+    processor.dispatch(NodeEventTask(frame_id="root", event=event))
+
+    assert event.node_run_result.outputs == {"counter": 99}
+    stored_counter = runtime_state.variable_pool.get(("loop", "counter"))
+    assert stored_counter is not None
+    assert stored_counter.to_object() == 99
+    event_stream.collect.assert_called_once_with(event)
 
 
 def test_parallel_iteration_preserves_aggregate_and_response_order() -> None:  # ruff: ignore[too-many-locals]

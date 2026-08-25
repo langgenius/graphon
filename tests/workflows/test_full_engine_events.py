@@ -601,14 +601,13 @@ def test_full_loop_graph_persists_variable_assignments_between_rounds() -> None:
     assert engine.graph_runtime_state.variable_pool.get(["local", "output"]) is None
 
 
-def test_nested_containers_stop_variable_updates_at_iteration_boundary() -> None:
-    """Propagate assignments through nested loops but not through an iteration.
+def test_nested_containers_preserve_external_updates_and_iteration_isolation() -> None:
+    """Keep external updates through nested Loops but isolate Iteration writes.
 
-    The inner Loop first increments the inherited root variable from zero to one,
-    proving that consecutive Loop handlers write it through both parent frames.
-    The following Iteration sees that value and emits an increment to two inside
-    its private pool, but its handler must stop the event before the outer Loop
-    can write it back to the root.
+    The inner Loop first increments its counter from zero to one. An external
+    command then changes it to ten; the second round must copy that value from the
+    live outer frame and increment it to eleven. The following Iteration emits
+    twelve inside its private pool, but must not write it back through the Loops.
     """
     dsl = _graph_dsl(
         nodes=[
@@ -632,10 +631,18 @@ def test_nested_containers_stop_variable_updates_at_iteration_boundary() -> None
                 "data": {
                     "type": "loop",
                     "container_id": "outer-loop",
-                    "loop_count": 1,
+                    "loop_count": 2,
                     "start_node_id": "inner-start",
                     "break_conditions": [],
                     "logical_operator": "and",
+                    "loop_variables": [
+                        {
+                            "label": "counter",
+                            "var_type": "number",
+                            "value_type": "constant",
+                            "value": 0,
+                        }
+                    ],
                 },
             },
             {
@@ -650,7 +657,7 @@ def test_nested_containers_stop_variable_updates_at_iteration_boundary() -> None
                     "container_id": "inner-loop",
                     "items": [
                         {
-                            "variable_selector": ["start", "counter"],
+                            "variable_selector": ["inner-loop", "counter"],
                             "input_type": "constant",
                             "operation": "+=",
                             "value": 1,
@@ -687,7 +694,7 @@ def test_nested_containers_stop_variable_updates_at_iteration_boundary() -> None
                     "container_id": "iteration",
                     "items": [
                         {
-                            "variable_selector": ["start", "counter"],
+                            "variable_selector": ["inner-loop", "counter"],
                             "input_type": "constant",
                             "operation": "+=",
                             "value": 1,
@@ -698,7 +705,7 @@ def test_nested_containers_stop_variable_updates_at_iteration_boundary() -> None
             _end_node([
                 {
                     "variable": "counter",
-                    "value_selector": ["start", "counter"],
+                    "value_selector": ["inner-loop", "counter"],
                 },
             ]),
         ],
@@ -712,15 +719,52 @@ def test_nested_containers_stop_variable_updates_at_iteration_boundary() -> None
         ],
     )
 
-    events = run_workflow(dsl, start_inputs={"counter": 0, "items": ["only"]})
+    engine = loads(dsl, start_inputs={"items": ["only"]})
+    update_sent = False
 
+    class UpdateAfterFirstInnerRound(Layer):
+        def on_event(self, event: EngineEvent) -> None:
+            """Queue the external update after the first inner Loop assignment.
+
+            A node success is a command-poll boundary, so sending here applies the
+            update before the next inner child frame is copied from the outer one.
+
+            Args:
+                event: Engine event currently being published to this layer.
+
+            """
+            nonlocal update_sent
+            if (
+                update_sent
+                or not isinstance(event, NodeRunSucceededEvent)
+                or event.node_id != "loop-increment"
+            ):
+                return
+            command_channel = self.command_channel
+            assert command_channel is not None
+            command_channel.send_command(
+                UpdateVariablesCommand(
+                    updates=[
+                        segment_to_variable(
+                            segment=build_segment(10),
+                            selector=("inner-loop", "counter"),
+                        )
+                    ],
+                ),
+            )
+            update_sent = True
+
+    engine.add_layer(UpdateAfterFirstInnerRound())
+    events = list(engine.run())
+
+    assert update_sent
     assert [
         event.variable.value
         for event in events
         if isinstance(event, NodeRunVariableUpdatedEvent)
-        and tuple(event.variable.selector) == ("start", "counter")
-    ] == [1, 2]
-    assert final_outputs(events) == {"counter": 1}
+        and tuple(event.variable.selector) == ("inner-loop", "counter")
+    ] == [1, 11, 12]
+    assert final_outputs(events) == {"counter": 11}
 
 
 def test_full_loop_graph_stops_at_loop_end_node() -> None:

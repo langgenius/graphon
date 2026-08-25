@@ -55,6 +55,20 @@ class FrameRegistry:
         """
         return self._frames[frame_id]
 
+    def frames(self) -> tuple[ExecutionFrame, ...]:
+        """Return an immutable snapshot of every currently live frame.
+
+        The dispatcher owns frame creation, removal, and command processing, so
+        callers can safely traverse this tuple without exposing the registry's
+        mutable mapping. The snapshot is used for workflow-level operations that
+        must affect root and descendant frames consistently.
+
+        Returns:
+            Root and child execution frames registered at call time.
+
+        """
+        return tuple(self._frames.values())
+
     def remove(self, frame_id: str) -> None:
         del self._frames[frame_id]
 

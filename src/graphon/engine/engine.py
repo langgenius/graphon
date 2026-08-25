@@ -117,7 +117,7 @@ class Engine:
         command_processor = CommandProcessor(
             command_channel=self._command_channel,
             graph_execution=self._graph_execution,
-            variable_pool=self._graph_runtime_state.variable_pool,
+            frame_registry=self._frame_registry,
         )
 
         # === Worker Pool Setup ===
