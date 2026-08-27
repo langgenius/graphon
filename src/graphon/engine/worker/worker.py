@@ -122,15 +122,10 @@ class Worker(threading.Thread):
                 if not self._task_claiming.is_set():
                     return
                 try:
-                    task = self._ready_queue.get(timeout=0)
+                    task = self._ready_queue.get(timeout=0.01)
                 except queue.Empty:
-                    task_claimed = False
-                else:
-                    self._has_current_task.set()
-                    task_claimed = True
-            if not task_claimed:
-                self._stop_event.wait(0.1)
-                continue
+                    continue
+                self._has_current_task.set()
             try:
                 self._execute_task(task)
             except Exception as e:

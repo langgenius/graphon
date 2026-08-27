@@ -724,14 +724,20 @@ def test_worker_pool_drain_observes_task_claimed_during_pause() -> None:  # ruff
     class BlockingReadyQueue:
         def __init__(self) -> None:
             self._queue = InMemoryReadyQueue()
+            self.get_started = threading.Event()
             self.task_removed = threading.Event()
             self.release_claim = threading.Event()
+            self.timeout: float | None = None
 
         def put(self, item: ReadyTask) -> None:
             self._queue.put(item)
 
         def get(self, timeout: float | None = None) -> ReadyTask:
-            task = self._queue.get(timeout)
+            self.timeout = timeout
+            self.get_started.set()
+            # Give the test thread time to enqueue after observing the requested
+            # timeout.
+            task = self._queue.get(timeout=1)
             self.task_removed.set()
             if not self.release_claim.wait(timeout=1):
                 msg = "task claim was not released"
@@ -778,7 +784,6 @@ def test_worker_pool_drain_observes_task_claimed_during_pause() -> None:  # ruff
             )
 
     ready_queue = BlockingReadyQueue()
-    ready_queue.put(StartTask(frame_id="root", node_id="node"))
     node_started = threading.Event()
     finish_node = threading.Event()
     dispatch_queue: queue.Queue[DispatchTask] = queue.Queue()
@@ -814,6 +819,9 @@ def test_worker_pool_drain_observes_task_claimed_during_pause() -> None:  # ruff
     pool.start()
     drain_thread = threading.Thread(target=drain_pool)
     try:
+        assert ready_queue.get_started.wait(timeout=1)
+        assert ready_queue.timeout == pytest.approx(0.01)
+        ready_queue.put(StartTask(frame_id="root", node_id="node"))
         assert ready_queue.task_removed.wait(timeout=1)
         drain_thread.start()
         assert not drain_done.wait(timeout=0.05)
@@ -825,7 +833,8 @@ def test_worker_pool_drain_observes_task_claimed_during_pause() -> None:  # ruff
     finally:
         ready_queue.release_claim.set()
         finish_node.set()
-        drain_thread.join(timeout=1)
+        if drain_thread.is_alive():
+            drain_thread.join(timeout=1)
         pool.stop()
 
 
