@@ -22,7 +22,7 @@ from graphon.engine_events import (
     NodeRunSucceededEvent,
 )
 
-_WORKERS = 1
+_WORKERS = 5
 _ROUNDS = 2
 _STEP_NODE_IDS = tuple(f"step-{index}" for index in range(3))
 _EXPECTED_NODE_IDS = ("start", *_STEP_NODE_IDS, "end")
