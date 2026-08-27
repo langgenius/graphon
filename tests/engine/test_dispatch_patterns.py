@@ -721,27 +721,22 @@ def test_worker_pool_pause_does_not_stop_worker_with_current_task() -> None:
 
 
 @pytest.mark.parametrize("action", ["pause", "stop"])
-def test_worker_pool_control_prevents_worker_reacquisition(action: str) -> None:  # ruff: ignore[too-many-statements]
+def test_worker_pool_control_stops_new_task_acquisition(action: str) -> None:
     """Verify pool controls finish without allowing another queue claim.
 
-    The lock probe gives the real worker one deterministic chance to reacquire
-    the claim lock while the control thread waits. A correct pool disables task
-    acquisition first, so the worker exits without calling ``ReadyQueue.get``
-    again and the control operation completes.
+    The acquisition-flag probe releases the worker's first blocked queue poll
+    only after the control operation clears the flag. The test therefore covers
+    both completion and the absence of later queue claims without constraining
+    how the worker checks the flag or enters its private lock.
 
     """
     first_get_started = threading.Event()
     release_first_get = threading.Event()
-    control_waiting = threading.Event()
-    worker_reacquired_lock = threading.Event()
-    unexpected_get = threading.Event()
+    acquisition_cleared = threading.Event()
     ready_queue = MagicMock(wraps=InMemoryReadyQueue())
 
     def controlled_get(timeout: float | None = None) -> ReadyTask:  # ruff: ignore[unused-function-argument]
-        """Block the first queue poll and record any poll after control starts."""
-        if first_get_started.is_set():
-            unexpected_get.set()
-            raise queue.Empty
+        """Block queue polling until the control operation disables acquisition."""
         first_get_started.set()
         release_first_get.wait()
         raise queue.Empty
@@ -754,8 +749,16 @@ def test_worker_pool_control_prevents_worker_reacquisition(action: str) -> None:
         layers=[],
         workers=1,
     )
-    acquisition_lock = threading.Lock()
-    lock_probe = MagicMock()
+    acquisition_enabled = threading.Event()
+    acquisition_flag_probe = MagicMock(wraps=acquisition_enabled)
+
+    def clear_acquisition_flag() -> None:
+        """Clear the real flag and expose that control boundary to the test."""
+        acquisition_enabled.clear()
+        acquisition_cleared.set()
+
+    acquisition_flag_probe.clear.side_effect = clear_acquisition_flag
+    pool._task_acquisition_enabled = cast(Any, acquisition_flag_probe)
     control_errors: list[Exception] = []
 
     def control_pool() -> None:
@@ -767,34 +770,19 @@ def test_worker_pool_control_prevents_worker_reacquisition(action: str) -> None:
 
     control_thread = threading.Thread(target=control_pool)
 
-    def enter_acquisition_lock() -> bool:
-        """Make the worker reacquire the lock before the waiting control thread."""
-        if threading.current_thread() is control_thread:
-            control_waiting.set()
-            worker_reacquired_lock.wait()
-            return acquisition_lock.acquire()
-        acquired = acquisition_lock.acquire()
-        if release_first_get.is_set():
-            worker_reacquired_lock.set()
-        return acquired
-
-    lock_probe.__enter__.side_effect = enter_acquisition_lock
-    lock_probe.__exit__.side_effect = acquisition_lock.__exit__
-    pool._task_acquisition_lock = cast(Any, lock_probe)
-
     pool.start()
     try:
         assert first_get_started.wait(timeout=1)
         control_thread.start()
-        assert control_waiting.wait(timeout=1)
+        assert acquisition_cleared.wait(timeout=1)
         release_first_get.set()
         control_thread.join(timeout=1)
         assert not control_thread.is_alive()
         assert control_errors == []
-        assert not unexpected_get.is_set()
+        assert ready_queue.get.call_count == 1
     finally:
+        acquisition_enabled.clear()
         release_first_get.set()
-        worker_reacquired_lock.set()
         if control_thread.ident is not None:
             control_thread.join(timeout=1)
         pool.stop()

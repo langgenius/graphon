@@ -22,7 +22,6 @@ from graphon.engine_events import (
     NodeRunSucceededEvent,
 )
 
-_WORKERS = 5
 _ROUNDS = 2
 _STEP_NODE_IDS = tuple(f"step-{index}" for index in range(3))
 _EXPECTED_NODE_IDS = ("start", *_STEP_NODE_IDS, "end")
@@ -77,7 +76,7 @@ def _setup_engine() -> tuple[tuple[Engine], dict[str, object]]:
         Positional and keyword arguments containing one fresh Engine instance.
 
     """
-    return (loads(_WORKFLOW_DSL, workers=_WORKERS),), {}
+    return (loads(_WORKFLOW_DSL),), {}
 
 
 def _run_engine(engine: Engine) -> list[EngineEvent]:
@@ -97,7 +96,7 @@ def _run_engine(engine: Engine) -> list[EngineEvent]:
 def test_engine_run_benchmark(benchmark: BenchmarkFixture) -> None:
     """Measure a complete local workflow without third-party service nodes.
 
-    The workload is a deterministic single-worker chain containing Start, three
+    The workload is a deterministic sequential chain containing Start, three
     constant Template Transform nodes, and End. Fixed pedantic rounds keep the
     benchmark quick and comparable, while the terminal event, output, and
     node-order checks ensure an implementation cannot appear faster by skipping
