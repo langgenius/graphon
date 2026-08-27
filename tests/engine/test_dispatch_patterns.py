@@ -721,29 +721,83 @@ def test_worker_pool_pause_does_not_stop_worker_with_current_task() -> None:
 
 
 @pytest.mark.parametrize("action", ["pause", "stop"])
-def test_worker_pool_disables_task_acquisition_before_waiting_for_workers(
-    action: str,
-) -> None:
-    task_acquisition_enabled = threading.Event()
-    task_acquisition_enabled.set()
-    task_acquisition_lock = MagicMock()
+def test_worker_pool_control_prevents_worker_reacquisition(action: str) -> None:  # ruff: ignore[too-many-statements]
+    """Verify pool controls finish without allowing another queue claim.
 
-    def assert_task_acquisition_disabled() -> None:
-        assert not task_acquisition_enabled.is_set()
+    The lock probe gives the real worker one deterministic chance to reacquire
+    the claim lock while the control thread waits. A correct pool disables task
+    acquisition first, so the worker exits without calling ``ReadyQueue.get``
+    again and the control operation completes.
 
-    task_acquisition_lock.__enter__.side_effect = assert_task_acquisition_disabled
-    pool = object.__new__(WorkerPool)
-    pool._lock = cast(Any, threading.Lock())
-    pool._task_acquisition_lock = cast(Any, task_acquisition_lock)
-    pool._task_acquisition_enabled = task_acquisition_enabled
-    pool._ready_queue = MagicMock()
-    pool._ready_queue.take_all.return_value = []
-    pool._workers = []
+    """
+    first_get_started = threading.Event()
+    release_first_get = threading.Event()
+    control_waiting = threading.Event()
+    worker_reacquired_lock = threading.Event()
+    unexpected_get = threading.Event()
+    ready_queue = MagicMock(wraps=InMemoryReadyQueue())
 
-    getattr(pool, action)()
+    def controlled_get(timeout: float | None = None) -> ReadyTask:  # ruff: ignore[unused-function-argument]
+        """Block the first queue poll and record any poll after control starts."""
+        if first_get_started.is_set():
+            unexpected_get.set()
+            raise queue.Empty
+        first_get_started.set()
+        release_first_get.wait()
+        raise queue.Empty
 
-    assert not task_acquisition_enabled.is_set()
-    task_acquisition_lock.__enter__.assert_called_once_with()
+    ready_queue.get.side_effect = controlled_get
+    pool = WorkerPool(
+        ready_queue=ready_queue,
+        dispatch_queue=queue.Queue(),
+        frame_registry=FrameRegistry(),
+        layers=[],
+        workers=1,
+    )
+    acquisition_lock = threading.Lock()
+    lock_probe = MagicMock()
+    control_errors: list[Exception] = []
+
+    def control_pool() -> None:
+        """Run the requested control operation and retain any thread error."""
+        try:
+            getattr(pool, action)()
+        except Exception as error:  # ruff: ignore[blind-except] - asserted below.
+            control_errors.append(error)
+
+    control_thread = threading.Thread(target=control_pool)
+
+    def enter_acquisition_lock() -> bool:
+        """Make the worker reacquire the lock before the waiting control thread."""
+        if threading.current_thread() is control_thread:
+            control_waiting.set()
+            worker_reacquired_lock.wait()
+            return acquisition_lock.acquire()
+        acquired = acquisition_lock.acquire()
+        if release_first_get.is_set():
+            worker_reacquired_lock.set()
+        return acquired
+
+    lock_probe.__enter__.side_effect = enter_acquisition_lock
+    lock_probe.__exit__.side_effect = acquisition_lock.__exit__
+    pool._task_acquisition_lock = cast(Any, lock_probe)
+
+    pool.start()
+    try:
+        assert first_get_started.wait(timeout=1)
+        control_thread.start()
+        assert control_waiting.wait(timeout=1)
+        release_first_get.set()
+        control_thread.join(timeout=1)
+        assert not control_thread.is_alive()
+        assert control_errors == []
+        assert not unexpected_get.is_set()
+    finally:
+        release_first_get.set()
+        worker_reacquired_lock.set()
+        if control_thread.ident is not None:
+            control_thread.join(timeout=1)
+        pool.stop()
 
 
 def test_worker_pool_pause_preserves_task_acquired_during_pause() -> None:  # ruff: ignore[complex-structure]

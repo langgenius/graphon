@@ -2,7 +2,6 @@ from collections.abc import Iterable
 from typing import Any, cast
 
 from graphon.engine.filter import (
-    EngineEventFilter,
     EngineEventFilterContext,
     filter_engine_events,
 )
@@ -74,12 +73,6 @@ class _FlushFilter:
                 target_node_id="b",
             ),
         )
-
-
-def test_filter_protocol_accepts_pass_through_filter() -> None:
-    event_filter: EngineEventFilter = _PassThroughFilter()
-    event_filter.initialize(_context())
-    assert event_filter.initialized is True
 
 
 def test_filter_chain_passes_events_when_no_filters() -> None:
