@@ -262,15 +262,15 @@ def _worker(
     dispatch_queue: queue.Queue[DispatchTask],
     frame_registry: FrameRegistry,
 ) -> Worker:
-    task_claiming = threading.Event()
-    task_claiming.set()
+    task_acquisition_enabled = threading.Event()
+    task_acquisition_enabled.set()
     return Worker(
         ready_queue=ready_queue,
         dispatch_queue=dispatch_queue,
         frame_registry=frame_registry,
         layers=[],
-        task_claim_lock=threading.Lock(),
-        task_claiming=task_claiming,
+        task_acquisition_lock=threading.Lock(),
+        task_acquisition_enabled=task_acquisition_enabled,
     )
 
 
@@ -550,7 +550,7 @@ def test_engine_rejects_invalid_workers_before_mutating_runtime_state(
 
 
 def test_worker_pool_rejects_zero_workers() -> None:
-    """Reject a directly constructed pool that could never claim queued work.
+    """Reject a directly constructed pool that could never acquire queued work.
 
     Direct callers bypass ``Engine`` validation, so the pool must enforce
     the same positive-worker invariant before retaining any collaborators.
@@ -614,7 +614,7 @@ def test_scheduler_defers_ready_task_when_paused() -> None:
     scheduler.enqueue_node("start")
 
     assert ready_queue.qsize() == 0
-    assert runtime_state.drain_deferred_ready_tasks() == [
+    assert runtime_state.take_deferred_ready_tasks() == [
         StartTask(frame_id="root", node_id="start"),
     ]
     assert graph.nodes["start"].state == NodeState.TAKEN
@@ -669,7 +669,7 @@ def test_pause_defers_queued_tasks_without_losing_frame_progress() -> None:
     )
     graph_execution.paused = True
     worker_pool = MagicMock()
-    worker_pool.drain.side_effect = ready_queue.drain
+    worker_pool.pause.side_effect = ready_queue.take_all
     dispatcher = Dispatcher(
         dispatch_queue=queue.Queue(),
         event_processor=MagicMock(),
@@ -683,7 +683,7 @@ def test_pause_defers_queued_tasks_without_losing_frame_progress() -> None:
     assert dispatcher._run_until_exit()
 
     assert ready_queue.qsize() == 0
-    assert runtime_state.drain_deferred_ready_tasks() == [
+    assert runtime_state.take_deferred_ready_tasks() == [
         StartTask(frame_id="root", node_id="queued")
     ]
     assert not scheduler.is_execution_complete()
@@ -691,11 +691,11 @@ def test_pause_defers_queued_tasks_without_losing_frame_progress() -> None:
     assert not scheduler.is_execution_complete()
     scheduler.finish_execution("queued")
     assert scheduler.is_execution_complete()
-    worker_pool.drain.assert_called_once_with()
+    worker_pool.pause.assert_called_once_with()
     worker_pool.stop.assert_not_called()
 
 
-def test_worker_pool_drain_does_not_stop_worker_with_current_task() -> None:
+def test_worker_pool_pause_does_not_stop_worker_with_current_task() -> None:
     class WorkerStub:
         def __init__(self, *, has_current_task: bool) -> None:
             self.has_current_task = has_current_task
@@ -708,25 +708,25 @@ def test_worker_pool_drain_does_not_stop_worker_with_current_task() -> None:
     idle_worker = WorkerStub(has_current_task=False)
     pool = object.__new__(WorkerPool)
     pool._lock = cast(Any, threading.RLock())
-    pool._task_claim_lock = threading.Lock()
-    pool._task_claiming = threading.Event()
-    pool._task_claiming.set()
+    pool._task_acquisition_lock = threading.Lock()
+    pool._task_acquisition_enabled = threading.Event()
+    pool._task_acquisition_enabled.set()
     pool._ready_queue = InMemoryReadyQueue()
     pool._workers = cast(Any, [active_worker, idle_worker])
 
-    pool.drain()
+    pool.pause()
 
     assert active_worker.stopped is False
     assert idle_worker.stopped is True
 
 
-def test_worker_pool_drain_observes_task_claimed_during_pause() -> None:  # ruff: ignore[complex-structure]
+def test_worker_pool_pause_preserves_task_acquired_during_pause() -> None:  # ruff: ignore[complex-structure]
     class BlockingReadyQueue:
         def __init__(self) -> None:
             self._queue = InMemoryReadyQueue()
             self.get_started = threading.Event()
             self.task_removed = threading.Event()
-            self.release_claim = threading.Event()
+            self.release_acquisition = threading.Event()
             self.timeout: float | None = None
 
         def put(self, item: ReadyTask) -> None:
@@ -739,8 +739,8 @@ def test_worker_pool_drain_observes_task_claimed_during_pause() -> None:  # ruff
             # timeout.
             task = self._queue.get(timeout=1)
             self.task_removed.set()
-            if not self.release_claim.wait(timeout=1):
-                msg = "task claim was not released"
+            if not self.release_acquisition.wait(timeout=1):
+                msg = "task acquisition was not released"
                 raise TimeoutError(msg)
             return task
 
@@ -750,8 +750,8 @@ def test_worker_pool_drain_observes_task_claimed_during_pause() -> None:  # ruff
         def qsize(self) -> int:
             return self._queue.qsize()
 
-        def drain(self) -> list[ReadyTask]:
-            return self._queue.drain()
+        def take_all(self) -> list[ReadyTask]:
+            return self._queue.take_all()
 
         def dumps(self) -> str:
             return self._queue.dumps()
@@ -809,33 +809,40 @@ def test_worker_pool_drain_observes_task_claimed_during_pause() -> None:  # ruff
         layers=[],
         workers=1,
     )
-    drained_tasks: list[ReadyTask] = []
-    drain_done = threading.Event()
+    pending_tasks: list[ReadyTask] = []
+    pause_done = threading.Event()
 
-    def drain_pool() -> None:
-        drained_tasks.extend(pool.drain())
-        drain_done.set()
+    def pause_pool() -> None:
+        """Pause the pool and expose completion to the coordinating test.
+
+        Pending tasks returned by the pool are retained for the final assertion,
+        and the event lets the main test thread observe when pause() releases the
+        task-acquisition lock.
+
+        """
+        pending_tasks.extend(pool.pause())
+        pause_done.set()
 
     pool.start()
-    drain_thread = threading.Thread(target=drain_pool)
+    pause_thread = threading.Thread(target=pause_pool)
     try:
         assert ready_queue.get_started.wait(timeout=1)
         assert ready_queue.timeout is not None
         assert 0 < ready_queue.timeout <= 0.01
         ready_queue.put(StartTask(frame_id="root", node_id="node"))
         assert ready_queue.task_removed.wait(timeout=1)
-        drain_thread.start()
-        assert not drain_done.wait(timeout=0.05)
-        ready_queue.release_claim.set()
+        pause_thread.start()
+        assert not pause_done.wait(timeout=0.05)
+        ready_queue.release_acquisition.set()
         assert node_started.wait(timeout=1)
-        assert drain_done.wait(timeout=1)
-        assert drained_tasks == []
+        assert pause_done.wait(timeout=1)
+        assert pending_tasks == []
         assert pool.has_current_tasks()
     finally:
-        ready_queue.release_claim.set()
+        ready_queue.release_acquisition.set()
         finish_node.set()
-        if drain_thread.is_alive():
-            drain_thread.join(timeout=1)
+        if pause_thread.is_alive():
+            pause_thread.join(timeout=1)
         pool.stop()
 
 
@@ -1047,7 +1054,7 @@ def test_pause_requested_event_defers_current_task_for_resume() -> None:
 
     assert graph_execution.paused
     assert not scheduler.is_execution_complete()
-    assert root_runtime_state.drain_deferred_ready_tasks() == [
+    assert root_runtime_state.take_deferred_ready_tasks() == [
         StartTask(frame_id="child-frame", node_id="human")
     ]
     assert (
@@ -1234,7 +1241,7 @@ def test_frame_registry_restores_child_frame() -> None:
     )
     deferred_task = StartTask(frame_id="child-frame", node_id="start")
     child_frame.state.enqueue_ready_task(deferred_task)
-    assert root_runtime_state.drain_deferred_ready_tasks() == [deferred_task]
+    assert root_runtime_state.take_deferred_ready_tasks() == [deferred_task]
 
 
 def test_frame_registry_rejects_frame_state_with_missing_graph_state_ids() -> None:
@@ -1658,10 +1665,10 @@ def test_dispatcher_keeps_polling_when_no_dispatch_event_is_available() -> None:
     assert graph_execution.aborted
 
 
-def test_dispatcher_polls_commands_while_draining_active_workers() -> None:
-    """Abort pause draining without snapshotting a still-active worker.
+def test_dispatcher_polls_commands_while_waiting_for_active_workers() -> None:
+    """Abort a cooperative pause without snapshotting an active worker.
 
-    The first command poll starts pause draining and the second enters the drain.
+    The first command poll starts the pause and the second waits for active work.
     The empty dispatch queue must remain a polling point, so the third poll observes
     the abort even though the worker is deliberately reported active forever.
     Because that worker may still mutate frame state, the aborted execution must
@@ -1682,7 +1689,7 @@ def test_dispatcher_polls_commands_while_draining_active_workers() -> None:
         frame_registry=FrameRegistry(),
     )
     worker_pool = MagicMock()
-    worker_pool.drain.return_value = []
+    worker_pool.pause.return_value = []
     worker_pool.has_current_tasks.return_value = True
     event_processor = MagicMock()
     completed = threading.Event()
@@ -1726,7 +1733,7 @@ def test_engine_terminal_failure_takes_precedence_over_pause() -> None:
 
             The answer sibling remains free to finish. Once its success event has
             queued the pause command, ``failure_may_run`` releases this worker so
-            the dispatcher observes a fatal result during pause draining.
+            the dispatcher observes a fatal result while completing the pause.
 
             Args:
                 node: Node about to run on one of the engine's workers.
@@ -1809,7 +1816,7 @@ def test_engine_terminal_failure_takes_precedence_over_pause() -> None:
 def test_engine_terminal_abort_takes_precedence_over_pause() -> None:
     """Emit an abort rather than a pause when both lifecycle flags are set.
 
-    Abort can arrive while the dispatcher drains workers for an earlier pause.
+    Abort can arrive while the dispatcher waits for workers after an earlier pause.
     The completed run must expose the irreversible abort as its terminal result so
     callers do not persist it as resumable state.
     """
@@ -1827,12 +1834,12 @@ def test_engine_terminal_abort_takes_precedence_over_pause() -> None:
 
 
 def test_resume_rejects_task_for_missing_container_invocation() -> None:
-    """Reject an orphaned ResumeTask before any worker can claim it.
+    """Reject an orphaned ResumeTask before any worker can acquire it.
 
     Resume tasks depend on persisted container-run state. Preflight must resolve
-    that invocation synchronously, restore the drained queue on failure, and leave
-    workers stopped; otherwise a worker dies on ``KeyError`` and the dispatcher can
-    incorrectly observe an empty scheduler as successful completion.
+    that invocation synchronously, restore tasks taken from the queue on failure,
+    and leave workers stopped; otherwise a worker dies on ``KeyError`` and the
+    dispatcher can incorrectly observe an empty scheduler as successful completion.
     """
     engine = _load_minimal_engine()
     runtime_state = engine.runtime_state

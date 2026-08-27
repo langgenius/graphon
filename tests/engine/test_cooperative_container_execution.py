@@ -118,21 +118,21 @@ def test_ready_queue_round_trips_start_and_resume_tasks() -> None:
     )
 
 
-def test_ready_queue_drain_returns_items_and_empties_queue() -> None:
+def test_ready_queue_take_all_returns_items_and_empties_queue() -> None:
     queue_ = InMemoryReadyQueue()
     first = StartTask(frame_id="root", node_id="a")
     second = StartTask(frame_id="child", node_id="b")
     queue_.put(first)
     queue_.put(second)
 
-    assert queue_.drain() == [first, second]
+    assert queue_.take_all() == [first, second]
     assert queue_.qsize() == 0
     restored = InMemoryReadyQueue()
     restored.loads(queue_.dumps())
     assert restored.qsize() == 0
 
 
-def test_ready_queue_drain_notifies_waiting_bounded_queue_producers() -> None:
+def test_ready_queue_take_all_notifies_waiting_bounded_queue_producers() -> None:
     queue_ = InMemoryReadyQueue(maxsize=1)
     first = StartTask(frame_id="root", node_id="a")
     second = StartTask(frame_id="child", node_id="b")
@@ -147,11 +147,11 @@ def test_ready_queue_drain_notifies_waiting_bounded_queue_producers() -> None:
     producer.start()
     assert not put_done.wait(0.01)
 
-    drained = queue_.drain()
+    taken = queue_.take_all()
     unblocked = put_done.wait(1)
     producer.join(timeout=1)
 
-    assert drained == [first]
+    assert taken == [first]
     assert unblocked
     assert not producer.is_alive()
     assert queue_.get(timeout=0.01) == second
@@ -183,9 +183,9 @@ def test_ready_queue_uses_only_public_queue_api(
 
     snapshot = queue_.dumps()
 
-    assert queue_.drain() == [first, second]
+    assert queue_.take_all() == [first, second]
     queue_.loads(snapshot)
-    assert queue_.drain() == [first, second]
+    assert queue_.take_all() == [first, second]
 
     join_thread = Thread(target=backends[0].join, daemon=True)
     join_thread.start()
@@ -282,15 +282,15 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
         ),
     )
     layer = _RecordingLayer()
-    task_claiming = Event()
-    task_claiming.set()
+    task_acquisition_enabled = Event()
+    task_acquisition_enabled.set()
     worker = Worker(
         ready_queue=ready_queue,
         dispatch_queue=dispatch_queue,
         frame_registry=frame_registry,
         layers=[layer],
-        task_claim_lock=Lock(),
-        task_claiming=task_claiming,
+        task_acquisition_lock=Lock(),
+        task_acquisition_enabled=task_acquisition_enabled,
     )
 
     worker.start()
@@ -411,15 +411,15 @@ def test_worker_reports_resume_failure_on_suspended_invocation_frame() -> None:
             result=_container_result(),
         ),
     )
-    task_claiming = Event()
-    task_claiming.set()
+    task_acquisition_enabled = Event()
+    task_acquisition_enabled.set()
     worker = Worker(
         ready_queue=ready_queue,
         dispatch_queue=dispatch_queue,
         frame_registry=frame_registry,
         layers=[],
-        task_claim_lock=Lock(),
-        task_claiming=task_claiming,
+        task_acquisition_lock=Lock(),
+        task_acquisition_enabled=task_acquisition_enabled,
     )
 
     worker.start()

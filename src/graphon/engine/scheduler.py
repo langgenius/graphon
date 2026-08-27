@@ -193,7 +193,7 @@ class Scheduler:
         return not self._unfinished_nodes
 
     def defer_ready_tasks(self, tasks: Sequence[ReadyTask]) -> None:
-        """Move unclaimed tasks into deferred storage."""
+        """Move tasks that have not started into deferred storage."""
         for task in tasks:
             self._state.defer_ready_task(task)
 

@@ -627,7 +627,7 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
             # container, so reject it before workers can lose the task or hang.
             invalid_tasks: list[str] = []
             for task_queue in (self._ready_queue, self._deferred_ready_queue):
-                tasks = task_queue.drain()
+                tasks = task_queue.take_all()
                 try:
                     invalid_tasks.extend(
                         (
@@ -808,8 +808,14 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
     def defer_ready_task(self, task: ReadyTask) -> None:
         self._deferred_ready_queue.put(task)
 
-    def drain_deferred_ready_tasks(self) -> list[ReadyTask]:
-        return self._deferred_ready_queue.drain()
+    def take_deferred_ready_tasks(self) -> list[ReadyTask]:
+        """Remove and return every task deferred while execution was paused.
+
+        Returns:
+            Deferred ready tasks in the order they were originally queued.
+
+        """
+        return self._deferred_ready_queue.take_all()
 
     def enqueue_ready_task(self, task: ReadyTask) -> None:
         if self.graph_execution.paused:

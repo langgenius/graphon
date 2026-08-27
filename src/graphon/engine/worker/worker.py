@@ -69,8 +69,8 @@ class Worker(threading.Thread):
         dispatch_queue: queue.Queue[DispatchTask],
         frame_registry: FrameRegistry,
         layers: Sequence[Layer],
-        task_claim_lock: threading.Lock,
-        task_claiming: threading.Event,
+        task_acquisition_lock: threading.Lock,
+        task_acquisition_enabled: threading.Event,
         worker_id: int = 0,
         execution_context: AbstractContextManager[object] | None = None,
     ) -> None:
@@ -81,6 +81,10 @@ class Worker(threading.Thread):
             dispatch_queue: Queue for pushing task-scoped execution results.
             frame_registry: Registry containing frame-local graphs to execute
             layers: Engine layers for node execution hooks
+            task_acquisition_lock: Shared lock that makes acquiring a ready task
+                atomic with pausing the worker pool.
+            task_acquisition_enabled: Shared flag indicating whether workers may
+                acquire new ready tasks.
             worker_id: Unique identifier for this worker
             execution_context: Optional execution context for context preservation
 
@@ -94,8 +98,8 @@ class Worker(threading.Thread):
         )
         self._stop_event = threading.Event()
         self._layers = layers
-        self._task_claim_lock = task_claim_lock
-        self._task_claiming = task_claiming
+        self._task_acquisition_lock = task_acquisition_lock
+        self._task_acquisition_enabled = task_acquisition_enabled
         self._current_node_started_at: datetime | None = None
         self._current_node: Node | None = None
         self._current_frame_id = ROOT_FRAME_ID
@@ -118,8 +122,8 @@ class Worker(threading.Thread):
         and pushes results to the dispatch queue until stopped.
         """
         while not self._stop_event.is_set():
-            with self._task_claim_lock:
-                if not self._task_claiming.is_set():
+            with self._task_acquisition_lock:
+                if not self._task_acquisition_enabled.is_set():
                     return
                 try:
                     task = self._ready_queue.get(timeout=0.01)

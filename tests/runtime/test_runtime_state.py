@@ -71,8 +71,8 @@ class _PrefixedReadyQueue:
     def qsize(self) -> int:
         return self._queue.qsize()
 
-    def drain(self) -> list[ReadyTask]:
-        return self._queue.drain()
+    def take_all(self) -> list[ReadyTask]:
+        return self._queue.take_all()
 
     def dumps(self) -> str:
         return f"prefixed:{self._queue.dumps()}"
@@ -262,8 +262,8 @@ class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
 
         restored = RuntimeState.from_snapshot(state.dumps())
 
-        assert restored.drain_deferred_ready_tasks() == [first, second]
-        assert restored.drain_deferred_ready_tasks() == []
+        assert restored.take_deferred_ready_tasks() == [first, second]
+        assert restored.take_deferred_ready_tasks() == []
 
     @pytest.mark.parametrize(
         "legacy_snapshot",
@@ -326,8 +326,8 @@ class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
         )
 
         assert isinstance(restored.ready_queue, _PrefixedReadyQueue)
-        assert restored.ready_queue.drain() == [live_task]
-        assert restored.drain_deferred_ready_tasks() == [deferred_task]
+        assert restored.ready_queue.take_all() == [live_task]
+        assert restored.take_deferred_ready_tasks() == [deferred_task]
 
     def test_container_runtime_state_preserves_file_values(self) -> None:
         state = RuntimeState(
@@ -747,10 +747,10 @@ class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
         }
         assert ready_node.state is NodeState.TAKEN
         assert approved_edge.state is NodeState.SKIPPED
-        assert restored.ready_queue.drain() == [
+        assert restored.ready_queue.take_all() == [
             StartTask(frame_id=ROOT_FRAME_ID, node_id="ready"),
         ]
-        assert restored.drain_deferred_ready_tasks() == [
+        assert restored.take_deferred_ready_tasks() == [
             StartTask(frame_id=ROOT_FRAME_ID, node_id="paused"),
             StartTask(frame_id=ROOT_FRAME_ID, node_id="deferred"),
         ]

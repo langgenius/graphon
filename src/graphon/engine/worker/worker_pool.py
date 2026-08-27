@@ -56,8 +56,8 @@ class WorkerPool:
         # Worker management
         self._workers: list[Worker] = []
         self._lock = threading.Lock()
-        self._task_claim_lock = threading.Lock()
-        self._task_claiming = threading.Event()
+        self._task_acquisition_lock = threading.Lock()
+        self._task_acquisition_enabled = threading.Event()
 
     def start(self) -> None:
         """Start the worker pool."""
@@ -65,7 +65,7 @@ class WorkerPool:
             if self._workers:
                 return
 
-            self._task_claiming.set()
+            self._task_acquisition_enabled.set()
             logger.debug("Starting worker pool: %d workers", self._worker_count)
             for worker_id in range(self._worker_count):
                 self._create_worker(worker_id)
@@ -73,8 +73,8 @@ class WorkerPool:
     def stop(self) -> None:
         """Stop all workers in the pool."""
         with self._lock:
-            with self._task_claim_lock:
-                self._task_claiming.clear()
+            with self._task_acquisition_lock:
+                self._task_acquisition_enabled.clear()
             worker_count = len(self._workers)
 
             if worker_count > 0:
@@ -91,16 +91,25 @@ class WorkerPool:
 
             self._workers.clear()
 
-    def drain(self) -> list[ReadyTask]:
-        """Atomically stop task claims and remove unclaimed ready work."""
+    def pause(self) -> list[ReadyTask]:
+        """Begin a cooperative pause and return tasks that have not started.
+
+        New task acquisition is disabled atomically with removing pending tasks
+        from the ready queue. Workers that already own a task continue running;
+        idle workers are stopped so the caller can wait only for active work.
+
+        Returns:
+            Ready tasks that were still queued when the pause began.
+
+        """
         with self._lock:
-            with self._task_claim_lock:
-                self._task_claiming.clear()
-                tasks = self._ready_queue.drain()
+            with self._task_acquisition_lock:
+                self._task_acquisition_enabled.clear()
+                pending_tasks = self._ready_queue.take_all()
                 for worker in self._workers:
                     if not worker.has_current_task:
                         worker.stop()
-            return tasks
+            return pending_tasks
 
     def has_current_tasks(self) -> bool:
         with self._lock:
@@ -115,8 +124,8 @@ class WorkerPool:
             layers=self._layers,
             worker_id=worker_id,
             execution_context=self._execution_context,
-            task_claim_lock=self._task_claim_lock,
-            task_claiming=self._task_claiming,
+            task_acquisition_lock=self._task_acquisition_lock,
+            task_acquisition_enabled=self._task_acquisition_enabled,
         )
 
         worker.start()

@@ -312,8 +312,8 @@ class Engine:
                 self._frame_registry[run_state.frame_id].scheduler.track_unfinished(
                     run_state.node_id
                 )
-            queued_tasks = self._runtime_state.ready_queue.drain()
-            deferred_tasks = self._runtime_state.drain_deferred_ready_tasks()
+            queued_tasks = self._runtime_state.ready_queue.take_all()
+            deferred_tasks = self._runtime_state.take_deferred_ready_tasks()
             ready_tasks = [*queued_tasks, *deferred_tasks]
             try:
                 for task in ready_tasks:

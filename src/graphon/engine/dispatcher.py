@@ -94,7 +94,7 @@ class Dispatcher:
         """Main dispatcher loop."""
         try:
             paused = self._run_until_exit()
-            self._drain_after_exit(paused)
+            self._finish_dispatching(paused)
         except Exception as error:
             logger.exception("Dispatcher error")
             self._graph_execution.fail(error)
@@ -113,7 +113,8 @@ class Dispatcher:
             ):
                 return False
             if self._graph_execution.paused:
-                self._scheduler.defer_ready_tasks(self._worker_pool.drain())
+                pending_tasks = self._worker_pool.pause()
+                self._scheduler.defer_ready_tasks(pending_tasks)
                 return True
             self._dispatch_next_event()
         return False
@@ -128,23 +129,41 @@ class Dispatcher:
         self._dispatch_queue.task_done()
         self._process_commands(event)
 
-    def _drain_after_exit(self, paused: bool) -> None:
+    def _finish_dispatching(self, paused: bool) -> None:
+        """Process remaining dispatch work after the main loop exits.
+
+        A cooperative pause waits for active workers while continuing to process
+        their dispatch tasks, then snapshots frames if no abort or failure
+        superseded the pause. Other terminal states process only tasks already in
+        the queue.
+
+        Args:
+            paused: Whether the main loop exited because execution was paused.
+
+        """
         self._process_commands()
         if paused:
-            self._drain_dispatch_tasks_until_idle()
+            self._process_tasks_until_workers_idle()
             if (
                 not self._graph_execution.aborted
                 and self._graph_execution.error is None
             ):
                 self._event_processor.snapshot_frames()
         else:
-            self._drain_dispatch_queue()
+            self._process_pending_tasks()
 
     def _process_commands(self, event: NodeEvent | None = None) -> None:
         if event is None or isinstance(event, self._COMMAND_TRIGGER_EVENTS):
             self._command_processor.process_commands()
 
-    def _drain_dispatch_queue(self) -> None:
+    def _process_pending_tasks(self) -> None:
+        """Process every dispatch task currently available without waiting.
+
+        The method handles both node events and container-await tasks through
+        the normal dispatch path and marks each queue item complete. It returns
+        as soon as the queue is empty.
+
+        """
         while True:
             try:
                 task = self._dispatch_queue.get(block=False)
@@ -153,7 +172,14 @@ class Dispatcher:
             self._dispatch_task(task)
             self._dispatch_queue.task_done()
 
-    def _drain_dispatch_tasks_until_idle(self) -> None:
+    def _process_tasks_until_workers_idle(self) -> None:
+        """Process dispatch tasks and commands until active workers become idle.
+
+        This is the completion phase of a cooperative pause. Empty queue polls
+        continue processing commands so an abort can supersede the pause while
+        an active worker is still finishing its current task.
+
+        """
         while (
             not self._stop_event.is_set()
             and not self._graph_execution.aborted
@@ -169,7 +195,7 @@ class Dispatcher:
             event = self._dispatch_task(task)
             self._dispatch_queue.task_done()
             self._process_commands(event)
-        self._drain_dispatch_queue()
+        self._process_pending_tasks()
 
     def _dispatch_task(self, task: DispatchTask) -> NodeEvent | None:
         if isinstance(task, ContainerAwaitTask):

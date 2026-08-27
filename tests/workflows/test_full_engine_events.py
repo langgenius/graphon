@@ -170,7 +170,7 @@ def _run_with_timeout(engine: Engine) -> list[EngineEvent]:
     thread.start()
     completed_in_time = finished.wait(timeout=_ENGINE_TIMEOUT_SECONDS)
     if not completed_in_time:
-        engine.runtime_state.ready_queue.drain()
+        engine.runtime_state.ready_queue.take_all()
         engine.request_abort("bounded ready queue test timed out")
         finished.wait(timeout=_ENGINE_TIMEOUT_SECONDS)
     thread.join(timeout=_ENGINE_TIMEOUT_SECONDS)
@@ -288,7 +288,7 @@ def test_resume_replays_tasks_through_a_bounded_ready_queue() -> None:
     thread.start()
     completed_in_time = finished.wait(timeout=_ENGINE_TIMEOUT_SECONDS)
     if not completed_in_time:
-        ready_queue.drain()
+        ready_queue.take_all()
         engine.request_abort("bounded ready queue replay timed out")
         finished.wait(timeout=_ENGINE_TIMEOUT_SECONDS)
     thread.join(timeout=_ENGINE_TIMEOUT_SECONDS)

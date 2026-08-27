@@ -476,7 +476,7 @@ def _runtime_with_live_resume_task() -> RuntimeState:
 def _resume_loop_snapshot(snapshot: str) -> list[NodeEventTask]:
     runtime_state = RuntimeState.from_snapshot(snapshot)
     runtime_state.graph_execution.paused = False
-    for task in runtime_state.drain_deferred_ready_tasks():
+    for task in runtime_state.take_deferred_ready_tasks():
         runtime_state.enqueue_ready_task(task)
 
     frame_registry = FrameRegistry()
@@ -488,15 +488,15 @@ def _resume_loop_snapshot(snapshot: str) -> list[NodeEventTask]:
         ),
     )
     dispatch_queue: queue.Queue[DispatchTask] = queue.Queue()
-    task_claiming = Event()
-    task_claiming.set()
+    task_acquisition_enabled = Event()
+    task_acquisition_enabled.set()
     worker = Worker(
         ready_queue=cast(InMemoryReadyQueue, runtime_state.ready_queue),
         dispatch_queue=dispatch_queue,
         frame_registry=frame_registry,
         layers=[],
-        task_claim_lock=Lock(),
-        task_claiming=task_claiming,
+        task_acquisition_lock=Lock(),
+        task_acquisition_enabled=task_acquisition_enabled,
     )
     worker.start()
     try:
@@ -599,7 +599,7 @@ def test_loop_hitl_runtime_state_round_trip_preserves_progress() -> None:
     paused_state = RuntimeState.from_snapshot(snapshot)
     run_state = paused_state.container_runs()[0]
     frame_state = paused_state.container_frames()[0]
-    deferred_tasks = paused_state.drain_deferred_ready_tasks()
+    deferred_tasks = paused_state.take_deferred_ready_tasks()
     resumed_events = list(
         _hitl_engine(
             _loop_dsl(),
@@ -723,7 +723,7 @@ def test_version_1_child_task_is_rejected_before_worker_start() -> None:
             callback=_complete_loop_hitl,
         )
 
-    assert restored.drain_deferred_ready_tasks() == [
+    assert restored.take_deferred_ready_tasks() == [
         StartTask(frame_id="root", node_id="human-input")
     ]
 
@@ -790,7 +790,7 @@ def test_parallel_iteration_hitl_runtime_state_round_trip_preserves_order() -> N
     paused_state = RuntimeState.from_snapshot(snapshot)
     run_state = paused_state.container_runs()[0]
     frame_state = paused_state.container_frames()[0]
-    deferred_tasks = paused_state.drain_deferred_ready_tasks()
+    deferred_tasks = paused_state.take_deferred_ready_tasks()
     resumed_events = list(
         _hitl_engine(
             _iteration_dsl(),
@@ -871,11 +871,11 @@ def test_parallel_iteration_hitl_runtime_state_round_trip_preserves_order() -> N
 def test_deferred_resume_task_round_trips_and_resumes_parent_container() -> None:
     runtime_state = _runtime_with_live_resume_task()
     runtime_state.graph_execution.paused = True
-    for task in runtime_state.ready_queue.drain():
+    for task in runtime_state.ready_queue.take_all():
         runtime_state.defer_ready_task(task)
     snapshot = runtime_state.dumps()
     restored_for_assert = RuntimeState.from_snapshot(snapshot)
-    deferred_tasks = restored_for_assert.drain_deferred_ready_tasks()
+    deferred_tasks = restored_for_assert.take_deferred_ready_tasks()
 
     task_events = _resume_loop_snapshot(snapshot)
 

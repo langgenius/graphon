@@ -63,8 +63,13 @@ class ReadyQueue(Protocol):
         ...
 
     @abstractmethod
-    def drain(self) -> list[ReadyTask]:
-        """Remove and return all pending items in FIFO order."""
+    def take_all(self) -> list[ReadyTask]:
+        """Remove and return every pending task in FIFO order.
+
+        Returns:
+            All tasks that were available when the operation began.
+
+        """
         ...
 
     @abstractmethod

@@ -129,7 +129,7 @@ class NodeEventProcessor:
             )
 
     def snapshot_frames(self) -> None:
-        """Persist live child frames after workers have drained for a pause."""
+        """Persist live child frames after active workers finish for a pause."""
         root_runtime_state = self._frame_registry[ROOT_FRAME_ID].state
         for frame_state in root_runtime_state.container_frames():
             frame = self._frame_registry[frame_state.frame_id]

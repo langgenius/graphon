@@ -97,11 +97,18 @@ class InMemoryReadyQueue:
         """
         return self._queue.qsize()
 
-    def drain(self) -> list[ReadyTask]:
-        """Remove and return all queued tasks in FIFO order."""
-        # Queue has no public atomic drain API. Limit removals to the size observed
-        # at entry so newly unblocked producers are not chased; concurrent consumers
-        # can still make this a best-effort drain.
+    def take_all(self) -> list[ReadyTask]:
+        """Remove and return every queued task in FIFO order.
+
+        The standard queue has no public atomic take-all operation. This method
+        therefore removes at most the number of tasks observed on entry; callers
+        must stop concurrent producers and consumers when an exact snapshot is
+        required.
+
+        Returns:
+            Tasks removed from the queue in their original order.
+
+        """
         items: list[ReadyTask] = []
         for _ in range(self._queue.qsize()):
             try:
@@ -119,9 +126,9 @@ class InMemoryReadyQueue:
             A JSON string containing the serialized queue state
 
         """
-        # Queue has no public snapshot API. This drain/restore cycle is not atomic;
+        # Queue has no public snapshot API. This take/restore cycle is not atomic;
         # callers must quiesce producers and consumers while serializing.
-        items = self.drain()
+        items = self.take_all()
         try:
             state = _ReadyQueueState(
                 version="2.0",
@@ -151,7 +158,7 @@ class InMemoryReadyQueue:
         # Replacing contents through public Queue operations is not atomic. Callers
         # must quiesce producers and consumers; otherwise a partial restore may be
         # observed, and bounded puts may block.
-        self.drain()
+        self.take_all()
 
         # Restore items
         for item in items:
