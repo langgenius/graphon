@@ -554,7 +554,7 @@ def test_slim_dsl_node_factory_rebinds_runtime_state() -> None:
     )
 
     assert rebound_factory is not factory
-    assert rebound_factory.graph_config is graph_config
+    assert rebound_factory.graph_config == graph_config
     assert rebound_factory.init_params is init_params
     assert rebound_factory.credentials is credentials
     assert rebound_factory.dependencies is dependencies

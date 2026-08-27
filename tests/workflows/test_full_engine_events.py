@@ -19,6 +19,7 @@ from graphon.engine_events.base import EngineEvent
 from graphon.engine_events.graph import (
     GraphRunFailedEvent,
     GraphRunPartialSucceededEvent,
+    GraphRunSucceededEvent,
 )
 from graphon.engine_events.iteration import (
     NodeRunIterationFailedEvent,
@@ -265,29 +266,38 @@ def test_resume_replays_tasks_through_a_bounded_ready_queue() -> None:
         StartTask(frame_id="root", node_id="answer"),
     )
     errors: list[Exception] = []
+    events: list[EngineEvent] = []
     finished = Event()
 
-    def start_execution() -> None:
+    def run_resumed_engine() -> None:
+        """Resume through the public generator and record its terminal outcome.
+
+        Running in a thread keeps the bounded-queue regression observable: if
+        replay fills the queue before workers start, this function cannot finish.
+        All yielded events and any raised exception are retained for assertions in
+        the test thread.
+        """
         try:
-            engine._start_execution(resume=True)
+            events.extend(engine.run())
         except Exception as error:  # ruff: ignore[blind-except] - re-raised in the test thread.
             errors.append(error)
         finally:
             finished.set()
 
-    thread = Thread(target=start_execution, daemon=True)
+    thread = Thread(target=run_resumed_engine, daemon=True)
     thread.start()
     completed_in_time = finished.wait(timeout=_ENGINE_TIMEOUT_SECONDS)
     if not completed_in_time:
         ready_queue.drain()
+        engine.request_abort("bounded ready queue replay timed out")
         finished.wait(timeout=_ENGINE_TIMEOUT_SECONDS)
     thread.join(timeout=_ENGINE_TIMEOUT_SECONDS)
-    engine._stop_execution()
 
     assert completed_in_time, "resume blocked while replaying bounded queue tasks"
     assert not thread.is_alive()
     if errors:
         raise errors[0]
+    assert isinstance(events[-1], GraphRunSucceededEvent)
 
 
 def test_full_iteration_graph_records_process_and_final_outputs() -> None:

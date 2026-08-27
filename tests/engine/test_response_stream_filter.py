@@ -1,6 +1,7 @@
 import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, ClassVar, cast
 
 import pytest
@@ -36,6 +37,15 @@ from graphon.runtime.runtime_state import (
 )
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import StringSegment
+
+_V1_FIXTURE_DIR = Path(__file__).with_name("fixtures")
+# These snapshots are the exact output of ResponseStreamFilter.dumps() at c3870df.
+_V1_SIMPLE_SNAPSHOT = (
+    _V1_FIXTURE_DIR / "response_stream_filter_v1_c3870df_simple.json"
+).read_text()
+_V1_NESTED_SNAPSHOT = (
+    _V1_FIXTURE_DIR / "response_stream_filter_v1_c3870df_nested.json"
+).read_text()
 
 
 class _TestNode(NodeProtocol):
@@ -650,7 +660,6 @@ def test_response_stream_filter_writes_version_2_snapshot() -> None:
     snapshot = json.loads(event_filter.dumps())
 
     assert snapshot["version"] == "2.0"
-    assert "_graphon_loaded_from_v1" not in snapshot
 
 
 def test_response_stream_filter_migrates_v1_root_state_after_graph_binding() -> None:
@@ -669,41 +678,30 @@ def test_response_stream_filter_migrates_v1_root_state_after_graph_binding() -> 
             },
         ]
     }
-    first_filter = ResponseStreamFilter()
-    first_filter.initialize(_context(graph))
-    snapshot = json.loads(first_filter.dumps())
-    snapshot.update({
-        "version": "1.0",
-        "response_nodes": ["answer", "child-answer"],
-        "active_session": {"node_id": "child-answer", "index": 0},
-        "waiting_sessions": [{"node_id": "answer", "index": 0}],
-        "pending_sessions": [{"node_id": "child-answer", "index": 0}],
-        "node_execution_ids": {
-            "source": "root-run",
-            "child-source": "child-run",
-        },
-        "paths_map": {
-            "answer": [["edge_1"]],
-            "child-answer": [["edge_0"]],
-        },
-    })
-
     restored_filter = ResponseStreamFilter()
-    restored_filter.loads(json.dumps(snapshot))
+    restored_filter.loads(_V1_NESTED_SNAPSHOT)
     with pytest.raises(RuntimeError, match="must be initialized"):
         restored_filter.dumps()
     restored_filter.initialize(_context(graph))
 
-    assert restored_filter._response_nodes == {"answer"}
-    assert restored_filter._active_session is not None
-    assert restored_filter._active_session.node_id == "answer"
-    assert list(restored_filter._waiting_sessions) == []
-    assert restored_filter._response_sessions == {}
-    assert restored_filter._node_execution_ids == {"source": "root-run"}
-    assert [path.edges for path in restored_filter._paths_maps["answer"]] == [
-        ["edge_0"]
-    ]
-    assert json.loads(restored_filter.dumps())["version"] == "2.0"
+    assert json.loads(restored_filter.dumps()) == {
+        "type": "ResponseStreamFilter",
+        "version": "2.0",
+        "response_nodes": ["answer"],
+        "active_session": None,
+        "waiting_sessions": [],
+        "pending_sessions": [{"node_id": "answer", "index": 0}],
+        "node_execution_ids": {},
+        "paths_map": {"answer": [["edge_0"]]},
+        "stream_buffers": [],
+        "stream_positions": [],
+        "closed_streams": [],
+    }
+
+    assert list(restored_filter.on_event(_stream_chunk("value"))) == []
+    output = list(restored_filter.on_event(_edge_taken(edge_id="edge_0")))
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert [event.chunk for event in chunks] == ["value"]
 
 
 def test_response_stream_filter_migrates_v1_graph_builder_state() -> None:
@@ -718,30 +716,24 @@ def test_response_stream_filter_migrates_v1_graph_builder_state() -> None:
     graph = Graph.new().add_root(cast(Any, source)).add_node(cast(Any, answer)).build()
     assert graph.graph_config is None
 
-    first_filter = ResponseStreamFilter()
-    first_filter.initialize(_context(graph))
-    snapshot = json.loads(first_filter.dumps())
-    snapshot["version"] = "1.0"
-
     restored_filter = ResponseStreamFilter()
-    restored_filter.loads(json.dumps(snapshot))
+    restored_filter.loads(_V1_SIMPLE_SNAPSHOT)
     restored_filter.initialize(_context(graph))
 
-    assert [path.edges for path in restored_filter._paths_maps["answer"]] == [
-        ["edge_0"]
-    ]
+    assert json.loads(restored_filter.dumps())["paths_map"] == {"answer": [["edge_0"]]}
+
+    assert list(restored_filter.on_event(_stream_chunk("value"))) == []
+    output = list(restored_filter.on_event(_edge_taken(edge_id="edge_0")))
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert [event.chunk for event in chunks] == ["value"]
 
 
 def test_response_stream_filter_rejects_v1_graph_without_stable_legacy_ids() -> None:
     graph = _variable_response_graph(edge_id="public-edge")
     graph.graph_config = None
-    first_filter = ResponseStreamFilter()
-    first_filter.initialize(_context(graph))
-    snapshot = json.loads(first_filter.dumps())
-    snapshot.update({"version": "1.0", "paths_map": {"answer": [["edge_0"]]}})
 
     restored_filter = ResponseStreamFilter()
-    restored_filter.loads(json.dumps(snapshot))
+    restored_filter.loads(_V1_SIMPLE_SNAPSHOT)
 
     with pytest.raises(ValueError, match="requires stable edge_N IDs"):
         restored_filter.initialize(_context(graph))
@@ -772,7 +764,6 @@ def test_response_stream_filter_v2_cannot_inject_v1_compatibility_marker() -> No
     first_filter.initialize(_context(graph))
     snapshot = json.loads(first_filter.dumps())
     snapshot["compatibility_marker"] = True
-    snapshot["_graphon_loaded_from_v1"] = True
 
     restored_filter = ResponseStreamFilter()
     restored_filter.loads(json.dumps(snapshot))

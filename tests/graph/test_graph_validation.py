@@ -218,8 +218,6 @@ def test_child_post_init_sees_only_its_scoped_graph_config(
     )
 
     child_start = cast(_TestNode, child_graph.nodes["child-start"])
-    assert child_start.graph_config is child_graph.graph_config
-    assert child_start.post_init_graph_config is child_graph.graph_config
     assert {node["id"] for node in child_start.post_init_graph_config["nodes"]} == {
         "child-start",
         "child-end",

@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
+from graphon.dsl import loads
 from graphon.engine import Engine
 from graphon.engine.command import (
     AbortCommand,
@@ -29,7 +30,7 @@ from graphon.engine.dispatcher import Dispatcher
 from graphon.engine.event.processor import NodeEventProcessor
 from graphon.engine.event.stream import EventStream
 from graphon.engine.frame import ExecutionFrame, FrameRegistry
-from graphon.engine.layer import ExecutionLimitsLayer
+from graphon.engine.layer import ExecutionLimitsLayer, Layer
 from graphon.engine.ready_queue.entities import (
     ReadyTask,
     ResumeTask,
@@ -43,7 +44,12 @@ from graphon.engine.worker import (
     Worker,
     WorkerPool,
 )
-from graphon.engine_events.graph import GraphRunAbortedEvent
+from graphon.engine_events.base import EngineEvent
+from graphon.engine_events.graph import (
+    GraphRunAbortedEvent,
+    GraphRunFailedEvent,
+    GraphRunPausedEvent,
+)
 from graphon.engine_events.node import (
     NodeRunExceptionEvent,
     NodeRunPauseRequestedEvent,
@@ -173,6 +179,43 @@ def _container_handlers(
             frame_registry=frame_registry,
         ),
     }
+
+
+def _load_minimal_engine(
+    *,
+    command_channel: InMemoryChannel | None = None,
+) -> Engine:
+    """Create a fully initialized one-node engine for lifecycle regressions.
+
+    The engine is loaded through the same public DSL entry point used by callers,
+    so its graph, runtime state, scheduler, dispatcher, and workers have their
+    normal relationships. Tests may optionally supply an in-memory command channel
+    to exercise pause and abort behavior without reaching into engine internals.
+
+    Args:
+        command_channel: Command source to bind to the engine, or ``None`` to use
+            the engine's default in-memory channel.
+
+    Returns:
+        A runnable engine whose only node is a valid workflow start node.
+
+    """
+    return loads(
+        json.dumps({
+            "kind": "graph",
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "start",
+                        "data": {"type": "start", "variables": []},
+                    }
+                ],
+                "edges": [],
+            },
+        }),
+        command_channel=command_channel,
+        workers=1,
+    )
 
 
 def _get_resume_task(ready_queue: InMemoryReadyQueue) -> ResumeTask:
@@ -1563,10 +1606,24 @@ def test_dispatcher_preserves_task_event_for_dispatch() -> None:
 
 
 def test_dispatcher_keeps_polling_when_no_dispatch_event_is_available() -> None:
-    graph_execution = MagicMock(aborted=False, paused=False, error=None)
+    graph_execution = GraphExecution(workflow_id="workflow")
+    graph_execution.start()
     scheduler = MagicMock()
     scheduler.is_execution_complete.return_value = False
-    command_processor = MagicMock()
+    command_channel = MagicMock()
+    command_channel.fetch_commands.side_effect = [
+        [],
+        [AbortCommand(reason="stop")],
+        [],
+    ]
+    command_processor = CommandProcessor(
+        command_channel=command_channel,
+        graph_execution=graph_execution,
+        frame_registry=FrameRegistry(),
+    )
+    completed = threading.Event()
+    event_stream = MagicMock()
+    event_stream.mark_complete.side_effect = completed.set
     dispatcher = Dispatcher(
         dispatch_queue=queue.Queue(),
         event_processor=MagicMock(),
@@ -1574,71 +1631,165 @@ def test_dispatcher_keeps_polling_when_no_dispatch_event_is_available() -> None:
         scheduler=scheduler,
         command_processor=command_processor,
         worker_pool=MagicMock(),
-        event_stream=MagicMock(),
+        event_stream=event_stream,
     )
 
-    dispatcher._dispatch_next_event()
+    dispatcher.start()
+    try:
+        assert completed.wait(timeout=1)
+    finally:
+        dispatcher.stop()
 
-    command_processor.process_commands.assert_called_once_with()
+    assert graph_execution.aborted
+    assert command_channel.fetch_commands.call_count == 3
 
 
 def test_dispatcher_polls_commands_while_draining_active_workers() -> None:
     """Abort pause draining without snapshotting a still-active worker.
 
-    The first command poll starts pause draining. The empty dispatch queue must
-    remain a polling point, so the second poll observes the abort even though the
-    worker is deliberately reported active forever. Because that worker may still
-    mutate frame state, the aborted execution must not create a pause snapshot.
+    The first command poll starts pause draining and the second enters the drain.
+    The empty dispatch queue must remain a polling point, so the third poll observes
+    the abort even though the worker is deliberately reported active forever.
+    Because that worker may still mutate frame state, the aborted execution must
+    not create a pause snapshot.
     """
     graph_execution = GraphExecution(workflow_id="workflow")
-    command_processor = MagicMock()
-
-    def process_commands() -> None:
-        """Abort on the drain poll after the initial pre-drain command poll."""
-        if command_processor.process_commands.call_count == 2:
-            graph_execution.abort("stop")
-
-    command_processor.process_commands.side_effect = process_commands
+    graph_execution.start()
+    command_channel = MagicMock()
+    command_channel.fetch_commands.side_effect = [
+        [PauseCommand(reason="wait")],
+        [],
+        [AbortCommand(reason="stop")],
+    ]
+    command_processor = CommandProcessor(
+        command_channel=command_channel,
+        graph_execution=graph_execution,
+        frame_registry=FrameRegistry(),
+    )
     worker_pool = MagicMock()
+    worker_pool.drain.return_value = []
     worker_pool.has_current_tasks.return_value = True
     event_processor = MagicMock()
+    completed = threading.Event()
+    event_stream = MagicMock()
+    event_stream.mark_complete.side_effect = completed.set
+    scheduler = MagicMock()
+    scheduler.is_execution_complete.return_value = False
     dispatcher = Dispatcher(
         dispatch_queue=queue.Queue(),
         event_processor=event_processor,
         graph_execution=graph_execution,
-        scheduler=MagicMock(),
+        scheduler=scheduler,
         command_processor=command_processor,
         worker_pool=worker_pool,
-        event_stream=MagicMock(),
+        event_stream=event_stream,
     )
 
-    dispatcher._drain_after_exit(paused=True)
+    dispatcher.start()
+    try:
+        assert completed.wait(timeout=1)
+    finally:
+        dispatcher.stop()
 
     assert graph_execution.aborted
-    assert command_processor.process_commands.call_count == 2
+    assert graph_execution.paused
+    assert command_channel.fetch_commands.call_count == 3
     event_processor.snapshot_frames.assert_not_called()
 
 
 def test_engine_terminal_failure_takes_precedence_over_pause() -> None:
-    """Raise a fatal worker error even when pause draining already set paused.
+    """Report a real sibling failure instead of an overlapping pause.
 
-    A pause is resumable, whereas a fatal error is terminal. Testing both flags on
-    the aggregate reproduces the race without threads and ensures terminal event
-    selection cannot hide the error behind ``GraphRunPausedEvent``.
+    Two workers run sibling nodes. The failing sibling is held until the answer
+    succeeds and queues a pause, reproducing the production race through
+    ``Engine.run()`` without constructing an impossible partial engine.
     """
-    graph_execution = GraphExecution(workflow_id="workflow", started=True)
-    graph_execution.pause(SchedulingPause(message="wait"))
-    failure = RuntimeError("fatal")
-    graph_execution.fail(failure)
-    engine = object.__new__(Engine)
-    engine._graph_execution = graph_execution
-    engine._runtime_state = cast(RuntimeState, SimpleNamespace(outputs={}))
-    engine._event_stream = MagicMock()
+    failure_may_run = threading.Event()
 
-    with pytest.raises(RuntimeError, match="fatal") as exc_info:
-        list(engine._emit_terminal_events())
+    class PauseBeforeFailure(Layer):
+        def on_node_run_start(self, node: Any) -> None:
+            """Hold only the failing sibling until pause processing can begin.
 
-    assert exc_info.value is failure
+            The answer sibling remains free to finish. Once its success event has
+            queued the pause command, ``failure_may_run`` releases this worker so
+            the dispatcher observes a fatal result during pause draining.
+
+            Args:
+                node: Node about to run on one of the engine's workers.
+
+            """
+            if node.id == "fail":
+                assert failure_may_run.wait(timeout=1)
+
+        def on_event(self, event: EngineEvent) -> None:
+            """Queue pause from answer success, then release the failing worker.
+
+            A node-success event is a dispatcher command boundary. Sending the
+            pause here guarantees it is applied before the already-enqueued sibling
+            failure is dispatched, reproducing the terminal-state race.
+
+            Args:
+                event: Engine event currently being published to this layer.
+
+            """
+            if not (
+                isinstance(event, NodeRunSucceededEvent) and event.node_id == "answer"
+            ):
+                return
+            command_channel = self.command_channel
+            assert command_channel is not None
+            command_channel.send_command(PauseCommand(reason="wait"))
+            failure_may_run.set()
+
+    engine = loads(
+        json.dumps({
+            "kind": "graph",
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "start",
+                        "data": {"type": "start", "variables": []},
+                    },
+                    {
+                        "id": "answer",
+                        "data": {"type": "answer", "answer": "done"},
+                    },
+                    {
+                        "id": "fail",
+                        "data": {
+                            "type": "assigner",
+                            "version": "2",
+                            "items": [
+                                {
+                                    "variable_selector": ["missing", "value"],
+                                    "input_type": "constant",
+                                    "operation": "over-write",
+                                    "value": "unused",
+                                }
+                            ],
+                        },
+                    },
+                ],
+                "edges": [
+                    {"source": "start", "target": "answer"},
+                    {"source": "start", "target": "fail"},
+                ],
+            },
+        }),
+        workers=2,
+    )
+    engine.add_layer(PauseBeforeFailure())
+    events: list[EngineEvent] = []
+
+    try:
+        with pytest.raises(RuntimeError, match="Variable"):
+            events.extend(engine.run())
+    finally:
+        failure_may_run.set()
+
+    assert engine.runtime_state.graph_execution.paused
+    assert isinstance(events[-1], GraphRunFailedEvent)
+    assert not any(isinstance(event, GraphRunPausedEvent) for event in events)
 
 
 def test_engine_terminal_abort_takes_precedence_over_pause() -> None:
@@ -1648,18 +1799,17 @@ def test_engine_terminal_abort_takes_precedence_over_pause() -> None:
     The completed run must expose the irreversible abort as its terminal result so
     callers do not persist it as resumable state.
     """
-    graph_execution = GraphExecution(workflow_id="workflow", started=True)
-    graph_execution.pause(SchedulingPause(message="wait"))
-    graph_execution.abort("stop")
-    engine = object.__new__(Engine)
-    engine._graph_execution = graph_execution
-    engine._runtime_state = cast(RuntimeState, SimpleNamespace(outputs={}))
-    engine._event_stream = MagicMock()
+    command_channel = InMemoryChannel()
+    command_channel.send_command(PauseCommand(reason="wait"))
+    command_channel.send_command(AbortCommand(reason="stop"))
+    engine = _load_minimal_engine(command_channel=command_channel)
 
-    events = list(engine._emit_terminal_events())
+    events = list(engine.run())
 
-    assert len(events) == 1
-    assert isinstance(events[0], GraphRunAbortedEvent)
+    assert engine.runtime_state.graph_execution.paused
+    assert engine.runtime_state.graph_execution.aborted
+    assert isinstance(events[-1], GraphRunAbortedEvent)
+    assert not any(isinstance(event, GraphRunPausedEvent) for event in events)
 
 
 def test_resume_rejects_task_for_missing_container_invocation() -> None:
@@ -1670,13 +1820,9 @@ def test_resume_rejects_task_for_missing_container_invocation() -> None:
     workers stopped; otherwise a worker dies on ``KeyError`` and the dispatcher can
     incorrectly observe an empty scheduler as successful completion.
     """
-    ready_queue = InMemoryReadyQueue()
-    runtime_state = RuntimeState(
-        workflow_id="workflow",
-        variable_pool=VariablePool(),
-        start_at=0,
-        ready_queue=ready_queue,
-    )
+    engine = _load_minimal_engine()
+    runtime_state = engine.runtime_state
+    runtime_state.graph_execution.start()
     resume_task = ResumeTask(
         invocation_id="missing-invocation",
         result=ContainerExecutionResult(
@@ -1685,20 +1831,14 @@ def test_resume_rejects_task_for_missing_container_invocation() -> None:
             node_run_result=ContainerNodeRunResult(),
         ),
     )
-    ready_queue.put(resume_task)
-    worker_pool = MagicMock()
-    engine = object.__new__(Engine)
-    engine._runtime_state = runtime_state
-    engine._frame_registry = FrameRegistry()
-    engine._worker_pool = worker_pool
-    engine._dispatcher = MagicMock()
+    runtime_state.enqueue_ready_task(resume_task)
+    events: list[EngineEvent] = []
 
     with pytest.raises(KeyError, match="missing-invocation"):
-        engine._start_execution(resume=True)
+        events.extend(engine.run())
 
-    assert ready_queue.get(timeout=0.01) == resume_task
-    worker_pool.start.assert_not_called()
-    engine._dispatcher.start.assert_not_called()
+    assert runtime_state.ready_queue.get(timeout=0.01) == resume_task
+    assert isinstance(events[-1], GraphRunFailedEvent)
 
 
 def test_event_processor_dispatches_task_event_payload() -> None:

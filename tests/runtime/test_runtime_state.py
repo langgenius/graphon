@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from time import time
 from unittest.mock import MagicMock
 
@@ -38,6 +39,20 @@ from graphon.variables.segments import ArrayFileSegment, FileSegment
 from graphon.variables.variables import StringVariable
 
 CONVERSATION_VARIABLE_NODE_ID = "conversation"
+
+# Captured from the runtime-state serializer on main at 1d0f32c, the last
+# version 2 writer. Keeping the bytes fixed prevents current serializers from
+# redefining what this compatibility test considers a historical snapshot.
+_FIXTURES_DIR = Path(__file__).with_name("fixtures")
+_VERSION_2_FULL_GRAPH_SNAPSHOT = (
+    _FIXTURES_DIR / "runtime_state_v2_full_graph.json"
+).read_text()
+_VERSION_2_GRAPH_BUILDER_SNAPSHOT = (
+    _FIXTURES_DIR / "runtime_state_v2_graph_builder.json"
+).read_text()
+_VERSION_2_UNATTACHED_SNAPSHOT = (
+    _FIXTURES_DIR / "runtime_state_v2_unattached.json"
+).read_text()
 
 
 class _PrefixedReadyQueue:
@@ -250,10 +265,14 @@ class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
         assert restored.drain_deferred_ready_tasks() == [first, second]
         assert restored.drain_deferred_ready_tasks() == []
 
-    @pytest.mark.parametrize("version", ["2.0", "3.0"])
+    @pytest.mark.parametrize(
+        "legacy_snapshot",
+        [_VERSION_2_UNATTACHED_SNAPSHOT, None],
+        ids=["version-2", "version-3"],
+    )
     def test_snapshot_before_graph_attachment_accepts_rebuilt_graph(
         self,
-        version: str,
+        legacy_snapshot: str | None,
     ) -> None:
         """Restore an unattached snapshot before binding a nonempty graph.
 
@@ -264,8 +283,6 @@ class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
         state = RuntimeState(
             workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
         )
-        payload = json.loads(state.dumps())
-        payload["version"] = version
         root = MagicMock(
             id="start",
             node_type=BuiltinNodeTypes.START,
@@ -280,7 +297,7 @@ class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
         )
         graph = Graph.new().add_root(root).add_node(end).build()
 
-        restored = RuntimeState.from_snapshot(json.dumps(payload))
+        restored = RuntimeState.from_snapshot(legacy_snapshot or state.dumps())
         restored.attach_graph(graph)
 
         assert json.loads(restored.dumps())["graph_node_states"] == {
@@ -446,24 +463,7 @@ class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
         version 2 state is a full-graph map keyed by global positional IDs; graph
         attachment must select only the root entry before writing version 3.
         """
-        state = RuntimeState(
-            workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
-        )
-        payload = json.loads(state.dumps())
-        payload.update({
-            "version": "2.0",
-            "graph_node_states": {
-                "start": NodeState.TAKEN,
-                "end": NodeState.UNKNOWN,
-                "child-start": NodeState.TAKEN,
-                "child-end": NodeState.UNKNOWN,
-            },
-            "graph_edge_states": {
-                "edge_1": NodeState.TAKEN,
-                "edge_2": NodeState.SKIPPED,
-            },
-        })
-        restored = RuntimeState.from_snapshot(json.dumps(payload))
+        restored = RuntimeState.from_snapshot(_VERSION_2_FULL_GRAPH_SNAPSHOT)
 
         with pytest.raises(
             RuntimeError,
@@ -485,12 +485,6 @@ class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
                     {"id": "child-end", "data": {"container_id": "container"}},
                 ],
                 "edges": [
-                    {
-                        "id": "ignored-edge",
-                        "source": "start",
-                        "target": "end",
-                        "sourceHandle": 1,
-                    },
                     {"id": "shared-edge", "source": "start", "target": "end"},
                     {
                         "id": "shared-edge",
@@ -517,48 +511,36 @@ class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
             id="start",
             node_type=BuiltinNodeTypes.START,
             execution_type=NodeExecutionType.ROOT,
-            state=NodeState.TAKEN,
+            state=NodeState.UNKNOWN,
         )
         end = MagicMock(
             id="end",
             node_type=BuiltinNodeTypes.END,
             execution_type=NodeExecutionType.EXECUTABLE,
-            state=NodeState.UNKNOWN,
+            state=NodeState.TAKEN,
         )
         graph = Graph.new().add_root(root).add_node(end).build()
         assert graph.graph_config is None
 
-        state = RuntimeState(
-            workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
-        )
-        state.attach_graph(graph)
-        payload = json.loads(state.dumps())
-        payload["version"] = "2.0"
-
-        restored = RuntimeState.from_snapshot(json.dumps(payload))
+        restored = RuntimeState.from_snapshot(_VERSION_2_GRAPH_BUILDER_SNAPSHOT)
         restored.attach_graph(graph)
 
         assert json.loads(restored.dumps())["version"] == "3.0"
         assert root.state is NodeState.TAKEN
         assert end.state is NodeState.UNKNOWN
+        assert graph.edges["edge_0"].state is NodeState.TAKEN
 
     def test_failed_version_2_migration_does_not_commit_compatibility_state(
         self,
     ) -> None:
         """Leave legacy state retryable when the rebuilt root graph does not match."""
-        state = RuntimeState(
-            workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
-        )
-        payload = json.loads(state.dumps())
-        payload.update({
-            "version": "2.0",
-            "graph_node_states": {"start": NodeState.TAKEN},
-            "graph_edge_states": {"edge_0": NodeState.SKIPPED},
-        })
-        restored = RuntimeState.from_snapshot(json.dumps(payload))
+        restored = RuntimeState.from_snapshot(_VERSION_2_GRAPH_BUILDER_SNAPSHOT)
         graph_config = {
-            "nodes": [{"id": "start", "data": {}}],
-            "edges": [{"id": "public-edge", "source": "start", "target": "start"}],
+            "nodes": [
+                {"id": "start", "data": {}},
+                {"id": "end", "data": {}},
+            ],
+            "edges": [{"id": "public-edge", "source": "start", "target": "end"}],
         }
         mismatched_graph = MagicMock(
             nodes={"other": MagicMock(state=NodeState.UNKNOWN)},
@@ -581,13 +563,16 @@ class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
         matching_edge = MagicMock(state=NodeState.UNKNOWN)
         restored.attach_graph(
             MagicMock(
-                nodes={"start": matching_node},
+                nodes={
+                    "start": matching_node,
+                    "end": MagicMock(state=NodeState.TAKEN),
+                },
                 edges={"public-edge": matching_edge},
                 graph_config=graph_config,
             )
         )
         assert matching_node.state is NodeState.TAKEN
-        assert matching_edge.state is NodeState.SKIPPED
+        assert matching_edge.state is NodeState.TAKEN
 
     def test_read_only_wrapper_exposes_additional_state(self) -> None:
         state = RuntimeState(

@@ -9,7 +9,6 @@ from threading import Event, Lock
 from time import monotonic, sleep
 from types import SimpleNamespace
 from typing import Any, ClassVar, cast
-from unittest.mock import MagicMock, call
 
 import pytest
 import yaml
@@ -504,57 +503,6 @@ def _resume_loop_snapshot(snapshot: str) -> list[NodeEventTask]:
     finally:
         worker.stop()
         worker.join(timeout=1)
-
-
-def test_resume_restores_container_runs_before_workers_start() -> None:
-    runtime_state = RuntimeState(
-        workflow_id="workflow",
-        variable_pool=VariablePool(),
-        start_at=1,
-    )
-    request = LoopFrameRequest(
-        inputs={"loop_count": build_container_value(1)},
-        outputs={},
-        loop_count=1,
-        root_node_id="loop-start",
-        loop_variable_selectors={},
-        loop_node_ids=frozenset(),
-        index=0,
-    )
-    runtime_state.put_container_run(
-        create_container_run_state(
-            invocation_id="loop-invocation",
-            frame_id="root",
-            node_id="loop",
-            started_at=datetime.now(UTC).replace(tzinfo=None),
-            request=request,
-        ),
-    )
-    runtime_state.defer_ready_task(StartTask(frame_id="root", node_id="start"))
-    scheduler = MagicMock()
-    worker_pool = MagicMock()
-
-    def assert_tasks_are_tracked_before_workers_start() -> None:
-        assert runtime_state.ready_queue.qsize() == 0
-        assert scheduler.track_unfinished.call_args_list == [
-            call("loop"),
-            call("start"),
-        ]
-
-    worker_pool.start.side_effect = assert_tasks_are_tracked_before_workers_start
-    frame_registry = MagicMock()
-    frame_registry.__getitem__.return_value.scheduler = scheduler
-    engine = object.__new__(Engine)
-    engine._runtime_state = runtime_state
-    engine._frame_registry = frame_registry
-    engine._worker_pool = worker_pool
-    engine._dispatcher = MagicMock()
-
-    engine._start_execution(resume=True)
-
-    assert runtime_state.ready_queue.qsize() == 1
-    worker_pool.start.assert_called_once_with()
-    engine._dispatcher.start.assert_called_once_with()
 
 
 def test_loop_frame_restore_copies_parent_variable_pool() -> None:

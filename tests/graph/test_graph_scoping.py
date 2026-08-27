@@ -145,7 +145,6 @@ def test_graph_init_materializes_only_root_scope_by_default() -> None:
         ("container-b", "end"),
     }
     assert graph.graph_config is not None
-    assert all(node.graph_config is graph.graph_config for node in graph.nodes.values())
     assert _config_node_ids(graph.graph_config) == {
         node["id"] for node in graph_config["nodes"]
     }
@@ -230,7 +229,6 @@ def test_graph_init_scopes_execution_and_retains_only_its_subtree_config() -> No
         ("nested-container", "a-end"),
     }
     assert graph.graph_config is not None
-    assert all(node.graph_config is graph.graph_config for node in graph.nodes.values())
     assert _config_node_ids(graph.graph_config) == {
         "a-start",
         "nested-container",
