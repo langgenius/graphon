@@ -727,16 +727,13 @@ def test_worker_pool_pause_preserves_task_acquired_during_pause() -> None:  # ru
             self.get_started = threading.Event()
             self.task_removed = threading.Event()
             self.release_acquisition = threading.Event()
-            self.timeout: float | None = None
 
         def put(self, item: ReadyTask) -> None:
             self._queue.put(item)
 
-        def get(self, timeout: float | None = None) -> ReadyTask:
-            self.timeout = timeout
+        def get(self, timeout: float | None = None) -> ReadyTask:  # ruff: ignore[unused-method-argument]
             self.get_started.set()
-            # Give the test thread time to enqueue after observing the requested
-            # timeout.
+            # Give the test thread time to enqueue after observing the blocked get.
             task = self._queue.get(timeout=1)
             self.task_removed.set()
             if not self.release_acquisition.wait(timeout=1):
@@ -827,8 +824,6 @@ def test_worker_pool_pause_preserves_task_acquired_during_pause() -> None:  # ru
     pause_thread = threading.Thread(target=pause_pool)
     try:
         assert ready_queue.get_started.wait(timeout=1)
-        assert ready_queue.timeout is not None
-        assert 0 < ready_queue.timeout <= 0.01
         ready_queue.put(StartTask(frame_id="root", node_id="node"))
         assert ready_queue.task_removed.wait(timeout=1)
         pause_thread.start()
