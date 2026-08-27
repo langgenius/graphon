@@ -720,6 +720,32 @@ def test_worker_pool_pause_does_not_stop_worker_with_current_task() -> None:
     assert idle_worker.stopped is True
 
 
+@pytest.mark.parametrize("action", ["pause", "stop"])
+def test_worker_pool_disables_task_acquisition_before_waiting_for_workers(
+    action: str,
+) -> None:
+    task_acquisition_enabled = threading.Event()
+    task_acquisition_enabled.set()
+    task_acquisition_lock = MagicMock()
+
+    def assert_task_acquisition_disabled() -> None:
+        assert not task_acquisition_enabled.is_set()
+
+    task_acquisition_lock.__enter__.side_effect = assert_task_acquisition_disabled
+    pool = object.__new__(WorkerPool)
+    pool._lock = cast(Any, threading.Lock())
+    pool._task_acquisition_lock = cast(Any, task_acquisition_lock)
+    pool._task_acquisition_enabled = task_acquisition_enabled
+    pool._ready_queue = MagicMock()
+    pool._ready_queue.take_all.return_value = []
+    pool._workers = []
+
+    getattr(pool, action)()
+
+    assert not task_acquisition_enabled.is_set()
+    task_acquisition_lock.__enter__.assert_called_once_with()
+
+
 def test_worker_pool_pause_preserves_task_acquired_during_pause() -> None:  # ruff: ignore[complex-structure]
     class BlockingReadyQueue:
         def __init__(self) -> None:

@@ -73,16 +73,16 @@ class WorkerPool:
     def stop(self) -> None:
         """Stop all workers in the pool."""
         with self._lock:
-            with self._task_acquisition_lock:
-                self._task_acquisition_enabled.clear()
+            self._task_acquisition_enabled.clear()
             worker_count = len(self._workers)
 
             if worker_count > 0:
                 logger.debug("Stopping worker pool: %d workers", worker_count)
 
             # Stop all workers
-            for worker in self._workers:
-                worker.stop()
+            with self._task_acquisition_lock:
+                for worker in self._workers:
+                    worker.stop()
 
             # Wait for workers to finish
             for worker in self._workers:
@@ -103,8 +103,8 @@ class WorkerPool:
 
         """
         with self._lock:
+            self._task_acquisition_enabled.clear()
             with self._task_acquisition_lock:
-                self._task_acquisition_enabled.clear()
                 pending_tasks = self._ready_queue.take_all()
                 for worker in self._workers:
                     if not worker.has_current_task:
