@@ -38,6 +38,7 @@ issues = 'https://github.com/langgenius/graphon/issues'
 [dependency-groups]
 dev = [
     'pytest',
+    'pytest-benchmark',
     'pytest-cov',
     'pytest-mock',
     'pytest-xdist',
@@ -95,5 +96,5 @@ python-platform = 'linux'
 
 [tool.pytest]
 minversion = '9.0'
-addopts = ['-n', 'auto']
+addopts = ['--benchmark-disable', '-n', 'auto']
 testpaths = ['tests']
