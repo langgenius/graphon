@@ -13,9 +13,9 @@ from graphon.nodes.question_classifier import (
     QuestionClassifierNodeDependencies,
 )
 from graphon.nodes.question_classifier.question_classifier_node import llm_utils
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.runtime_state import RuntimeState
 
-from ...helpers import build_graph_init_params
+from ...helpers import build_init_params
 
 
 def _build_question_classifier_dependencies(
@@ -75,10 +75,10 @@ def _build_question_classifier_node(
     return QuestionClassifierNode(
         node_id="classifier",
         data=node_data,
-        graph_init_params=build_graph_init_params(
+        init_params=build_init_params(
             graph_config={"nodes": [], "edges": []},
         ),
-        graph_runtime_state=RuntimeState(
+        runtime_state=RuntimeState(
             workflow_id="workflow",
             variable_pool=variable_pool,
             start_at=0.0,
@@ -135,10 +135,10 @@ def test_question_classifier_constructor_accepts_dependency_bundle(
     node = QuestionClassifierNode(
         node_id="classifier",
         data=node_data,
-        graph_init_params=build_graph_init_params(
+        init_params=build_init_params(
             graph_config={"nodes": [], "edges": []},
         ),
-        graph_runtime_state=RuntimeState(
+        runtime_state=RuntimeState(
             workflow_id="workflow",
             variable_pool=variable_pool,
             start_at=0.0,
@@ -206,10 +206,10 @@ def test_question_classifier_constructor_rejects_mixed_dependency_inputs() -> No
         QuestionClassifierNode(
             node_id="classifier",
             data=node_data,
-            graph_init_params=build_graph_init_params(
+            init_params=build_init_params(
                 graph_config={"nodes": [], "edges": []},
             ),
-            graph_runtime_state=RuntimeState(
+            runtime_state=RuntimeState(
                 workflow_id="workflow",
                 variable_pool=variable_pool,
                 start_at=0.0,

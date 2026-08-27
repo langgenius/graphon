@@ -80,7 +80,7 @@ class Worker(threading.Thread):
             ready_queue: Ready queue containing node IDs ready for execution
             dispatch_queue: Queue for pushing task-scoped execution results.
             frame_registry: Registry containing frame-local graphs to execute
-            layers: Graph engine layers for node execution hooks
+            layers: Engine layers for node execution hooks
             worker_id: Unique identifier for this worker
             execution_context: Optional execution context for context preservation
 

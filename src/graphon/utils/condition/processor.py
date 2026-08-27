@@ -6,7 +6,7 @@ from typing_extensions import TypeIs
 
 from graphon.file import file_manager
 from graphon.file.enums import FileAttribute
-from graphon.runtime.graph_runtime_state_protocol import ReadOnlyVariablePool
+from graphon.runtime.runtime_state_protocol import ReadOnlyVariablePool
 from graphon.variables.segments import (
     ArrayBooleanSegment,
     ArrayFileSegment,

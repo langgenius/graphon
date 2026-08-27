@@ -17,10 +17,10 @@ from graphon.nodes.human_input.entities import (
     PauseRequested,
 )
 from graphon.nodes.human_input.human_input_node import HumanInputNode
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.variables.segments import StringSegment
 
-from ...helpers import build_graph_init_params, build_variable_pool
+from ...helpers import build_init_params, build_variable_pool
 
 
 def _build_node(
@@ -35,11 +35,11 @@ def _build_node(
     node = HumanInputNode(
         node_id="human-node",
         data=HumanInputNodeData(title="Collect Input"),
-        graph_init_params=build_graph_init_params(
+        init_params=build_init_params(
             graph_config={"nodes": [], "edges": []},
             run_context=run_context,
         ),
-        graph_runtime_state=RuntimeState(
+        runtime_state=RuntimeState(
             workflow_id="workflow",
             variable_pool=build_variable_pool(),
             start_at=perf_counter(),

@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, Protocol
 
 from graphon.engine_events.base import EngineEvent
 from graphon.graph.graph import Graph
-from graphon.runtime.graph_runtime_state_protocol import ReadOnlyGraphRuntimeState
-from graphon.runtime.read_only_wrappers import ReadOnlyGraphRuntimeStateWrapper
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
+from graphon.runtime.runtime_state_protocol import ReadOnlyRuntimeState
 
 if TYPE_CHECKING:
     from graphon.engine.engine import Engine
@@ -18,14 +18,14 @@ class EngineEventFilterContext:
     """Run-scoped context available to engine event filters."""
 
     graph: Graph
-    runtime_state: ReadOnlyGraphRuntimeState
+    runtime_state: ReadOnlyRuntimeState
 
     @classmethod
     def from_engine(cls, engine: Engine) -> EngineEventFilterContext:
         return cls(
             graph=engine.graph,
-            runtime_state=ReadOnlyGraphRuntimeStateWrapper(
-                engine.graph_runtime_state,
+            runtime_state=ReadOnlyRuntimeStateWrapper(
+                engine.runtime_state,
             ),
         )
 

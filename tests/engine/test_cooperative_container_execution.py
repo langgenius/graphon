@@ -45,7 +45,7 @@ from graphon.nodes.container_effects import (
 )
 from graphon.runtime.container_state import create_container_run_state
 from graphon.runtime.execution import GraphExecution
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 
 
@@ -53,15 +53,15 @@ def _execution_frame(
     *,
     frame_id: str,
     graph: Graph,
-    graph_runtime_state: RuntimeState,
+    runtime_state: RuntimeState,
 ) -> ExecutionFrame:
-    scheduler = Scheduler(graph, graph_runtime_state, frame_id)
+    scheduler = Scheduler(graph, runtime_state, frame_id)
     return ExecutionFrame(
         frame_id=frame_id,
         graph=graph,
-        state=graph_runtime_state,
+        state=runtime_state,
         scheduler=scheduler,
-        failure_handler=NodeFailureHandler(graph, graph_runtime_state.graph_execution),
+        failure_handler=NodeFailureHandler(graph, runtime_state.graph_execution),
     )
 
 
@@ -278,7 +278,7 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
         _execution_frame(
             frame_id="root",
             graph=graph,
-            graph_runtime_state=runtime_state,
+            runtime_state=runtime_state,
         ),
     )
     layer = _RecordingLayer()
@@ -376,14 +376,14 @@ def test_worker_reports_resume_failure_on_suspended_invocation_frame() -> None:
         _execution_frame(
             frame_id="root",
             graph=parent_graph,
-            graph_runtime_state=runtime_state,
+            runtime_state=runtime_state,
         ),
     )
     frame_registry.register(
         _execution_frame(
             frame_id="parent-frame",
             graph=parent_graph,
-            graph_runtime_state=runtime_state,
+            runtime_state=runtime_state,
         ),
     )
     started_at = datetime.now(UTC).replace(tzinfo=None)

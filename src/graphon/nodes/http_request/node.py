@@ -6,7 +6,6 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, assert_never, cast, override
 
-from graphon.entities.graph_init_params import InitParams
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.file.enums import FileTransferMethod
 from graphon.file.models import File
@@ -21,7 +20,8 @@ from graphon.nodes.protocols import (
     FileReferenceFactoryProtocol,
     ToolFileManagerProtocol,
 )
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.init_params import InitParams
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.variables.segments import ArrayFileSegment
 
 from .config import build_http_request_config, resolve_http_request_config
@@ -57,8 +57,8 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
         node_id: str,
         data: HttpRequestNodeData,
         *,
-        graph_init_params: InitParams,
-        graph_runtime_state: RuntimeState,
+        init_params: InitParams,
+        runtime_state: RuntimeState,
         http_request_config: HttpRequestNodeConfig,
         dependencies: HttpRequestNodeDependencies | None = None,
         http_client: HttpClientProtocol | None = None,
@@ -69,8 +69,8 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
         super().__init__(
             node_id=node_id,
             data=data,
-            graph_init_params=graph_init_params,
-            graph_runtime_state=graph_runtime_state,
+            init_params=init_params,
+            runtime_state=runtime_state,
         )
         resolved_dependencies = self._resolve_dependencies(
             dependencies=dependencies,
@@ -190,10 +190,10 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
             http_executor = Executor(
                 node_data=self.node_data,
                 timeout=self._get_request_timeout(self.node_data),
-                variable_pool=self.graph_runtime_state.variable_pool,
+                variable_pool=self.runtime_state.variable_pool,
                 http_request_config=self._http_request_config,
                 # Must be 0 to disable executor-level retries,
-                # as the graph engine handles them.
+                # as the engine handles them.
                 # This is critical to prevent nested retries.
                 max_retries=0,
                 ssl_verify=self.node_data.ssl_verify,

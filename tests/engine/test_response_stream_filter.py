@@ -27,13 +27,13 @@ from graphon.nodes.base.template import (
     VariableSegment,
 )
 from graphon.runtime.execution import ROOT_FRAME_ID
-from graphon.runtime.graph_runtime_state import (
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
+from graphon.runtime.runtime_state import (
     EdgeProtocol,
     GraphProtocol,
     NodeProtocol,
     RuntimeState,
 )
-from graphon.runtime.read_only_wrappers import ReadOnlyGraphRuntimeStateWrapper
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import StringSegment
 
@@ -154,7 +154,7 @@ def _context(
     state.attach_graph(cast(Any, graph))
     return EngineEventFilterContext(
         graph=cast(Any, graph),
-        runtime_state=ReadOnlyGraphRuntimeStateWrapper(state),
+        runtime_state=ReadOnlyRuntimeStateWrapper(state),
     )
 
 

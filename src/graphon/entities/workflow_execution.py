@@ -1,6 +1,6 @@
 """Domain entities for workflow execution.
 
-Models describe graph runtime state and avoid infrastructure-specific details.
+Models describe runtime state and avoid infrastructure-specific details.
 """
 
 from __future__ import annotations

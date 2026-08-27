@@ -19,7 +19,7 @@ def test_variable_alias_still_validates_in_event_models() -> None:
     }
 
     node_event = VariableUpdatedEvent.model_validate(payload)
-    graph_event = NodeRunVariableUpdatedEvent.model_validate({
+    engine_event = NodeRunVariableUpdatedEvent.model_validate({
         **payload,
         "id": "evt-1",
         "node_id": "start",
@@ -30,14 +30,14 @@ def test_variable_alias_still_validates_in_event_models() -> None:
     })
 
     assert node_event.variable.value == "hello"
-    assert graph_event.variable.selector == ["start", "greeting"]
+    assert engine_event.variable.selector == ["start", "greeting"]
 
 
 def test_pause_reason_alias_still_validates_in_event_models() -> None:
     payload = {"reason": {"TYPE": "scheduled_pause", "message": "Hold on"}}
 
     node_event = PauseRequestedEvent.model_validate(payload)
-    graph_event = NodeRunPauseRequestedEvent.model_validate({
+    engine_event = NodeRunPauseRequestedEvent.model_validate({
         **payload,
         "id": "evt-2",
         "node_id": "start",
@@ -48,6 +48,6 @@ def test_pause_reason_alias_still_validates_in_event_models() -> None:
     })
 
     assert isinstance(node_event.reason, SchedulingPause)
-    assert isinstance(graph_event.reason, SchedulingPause)
+    assert isinstance(engine_event.reason, SchedulingPause)
     assert node_event.reason.message == "Hold on"
-    assert graph_event.reason.message == "Hold on"
+    assert engine_event.reason.message == "Hold on"

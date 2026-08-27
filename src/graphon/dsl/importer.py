@@ -13,12 +13,12 @@ from pydantic import ValidationError
 from graphon.engine import Engine
 from graphon.engine.command import CommandChannel
 from graphon.engine.container_handler import ContainerHandlerFactory
-from graphon.entities.graph_init_params import InitParams
 from graphon.enums import BuiltinNodeTypes
 from graphon.graph.graph import Graph
 from graphon.graph.scoping import resolve_container_id
 from graphon.graph.validation import GraphValidationError
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.init_params import InitParams
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 
 from .entities import (
@@ -128,13 +128,13 @@ def loads(
         run_context=run_context or {},
         start_inputs=start_inputs or {},
     )
-    graph_init_params = InitParams(
+    init_params = InitParams(
         workflow_id=workflow_id,
         graph_config=graph_config,
         run_context=run_context or {},
         call_depth=0,
     )
-    graph_runtime_state = RuntimeState(
+    runtime_state = RuntimeState(
         variable_pool=variable_pool,
         start_at=time.time(),
         workflow_id=workflow_id,
@@ -142,8 +142,8 @@ def loads(
     parsed_credentials = _parse_credentials(credentials)
     node_factory = SlimDslNodeFactory(
         graph_config=graph_config,
-        graph_init_params=graph_init_params,
-        graph_runtime_state=graph_runtime_state,
+        init_params=init_params,
+        runtime_state=runtime_state,
         credentials=parsed_credentials,
         dependencies=list(plan.dependencies),
     )
@@ -172,7 +172,7 @@ def loads(
 
     return Engine(
         graph=graph,
-        graph_runtime_state=graph_runtime_state,
+        runtime_state=runtime_state,
         command_channel=command_channel,
         workers=workers,
         container_handler_factories=container_handler_factories,

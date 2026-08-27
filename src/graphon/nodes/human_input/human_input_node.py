@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Generator, Mapping, Sequence
 from typing import Any, override
 
-from graphon.entities.graph_init_params import InitParams
 from graphon.entities.pause_reason import HitlRequired
 from graphon.enums import (
     BuiltinNodeTypes,
@@ -13,7 +12,8 @@ from graphon.enums import (
 from graphon.node_events.base import NodeEventPayload, NodeRunResult
 from graphon.node_events.node import PauseRequestedEvent, StreamCompletedEvent
 from graphon.nodes.base.node import Node
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.init_params import InitParams
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.variables.segments import Segment
 
 from .entities import (
@@ -42,15 +42,15 @@ class HumanInputNode(Node[HumanInputNodeData]):
         node_id: str,
         data: HumanInputNodeData,
         *,
-        graph_init_params: InitParams,
-        graph_runtime_state: RuntimeState,
+        init_params: InitParams,
+        runtime_state: RuntimeState,
         hitl_callback: HITLCallback,
     ) -> None:
         super().__init__(
             node_id=node_id,
             data=data,
-            graph_init_params=graph_init_params,
-            graph_runtime_state=graph_runtime_state,
+            init_params=init_params,
+            runtime_state=runtime_state,
         )
         self._hitl_callback = hitl_callback
 
@@ -66,7 +66,7 @@ class HumanInputNode(Node[HumanInputNodeData]):
                 workflow_execution_id=self._resolve_workflow_execution_id(),
                 node_id=self.id,
                 node_title=self.title,
-                variable_pool=self.graph_runtime_state.variable_pool,
+                variable_pool=self.runtime_state.variable_pool,
             )
         )
 
@@ -95,7 +95,7 @@ class HumanInputNode(Node[HumanInputNodeData]):
                 raise AssertionError(msg)
 
     def _resolve_workflow_execution_id(self) -> str:
-        variable_pool = self.graph_runtime_state.variable_pool
+        variable_pool = self.runtime_state.variable_pool
         for selector in _WORKFLOW_EXECUTION_ID_SELECTORS:
             segment = variable_pool.get(selector)
             if segment is not None and segment.text:

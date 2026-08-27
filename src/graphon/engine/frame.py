@@ -7,7 +7,7 @@ from typing import Protocol, cast, final
 
 from graphon.graph.graph import Graph, NodeFactory
 from graphon.runtime.container_state import FrameRuntimeData
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 
 from .event.node_failure import NodeFailureHandler
@@ -17,7 +17,7 @@ from .scheduler import Scheduler
 class RebindableNodeFactory(NodeFactory, Protocol):
     def with_runtime_state(
         self,
-        graph_runtime_state: RuntimeState,
+        runtime_state: RuntimeState,
     ) -> RebindableNodeFactory: ...
 
 

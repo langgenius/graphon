@@ -36,9 +36,9 @@ from graphon.nodes.llm.node import LLMNode
 from graphon.nodes.question_classifier.question_classifier_node import (
     QuestionClassifierNode,
 )
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.runtime_state import RuntimeState
 
-from ..helpers import build_graph_init_params, build_variable_pool
+from ..helpers import build_init_params, build_variable_pool
 
 _pytestmark = pytest.mark.usefixtures("_restore_default_http_client")
 
@@ -358,10 +358,10 @@ def test_http_request_node_accepts_public_dependency_bundle() -> None:
             params="",
             body=HttpRequestNodeBody(type="none", data=[]),
         ),
-        graph_init_params=build_graph_init_params(
+        init_params=build_init_params(
             graph_config={"nodes": [], "edges": []},
         ),
-        graph_runtime_state=_build_runtime_state(),
+        runtime_state=_build_runtime_state(),
         http_request_config=build_http_request_config(),
         dependencies=_build_dependencies(),
     )
@@ -385,10 +385,10 @@ def test_http_request_node_rejects_mixed_dependency_inputs() -> None:
                 params="",
                 body=HttpRequestNodeBody(type="none", data=[]),
             ),
-            graph_init_params=build_graph_init_params(
+            init_params=build_init_params(
                 graph_config={"nodes": [], "edges": []},
             ),
-            graph_runtime_state=_build_runtime_state(),
+            runtime_state=_build_runtime_state(),
             http_request_config=build_http_request_config(),
             dependencies=_build_dependencies(),
             file_manager=_FileManager(),
@@ -410,10 +410,10 @@ def test_http_request_node_uses_configured_default_http_client() -> None:
             params="",
             body=HttpRequestNodeBody(type="none", data=[]),
         ),
-        graph_init_params=build_graph_init_params(
+        init_params=build_init_params(
             graph_config={"nodes": [], "edges": []},
         ),
-        graph_runtime_state=_build_runtime_state(),
+        runtime_state=_build_runtime_state(),
         http_request_config=build_http_request_config(),
         tool_file_manager_factory=_ToolFileManager,
         file_manager=_FileManager(),
@@ -430,10 +430,10 @@ def test_document_extractor_node_uses_default_http_client_when_not_injected() ->
             title="Document Extractor",
             variable_selector=["inputs", "file"],
         ),
-        graph_init_params=build_graph_init_params(
+        init_params=build_init_params(
             graph_config={"nodes": [], "edges": []},
         ),
-        graph_runtime_state=_build_runtime_state(),
+        runtime_state=_build_runtime_state(),
     )
 
     assert node.http_client is get_http_client()
@@ -449,10 +449,10 @@ def test_document_extractor_node_uses_configured_default_http_client() -> None:
             title="Document Extractor",
             variable_selector=["inputs", "file"],
         ),
-        graph_init_params=build_graph_init_params(
+        init_params=build_init_params(
             graph_config={"nodes": [], "edges": []},
         ),
-        graph_runtime_state=_build_runtime_state(),
+        runtime_state=_build_runtime_state(),
     )
 
     assert node.http_client is default_http_client

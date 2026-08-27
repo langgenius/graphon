@@ -42,7 +42,6 @@ from graphon.engine_events.node import (
     NodeRunSucceededEvent,
 )
 from graphon.entities.graph_config import NodeConfigDict
-from graphon.entities.graph_init_params import InitParams
 from graphon.entities.pause_reason import HitlRequired
 from graphon.entities.workflow_start_reason import WorkflowStartReason
 from graphon.enums import (
@@ -74,7 +73,8 @@ from graphon.runtime.container_state import (
     LoopRunState,
     create_container_run_state,
 )
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.init_params import InitParams
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import StringSegment
 from tests.helpers.workflow_events import final_outputs
@@ -227,10 +227,10 @@ class _HitlNodeFactory:
 
     def with_runtime_state(
         self,
-        graph_runtime_state: RuntimeState,
+        runtime_state: RuntimeState,
     ) -> _HitlNodeFactory:
         return _HitlNodeFactory(
-            base_factory=self.base_factory.with_runtime_state(graph_runtime_state),
+            base_factory=self.base_factory.with_runtime_state(runtime_state),
             callback=self.callback,
         )
 
@@ -240,8 +240,8 @@ class _HitlNodeFactory:
         return HumanInputNode(
             node_id=node_config["id"],
             data=HumanInputNode.validate_node_data(node_config["data"]),
-            graph_init_params=self.base_factory.graph_init_params,
-            graph_runtime_state=self.base_factory.graph_runtime_state,
+            init_params=self.base_factory.init_params,
+            runtime_state=self.base_factory.runtime_state,
             hitl_callback=self.callback,
         )
 
@@ -266,7 +266,7 @@ def _hitl_engine(
     if graph_config is None:
         msg = "test DSL must contain a graph"
         raise AssertionError(msg)
-    graph_init_params = InitParams(
+    init_params = InitParams(
         workflow_id="workflow",
         graph_config=graph_config,
         run_context={"workflow_execution_id": "workflow-execution"},
@@ -274,8 +274,8 @@ def _hitl_engine(
     )
     base_factory = SlimDslNodeFactory(
         graph_config=graph_config,
-        graph_init_params=graph_init_params,
-        graph_runtime_state=runtime_state,
+        init_params=init_params,
+        runtime_state=runtime_state,
         credentials=DslCredentials(),
         dependencies=list(plan.dependencies),
     )
@@ -289,7 +289,7 @@ def _hitl_engine(
     )
     return Engine(
         graph=graph,
-        graph_runtime_state=runtime_state,
+        runtime_state=runtime_state,
         workers=2,
     )
 
@@ -300,7 +300,7 @@ def _snapshot_after_hitl_pause(
     events = list(engine.run())
     assert any(isinstance(event, NodeRunPauseRequestedEvent) for event in events)
     assert any(isinstance(event, GraphRunPausedEvent) for event in events)
-    return engine.graph_runtime_state.dumps(), events
+    return engine.runtime_state.dumps(), events
 
 
 def _completed_hitl(answer: str) -> Completed:
@@ -326,13 +326,13 @@ def _execution_frame(
     *,
     frame_id: str,
     graph: Graph,
-    graph_runtime_state: RuntimeState,
+    runtime_state: RuntimeState,
 ) -> ExecutionFrame:
     return ExecutionFrame(
         frame_id=frame_id,
         graph=graph,
-        state=graph_runtime_state,
-        scheduler=Scheduler(graph, graph_runtime_state, frame_id),
+        state=runtime_state,
+        scheduler=Scheduler(graph, runtime_state, frame_id),
         failure_handler=cast(Any, SimpleNamespace()),
     )
 
@@ -353,9 +353,9 @@ class _FrameFactory:
 
     def with_runtime_state(
         self,
-        graph_runtime_state: RuntimeState,
+        runtime_state: RuntimeState,
     ) -> _FrameFactory:
-        _ = graph_runtime_state
+        _ = runtime_state
         return self
 
     def create_node(self, node_config: dict[str, object]) -> object:
@@ -400,7 +400,7 @@ def _loop_graph(runtime_state: RuntimeState) -> Graph:
         "break_conditions": [],
         "logical_operator": "and",
     })
-    loop_node.graph_runtime_state = runtime_state
+    loop_node.runtime_state = runtime_state
     loop_node.graph_config = graph_config
     return cast(
         Graph,
@@ -415,19 +415,19 @@ def _loop_graph(runtime_state: RuntimeState) -> Graph:
 
 def _runtime_with_live_resume_task() -> RuntimeState:
     ready_queue = InMemoryReadyQueue()
-    graph_runtime_state = RuntimeState(
+    runtime_state = RuntimeState(
         workflow_id="workflow",
         variable_pool=VariablePool(),
         start_at=1,
         ready_queue=ready_queue,
     )
-    graph = _loop_graph(graph_runtime_state)
+    graph = _loop_graph(runtime_state)
     frame_registry = FrameRegistry()
     frame_registry.register(
         _execution_frame(
             frame_id="root",
             graph=graph,
-            graph_runtime_state=graph_runtime_state,
+            runtime_state=runtime_state,
         ),
     )
     request = LoopFrameRequest(
@@ -439,7 +439,7 @@ def _runtime_with_live_resume_task() -> RuntimeState:
         loop_node_ids=frozenset(),
         index=0,
     )
-    graph_runtime_state.put_container_run(
+    runtime_state.put_container_run(
         create_container_run_state(
             invocation_id="loop-invocation",
             frame_id="root",
@@ -466,7 +466,7 @@ def _runtime_with_live_resume_task() -> RuntimeState:
     resume_task = ready_queue.get(timeout=0.01)
     assert isinstance(resume_task, ResumeTask)
     ready_queue.put(resume_task)
-    return graph_runtime_state
+    return runtime_state
 
 
 def _resume_loop_snapshot(snapshot: str) -> list[NodeEventTask]:
@@ -480,7 +480,7 @@ def _resume_loop_snapshot(snapshot: str) -> list[NodeEventTask]:
         _execution_frame(
             frame_id="root",
             graph=_loop_graph(runtime_state),
-            graph_runtime_state=runtime_state,
+            runtime_state=runtime_state,
         ),
     )
     dispatch_queue: queue.Queue[DispatchTask] = queue.Queue()
@@ -545,7 +545,7 @@ def test_resume_restores_container_runs_before_workers_start() -> None:
     frame_registry = MagicMock()
     frame_registry.__getitem__.return_value.scheduler = scheduler
     engine = object.__new__(Engine)
-    engine._graph_runtime_state = runtime_state
+    engine._runtime_state = runtime_state
     engine._frame_registry = frame_registry
     engine._worker_pool = worker_pool
     engine._dispatcher = MagicMock()
@@ -605,7 +605,7 @@ def test_loop_frame_restore_copies_parent_variable_pool() -> None:
         _execution_frame(
             frame_id="root",
             graph=_loop_graph(restored_state),
-            graph_runtime_state=restored_state,
+            runtime_state=restored_state,
         ),
     )
 
@@ -842,8 +842,8 @@ def test_paused_engine_can_resume_same_instance() -> None:
     )
     assert final_outputs(resumed_events) == {"rounds": 3, "seed": "fixed"}
     assert callback_count == 4
-    assert engine.graph_runtime_state.container_runs() == ()
-    assert engine.graph_runtime_state.container_frames() == ()
+    assert engine.runtime_state.container_runs() == ()
+    assert engine.runtime_state.container_frames() == ()
 
 
 def test_parallel_iteration_hitl_runtime_state_round_trip_preserves_order() -> None:

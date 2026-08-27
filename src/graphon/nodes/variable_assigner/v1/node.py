@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Generator, Mapping, Sequence
 from typing import Any, assert_never, override
 
-from graphon.entities.graph_init_params import InitParams
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.node_events.base import (
     NodeEventPayload,
@@ -16,7 +15,8 @@ from graphon.node_events.node import (
 from graphon.nodes.base.node import Node
 from graphon.nodes.variable_assigner.common import helpers as common_helpers
 from graphon.nodes.variable_assigner.common.exc import VariableOperatorNodeError
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.init_params import InitParams
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.variables.types import SegmentType
 from graphon.variables.variables import (
     ArrayAnyVariable,
@@ -39,14 +39,14 @@ class VariableAssignerNode(Node[VariableAssignerData]):
         node_id: str,
         data: VariableAssignerData,
         *,
-        graph_init_params: InitParams,
-        graph_runtime_state: RuntimeState,
+        init_params: InitParams,
+        runtime_state: RuntimeState,
     ) -> None:
         super().__init__(
             node_id=node_id,
             data=data,
-            graph_init_params=graph_init_params,
-            graph_runtime_state=graph_runtime_state,
+            init_params=init_params,
+            runtime_state=runtime_state,
         )
 
     @override
@@ -91,7 +91,7 @@ class VariableAssignerNode(Node[VariableAssignerData]):
     def _run(self) -> Generator[NodeEventPayload, None, None]:
         assigned_variable_selector = self.node_data.assigned_variable_selector
         # Should be String, Number, Object, ArrayString, ArrayNumber, ArrayObject
-        original_variable = self.graph_runtime_state.variable_pool.get_variable(
+        original_variable = self.runtime_state.variable_pool.get_variable(
             assigned_variable_selector,
         )
         if original_variable is None:
@@ -101,7 +101,7 @@ class VariableAssignerNode(Node[VariableAssignerData]):
         write_mode = self.node_data.write_mode
         match write_mode:
             case WriteMode.OVER_WRITE:
-                income_value = self.graph_runtime_state.variable_pool.get(
+                income_value = self.runtime_state.variable_pool.get(
                     self.node_data.input_variable_selector,
                 )
                 if not income_value:
@@ -112,7 +112,7 @@ class VariableAssignerNode(Node[VariableAssignerData]):
                 )
 
             case WriteMode.APPEND:
-                income_value = self.graph_runtime_state.variable_pool.get(
+                income_value = self.runtime_state.variable_pool.get(
                     self.node_data.input_variable_selector,
                 )
                 if not income_value:

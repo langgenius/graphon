@@ -34,7 +34,7 @@ class WorkerPool:
             ready_queue: Ready queue protocol for nodes ready for execution
             dispatch_queue: Queue for worker dispatch tasks.
             frame_registry: Registry containing frame-local graphs to execute
-            layers: Graph engine layers for node execution hooks
+            layers: Engine layers for node execution hooks
             workers: Fixed number of worker threads to create
             execution_context: Optional execution context for context preservation
 

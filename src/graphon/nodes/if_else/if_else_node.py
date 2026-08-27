@@ -72,7 +72,7 @@ class IfElseNode(Node[IfElseNodeData]):
         for case in self.node_data.iter_cases():
             input_conditions, group_result, final_result = (
                 condition_processor.process_conditions(
-                    variable_pool=self.graph_runtime_state.variable_pool,
+                    variable_pool=self.runtime_state.variable_pool,
                     conditions=case.conditions,
                     operator=case.logical_operator,
                 )

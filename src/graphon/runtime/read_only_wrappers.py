@@ -6,8 +6,8 @@ from copy import deepcopy
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.variables.segments import Segment
 
-from .graph_runtime_state import RuntimeState
-from .graph_runtime_state_protocol import ReadOnlyVariablePool
+from .runtime_state import RuntimeState
+from .runtime_state_protocol import ReadOnlyVariablePool
 from .variable_pool import VariablePool
 
 
@@ -27,7 +27,7 @@ class ReadOnlyVariablePoolWrapper(ReadOnlyVariablePool):
         return self._variable_pool.get_by_prefix(prefix)
 
 
-class ReadOnlyGraphRuntimeStateWrapper:
+class ReadOnlyRuntimeStateWrapper:
     """Expose a defensive, read-only view of ``RuntimeState``."""
 
     def __init__(self, state: RuntimeState) -> None:

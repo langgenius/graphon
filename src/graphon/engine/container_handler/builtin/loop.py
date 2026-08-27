@@ -31,7 +31,7 @@ from graphon.runtime.container_state import (
     LoopRunState,
 )
 from graphon.runtime.execution import ROOT_FRAME_ID
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.utils.condition.processor import ConditionProcessor
 from graphon.variables.segments import SerializableSegment
 

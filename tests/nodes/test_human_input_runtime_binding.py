@@ -10,9 +10,9 @@ from graphon.nodes.human_input.entities import (
     PauseRequested,
 )
 from graphon.nodes.human_input.human_input_node import HumanInputNode
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.runtime_state import RuntimeState
 
-from ..helpers import build_graph_init_params, build_variable_pool
+from ..helpers import build_init_params, build_variable_pool
 
 
 class _RecordingHITLCallback:
@@ -31,11 +31,11 @@ def _build_human_input_node(
     node = HumanInputNode(
         node_id="human-input-node",
         data=HumanInputNodeData(title="Human Input"),
-        graph_init_params=build_graph_init_params(
+        init_params=build_init_params(
             graph_config={"nodes": [], "edges": []},
             run_context={"workflow_execution_id": "workflow-exec-1"},
         ),
-        graph_runtime_state=RuntimeState(
+        runtime_state=RuntimeState(
             workflow_id="workflow",
             variable_pool=build_variable_pool(),
             start_at=perf_counter(),

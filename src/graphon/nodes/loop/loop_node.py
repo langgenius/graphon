@@ -144,7 +144,7 @@ class LoopNode(Node[LoopNodeData]):
                     if not isinstance(loop_variable.value, list):
                         msg = f"Invalid value for loop variable {loop_variable.label}"
                         raise TypeError(msg)
-                    processed_segment = self.graph_runtime_state.variable_pool.get(
+                    processed_segment = self.runtime_state.variable_pool.get(
                         loop_variable.value,
                     )
                 case _:
@@ -159,7 +159,7 @@ class LoopNode(Node[LoopNodeData]):
                 segment=processed_segment,
                 selector=variable_selector,
             )
-            self.graph_runtime_state.variable_pool.add(
+            self.runtime_state.variable_pool.add(
                 variable_selector,
                 variable.value,
             )

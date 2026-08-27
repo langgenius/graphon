@@ -10,7 +10,6 @@ from typing import Any, ClassVar
 
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.entities.graph_config import NodeConfigDict
-from graphon.entities.graph_init_params import InitParams
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType
 from graphon.file.enums import FileType
 from graphon.file.models import File
@@ -67,7 +66,8 @@ from graphon.nodes.variable_assigner.v2.entities import VariableAssignerNodeData
 from graphon.nodes.variable_assigner.v2.node import (
     VariableAssignerNode as VariableAssignerNodeV2,
 )
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.init_params import InitParams
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.template_rendering import Jinja2TemplateRenderer, TemplateRenderError
 
 from .code_runtime import SandboxCodeExecutor
@@ -419,8 +419,8 @@ type _NodeBuilder = Callable[[Any, _NodeBuildRequest], Node]
 @dataclass(slots=True)
 class SlimDslNodeFactory:
     graph_config: Mapping[str, Any]
-    graph_init_params: InitParams
-    graph_runtime_state: RuntimeState
+    init_params: InitParams
+    runtime_state: RuntimeState
     credentials: DslCredentials
     dependencies: list[DslDependency]
     slim_client_config: SlimClientConfig = field(init=False)
@@ -444,9 +444,18 @@ class SlimDslNodeFactory:
 
     def with_runtime_state(
         self,
-        graph_runtime_state: RuntimeState,
+        runtime_state: RuntimeState,
     ) -> SlimDslNodeFactory:
-        return replace(self, graph_runtime_state=graph_runtime_state)
+        """Return a copied factory bound to one execution frame's state.
+
+        Args:
+            runtime_state: State that every node created by the copy must use.
+
+        Returns:
+            An independent factory preserving the current graph and dependencies.
+
+        """
+        return replace(self, runtime_state=runtime_state)
 
     def with_graph_config(
         self,
@@ -456,7 +465,7 @@ class SlimDslNodeFactory:
 
         ``Node.__init__`` invokes ``post_init()`` immediately, so both legacy
         ``factory.graph_config`` access and the canonical
-        ``node.graph_init_params.graph_config`` path must already point at the
+        ``node.init_params.graph_config`` path must already point at the
         scoped config before ``create_node()`` runs. Copying the Pydantic model
         also keeps parent and sibling factories isolated.
 
@@ -470,7 +479,7 @@ class SlimDslNodeFactory:
         return replace(
             self,
             graph_config=graph_config,
-            graph_init_params=self.graph_init_params.model_copy(
+            init_params=self.init_params.model_copy(
                 update={"graph_config": graph_config},
             ),
         )
@@ -572,40 +581,40 @@ class SlimDslNodeFactory:
         return StartNode(
             node_id=request.node_id,
             data=StartNode.validate_node_data(request.data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_end_node(self, request: _NodeBuildRequest) -> EndNode:
         return EndNode(
             node_id=request.node_id,
             data=EndNode.validate_node_data(request.data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_answer_node(self, request: _NodeBuildRequest) -> AnswerNode:
         return AnswerNode(
             node_id=request.node_id,
             data=AnswerNode.validate_node_data(request.data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_if_else_node(self, request: _NodeBuildRequest) -> IfElseNode:
         return IfElseNode(
             node_id=request.node_id,
             data=IfElseNode.validate_node_data(request.data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_iteration_node(self, request: _NodeBuildRequest) -> IterationNode:
         return IterationNode(
             node_id=request.node_id,
             data=IterationNode.validate_node_data(request.data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_iteration_start_node(
@@ -615,32 +624,32 @@ class SlimDslNodeFactory:
         return IterationStartNode(
             node_id=request.node_id,
             data=IterationStartNode.validate_node_data(request.data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_loop_node(self, request: _NodeBuildRequest) -> LoopNode:
         return LoopNode(
             node_id=request.node_id,
             data=LoopNode.validate_node_data(request.data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_loop_start_node(self, request: _NodeBuildRequest) -> LoopStartNode:
         return LoopStartNode(
             node_id=request.node_id,
             data=LoopStartNode.validate_node_data(request.data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_loop_end_node(self, request: _NodeBuildRequest) -> LoopEndNode:
         return LoopEndNode(
             node_id=request.node_id,
             data=LoopEndNode.validate_node_data(request.data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_template_transform_node(
@@ -650,8 +659,8 @@ class SlimDslNodeFactory:
         return TemplateTransformNode(
             node_id=request.node_id,
             data=TemplateTransformNodeData.model_validate(request.data_payload),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
             jinja2_template_renderer=_DefaultJinja2TemplateRenderer(),
         )
 
@@ -659,8 +668,8 @@ class SlimDslNodeFactory:
         return CodeNode(
             node_id=request.node_id,
             data=CodeNodeData.model_validate(request.data_payload),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
             code_executor=SandboxCodeExecutor(self.credentials.code),
             code_limits=_code_limits(self.credentials.code),
         )
@@ -684,8 +693,8 @@ class SlimDslNodeFactory:
         return ToolNode(
             node_id=request.node_id,
             data=tool_data,
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
             tool_file_manager=_UnsupportedToolFileManager(),
             runtime=runtime,
         )
@@ -697,8 +706,8 @@ class SlimDslNodeFactory:
         return HttpRequestNode(
             node_id=request.node_id,
             data=HttpRequestNodeData.model_validate(request.data_payload),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
             http_request_config=build_http_request_config(),
             dependencies=HttpRequestNodeDependencies(
                 tool_file_manager_factory=_TextOnlyHttpResponseFileManager,
@@ -714,8 +723,8 @@ class SlimDslNodeFactory:
         return VariableAggregatorNode(
             node_id=request.node_id,
             data=VariableAggregatorNodeData.model_validate(request.data_payload),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_list_operator_node(
@@ -725,8 +734,8 @@ class SlimDslNodeFactory:
         return ListOperatorNode(
             node_id=request.node_id,
             data=ListOperatorNodeData.model_validate(request.data_payload),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _unsupported_node_error(self, request: _NodeBuildRequest) -> DslError:
@@ -787,14 +796,14 @@ class SlimDslNodeFactory:
             return VariableAssignerNodeV2(
                 node_id=request.node_id,
                 data=data,
-                graph_init_params=self.graph_init_params,
-                graph_runtime_state=self.graph_runtime_state,
+                init_params=self.init_params,
+                runtime_state=self.runtime_state,
             )
         return VariableAssignerNodeV1(
             node_id=request.node_id,
             data=data,
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_question_classifier_node(
@@ -809,8 +818,8 @@ class SlimDslNodeFactory:
         return QuestionClassifierNode(
             node_id=request.node_id,
             data=QuestionClassifierNodeData.model_validate(normalized_data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
             dependencies=QuestionClassifierNodeDependencies(
                 model_instance=model_instance,
                 template_renderer=_DefaultJinja2TemplateRenderer(),
@@ -831,8 +840,8 @@ class SlimDslNodeFactory:
         return ParameterExtractorNode(
             node_id=request.node_id,
             data=ParameterExtractorNodeData.model_validate(normalized_data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
             model_instance=model_instance,
             prompt_message_serializer=_PassthroughPromptMessageSerializer(),
         )
@@ -846,8 +855,8 @@ class SlimDslNodeFactory:
         return LLMNode(
             node_id=request.node_id,
             data=LLMNodeData.model_validate(normalized_data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
             model_instance=model_instance,
             llm_file_saver=_TextOnlyFileSaver(),
             prompt_message_serializer=_PassthroughPromptMessageSerializer(),

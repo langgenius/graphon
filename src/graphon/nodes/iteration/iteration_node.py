@@ -64,7 +64,7 @@ class IterationNode(Node[IterationNodeData]):
     def _run(
         self,
     ) -> Generator[NodeEventPayload | IterationFrameRequest, None, None]:
-        variable = self.graph_runtime_state.variable_pool.get(
+        variable = self.runtime_state.variable_pool.get(
             self.node_data.iterator_selector,
         )
         if variable is None:

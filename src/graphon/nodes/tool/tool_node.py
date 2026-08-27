@@ -5,7 +5,6 @@ from typing import Any, override
 from typing_extensions import TypeIs
 
 from graphon.engine_events.node import NodeRunStartedEvent
-from graphon.entities.graph_init_params import InitParams
 from graphon.enums import (
     BuiltinNodeTypes,
     WorkflowNodeExecutionMetadataKey,
@@ -31,7 +30,8 @@ from graphon.nodes.tool_runtime_entities import (
     ToolRuntimeMessage,
     ToolRuntimeParameter,
 )
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.init_params import InitParams
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import ArrayFileSegment
 from graphon.variables.template_resolution import convert_template
@@ -79,8 +79,8 @@ class ToolNode(Node[ToolNodeData]):
         node_id: str,
         data: ToolNodeData,
         *,
-        graph_init_params: InitParams,
-        graph_runtime_state: RuntimeState,
+        init_params: InitParams,
+        runtime_state: RuntimeState,
         tool_file_manager: ToolFileManagerProtocol,
         # TODO @-LAN: See https://github.com/langgenius/graphon/issues/new/choose.  # ruff:ignore[line-contains-todo]
         # Make `runtime` optional once Graphon provides a default tool runtime
@@ -90,8 +90,8 @@ class ToolNode(Node[ToolNodeData]):
         super().__init__(
             node_id=node_id,
             data=data,
-            graph_init_params=graph_init_params,
-            graph_runtime_state=graph_runtime_state,
+            init_params=init_params,
+            runtime_state=runtime_state,
         )
         self._tool_file_manager = tool_file_manager
         self._runtime = runtime
@@ -127,7 +127,7 @@ class ToolNode(Node[ToolNodeData]):
                 self.node_data.version != "1"
                 or self.node_data.tool_node_version is not None
             ):
-                variable_pool = self.graph_runtime_state.variable_pool
+                variable_pool = self.runtime_state.variable_pool
             tool_runtime = self._get_tool_runtime(
                 variable_pool=variable_pool,
                 node_execution_id=self.execution_id,
@@ -150,12 +150,12 @@ class ToolNode(Node[ToolNodeData]):
         )
         parameters = self._generate_parameters(
             tool_parameters=tool_parameters,
-            variable_pool=self.graph_runtime_state.variable_pool,
+            variable_pool=self.runtime_state.variable_pool,
             node_data=self.node_data,
         )
         parameters_for_log = self._generate_parameters(
             tool_parameters=tool_parameters,
-            variable_pool=self.graph_runtime_state.variable_pool,
+            variable_pool=self.runtime_state.variable_pool,
             node_data=self.node_data,
             for_log=True,
         )

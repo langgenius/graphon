@@ -3,12 +3,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-DIFY_RUN_CONTEXT_KEY = "_dify"
-
 
 class InitParams(BaseModel):
     """InitParams encapsulates the configurations and contextual information
-    that remain constant throughout a single execution of the graph engine.
+    that remain constant throughout a single engine execution.
 
     A single execution is defined as follows: as long as the execution has not reached
     its conclusion, it is considered one execution. For instance, if a workflow is

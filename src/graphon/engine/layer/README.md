@@ -38,4 +38,4 @@ class MetricsLayer(Layer):
 ```
 
 `engine.add_layer()` binds the read-only runtime state before execution, so
-`graph_runtime_state` is always available inside layer hooks.
+`runtime_state` is always available inside layer hooks.

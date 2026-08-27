@@ -147,7 +147,7 @@ def _run_failed_workflow(
 
 def _use_bounded_ready_queue(engine: Engine) -> InMemoryReadyQueue:
     ready_queue = InMemoryReadyQueue(maxsize=1)
-    engine.graph_runtime_state._ready_queue = ready_queue
+    engine.runtime_state._ready_queue = ready_queue
     engine._worker_pool._ready_queue = ready_queue
     return ready_queue
 
@@ -169,7 +169,7 @@ def _run_with_timeout(engine: Engine) -> list[EngineEvent]:
     thread.start()
     completed_in_time = finished.wait(timeout=_ENGINE_TIMEOUT_SECONDS)
     if not completed_in_time:
-        engine.graph_runtime_state.ready_queue.drain()
+        engine.runtime_state.ready_queue.drain()
         engine.request_abort("bounded ready queue test timed out")
         finished.wait(timeout=_ENGINE_TIMEOUT_SECONDS)
     thread.join(timeout=_ENGINE_TIMEOUT_SECONDS)
@@ -259,9 +259,9 @@ def test_resume_replays_tasks_through_a_bounded_ready_queue() -> None:
         workers=1,
     )
     ready_queue = _use_bounded_ready_queue(engine)
-    engine.graph_runtime_state.graph_execution.start()
+    engine.runtime_state.graph_execution.start()
     ready_queue.put(StartTask(frame_id="root", node_id="start"))
-    engine.graph_runtime_state.defer_ready_task(
+    engine.runtime_state.defer_ready_task(
         StartTask(frame_id="root", node_id="answer"),
     )
     errors: list[Exception] = []
@@ -598,7 +598,7 @@ def test_full_loop_graph_persists_variable_assignments_between_rounds() -> None:
         and tuple(event.variable.selector) == ("start", "counter")
     ] == [1, 2]
     assert final_outputs(events) == {"counter": 2}
-    assert engine.graph_runtime_state.variable_pool.get(["local", "output"]) is None
+    assert engine.runtime_state.variable_pool.get(["local", "output"]) is None
 
 
 def test_nested_containers_preserve_external_updates_and_iteration_isolation() -> None:
@@ -1067,7 +1067,7 @@ def test_full_loop_graph_propagates_child_failure() -> None:
     assert failed.steps == 2
     assert failed.metadata["completed_reason"] == "error"
     assert terminal.exceptions_count == 2
-    assert engine.graph_runtime_state.outputs == {}
+    assert engine.runtime_state.outputs == {}
 
 
 @pytest.mark.parametrize(

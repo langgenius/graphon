@@ -55,8 +55,8 @@ from graphon.nodes.variable_assigner.v1.node import (
 from graphon.nodes.variable_assigner.v2.node import (
     VariableAssignerNode as VariableAssignerNodeV2,
 )
-from graphon.runtime.graph_runtime_state import RuntimeState
-from tests.helpers import build_graph_init_params, build_variable_pool
+from graphon.runtime.runtime_state import RuntimeState
+from tests.helpers import build_init_params, build_variable_pool
 
 _OPENAI_PLUGIN_ID = "langgenius/openai:0.3.8@test"
 
@@ -361,10 +361,10 @@ def _dsl_node_factory(
 ) -> node_factory_module.SlimDslNodeFactory:
     return node_factory_module.SlimDslNodeFactory(
         graph_config={"nodes": [], "edges": []},
-        graph_init_params=build_graph_init_params(
+        init_params=build_init_params(
             graph_config={"nodes": [], "edges": []},
         ),
-        graph_runtime_state=RuntimeState(
+        runtime_state=RuntimeState(
             workflow_id="workflow",
             variable_pool=build_variable_pool(variables=variables),
             start_at=0,
@@ -493,12 +493,12 @@ def _parameter_extractor_data() -> dict[str, Any]:
     }
 
 
-def test_slim_dsl_node_factory_rebinds_graph_runtime_state() -> None:
+def test_slim_dsl_node_factory_rebinds_runtime_state() -> None:
     graph_config = {
         "nodes": [{"id": "start", "data": {"type": "start", "variables": []}}],
         "edges": [],
     }
-    graph_init_params = build_graph_init_params(graph_config=graph_config)
+    init_params = build_init_params(graph_config=graph_config)
     original_runtime_state = RuntimeState(
         workflow_id="workflow",
         variable_pool=build_variable_pool(variables=[(["start", "query"], "before")]),
@@ -539,8 +539,8 @@ def test_slim_dsl_node_factory_rebinds_graph_runtime_state() -> None:
     ]
     factory = node_factory_module.SlimDslNodeFactory(
         graph_config=graph_config,
-        graph_init_params=graph_init_params,
-        graph_runtime_state=original_runtime_state,
+        init_params=init_params,
+        runtime_state=original_runtime_state,
         credentials=credentials,
         dependencies=dependencies,
     )
@@ -555,12 +555,12 @@ def test_slim_dsl_node_factory_rebinds_graph_runtime_state() -> None:
 
     assert rebound_factory is not factory
     assert rebound_factory.graph_config is graph_config
-    assert rebound_factory.graph_init_params is graph_init_params
+    assert rebound_factory.init_params is init_params
     assert rebound_factory.credentials is credentials
     assert rebound_factory.dependencies is dependencies
-    assert rebound_factory.graph_runtime_state is rebound_runtime_state
+    assert rebound_factory.runtime_state is rebound_runtime_state
     assert rebound_factory.slim_client_config == factory.slim_client_config
-    assert node.graph_runtime_state is rebound_runtime_state
+    assert node.runtime_state is rebound_runtime_state
 
 
 @pytest.mark.parametrize(
@@ -792,8 +792,8 @@ def test_dify_exported_app_loads_category_one_and_two_nodes(
         "classifier-model",
         "extractor-model",
     ]
-    env_var = engine.graph_runtime_state.variable_pool.get(["env", "api_key"])
-    conversation_var = engine.graph_runtime_state.variable_pool.get([
+    env_var = engine.runtime_state.variable_pool.get(["env", "api_key"])
+    conversation_var = engine.runtime_state.variable_pool.get([
         "conversation",
         "topic",
     ])
@@ -836,7 +836,7 @@ def test_assigner_node_from_dsl_emits_variable_update() -> None:
         _graph_dsl_for_node(_assigner_v2_data()),
         start_inputs={"value": "after"},
     )
-    engine.graph_runtime_state.variable_pool.add(["conversation", "topic"], "before")
+    engine.runtime_state.variable_pool.add(["conversation", "topic"], "before")
     node = engine.graph.nodes["node"]
     node.bind_execution_id("node-run")
 

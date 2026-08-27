@@ -54,7 +54,6 @@ from graphon.engine_events.traversal import (
     GraphEdgeSkippedEvent,
     GraphEdgeTakenEvent,
 )
-from graphon.entities.graph_init_params import InitParams
 from graphon.entities.pause_reason import HitlRequired, SchedulingPause
 from graphon.enums import (
     BuiltinNodeTypes,
@@ -83,7 +82,8 @@ from graphon.runtime.container_state import (
     create_container_run_state,
 )
 from graphon.runtime.execution import GraphExecution
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.init_params import InitParams
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.variables import StringVariable
 
@@ -101,13 +101,13 @@ def _execution_frame(
     *,
     frame_id: str,
     graph: Graph,
-    graph_runtime_state: object | None = None,
+    runtime_state: object | None = None,
     scheduler: object | None = None,
     failure_handler: object | None = None,
     container_id: str = "",
 ) -> ExecutionFrame:
-    if isinstance(graph_runtime_state, MagicMock):
-        graph_runtime_state.has_container_frame.return_value = False
+    if isinstance(runtime_state, MagicMock):
+        runtime_state.has_container_frame.return_value = False
     if scheduler is None:
         resolved_scheduler = MagicMock()
         resolved_scheduler.process_node_success.return_value = ([], [])
@@ -117,7 +117,7 @@ def _execution_frame(
     return ExecutionFrame(
         frame_id=frame_id,
         graph=graph,
-        state=cast(Any, graph_runtime_state or MagicMock()),
+        state=cast(Any, runtime_state or MagicMock()),
         scheduler=cast(Any, resolved_scheduler),
         failure_handler=cast(Any, failure_handler or MagicMock()),
         container_id=container_id,
@@ -264,9 +264,9 @@ class _FrameFactory:
 
     def with_runtime_state(
         self,
-        graph_runtime_state: RuntimeState,
+        runtime_state: RuntimeState,
     ) -> "_FrameFactory":
-        _ = graph_runtime_state
+        _ = runtime_state
         return self
 
     def create_node(self, node_config: dict[str, object]) -> _FrameNode:
@@ -429,21 +429,21 @@ def test_command_processor_directly_handles_builtin_commands() -> None:
         _execution_frame(
             frame_id="root",
             graph=cast(Graph, MagicMock()),
-            graph_runtime_state=SimpleNamespace(variable_pool=variable_pool),
+            runtime_state=SimpleNamespace(variable_pool=variable_pool),
         ),
     )
     frame_registry.register(
         _execution_frame(
             frame_id="nested",
             graph=cast(Graph, MagicMock()),
-            graph_runtime_state=SimpleNamespace(variable_pool=nested_variable_pool),
+            runtime_state=SimpleNamespace(variable_pool=nested_variable_pool),
         ),
     )
     frame_registry.register(
         _execution_frame(
             frame_id="isolated",
             graph=cast(Graph, MagicMock()),
-            graph_runtime_state=SimpleNamespace(variable_pool=isolated_variable_pool),
+            runtime_state=SimpleNamespace(variable_pool=isolated_variable_pool),
         ),
     )
     channel.send_command(
@@ -502,7 +502,7 @@ def test_engine_rejects_invalid_workers_before_mutating_runtime_state(
     with pytest.raises(ValueError, match="workers must be a positive integer"):
         Engine(
             graph=MagicMock(),
-            graph_runtime_state=runtime_state,
+            runtime_state=runtime_state,
             workers=workers,
         )
 
@@ -754,7 +754,7 @@ def test_worker_pool_drain_observes_task_claimed_during_pause() -> None:  # ruff
         _execution_frame(
             frame_id="root",
             graph=cast(Graph, SimpleNamespace(nodes={"node": BlockingNode()})),
-            graph_runtime_state=runtime_state,
+            runtime_state=runtime_state,
         ),
     )
     pool = WorkerPool(
@@ -838,7 +838,7 @@ def test_worker_pool_runs_queued_siblings_with_fixed_workers() -> None:
         _execution_frame(
             frame_id="root",
             graph=cast(Graph, graph),
-            graph_runtime_state=runtime_state,
+            runtime_state=runtime_state,
         ),
     )
     pool = WorkerPool(
@@ -882,7 +882,7 @@ def test_pause_requested_event_defers_current_task_for_resume() -> None:
         deferred_ready_queue=root_runtime_state.deferred_ready_queue,
         graph_execution=graph_execution,
     )
-    graph_init_params = InitParams(
+    init_params = InitParams(
         workflow_id="workflow",
         graph_config={},
         run_context={},
@@ -900,8 +900,8 @@ def test_pause_requested_event_defers_current_task_for_resume() -> None:
             "error_handle_mode": ErrorHandleMode.TERMINATED,
             "flatten_output": False,
         }),
-        graph_init_params=graph_init_params,
-        graph_runtime_state=root_runtime_state,
+        init_params=init_params,
+        runtime_state=root_runtime_state,
     )
     root_graph = Graph(
         root_node=iteration_node,
@@ -913,8 +913,8 @@ def test_pause_requested_event_defers_current_task_for_resume() -> None:
             "type": "human-input",
             "title": "Human",
         }),
-        graph_init_params=graph_init_params,
-        graph_runtime_state=child_runtime_state,
+        init_params=init_params,
+        runtime_state=child_runtime_state,
         hitl_callback=lambda _context: PauseRequested(session_id="unused"),
     )
     child_graph = Graph(
@@ -961,14 +961,14 @@ def test_pause_requested_event_defers_current_task_for_resume() -> None:
         _execution_frame(
             frame_id="root",
             graph=root_graph,
-            graph_runtime_state=root_runtime_state,
+            runtime_state=root_runtime_state,
         ),
     )
     frame_registry.register(
         _execution_frame(
             frame_id="child-frame",
             graph=child_graph,
-            graph_runtime_state=child_runtime_state,
+            runtime_state=child_runtime_state,
             scheduler=scheduler,
         ),
     )
@@ -1033,7 +1033,7 @@ def test_frame_registry_creates_child_frame_with_rebound_runtime() -> None:
     @dataclass
     class RuntimeBoundNode:
         id: str
-        graph_runtime_state: RuntimeState
+        runtime_state: RuntimeState
 
         node_type: ClassVar[NodeType] = BuiltinNodeTypes.START
         execution_type: ClassVar[NodeExecutionType] = NodeExecutionType.ROOT
@@ -1046,9 +1046,9 @@ def test_frame_registry_creates_child_frame_with_rebound_runtime() -> None:
 
         def with_runtime_state(
             self,
-            graph_runtime_state: RuntimeState,
+            runtime_state: RuntimeState,
         ) -> "RuntimeBoundFactory":
-            return RuntimeBoundFactory(graph_runtime_state)
+            return RuntimeBoundFactory(runtime_state)
 
         def with_graph_config(
             self,
@@ -1092,7 +1092,7 @@ def test_frame_registry_creates_child_frame_with_rebound_runtime() -> None:
         _execution_frame(
             frame_id="root",
             graph=root_graph,
-            graph_runtime_state=root_runtime_state,
+            runtime_state=root_runtime_state,
         ),
     )
     child_frame = frame_registry.create_child(
@@ -1105,7 +1105,7 @@ def test_frame_registry_creates_child_frame_with_rebound_runtime() -> None:
 
     assert child_frame.graph is not root_graph
     assert child_frame.graph.nodes["start"] is not root_graph.nodes["start"]
-    assert child_frame.graph.nodes["start"].graph_runtime_state is child_frame.state
+    assert child_frame.graph.nodes["start"].runtime_state is child_frame.state
     assert child_frame.state.ready_queue is root_runtime_state.ready_queue
     assert child_frame.state.graph_execution is graph_execution
 
@@ -1136,7 +1136,7 @@ def test_frame_registry_restores_child_frame() -> None:
         _execution_frame(
             frame_id="root",
             graph=root_graph,
-            graph_runtime_state=root_runtime_state,
+            runtime_state=root_runtime_state,
         ),
     )
     variable_pool = VariablePool()
@@ -1213,7 +1213,7 @@ def test_frame_registry_rejects_frame_state_with_missing_graph_state_ids() -> No
         _execution_frame(
             frame_id="root",
             graph=root_graph,
-            graph_runtime_state=root_runtime_state,
+            runtime_state=root_runtime_state,
         ),
     )
     frame_state = IterationFrameState(
@@ -1277,7 +1277,7 @@ def test_frame_registry_copies_frame_runtime_data_from_state() -> None:
         _execution_frame(
             frame_id="root",
             graph=root_graph,
-            graph_runtime_state=root_runtime_state,
+            runtime_state=root_runtime_state,
         ),
     )
     variable_pool = VariablePool()
@@ -1356,7 +1356,7 @@ def test_worker_executes_node_from_ready_task() -> None:
         _execution_frame(
             frame_id="root",
             graph=cast(Graph, graph),
-            graph_runtime_state=runtime_state,
+            runtime_state=runtime_state,
         ),
     )
     worker = _worker(
@@ -1418,14 +1418,14 @@ def test_worker_resolves_node_from_task_frame() -> None:
         _execution_frame(
             frame_id="root",
             graph=cast(Graph, root_graph),
-            graph_runtime_state=runtime_state,
+            runtime_state=runtime_state,
         ),
     )
     frame_registry.register(
         _execution_frame(
             frame_id="child",
             graph=cast(Graph, child_graph),
-            graph_runtime_state=runtime_state,
+            runtime_state=runtime_state,
         ),
     )
     worker = _worker(
@@ -1493,7 +1493,7 @@ def test_worker_binds_node_execution_id_from_task_frame() -> None:
         _execution_frame(
             frame_id="child",
             graph=cast(Graph, graph),
-            graph_runtime_state=runtime_state,
+            runtime_state=runtime_state,
         ),
     )
     worker = _worker(
@@ -1632,7 +1632,7 @@ def test_engine_terminal_failure_takes_precedence_over_pause() -> None:
     graph_execution.fail(failure)
     engine = object.__new__(Engine)
     engine._graph_execution = graph_execution
-    engine._graph_runtime_state = cast(RuntimeState, SimpleNamespace(outputs={}))
+    engine._runtime_state = cast(RuntimeState, SimpleNamespace(outputs={}))
     engine._event_stream = MagicMock()
 
     with pytest.raises(RuntimeError, match="fatal") as exc_info:
@@ -1653,7 +1653,7 @@ def test_engine_terminal_abort_takes_precedence_over_pause() -> None:
     graph_execution.abort("stop")
     engine = object.__new__(Engine)
     engine._graph_execution = graph_execution
-    engine._graph_runtime_state = cast(RuntimeState, SimpleNamespace(outputs={}))
+    engine._runtime_state = cast(RuntimeState, SimpleNamespace(outputs={}))
     engine._event_stream = MagicMock()
 
     events = list(engine._emit_terminal_events())
@@ -1688,7 +1688,7 @@ def test_resume_rejects_task_for_missing_container_invocation() -> None:
     ready_queue.put(resume_task)
     worker_pool = MagicMock()
     engine = object.__new__(Engine)
-    engine._graph_runtime_state = runtime_state
+    engine._runtime_state = runtime_state
     engine._frame_registry = FrameRegistry()
     engine._worker_pool = worker_pool
     engine._dispatcher = MagicMock()
@@ -1719,7 +1719,7 @@ def test_event_processor_dispatches_task_event_payload() -> None:
         _execution_frame(
             frame_id="root",
             graph=cast(Graph, MagicMock()),
-            graph_runtime_state=runtime_state,
+            runtime_state=runtime_state,
         ),
     )
     handler = _event_processor(
@@ -1761,7 +1761,7 @@ def test_event_processor_stamps_frame_owner_on_node_and_edge_events() -> None:
         _execution_frame(
             frame_id="root",
             graph=cast(Graph, graph),
-            graph_runtime_state=runtime_state,
+            runtime_state=runtime_state,
             scheduler=scheduler,
             container_id="owner",
         ),
@@ -1819,7 +1819,7 @@ def test_loop_exception_preserves_default_outputs() -> None:
         _execution_frame(
             frame_id="root",
             graph=cast(Graph, graph),
-            graph_runtime_state=runtime_state,
+            runtime_state=runtime_state,
         ),
     )
     processor = _event_processor(
@@ -1881,7 +1881,7 @@ def test_parallel_iteration_preserves_aggregate_and_response_order() -> None:  #
         "is_parallel": True,
         "parallel_nums": 2,
     })
-    iteration_node.graph_runtime_state = runtime_state
+    iteration_node.runtime_state = runtime_state
     iteration_node.graph_config = graph_config
     graph = SimpleNamespace(
         nodes={"iteration": iteration_node},
@@ -1893,7 +1893,7 @@ def test_parallel_iteration_preserves_aggregate_and_response_order() -> None:  #
         _execution_frame(
             frame_id="root",
             graph=cast(Graph, graph),
-            graph_runtime_state=runtime_state,
+            runtime_state=runtime_state,
         ),
     )
     event_stream = MagicMock()
@@ -2083,7 +2083,7 @@ def test_iteration_frame_completion_requests_next_index() -> None:
         "is_parallel": True,
         "parallel_nums": 2,
     })
-    iteration_node.graph_runtime_state = runtime_state
+    iteration_node.runtime_state = runtime_state
     iteration_node.graph_config = graph_config
     graph = SimpleNamespace(
         nodes={"iteration": iteration_node},
@@ -2095,7 +2095,7 @@ def test_iteration_frame_completion_requests_next_index() -> None:
         _execution_frame(
             frame_id="root",
             graph=cast(Graph, graph),
-            graph_runtime_state=runtime_state,
+            runtime_state=runtime_state,
         ),
     )
     container_handler = IterationContainerHandler(

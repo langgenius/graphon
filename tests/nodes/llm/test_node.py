@@ -47,9 +47,9 @@ from graphon.nodes.llm import LLMNode, LLMNodeData
 from graphon.nodes.llm.exc import LLMNodeError
 from graphon.nodes.llm.reasoning import split_reasoning
 from graphon.nodes.llm.runtime_protocols import LLMPollingCapableProtocol, LLMProtocol
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.runtime_state import RuntimeState
 
-from ...helpers import build_graph_init_params, build_variable_pool
+from ...helpers import build_init_params, build_variable_pool
 
 
 class _PollingLLM(LLMPollingCapableProtocol):
@@ -162,11 +162,11 @@ def _build_llm_node(
             ],
             "context": {"enabled": False},
         }),
-        graph_init_params=build_graph_init_params(
+        init_params=build_init_params(
             graph_config={"nodes": [], "edges": []},
             run_context=run_context,
         ),
-        graph_runtime_state=RuntimeState(
+        runtime_state=RuntimeState(
             workflow_id="workflow",
             variable_pool=build_variable_pool(variables=prepared_variables),
             start_at=0.0,
@@ -937,7 +937,7 @@ def test_polling_llm_respects_existing_abort_before_start(
         ),
     ])
     node = _build_llm_node(model_instance=model)
-    node.graph_runtime_state.graph_execution.abort("stop")
+    node.runtime_state.graph_execution.abort("stop")
     _stub_simple_prompt(monkeypatch, node)
 
     events = list(node._run())
@@ -1062,7 +1062,7 @@ def test_polling_progress_event_keeps_next_check_when_delay_wins(
     assert event.next_check_at == event.last_checked_at + timedelta(seconds=5)
 
 
-def test_polling_progress_event_dispatches_to_graph_event() -> None:
+def test_polling_progress_event_dispatches_to_engine_event() -> None:
     node = _build_llm_node()
     progress_event = ModelPollingProgressEvent(
         attempt=2,
@@ -1070,10 +1070,10 @@ def test_polling_progress_event_dispatches_to_graph_event() -> None:
         next_check_at=None,
     )
 
-    graph_event = node._dispatch(progress_event)
+    engine_event = node._dispatch(progress_event)
 
-    assert isinstance(graph_event, NodeRunModelPollingProgressEvent)
-    assert graph_event.attempt == 2
+    assert isinstance(engine_event, NodeRunModelPollingProgressEvent)
+    assert engine_event.attempt == 2
 
 
 def _collect_stream_events(
@@ -1310,7 +1310,7 @@ def test_separated_stream_without_think_emits_no_reasoning_events() -> None:
     assert reasoning == []
 
 
-def test_reasoning_event_dispatches_to_graph_event() -> None:
+def test_reasoning_event_dispatches_to_engine_event() -> None:
     node = _build_llm_node()
     reasoning_event = StreamReasoningEvent(
         selector=["other", "reasoning_content"],
@@ -1318,13 +1318,13 @@ def test_reasoning_event_dispatches_to_graph_event() -> None:
         is_final=True,
     )
 
-    graph_event = node._dispatch(reasoning_event)
+    engine_event = node._dispatch(reasoning_event)
 
-    assert isinstance(graph_event, NodeRunReasoningChunkEvent)
-    assert graph_event.node_id == "llm"
-    assert graph_event.selector == ["llm", "reasoning_content"]
-    assert graph_event.chunk == "thinking"
-    assert graph_event.is_final is True
+    assert isinstance(engine_event, NodeRunReasoningChunkEvent)
+    assert engine_event.node_id == "llm"
+    assert engine_event.selector == ["llm", "reasoning_content"]
+    assert engine_event.chunk == "thinking"
+    assert engine_event.is_final is True
 
 
 def test_run_forwards_streaming_reasoning_events(

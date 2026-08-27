@@ -24,8 +24,8 @@ from graphon.nodes.tool_runtime_entities import (
     ToolRuntimeMessage,
     ToolRuntimeParameter,
 )
-from graphon.runtime.graph_runtime_state import RuntimeState
-from tests.helpers.builders import build_graph_init_params, build_variable_pool
+from graphon.runtime.runtime_state import RuntimeState
+from tests.helpers.builders import build_init_params, build_variable_pool
 
 
 def _message_stream(
@@ -143,8 +143,8 @@ def _build_tool_node() -> tuple[ToolNode, _StubToolRuntime, _StubToolFileManager
     node = ToolNode(
         node_id="node-1",
         data=_tool_node_data(),
-        graph_init_params=build_graph_init_params(),
-        graph_runtime_state=RuntimeState(
+        init_params=build_init_params(),
+        runtime_state=RuntimeState(
             workflow_id="workflow",
             variable_pool=build_variable_pool(),
             start_at=time(),
@@ -168,8 +168,8 @@ def _build_run_tool_node(
     node = ToolNode(
         node_id="node-1",
         data=_tool_node_data(tool_node_version=tool_node_version),
-        graph_init_params=build_graph_init_params(),
-        graph_runtime_state=runtime_state,
+        init_params=build_init_params(),
+        runtime_state=runtime_state,
         tool_file_manager=cast(Any, _StubToolFileManager()),
         runtime=cast(Any, runtime),
     )

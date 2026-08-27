@@ -10,7 +10,7 @@ from graphon.engine_events.base import (
     NodeEvent,
 )
 from graphon.nodes.base.node import Node
-from graphon.runtime.graph_runtime_state_protocol import ReadOnlyGraphRuntimeState
+from graphon.runtime.runtime_state_protocol import ReadOnlyRuntimeState
 
 
 class Layer:
@@ -18,7 +18,7 @@ class Layer:
 
     Layers are middleware-like components that can:
     - Observe all events emitted by the Engine
-    - Access the graph runtime state
+    - Access the runtime state
     - Send commands to control execution
 
     Subclasses override only the lifecycle hooks they need. The default hooks
@@ -27,22 +27,28 @@ class Layer:
 
     def __init__(self) -> None:
         """Initialize the layer. Subclasses can override with custom parameters."""
-        self._graph_runtime_state: ReadOnlyGraphRuntimeState | None = None
+        self._runtime_state: ReadOnlyRuntimeState | None = None
         self.command_channel: CommandChannel | None = None
 
     @property
-    def graph_runtime_state(self) -> ReadOnlyGraphRuntimeState:
-        if self._graph_runtime_state is None:
+    def runtime_state(self) -> ReadOnlyRuntimeState:
+        """Return the read-only runtime state bound by ``Engine.add_layer``.
+
+        Raises:
+            RuntimeError: If the layer has not been registered with an engine.
+
+        """
+        if self._runtime_state is None:
             msg = (
                 f"{type(self).__name__} runtime state is not initialized. "
                 "Bind the layer to an Engine before access."
             )
             raise RuntimeError(msg)
-        return self._graph_runtime_state
+        return self._runtime_state
 
     def initialize(
         self,
-        graph_runtime_state: ReadOnlyGraphRuntimeState,
+        runtime_state: ReadOnlyRuntimeState,
         command_channel: CommandChannel,
     ) -> None:
         """Initialize the layer with engine dependencies.
@@ -52,11 +58,11 @@ class Layer:
         Implementations should be idempotent.
 
         Args:
-            graph_runtime_state: Read-only view of the runtime state
+            runtime_state: Read-only view of the runtime state
             command_channel: Channel for sending commands to the engine
 
         """
-        self._graph_runtime_state = graph_runtime_state
+        self._runtime_state = runtime_state
         self.command_channel = command_channel
 
     def on_graph_start(self) -> None:

@@ -9,16 +9,16 @@ import pytest
 
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.entities.graph_config import NodeConfigDict
-from graphon.entities.graph_init_params import InitParams
 from graphon.enums import BuiltinNodeTypes, ErrorStrategy, NodeExecutionType, NodeType
 from graphon.graph.graph import Graph
 from graphon.graph.validation import GraphValidationError
 from graphon.node_events.base import NodeEventPayload, NodeRunResult
 from graphon.nodes.base.node import Node
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.init_params import InitParams
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 
-from ..helpers import build_graph_init_params
+from ..helpers import build_init_params
 
 
 class _TestNodeData(BaseNodeData):
@@ -40,14 +40,14 @@ class _TestNode(Node[_TestNodeData]):
         *,
         node_id: str,
         data: _TestNodeData,
-        graph_init_params: InitParams,
-        graph_runtime_state: RuntimeState,
+        init_params: InitParams,
+        runtime_state: RuntimeState,
     ) -> None:
         super().__init__(
             node_id=node_id,
             data=data,
-            graph_init_params=graph_init_params,
-            graph_runtime_state=graph_runtime_state,
+            init_params=init_params,
+            runtime_state=runtime_state,
         )
 
         node_type_value = self.data.get("type")
@@ -59,7 +59,7 @@ class _TestNode(Node[_TestNodeData]):
 
     def post_init(self) -> None:
         super().post_init()
-        self.post_init_graph_config = self.graph_init_params.graph_config
+        self.post_init_graph_config = self.init_params.graph_config
         self._maybe_override_execution_type()
         self.data = dict(self.node_data.model_dump())
 
@@ -75,8 +75,8 @@ class _TestNode(Node[_TestNodeData]):
 
 @dataclass(slots=True)
 class _SimpleNodeFactory:
-    graph_init_params: InitParams
-    graph_runtime_state: RuntimeState
+    init_params: InitParams
+    runtime_state: RuntimeState
 
     def with_graph_config(
         self,
@@ -85,7 +85,7 @@ class _SimpleNodeFactory:
         """Copy this test factory with scope-correct node initialization params."""
         return replace(
             self,
-            graph_init_params=self.graph_init_params.model_copy(
+            init_params=self.init_params.model_copy(
                 update={"graph_config": graph_config},
             ),
         )
@@ -101,15 +101,15 @@ class _SimpleNodeFactory:
         return _TestNode(
             node_id=str(node_config["id"]),
             data=_TestNode.validate_node_data(node_config["data"]),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
 
 @pytest.fixture
 def graph_init_dependencies() -> tuple[_SimpleNodeFactory, dict[str, object]]:
     graph_config: dict[str, object] = {"edges": [], "nodes": []}
-    init_params = build_graph_init_params(
+    init_params = build_init_params(
         workflow_id="workflow",
         graph_config=graph_config,
     )
@@ -119,8 +119,8 @@ def graph_init_dependencies() -> tuple[_SimpleNodeFactory, dict[str, object]]:
         start_at=time.perf_counter(),
     )
     factory = _SimpleNodeFactory(
-        graph_init_params=init_params,
-        graph_runtime_state=runtime_state,
+        init_params=init_params,
+        runtime_state=runtime_state,
     )
     return factory, graph_config
 

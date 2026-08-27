@@ -62,7 +62,7 @@ from graphon.protocols import (
     PromptMessageSerializerProtocol as PublicPromptMessageSerializerProtocol,
 )
 from graphon.protocols import (
-    ReadOnlyGraphRuntimeState as PublicReadOnlyGraphRuntimeState,
+    ReadOnlyRuntimeState as PublicReadOnlyRuntimeState,
 )
 from graphon.protocols import ReadOnlyVariablePool as PublicReadOnlyVariablePool
 from graphon.protocols import RerankModelRuntime as PublicRerankModelRuntime
@@ -82,8 +82,8 @@ from graphon.protocols import VariableLoader as PublicVariableLoader
 from graphon.protocols import (
     WorkflowFileRuntimeProtocol as PublicWorkflowFileRuntimeProtocol,
 )
-from graphon.runtime.graph_runtime_state_protocol import (
-    ReadOnlyGraphRuntimeState,
+from graphon.runtime.runtime_state_protocol import (
+    ReadOnlyRuntimeState,
     ReadOnlyVariablePool,
 )
 from graphon.variable_loader import VariableLoader
@@ -117,7 +117,7 @@ def test_public_protocol_exports_match_canonical_definitions() -> None:
     assert PublicFileReferenceFactoryProtocol is FileReferenceFactoryProtocol
     assert PublicToolNodeRuntimeProtocol is ToolNodeRuntimeProtocol
     assert PublicReadOnlyVariablePool is ReadOnlyVariablePool
-    assert PublicReadOnlyGraphRuntimeState is ReadOnlyGraphRuntimeState
+    assert PublicReadOnlyRuntimeState is ReadOnlyRuntimeState
     assert PublicVariableLoader is VariableLoader
 
 
@@ -141,7 +141,7 @@ def test_public_protocol_package_exports_are_stable() -> None:
         "PreparedLLMProtocol",
         "PromptMessageMemory",
         "PromptMessageSerializerProtocol",
-        "ReadOnlyGraphRuntimeState",
+        "ReadOnlyRuntimeState",
         "ReadOnlyVariablePool",
         "RerankModelRuntime",
         "RetrieverAttachmentLoaderProtocol",

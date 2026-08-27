@@ -22,8 +22,8 @@ from graphon.engine_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTake
 from graphon.enums import NodeExecutionType, NodeState
 from graphon.nodes.base.template import Template, TextSegment, VariableSegment
 from graphon.runtime.execution import ROOT_FRAME_ID
-from graphon.runtime.graph_runtime_state import GraphProtocol, NodeProtocol
-from graphon.runtime.graph_runtime_state_protocol import ReadOnlyGraphRuntimeState
+from graphon.runtime.runtime_state import GraphProtocol, NodeProtocol
+from graphon.runtime.runtime_state_protocol import ReadOnlyRuntimeState
 
 __all__ = ["ResponseStreamFilter"]
 
@@ -254,7 +254,7 @@ class ResponseStreamFilter:
     def __init__(self, *, pass_unmatched_chunks: bool = False) -> None:
         self._pass_unmatched_chunks = pass_unmatched_chunks
         self._graph: GraphProtocol | None = None
-        self._runtime_state: ReadOnlyGraphRuntimeState | None = None
+        self._runtime_state: ReadOnlyRuntimeState | None = None
         self._pending_state: _ResponseStreamFilterState | None = None
         self._reset_run_state()
 
@@ -594,7 +594,7 @@ class ResponseStreamFilter:
         return self._graph
 
     @property
-    def _bound_runtime_state(self) -> ReadOnlyGraphRuntimeState:
+    def _bound_runtime_state(self) -> ReadOnlyRuntimeState:
         if self._runtime_state is None:
             msg = "ResponseStreamFilter must be initialized before use."
             raise RuntimeError(msg)

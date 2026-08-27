@@ -20,11 +20,11 @@ class ReadOnlyVariablePool(Protocol):
         ...
 
 
-class ReadOnlyGraphRuntimeState(Protocol):
+class ReadOnlyRuntimeState(Protocol):
     """Read-only view of RuntimeState for layers.
 
     This protocol defines a read-only interface that prevents layers from
-    modifying the graph runtime state while still allowing observation.
+    modifying runtime state while still allowing observation.
     All methods return defensive copies to ensure immutability.
     """
 

@@ -15,7 +15,7 @@ from graphon.runtime.container_state import (
     FrameRuntimeData,
     create_container_run_state,
 )
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 
 

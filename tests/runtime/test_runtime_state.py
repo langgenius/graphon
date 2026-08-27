@@ -30,9 +30,9 @@ from graphon.runtime.container_state import (
     IterationRunState,
 )
 from graphon.runtime.execution import ROOT_FRAME_ID, GraphExecution
-from graphon.runtime.graph_runtime_state import RuntimeState
-from graphon.runtime.read_only_wrappers import ReadOnlyGraphRuntimeStateWrapper
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.ready_queue import ReadyQueue
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import ArrayFileSegment, FileSegment
 from graphon.variables.variables import StringVariable
@@ -145,7 +145,7 @@ def test_attach_graph_rejects_saved_state_missing_current_graph_entries(
         state.attach_graph(graph)
 
 
-class TestGraphRuntimeState:  # ruff:ignore[too-many-public-methods]
+class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
     def test_execution_context_defaults_to_empty_context(self) -> None:
         state = RuntimeState(
             workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
@@ -593,7 +593,7 @@ class TestGraphRuntimeState:  # ruff:ignore[too-many-public-methods]
         state = RuntimeState(
             workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
         )
-        wrapper = ReadOnlyGraphRuntimeStateWrapper(state)
+        wrapper = ReadOnlyRuntimeStateWrapper(state)
 
         assert wrapper.ready_queue_size == 0
         assert wrapper.exceptions_count == 0
@@ -608,7 +608,7 @@ class TestGraphRuntimeState:  # ruff:ignore[too-many-public-methods]
         state.set_output("result", {"success": True})
         state.ready_queue.put(StartTask(frame_id="root", node_id="node-1"))
 
-        wrapper = ReadOnlyGraphRuntimeStateWrapper(state)
+        wrapper = ReadOnlyRuntimeStateWrapper(state)
 
         wrapper_snapshot = json.loads(wrapper.dumps())
         state_snapshot = json.loads(state.dumps())

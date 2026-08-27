@@ -78,7 +78,7 @@ class _GraphStateSnapshotV1(BaseModel):
     edges: dict[str, NodeState]
 
 
-class _GraphRuntimeStateSnapshotV1(BaseModel):
+class _RuntimeStateSnapshotV1(BaseModel):
     """Runtime snapshot produced before frame-aware execution."""
 
     model_config = ConfigDict(frozen=True)
@@ -96,7 +96,7 @@ class _GraphRuntimeStateSnapshotV1(BaseModel):
     graph_state: _GraphStateSnapshotV1
 
 
-class _GraphRuntimeStateSnapshot(BaseModel):
+class _RuntimeStateSnapshot(BaseModel):
     """Validated serialized runtime state snapshot."""
 
     model_config = ConfigDict(frozen=True)
@@ -153,10 +153,10 @@ def _normalize_v2_snapshot(value: object) -> object:
     return normalized
 
 
-_GRAPH_RUNTIME_STATE_SNAPSHOT_ADAPTER = TypeAdapter(
+_RUNTIME_STATE_SNAPSHOT_ADAPTER = TypeAdapter(
     Annotated[
         Annotated[
-            _GraphRuntimeStateSnapshotV1 | _GraphRuntimeStateSnapshot,
+            _RuntimeStateSnapshotV1 | _RuntimeStateSnapshot,
             Field(discriminator="version"),
         ],
         BeforeValidator(_normalize_v2_snapshot),
@@ -723,7 +723,7 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
             graph_edge_states = {
                 edge_id: edge.state for edge_id, edge in self._graph.edges.items()
             }
-        return _GraphRuntimeStateSnapshot(
+        return _RuntimeStateSnapshot(
             version="3.0",
             start_at=self._start_at,
             node_run_steps=self._node_run_steps,
@@ -747,12 +747,12 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         ready_queue_factory: Callable[[], ReadyQueue] = _new_ready_queue,
     ) -> RuntimeState:
         """Restore runtime state from a serialized snapshot."""
-        snapshot = _GRAPH_RUNTIME_STATE_SNAPSHOT_ADAPTER.validate_json(data)
+        snapshot = _RUNTIME_STATE_SNAPSHOT_ADAPTER.validate_json(data)
 
         ready_queue = ready_queue_factory()
         ready_queue.loads(snapshot.ready_queue)
         deferred_ready_queue = ready_queue_factory()
-        if isinstance(snapshot, _GraphRuntimeStateSnapshotV1):
+        if isinstance(snapshot, _RuntimeStateSnapshotV1):
             from graphon.engine.ready_queue import (  # ruff:ignore[import-outside-top-level]
                 StartTask,
             )
@@ -795,7 +795,7 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         # this compatibility rule at the deserialization boundary rather than
         # weakening restore_graph_state() for explicit callers.
         if graph_node_states or graph_edge_states:
-            if isinstance(snapshot, _GraphRuntimeStateSnapshotV1):
+            if isinstance(snapshot, _RuntimeStateSnapshotV1):
                 state._legacy_snapshot_version = "1.0"
             elif snapshot.compatibility_marker is _V2_SNAPSHOT_MARKER:
                 state._legacy_snapshot_version = "2.0"

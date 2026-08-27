@@ -7,7 +7,7 @@ from graphon.engine_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTake
 from graphon.enums import NodeExecutionType, NodeState
 from graphon.graph.edge import Edge
 from graphon.graph.graph import Graph
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.runtime_state import RuntimeState
 
 from .ready_queue import ReadyTask, StartTask
 

@@ -11,9 +11,9 @@ from graphon.engine_events.node import NodeRunSucceededEvent
 from graphon.enums import WorkflowNodeExecutionStatus
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.if_else.if_else_node import IfElseNode
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.runtime_state import RuntimeState
 
-from ...helpers import build_graph_init_params, build_variable_pool
+from ...helpers import build_init_params, build_variable_pool
 
 
 def _condition(
@@ -211,10 +211,10 @@ def _run_if_else_node(
     node = IfElseNode(
         node_id="if-node",
         data=IfElseNode.validate_node_data(data),
-        graph_init_params=build_graph_init_params(
+        init_params=build_init_params(
             graph_config={"nodes": [], "edges": []},
         ),
-        graph_runtime_state=runtime_state,
+        runtime_state=runtime_state,
     )
     node.bind_execution_id("if-run")
 

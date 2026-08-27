@@ -38,7 +38,6 @@ from graphon.engine_events.node import (
 )
 from graphon.entities.base_node_data import BaseNodeData, RetryConfig
 from graphon.entities.graph_config import NodeConfigDict, NodeConfigDictAdapter
-from graphon.entities.graph_init_params import InitParams
 from graphon.enums import (
     ErrorStrategy,
     NodeExecutionType,
@@ -75,7 +74,8 @@ from graphon.node_events.node import (
     VariableUpdatedEvent,
 )
 from graphon.nodes.container_effects import ContainerAwaitRequest, ContainerRunResult
-from graphon.runtime.graph_runtime_state import RuntimeState
+from graphon.runtime.init_params import InitParams
+from graphon.runtime.runtime_state import RuntimeState
 
 _MISSING_RUN_CONTEXT_VALUE = object()
 
@@ -336,8 +336,9 @@ class _NodeRuntimeMixin[NodeDataT: BaseNodeData]:
         return
 
     @property
-    def graph_init_params(self: Node[NodeDataT]) -> InitParams:
-        return self._graph_init_params
+    def init_params(self: Node[NodeDataT]) -> InitParams:
+        """Return the immutable inputs bound during node construction."""
+        return self._init_params
 
     @property
     def run_context(self: Node[NodeDataT]) -> Mapping[str, Any]:
@@ -593,20 +594,20 @@ class Node[NodeDataT: BaseNodeData](
         node_id: str,
         data: NodeDataT,
         *,
-        graph_init_params: InitParams,
-        graph_runtime_state: RuntimeState,
+        init_params: InitParams,
+        runtime_state: RuntimeState,
     ) -> None:
         if not node_id:
             msg = "node_id is required"
             raise ValueError(msg)
 
-        self._graph_init_params = graph_init_params
-        self._run_context = MappingProxyType(dict(graph_init_params.run_context))
+        self._init_params = init_params
+        self._run_context = MappingProxyType(dict(init_params.run_context))
         self.id = node_id
-        self.workflow_id = graph_init_params.workflow_id
-        self.graph_config = graph_init_params.graph_config
-        self.workflow_call_depth = graph_init_params.call_depth
-        self.graph_runtime_state = graph_runtime_state
+        self.workflow_id = init_params.workflow_id
+        self.graph_config = init_params.graph_config
+        self.workflow_call_depth = init_params.call_depth
+        self.runtime_state = runtime_state
         self.state: NodeState = NodeState.UNKNOWN  # node execution state
 
         self._node_id = node_id
