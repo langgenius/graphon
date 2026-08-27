@@ -5,6 +5,7 @@ import queue
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from threading import Event, Lock
 from time import monotonic, sleep
 from types import SimpleNamespace
@@ -77,6 +78,10 @@ from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import StringSegment
 from tests.helpers.workflow_events import final_outputs
+
+_V2_PAUSED_LOOP_SNAPSHOT = (
+    Path(__file__).with_name("fixtures") / "runtime_state_v2_1d0f32c_paused_loop.json"
+).read_text()
 
 
 def _graph_dsl(
@@ -662,64 +667,17 @@ def test_loop_hitl_runtime_state_round_trip_preserves_progress() -> None:
 
 
 def test_version_2_full_graph_snapshot_restores_scoped_loop_frames() -> None:
-    """Resume a legacy snapshot whose root and child each stored the full graph.
+    """Resume a frozen v2 paused-loop snapshot with a live child frame.
 
-    Version 2 materialized every execution frame from the complete workflow graph,
-    so both the root snapshot and each live container frame persisted states for
-    every node and positional ``edge_N``. The frozen DSL uses explicit public edge
-    IDs; migration must select each frame's scope and restore those public IDs.
+    Commit 1d0f32c, the direct parent of the v3 writer, generated this fixture.
+    Version 2 materialized every frame from the complete workflow graph, so the
+    root and live Loop frame both contain every node and positional ``edge_N``.
     """
-    snapshot, _ = _snapshot_after_hitl_pause(
-        _hitl_engine(
-            _loop_dsl(),
-            runtime_state=_new_runtime_state({}),
-            callback=lambda _: PauseRequested(session_id="legacy-loop-pause"),
-        )
-    )
-    payload = json.loads(snapshot)
-    payload["version"] = "2.0"
-    public_to_legacy = {
-        "start-to-loop": "edge_0",
-        "loop-start-to-human-input": "edge_1",
-        "loop-to-end": "edge_2",
-    }
-    assert set(payload["graph_edge_states"]) == {
-        "start-to-loop",
-        "loop-to-end",
-    }
-    assert {
-        edge_id
-        for frame in payload["container_frames"]
-        for edge_id in frame["runtime_data"]["graph_edge_states"]
-    } == {"loop-start-to-human-input"}
-    payload["graph_edge_states"] = {
-        public_to_legacy[edge_id]: state
-        for edge_id, state in payload["graph_edge_states"].items()
-    }
-    for frame in payload["container_frames"]:
-        runtime_data = frame["runtime_data"]
-        runtime_data["graph_edge_states"] = {
-            public_to_legacy[edge_id]: state
-            for edge_id, state in runtime_data["graph_edge_states"].items()
-        }
-    full_node_states = dict(payload["graph_node_states"])
-    full_edge_states = dict(payload["graph_edge_states"])
-    for frame in payload["container_frames"]:
-        runtime_data = frame["runtime_data"]
-        full_node_states.update(runtime_data["graph_node_states"])
-        full_edge_states.update(runtime_data["graph_edge_states"])
-    assert set(full_edge_states) == {"edge_0", "edge_1", "edge_2"}
-    payload["graph_node_states"] = full_node_states
-    payload["graph_edge_states"] = full_edge_states
-    for frame in payload["container_frames"]:
-        runtime_data = frame["runtime_data"]
-        runtime_data["graph_node_states"] = full_node_states
-        runtime_data["graph_edge_states"] = full_edge_states
-
+    assert json.loads(_V2_PAUSED_LOOP_SNAPSHOT)["container_frames"]
     resumed_events = list(
         _hitl_engine(
             _loop_dsl(),
-            runtime_state=RuntimeState.from_snapshot(json.dumps(payload)),
+            runtime_state=RuntimeState.from_snapshot(_V2_PAUSED_LOOP_SNAPSHOT),
             callback=_complete_loop_hitl,
         ).run()
     )

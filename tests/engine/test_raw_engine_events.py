@@ -30,8 +30,6 @@ def _root_frame(
     scheduler: object,
     failure_handler: object,
 ) -> FrameRegistry:
-    if isinstance(state, MagicMock):
-        state.has_container_frame.return_value = False
     frame_registry = FrameRegistry()
     frame_registry.register(
         ExecutionFrame(

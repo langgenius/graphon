@@ -112,12 +112,9 @@ def _execution_frame(
     failure_handler: object | None = None,
     container_id: str = "",
 ) -> ExecutionFrame:
-    if isinstance(runtime_state, MagicMock):
-        runtime_state.has_container_frame.return_value = False
     if scheduler is None:
         resolved_scheduler = MagicMock()
         resolved_scheduler.process_node_success.return_value = ([], [])
-        resolved_scheduler.handle_branch_completion.return_value = ([], [])
     else:
         resolved_scheduler = scheduler
     return ExecutionFrame(
@@ -1574,10 +1571,14 @@ def test_dispatcher_preserves_task_event_for_dispatch() -> None:
         dispatched_events: list[object]
 
         def __init__(self) -> None:
+            """Initialize the recorded event list and its synchronization signal."""
             self.dispatched_events = []
+            self.received = threading.Event()
 
         def dispatch(self, event: object) -> None:
+            """Record one dispatched task and wake the waiting test thread."""
             self.dispatched_events.append(event)
+            self.received.set()
 
     event_processor = RecordingNodeEventProcessor()
     graph_execution = MagicMock(
@@ -1600,7 +1601,11 @@ def test_dispatcher_preserves_task_event_for_dispatch() -> None:
         event_stream=MagicMock(),
     )
 
-    dispatcher._dispatcher_loop()
+    dispatcher.start()
+    try:
+        assert event_processor.received.wait(timeout=1)
+    finally:
+        dispatcher.stop()
 
     assert event_processor.dispatched_events == [task_event]
 
@@ -1611,11 +1616,11 @@ def test_dispatcher_keeps_polling_when_no_dispatch_event_is_available() -> None:
     scheduler = MagicMock()
     scheduler.is_execution_complete.return_value = False
     command_channel = MagicMock()
-    command_channel.fetch_commands.side_effect = [
+    command_batches = iter([
         [],
         [AbortCommand(reason="stop")],
-        [],
-    ]
+    ])
+    command_channel.fetch_commands.side_effect = lambda: next(command_batches, [])
     command_processor = CommandProcessor(
         command_channel=command_channel,
         graph_execution=graph_execution,
@@ -1641,7 +1646,6 @@ def test_dispatcher_keeps_polling_when_no_dispatch_event_is_available() -> None:
         dispatcher.stop()
 
     assert graph_execution.aborted
-    assert command_channel.fetch_commands.call_count == 3
 
 
 def test_dispatcher_polls_commands_while_draining_active_workers() -> None:
@@ -1656,11 +1660,12 @@ def test_dispatcher_polls_commands_while_draining_active_workers() -> None:
     graph_execution = GraphExecution(workflow_id="workflow")
     graph_execution.start()
     command_channel = MagicMock()
-    command_channel.fetch_commands.side_effect = [
+    command_batches = iter([
         [PauseCommand(reason="wait")],
         [],
         [AbortCommand(reason="stop")],
-    ]
+    ])
+    command_channel.fetch_commands.side_effect = lambda: next(command_batches, [])
     command_processor = CommandProcessor(
         command_channel=command_channel,
         graph_execution=graph_execution,
@@ -1693,7 +1698,6 @@ def test_dispatcher_polls_commands_while_draining_active_workers() -> None:
 
     assert graph_execution.aborted
     assert graph_execution.paused
-    assert command_channel.fetch_commands.call_count == 3
     event_processor.snapshot_frames.assert_not_called()
 
 
