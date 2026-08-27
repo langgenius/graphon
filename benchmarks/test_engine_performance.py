@@ -15,9 +15,9 @@ import pytest
 from pytest_benchmark.fixture import BenchmarkFixture
 
 from graphon.dsl import loads
-from graphon.graph_engine import GraphEngine, GraphEngineConfig
-from graphon.graph_events import (
-    GraphEngineEvent,
+from graphon.engine import Engine
+from graphon.engine_events import (
+    EngineEvent,
     GraphRunSucceededEvent,
     NodeRunSucceededEvent,
 )
@@ -65,7 +65,7 @@ _WORKFLOW_DSL = json.dumps({
 })
 
 
-def _setup_engine() -> tuple[tuple[GraphEngine], dict[str, object]]:
+def _setup_engine() -> tuple[tuple[Engine], dict[str, object]]:
     """Create the one-shot Engine passed to one benchmark round.
 
     ``pytest-benchmark`` invokes this setup before starting the timer. Building
@@ -77,11 +77,10 @@ def _setup_engine() -> tuple[tuple[GraphEngine], dict[str, object]]:
         Positional and keyword arguments containing one fresh Engine instance.
 
     """
-    config = GraphEngineConfig(min_workers=_WORKERS, max_workers=_WORKERS)
-    return (loads(_WORKFLOW_DSL, config=config),), {}
+    return (loads(_WORKFLOW_DSL, workers=_WORKERS),), {}
 
 
-def _run_engine(engine: GraphEngine) -> list[GraphEngineEvent]:
+def _run_engine(engine: Engine) -> list[EngineEvent]:
     """Run one Engine instance to completion and return every emitted event.
 
     ``Engine.run()`` is a lazy generator, so fully materializing it is part of
@@ -105,7 +104,7 @@ def test_engine_run_benchmark(benchmark: BenchmarkFixture) -> None:
     scheduled work.
     """
     events = cast(
-        list[GraphEngineEvent],
+        list[EngineEvent],
         benchmark.pedantic(
             _run_engine,
             setup=_setup_engine,
