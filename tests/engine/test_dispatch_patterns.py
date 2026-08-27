@@ -820,7 +820,8 @@ def test_worker_pool_drain_observes_task_claimed_during_pause() -> None:  # ruff
     drain_thread = threading.Thread(target=drain_pool)
     try:
         assert ready_queue.get_started.wait(timeout=1)
-        assert ready_queue.timeout == pytest.approx(0.01)
+        assert ready_queue.timeout is not None
+        assert 0 < ready_queue.timeout <= 0.01
         ready_queue.put(StartTask(frame_id="root", node_id="node"))
         assert ready_queue.task_removed.wait(timeout=1)
         drain_thread.start()

@@ -682,6 +682,13 @@ def test_version_2_full_graph_snapshot_restores_scoped_loop_frames() -> None:
         ).run()
     )
 
+    assert [
+        event.node_run_result.metadata[WorkflowNodeExecutionMetadataKey.LOOP_INDEX]
+        for event in resumed_events
+        if isinstance(event, NodeRunSucceededEvent)
+        and event.node_id == "human-input"
+        and event.container_id == "loop"
+    ] == [1, 2]
     assert final_outputs(resumed_events) == {"rounds": 3, "seed": "fixed"}
 
 
