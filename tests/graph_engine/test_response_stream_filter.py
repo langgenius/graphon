@@ -12,6 +12,7 @@ from graphon.filters import (
 )
 from graphon.graph_events.graph import GraphRunStartedEvent
 from graphon.graph_events.node import (
+    NodeRunExceptionEvent,
     NodeRunReasoningChunkEvent,
     NodeRunRetryEvent,
     NodeRunStartedEvent,
@@ -542,6 +543,96 @@ def test_response_stream_filter_does_not_mix_buffered_chunks_with_final_value() 
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     assert [event.chunk for event in chunks] == ["Quiet", " Night", " Thought"]
+
+
+def test_response_stream_filter_flushes_streamed_chunks_after_exception() -> None:
+    """When a node fails after streaming chunks (error_strategy=DEFAULT_VALUE),
+    the filter should close the unfinished stream so already-streamed chunks
+    are flushed and the response session can complete instead of wedging.
+    """
+    graph = _variable_response_graph()
+    variable_pool = VariablePool()
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph, variable_pool))
+
+    started = NodeRunStartedEvent(
+        id="source-run",
+        node_id="source",
+        node_type=BuiltinNodeTypes.CODE,
+        node_title="Source",
+        start_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    # Simulate the LLM streaming partial output before crashing — no is_final
+    # chunk is ever emitted because the node raised.
+    chunk1 = _stream_chunk("Hello", is_final=False)
+    chunk2 = _stream_chunk(" World", is_final=False)
+    exception = NodeRunExceptionEvent(
+        id="source-run",
+        node_id="source",
+        node_type=BuiltinNodeTypes.CODE,
+        error="model crashed mid-stream",
+        start_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    assert list(event_filter.on_event(started)) == [started]
+    # Activate the session so buffered chunks start flushing.
+    list(event_filter.on_event(_edge_taken()))
+    out1 = list(event_filter.on_event(chunk1))
+    out2 = list(event_filter.on_event(chunk2))
+    assert [e.chunk for e in out1 if isinstance(e, NodeRunStreamChunkEvent)] == [
+        "Hello"
+    ]
+    assert [e.chunk for e in out2 if isinstance(e, NodeRunStreamChunkEvent)] == [
+        " World"
+    ]
+    # ErrorHandler writes default values to the variable pool before the
+    # NodeRunExceptionEvent reaches the filter.
+    variable_pool.add(["source", "answer"], StringSegment(value="default"))
+    # Without the fix the session wedges here: the stream is neither closed nor
+    # eligible for the variable-pool fallback (has_stream_events is True).
+    output = list(event_filter.on_event(exception))
+
+    # The session should have completed (no longer stuck on the open segment).
+    assert event_filter._active_session is None
+    assert exception in output
+
+
+def test_response_stream_filter_emits_default_value_when_no_chunks_streamed() -> None:
+    """When a node fails before streaming any chunk, the default value written
+    to the variable pool by the error handler should be emitted as the chunk.
+    """
+    graph = _variable_response_graph()
+    variable_pool = VariablePool()
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph, variable_pool))
+
+    started = NodeRunStartedEvent(
+        id="source-run",
+        node_id="source",
+        node_type=BuiltinNodeTypes.CODE,
+        node_title="Source",
+        start_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    exception = NodeRunExceptionEvent(
+        id="source-run",
+        node_id="source",
+        node_type=BuiltinNodeTypes.CODE,
+        error="model crashed before first token",
+        start_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    assert list(event_filter.on_event(started)) == [started]
+    list(event_filter.on_event(_edge_taken()))
+    # ErrorHandler writes default values to the variable pool before the
+    # NodeRunExceptionEvent reaches the filter.
+    variable_pool.add(["source", "answer"], StringSegment(value="fallback"))
+    output = list(event_filter.on_event(exception))
+
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert [event.chunk for event in chunks] == ["fallback"]
+    assert event_filter._active_session is None
 
 
 def test_response_stream_filter_uses_retry_execution_id_for_scalar_value() -> None:
