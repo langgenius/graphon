@@ -1,16 +1,16 @@
 """Thread-safe collection and delivery of engine events."""
 
 import logging
-import threading
-import time
 from collections.abc import Generator
-from typing import final
+from queue import SimpleQueue
+from typing import cast, final
 
 from graphon.engine_events.base import EngineEvent
 
 from ..layer import Layer
 
 _logger = logging.getLogger(__name__)
+_COMPLETE = object()
 
 
 @final
@@ -34,10 +34,8 @@ class EventStream:
             layers: Mutable list of layers owned by the engine.
 
         """
-        self._events: list[EngineEvent] = []
-        self._lock = threading.Lock()
+        self._events: SimpleQueue[object] = SimpleQueue()
         self._layers = layers
-        self._execution_complete = threading.Event()
 
     def notify_layers(self, event: EngineEvent) -> None:
         """Notify all layers about an event without buffering it.
@@ -62,45 +60,16 @@ class EventStream:
             event: The event to collect
 
         """
-        with self._lock:
-            self._events.append(event)
-
-        # NOTE: `notify_layers` is intentionally called outside the critical section
-        # to minimize lock contention and avoid blocking other readers or writers.
+        self._events.put(event)
         self.notify_layers(event)
-
-    def _get_new_events(self, start_index: int) -> list[EngineEvent]:
-        """Get new events starting from a specific index.
-
-        Args:
-            start_index: The index to start from
-
-        Returns:
-            List of new events
-
-        """
-        with self._lock:
-            return list(self._events[start_index:])
-
-    def _event_count(self) -> int:
-        """Get the current count of collected events.
-
-        Returns:
-            Number of collected events
-
-        """
-        with self._lock:
-            return len(self._events)
 
     def mark_complete(self) -> None:
         """Mark execution as complete to stop the event emission generator."""
-        self._execution_complete.set()
+        self._events.put(_COMPLETE)
 
     def reset(self) -> None:
         """Discard events and completion state from the previous engine run."""
-        with self._lock:
-            self._events.clear()
-            self._execution_complete.clear()
+        self._events = SimpleQueue()
 
     def emit_events(self) -> Generator[EngineEvent, None, None]:
         """Generator that yields events as they're collected.
@@ -109,19 +78,6 @@ class EventStream:
             EngineEvent instances as they're processed
 
         """
-        yielded_count = 0
-
-        while (
-            not self._execution_complete.is_set() or yielded_count < self._event_count()
-        ):
-            # Get new events since last yield
-            new_events = self._get_new_events(yielded_count)
-
-            # Yield any new events
-            for event in new_events:
-                yield event
-                yielded_count += 1
-
-            # Small sleep to avoid busy waiting
-            if not self._execution_complete.is_set() and not new_events:
-                time.sleep(0.001)
+        events = self._events
+        while (event := events.get()) is not _COMPLETE:
+            yield cast(EngineEvent, event)

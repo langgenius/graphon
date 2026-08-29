@@ -177,6 +177,11 @@ def test_graph_init_preserves_typed_node_container_ownership() -> None:
     )
 
     assert set(graph.nodes) == {"start", "owner"}
+    assert graph.graph_config is not None
+    child_config = next(
+        node for node in graph.graph_config["nodes"] if node["id"] == "child"
+    )
+    assert child_config["data"]["container_id"] == "owner"
 
 
 def test_typed_node_default_does_not_hide_explicit_legacy_ownership() -> None:
@@ -210,6 +215,14 @@ def test_typed_node_default_does_not_hide_explicit_legacy_ownership() -> None:
     )
 
     assert set(graph.nodes) == {"start", "owner"}
+    assert graph.graph_config is not None
+    child_config = next(
+        node for node in graph.graph_config["nodes"] if node["id"] == "child"
+    )
+    assert child_config["data"]["container_id"] == "owner"
+    original_data = graph_config["nodes"][2]["data"]
+    assert isinstance(original_data, BaseNodeData)
+    assert "container_id" not in original_data.model_fields_set
 
 
 def test_graph_init_scopes_execution_and_retains_only_its_subtree_config() -> None:
@@ -523,6 +536,13 @@ def test_graph_init_accepts_container_scope_owners(
     )
 
     assert set(graph.nodes) == {"start", "owner"}
+    assert graph.graph_config is not None
+    child_config = next(
+        node for node in graph.graph_config["nodes"] if node["id"] == "child"
+    )
+    assert child_config["data"]["container_id"] == "owner"
+    if ownership_field != "container_id":
+        assert "container_id" not in graph_config["nodes"][2]["data"]
 
 
 def test_graph_init_rejects_non_container_scope_owner() -> None:
@@ -640,6 +660,15 @@ def test_graph_init_accepts_nested_legacy_fields_without_container_id(
 
     assert set(graph.nodes) == {inner_start_id, "stop"}
     assert _graph_edges(graph) == {(inner_start_id, "stop")}
+    assert graph.graph_config is not None
+    assert {node["data"]["container_id"] for node in graph.graph_config["nodes"]} == {
+        inner_id
+    }
+    assert all(
+        "container_id" not in node["data"]
+        for node in graph_config["nodes"]
+        if node["id"] in {inner_start_id, "stop"}
+    )
 
 
 def test_graph_init_rejects_unrelated_legacy_container_owners() -> None:

@@ -9,7 +9,6 @@ from graphon.enums import (
     NodeExecutionType,
     WorkflowNodeExecutionStatus,
 )
-from graphon.graph.scoping import resolve_container_id
 from graphon.node_events.base import NodeEventPayload
 from graphon.node_events.loop import (
     LoopFailedEvent,
@@ -220,11 +219,10 @@ class LoopNode(Node[LoopNodeData]):
     ) -> set[str]:
         """Return nodes governed by the nearest enclosing Loop.
 
-        Legacy nodes identify their Loop directly, while canonical nodes only
-        identify their immediate container. Walking that container hierarchy
-        lets a Loop End nested in an Iteration still stop its surrounding Loop.
-        The walk stops at a different Loop so an inner Loop End never breaks an
-        outer Loop.
+        ``Graph.init`` has already normalized every node's immediate owner into
+        ``data.container_id``. Walking that canonical hierarchy lets a Loop End
+        nested in an Iteration still stop its surrounding Loop. The walk stops at
+        a different Loop so an inner Loop End never breaks an outer Loop.
 
         Args:
             graph_config: Container subtree visible to the Loop node.
@@ -242,7 +240,12 @@ class LoopNode(Node[LoopNodeData]):
             and isinstance((node_id := node.get("id")), str)
         }
         for node_id, node_config in node_configs.items():
-            owner = resolve_container_id(node_config, nodes_by_id=node_configs)
+            node_data = node_config.get("data")
+            owner = (
+                node_data.get("container_id", "")
+                if isinstance(node_data, Mapping)
+                else ""
+            )
             visited: set[str] = set()
             while owner and owner not in visited:
                 if owner == loop_node_id:
@@ -258,9 +261,10 @@ class LoopNode(Node[LoopNodeData]):
                     and owner_data.get("type") == BuiltinNodeTypes.LOOP
                 ):
                     break
-                owner = resolve_container_id(
-                    owner_config,
-                    nodes_by_id=node_configs,
+                owner = (
+                    owner_data.get("container_id", "")
+                    if isinstance(owner_data, Mapping)
+                    else ""
                 )
         return loop_node_ids
 

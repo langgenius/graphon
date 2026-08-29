@@ -503,7 +503,6 @@ class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
         assert root_edge.state is NodeState.TAKEN
         assert migrated["version"] == "3.0"
         assert migrated["graph_edge_states"] == {"shared-edge": NodeState.TAKEN}
-        assert "compatibility_marker" not in migrated
 
     def test_version_2_graph_builder_state_migrates_without_graph_config(self) -> None:
         """Keep legacy generated IDs when a programmatic graph matches exactly."""

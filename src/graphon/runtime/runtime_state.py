@@ -7,7 +7,7 @@ from contextlib import AbstractContextManager, nullcontext
 from copy import deepcopy
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Protocol
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from graphon.enums import NodeExecutionType, NodeState, NodeType
 from graphon.model_runtime.entities.llm_entities import LLMUsage
@@ -97,11 +97,16 @@ class _RuntimeStateSnapshotV1(BaseModel):
 
 
 class _RuntimeStateSnapshot(BaseModel):
-    """Validated serialized runtime state snapshot."""
+    """Runtime snapshot shape shared by versions 2.0 and 3.0.
+
+    The payload shape did not change between these versions. Only persisted edge
+    identities changed, so keeping the real version lets graph attachment decide
+    whether the graph-aware edge migration is required.
+    """
 
     model_config = ConfigDict(frozen=True)
 
-    version: Literal["3.0"]
+    version: Literal["2.0", "3.0"]
     start_at: float
     node_run_steps: int = Field(ge=0)
     llm_usage: LLMUsage
@@ -114,52 +119,12 @@ class _RuntimeStateSnapshot(BaseModel):
     container_frames: tuple[ContainerFrameState, ...]
     graph_node_states: dict[str, NodeState]
     graph_edge_states: dict[str, NodeState]
-    compatibility_marker: object | None = Field(default=None, exclude=True, repr=False)
-
-
-_V2_SNAPSHOT_MARKER = object()
-
-
-def _normalize_v2_snapshot(value: object) -> object:
-    """Normalize one version 2 runtime snapshot for the version 3 reader.
-
-    Version 2 and version 3 share the same outer payload shape, but version 2
-    edge-state keys are positional ``edge_N`` values while version 3 keys are
-    public DSL edge IDs. Pydantic runs this function before discriminating the
-    snapshot union, so it can reuse the version 3 schema without exposing a
-    second long-lived snapshot model. The in-memory marker cannot be supplied by
-    JSON and tells :class:`RuntimeState` to defer edge migration until the full
-    graph configuration is attached.
-
-    TODO(runtime-snapshot-v2): Remove this validator, ``_V2_SNAPSHOT_MARKER``,
-    the excluded ``compatibility_marker`` field, and RuntimeState's legacy
-    migration branch together when restoring version 1/2 snapshots is no longer
-    supported. None of these details are part of serialized version 3 data or the
-    public graph model.
-
-    Args:
-        value: Parsed JSON value presented to the snapshot adapter.
-
-    Returns:
-        A shallow version 3-compatible copy for version 2 input, otherwise the
-        original value unchanged.
-
-    """
-    if not isinstance(value, Mapping) or value.get("version") != "2.0":
-        return value
-    normalized = dict(value)
-    normalized["version"] = "3.0"
-    normalized["compatibility_marker"] = _V2_SNAPSHOT_MARKER
-    return normalized
 
 
 _RUNTIME_STATE_SNAPSHOT_ADAPTER = TypeAdapter(
     Annotated[
-        Annotated[
-            _RuntimeStateSnapshotV1 | _RuntimeStateSnapshot,
-            Field(discriminator="version"),
-        ],
-        BeforeValidator(_normalize_v2_snapshot),
+        _RuntimeStateSnapshotV1 | _RuntimeStateSnapshot,
+        Field(discriminator="version"),
     ],
 )
 
@@ -228,7 +193,7 @@ def _legacy_graph_scopes(
     edges by their direct owner so each frame can be converted independently.
 
     This helper is intentionally private and used only by the removable version
-    1/2 compatibility path described in :func:`_normalize_v2_snapshot`.
+    1/2 compatibility path in :class:`RuntimeState`.
 
     Args:
         graph_config: Full root graph configuration after normal graph import.
@@ -283,7 +248,7 @@ def _select_legacy_scope_state(
     field is changed, which lets the caller replace every frame atomically.
 
     This helper belongs exclusively to the removable version 1/2 compatibility
-    path documented in :func:`_normalize_v2_snapshot`.
+    path in :class:`RuntimeState`.
 
     Args:
         owner: Direct container node ID, or an empty string for the root graph.
@@ -535,8 +500,7 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         that exception behind ``_legacy_snapshot_version`` prevents relaxed
         validation from affecting newly written snapshots or normal callers.
 
-        TODO(runtime-snapshot-v2): Delete the legacy branch together with the
-        validator and helpers documented by :func:`_normalize_v2_snapshot` once
+        TODO(runtime-snapshot-v2): Delete the legacy branch and its helpers once
         old snapshots no longer need to resume.
 
         Args:
@@ -579,8 +543,8 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         generated ``edge_N`` identities need no translation.
 
         This method is private compatibility code. Remove it together with
-        ``_legacy_snapshot_version`` and the version 2 adapter validator when
-        version 1/2 snapshot restoration is retired.
+        ``_legacy_snapshot_version`` when version 1/2 snapshot restoration is
+        retired.
 
         Args:
             graph: Materialized root graph used to validate and translate state.
@@ -797,7 +761,7 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         if graph_node_states or graph_edge_states:
             if isinstance(snapshot, _RuntimeStateSnapshotV1):
                 state._legacy_snapshot_version = "1.0"
-            elif snapshot.compatibility_marker is _V2_SNAPSHOT_MARKER:
+            elif snapshot.version == "2.0":
                 state._legacy_snapshot_version = "2.0"
             state.restore_graph_state(
                 node_states=graph_node_states,
