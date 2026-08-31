@@ -13,6 +13,7 @@ from graphon.enums import NodeExecutionType, NodeState
 from graphon.graph.graph import Graph
 from graphon.graph.validation import GraphValidationError
 from graphon.nodes.base.node import Node
+from graphon.runtime.runtime_state import RuntimeState
 
 
 class _NodeDataWithContainerDefault(BaseNodeData):
@@ -25,6 +26,14 @@ class _NodeDataWithContainerDefault(BaseNodeData):
 class _RecordingNodeFactory:
     created_node_ids: list[str] = field(default_factory=list)
     graph_config: Mapping[str, Any] | None = None
+
+    def with_runtime_state(
+        self,
+        runtime_state: RuntimeState,
+    ) -> _RecordingNodeFactory:
+        """Accept frame state rebinding for this stateless test factory."""
+        _ = runtime_state
+        return self
 
     def with_graph_config(
         self,

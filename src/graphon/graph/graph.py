@@ -4,7 +4,7 @@ import logging
 from abc import abstractmethod
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from typing import Any, Protocol, final
+from typing import TYPE_CHECKING, Any, Protocol, final
 
 from pydantic import TypeAdapter
 
@@ -16,6 +16,9 @@ from graphon.nodes.base.node import Node
 from .edge import Edge
 from .scoping import resolve_container_id
 from .validation import get_graph_validator
+
+if TYPE_CHECKING:
+    from graphon.runtime.runtime_state import RuntimeState
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +32,29 @@ class NodeFactory(Protocol):
     This protocol decouples the Graph class from specific node mapping implementations,
     allowing for different node creation strategies while maintaining type safety.
     """
+
+    @abstractmethod
+    def with_runtime_state(
+        self,
+        runtime_state: RuntimeState,
+    ) -> NodeFactory:
+        """Return a factory bound to one execution frame's runtime state.
+
+        Container execution creates a separate :class:`RuntimeState` for every
+        child frame before constructing its scoped graph. Implementations must
+        ensure every node created by the returned factory uses ``runtime_state``
+        instead of the parent frame's state. Stateful factories should return an
+        independent copy; factories that do not retain runtime state may return
+        themselves.
+
+        Args:
+            runtime_state: Runtime state owned by the frame being constructed.
+
+        Returns:
+            A factory ready to construct nodes for exactly that execution frame.
+
+        """
+        ...
 
     @abstractmethod
     def with_graph_config(

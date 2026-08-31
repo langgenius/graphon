@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Annotated, Any, Literal, cast
+from typing import cast
 from uuid import uuid4
-
-from pydantic import BaseModel, BeforeValidator, Field, TypeAdapter
 
 from graphon.engine.filter.protocol import EngineEventFilterContext
 from graphon.engine_events.base import EngineEvent
@@ -25,11 +23,20 @@ from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.runtime_state import GraphProtocol, NodeProtocol
 from graphon.runtime.runtime_state_protocol import ReadOnlyRuntimeState
 
+from . import snapshot, v2
+from .snapshot import (
+    ResponseSessionState,
+    ResponseStreamFilterSnapshot,
+    Selector,
+    StreamBufferState,
+    StreamPositionState,
+)
+
 __all__ = ["ResponseStreamFilter"]
 
 type _NodeID = str
 type _EdgeID = str
-type _Selector = tuple[str, ...]
+type _Selector = Selector
 
 
 @dataclass
@@ -68,27 +75,6 @@ class _ResponseSession:
         return self.index >= len(self.template.segments)
 
 
-class _ResponseSessionState(BaseModel):
-    """Serializable representation of a response session."""
-
-    node_id: str
-    index: int = Field(default=0, ge=0)
-
-
-class _StreamBufferState(BaseModel):
-    """Serializable representation of buffered stream chunks."""
-
-    selector: _Selector
-    events: list[NodeRunStreamChunkEvent] = Field(default_factory=list)
-
-
-class _StreamPositionState(BaseModel):
-    """Serializable representation for stream read positions."""
-
-    selector: _Selector
-    position: int = Field(default=0, ge=0)
-
-
 @dataclass
 class _StreamBuffers:
     """Buffered stream chunks plus per-selector read cursors."""
@@ -101,8 +87,8 @@ class _StreamBuffers:
     def from_state(
         cls,
         *,
-        buffers: Sequence[_StreamBufferState],
-        positions: Sequence[_StreamPositionState],
+        buffers: Sequence[StreamBufferState],
+        positions: Sequence[StreamPositionState],
         closed_selectors: Sequence[_Selector],
     ) -> _StreamBuffers:
         stream_buffers = cls(
@@ -171,81 +157,23 @@ class _StreamBuffers:
     def is_closed(self, selector: Sequence[str]) -> bool:
         return tuple(selector) in self.closed_selectors
 
-    def dump_buffers(self) -> list[_StreamBufferState]:
+    def dump_buffers(self) -> list[StreamBufferState]:
         return [
-            _StreamBufferState(
+            StreamBufferState(
                 selector=selector,
                 events=[event.model_copy(deep=True) for event in events],
             )
             for selector, events in sorted(self.events.items())
         ]
 
-    def dump_positions(self) -> list[_StreamPositionState]:
+    def dump_positions(self) -> list[StreamPositionState]:
         return [
-            _StreamPositionState(selector=selector, position=position)
+            StreamPositionState(selector=selector, position=position)
             for selector, position in sorted(self.positions.items())
         ]
 
     def dump_closed_selectors(self) -> list[_Selector]:
         return sorted(self.closed_selectors)
-
-
-_V1_STATE_MARKER = object()
-
-
-def _normalize_response_stream_filter_state(value: Any) -> Any:
-    """Normalize a persisted filter snapshot before model validation.
-
-    Version 1 snapshots stored generated ``edge_N`` identifiers in ``paths_map``.
-    Version 2 stores the public edge IDs from the workflow DSL instead. Pydantic runs
-    this function only at the deserialization boundary: it upgrades the version tag
-    and records an excluded marker, while deliberately leaving ``paths_map`` intact
-    because the legacy IDs cannot be resolved until the filter is bound to a graph.
-
-    The marker is an in-memory singleton that JSON cannot reproduce. Native version
-    2 input therefore cannot enter the compatibility path by supplying a similarly
-    named field.
-
-    TODO: Remove this validator, ``_V1_STATE_MARKER``, the excluded
-    ``compatibility_marker`` field, and ``_migrate_v1_state`` together after version
-    1 snapshots are no longer supported. Keeping all compatibility behavior behind
-    the marker ensures its later removal cannot change native version 2 handling.
-
-    Returns:
-        The original input, or a copied version 1 mapping normalized for validation.
-    """
-    if not isinstance(value, dict) or value.get("version") != "1.0":
-        return value
-
-    normalized = dict(value)
-    normalized["version"] = "2.0"
-    normalized["compatibility_marker"] = _V1_STATE_MARKER
-    return normalized
-
-
-class _ResponseStreamFilterState(BaseModel):
-    """Serialized snapshot of ResponseStreamFilter."""
-
-    type: Literal["ResponseStreamFilter"] = Field(default="ResponseStreamFilter")
-    version: Literal["2.0"] = Field(default="2.0")
-    compatibility_marker: object | None = Field(default=None, exclude=True, repr=False)
-    response_nodes: Sequence[str] = Field(default_factory=list)
-    active_session: _ResponseSessionState | None = None
-    waiting_sessions: Sequence[_ResponseSessionState] = Field(default_factory=list)
-    pending_sessions: Sequence[_ResponseSessionState] = Field(default_factory=list)
-    node_execution_ids: dict[str, str] = Field(default_factory=dict)
-    paths_map: dict[str, list[list[str]]] = Field(default_factory=dict)
-    stream_buffers: Sequence[_StreamBufferState] = Field(default_factory=list)
-    stream_positions: Sequence[_StreamPositionState] = Field(default_factory=list)
-    closed_streams: Sequence[_Selector] = Field(default_factory=list)
-
-
-_RESPONSE_STREAM_FILTER_STATE_ADAPTER = TypeAdapter(
-    Annotated[
-        _ResponseStreamFilterState,
-        BeforeValidator(_normalize_response_stream_filter_state),
-    ]
-)
 
 
 class ResponseStreamFilter:
@@ -255,7 +183,7 @@ class ResponseStreamFilter:
         self._pass_unmatched_chunks = pass_unmatched_chunks
         self._graph: GraphProtocol | None = None
         self._runtime_state: ReadOnlyRuntimeState | None = None
-        self._pending_state: _ResponseStreamFilterState | None = None
+        self._pending_state: ResponseStreamFilterSnapshot | None = None
         self._reset_run_state()
 
     def _reset_run_state(self) -> None:
@@ -324,16 +252,10 @@ class ResponseStreamFilter:
 
     def dumps(self) -> str:
         if self._pending_state is not None:
-            if self._pending_state.compatibility_marker is _V1_STATE_MARKER:
-                msg = (
-                    "Version 1 ResponseStreamFilter state must be initialized "
-                    "before serialization"
-                )
-                raise RuntimeError(msg)
-            return self._pending_state.model_dump_json()
+            return snapshot.dumps(self._pending_state)
         self._ensure_initialized()
 
-        state = _ResponseStreamFilterState(
+        state = v2.Snapshot(
             response_nodes=sorted(self._response_nodes),
             active_session=self._serialize_session(self._active_session),
             waiting_sessions=[
@@ -355,23 +277,18 @@ class ResponseStreamFilter:
             stream_positions=self._stream_buffers.dump_positions(),
             closed_streams=self._stream_buffers.dump_closed_selectors(),
         )
-        return state.model_dump_json()
+        return snapshot.dumps(state)
 
     def loads(self, data: str) -> None:
-        state = self._parse_state(data)
+        state = snapshot.loads(data)
         if self._graph is None or self._pending_state is not None:
             self._pending_state = state
             return
 
         self._apply_state(state)
 
-    @staticmethod
-    def _parse_state(data: str) -> _ResponseStreamFilterState:
-        return _RESPONSE_STREAM_FILTER_STATE_ADAPTER.validate_json(data)
-
-    def _apply_state(self, state: _ResponseStreamFilterState) -> None:
-        if state.compatibility_marker is _V1_STATE_MARKER:
-            state = self._migrate_v1_state(state)
+    def _apply_state(self, state: ResponseStreamFilterSnapshot) -> None:
+        state = snapshot.for_graph(state, self._bound_graph)
 
         response_nodes = set(state.response_nodes)
         paths_maps = {
@@ -414,168 +331,6 @@ class ResponseStreamFilter:
         self._response_sessions = response_sessions
         self._referenced_selectors = referenced_selectors
         self._pending_state = None
-
-    def _migrate_v1_state(  # ruff:ignore[complex-structure, too-many-branches]
-        self,
-        state: _ResponseStreamFilterState,
-    ) -> _ResponseStreamFilterState:
-        """Restrict and translate a version 1 snapshot for the bound root graph.
-
-        Version 1 filters were initialized with the full workflow graph, so their
-        response sessions and stream buffers may include nodes now owned by child
-        frames. The current filter is bound only to the root graph. This migration
-        retains state for root response nodes, promotes the first retained waiting
-        session when a removed child session had been active, and discards child-only
-        buffers and execution IDs.
-
-        The legacy graph assigned ``edge_N`` across the full config after accepting
-        each edge whose source and target were strings. For imported graphs, replaying
-        that counter against the retained config produces the exact root-only mapping,
-        including when a child graph reuses the same public edge ID. Programmatic
-        graphs have no config, so they are accepted only when their complete edge-key
-        set is already the contiguous legacy ``edge_0..edge_N`` set and every mapping
-        key equals its edge object's ID. Unknown or renamed IDs fail instead of being
-        guessed, preventing an incorrect response release.
-
-        TODO: Delete this method together with
-        ``_normalize_response_stream_filter_state``, ``_V1_STATE_MARKER``, and
-        ``compatibility_marker`` when version 1 snapshot support is removed. Native
-        version 2 snapshots never call this method.
-
-        Returns:
-            A version 2 state containing only data owned by the bound root graph.
-
-        Raises:
-            TypeError: If the bound graph or edge config has an invalid shape.
-            ValueError: If stable legacy IDs cannot be proven or mapped exactly.
-        """
-        bound_graph = self._bound_graph
-        root_response_nodes = {
-            node_id
-            for node_id, node in bound_graph.nodes.items()
-            if node.execution_type == NodeExecutionType.RESPONSE
-        }
-        graph_config = getattr(bound_graph, "graph_config", None)
-        if graph_config is None:
-            expected_edge_ids = {
-                f"edge_{edge_index}" for edge_index in range(len(bound_graph.edges))
-            }
-            if set(bound_graph.edges) != expected_edge_ids or any(
-                edge_id != edge.id for edge_id, edge in bound_graph.edges.items()
-            ):
-                msg = (
-                    "Version 1 ResponseStreamFilter state without graph config "
-                    "requires stable edge_N IDs"
-                )
-                raise ValueError(msg)
-            legacy_edge_ids = {edge_id: edge_id for edge_id in expected_edge_ids}
-        else:
-            if not isinstance(graph_config, Mapping):
-                msg = "Version 1 ResponseStreamFilter state requires graph config"
-                raise TypeError(msg)
-
-            edge_configs = graph_config.get("edges")
-            if not isinstance(edge_configs, Sequence) or isinstance(
-                edge_configs, (str, bytes)
-            ):
-                msg = "Version 1 ResponseStreamFilter state requires graph edge config"
-                raise TypeError(msg)
-
-            legacy_edge_ids = {}
-            edge_index = 0
-            for edge_config in edge_configs:
-                if not isinstance(edge_config, Mapping):
-                    msg = "Graph edge config must be a mapping"
-                    raise TypeError(msg)
-                if not isinstance(edge_config.get("source"), str) or not isinstance(
-                    edge_config.get("target"), str
-                ):
-                    continue
-
-                edge_id = edge_config.get("id")
-                if not isinstance(edge_id, str):
-                    msg = "Graph edge config is missing its public edge ID"
-                    raise TypeError(msg)
-
-                bound_edge = bound_graph.edges.get(edge_id)
-                if (
-                    bound_edge is not None
-                    and bound_edge.tail == edge_config["source"]
-                    and bound_edge.head == edge_config["target"]
-                ):
-                    legacy_edge_ids[f"edge_{edge_index}"] = edge_id
-                edge_index += 1
-
-        try:
-            paths_map = {
-                node_id: [
-                    [legacy_edge_ids[edge_id] for edge_id in path] for path in paths
-                ]
-                for node_id, paths in state.paths_map.items()
-                if node_id in root_response_nodes
-            }
-        except KeyError as exc:
-            msg = f"Unknown version 1 edge ID: {exc.args[0]}"
-            raise ValueError(msg) from exc
-
-        active_session = state.active_session
-        if (
-            active_session is not None
-            and active_session.node_id not in root_response_nodes
-        ):
-            active_session = None
-        waiting_sessions = [
-            session
-            for session in state.waiting_sessions
-            if session.node_id in root_response_nodes
-        ]
-        if active_session is None and waiting_sessions:
-            active_session = waiting_sessions.pop(0)
-
-        referenced_selectors: set[_Selector] = set()
-        for response_node_id in root_response_nodes:
-            referenced_selectors.update(
-                self._get_referenced_selectors(response_node_id)
-            )
-
-        return state.model_copy(
-            update={
-                "compatibility_marker": None,
-                "response_nodes": [
-                    node_id
-                    for node_id in state.response_nodes
-                    if node_id in root_response_nodes
-                ],
-                "active_session": active_session,
-                "waiting_sessions": waiting_sessions,
-                "pending_sessions": [
-                    session
-                    for session in state.pending_sessions
-                    if session.node_id in root_response_nodes
-                ],
-                "node_execution_ids": {
-                    node_id: execution_id
-                    for node_id, execution_id in state.node_execution_ids.items()
-                    if node_id in bound_graph.nodes
-                },
-                "paths_map": paths_map,
-                "stream_buffers": [
-                    buffer
-                    for buffer in state.stream_buffers
-                    if tuple(buffer.selector) in referenced_selectors
-                ],
-                "stream_positions": [
-                    position
-                    for position in state.stream_positions
-                    if tuple(position.selector) in referenced_selectors
-                ],
-                "closed_streams": [
-                    selector
-                    for selector in state.closed_streams
-                    if tuple(selector) in referenced_selectors
-                ],
-            }
-        )
 
     def _ensure_initialized(self) -> None:
         if (
@@ -996,14 +751,14 @@ class ResponseStreamFilter:
     def _serialize_session(
         self,
         session: _ResponseSession | None,
-    ) -> _ResponseSessionState | None:
+    ) -> ResponseSessionState | None:
         if session is None:
             return None
-        return _ResponseSessionState(node_id=session.node_id, index=session.index)
+        return ResponseSessionState(node_id=session.node_id, index=session.index)
 
     def _session_from_state(
         self,
-        session_state: _ResponseSessionState,
+        session_state: ResponseSessionState,
     ) -> _ResponseSession:
         node = self._bound_graph.nodes.get(session_state.node_id)
         if node is None:

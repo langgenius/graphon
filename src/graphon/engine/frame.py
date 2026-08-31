@@ -3,22 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, cast, final
+from typing import final
 
-from graphon.graph.graph import Graph, NodeFactory
+from graphon.graph.graph import Graph
 from graphon.runtime.container_state import FrameRuntimeData
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 
 from .event.node_failure import NodeFailureHandler
 from .scheduler import Scheduler
-
-
-class RebindableNodeFactory(NodeFactory, Protocol):
-    def with_runtime_state(
-        self,
-        runtime_state: RuntimeState,
-    ) -> RebindableNodeFactory: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,9 +228,7 @@ class FrameRegistry:
             msg = "Parent graph does not carry node_factory for frame creation."
             raise RuntimeError(msg)
 
-        rebound_factory = cast(RebindableNodeFactory, node_factory).with_runtime_state(
-            state,
-        )
+        rebound_factory = node_factory.with_runtime_state(state)
         graph = Graph.init(
             graph_config=graph_config,
             node_factory=rebound_factory,

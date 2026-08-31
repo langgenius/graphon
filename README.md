@@ -146,6 +146,8 @@ planned as a separate follow-up.
 
 ## Internal Docs
 
+- [CHANGELOG.md](CHANGELOG.md): versioned user-facing changes
+- [MIGRATION.md](MIGRATION.md): breaking-release upgrade instructions
 - [CONTRIBUTING.md](CONTRIBUTING.md): contributor workflow, CI, commit/PR rules
 - [examples/slim_llm/README.md](examples/slim_llm/README.md):
   runnable Slim LLM example setup

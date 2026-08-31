@@ -78,6 +78,13 @@ class _SimpleNodeFactory:
     init_params: InitParams
     runtime_state: RuntimeState
 
+    def with_runtime_state(
+        self,
+        runtime_state: RuntimeState,
+    ) -> _SimpleNodeFactory:
+        """Copy this test factory with the state owned by a child frame."""
+        return replace(self, runtime_state=runtime_state)
+
     def with_graph_config(
         self,
         graph_config: Mapping[str, Any],

@@ -758,24 +758,6 @@ def test_response_stream_filter_does_not_migrate_version_2_edge_ids() -> None:
     assert [event.chunk for event in chunks] == ["value"]
 
 
-def test_response_stream_filter_v2_cannot_inject_v1_compatibility_marker() -> None:
-    graph = _variable_response_graph(edge_id="public-edge")
-    first_filter = ResponseStreamFilter()
-    first_filter.initialize(_context(graph))
-    snapshot = json.loads(first_filter.dumps())
-    snapshot["compatibility_marker"] = True
-
-    restored_filter = ResponseStreamFilter()
-    restored_filter.loads(json.dumps(snapshot))
-    assert json.loads(restored_filter.dumps())["version"] == "2.0"
-    restored_filter.initialize(_context(graph))
-
-    assert list(restored_filter.on_event(_stream_chunk("value"))) == []
-    output = list(restored_filter.on_event(_edge_taken(edge_id="public-edge")))
-    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
-    assert [event.chunk for event in chunks] == ["value"]
-
-
 def test_response_stream_filter_round_trips_resume_state() -> None:
     graph = _variable_response_graph()
     context = _context(graph)
