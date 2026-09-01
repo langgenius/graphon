@@ -6,7 +6,7 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from graphon.graph_engine.ready_queue.protocol import ReadyTask
+    from graphon.engine.ready_queue.entities import ReadyTask
 
 
 class ReadyQueue(Protocol):
@@ -63,8 +63,13 @@ class ReadyQueue(Protocol):
         ...
 
     @abstractmethod
-    def drain(self) -> list[ReadyTask]:
-        """Remove and return all pending items in FIFO order."""
+    def take_all(self) -> list[ReadyTask]:
+        """Remove and return every pending task in FIFO order.
+
+        Returns:
+            All tasks that were available when the operation began.
+
+        """
         ...
 
     @abstractmethod

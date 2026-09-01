@@ -4,16 +4,21 @@ import logging
 from abc import abstractmethod
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from typing import Any, Protocol, final
+from typing import TYPE_CHECKING, Any, Protocol, final
 
 from pydantic import TypeAdapter
 
+from graphon.entities.base_node_data import BaseNodeData
 from graphon.entities.graph_config import NodeConfigDict
 from graphon.enums import ErrorStrategy, NodeExecutionType, NodeState
 from graphon.nodes.base.node import Node
 
 from .edge import Edge
+from .scoping import resolve_container_id
 from .validation import get_graph_validator
+
+if TYPE_CHECKING:
+    from graphon.runtime.runtime_state import RuntimeState
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +32,75 @@ class NodeFactory(Protocol):
     This protocol decouples the Graph class from specific node mapping implementations,
     allowing for different node creation strategies while maintaining type safety.
     """
+
+    @abstractmethod
+    def with_runtime_state(
+        self,
+        runtime_state: RuntimeState,
+    ) -> NodeFactory:
+        """Return a factory bound to one execution frame's runtime state.
+
+        Container execution creates a separate :class:`RuntimeState` for every
+        child frame before constructing its scoped graph. Implementations must
+        ensure every node created by the returned factory uses ``runtime_state``
+        instead of the parent frame's state. Stateful factories should return an
+        independent copy; factories that do not retain runtime state may return
+        themselves.
+
+        Args:
+            runtime_state: Runtime state owned by the frame being constructed.
+
+        Returns:
+            A factory ready to construct nodes for exactly that execution frame.
+
+        """
+        ...
+
+    @abstractmethod
+    def with_graph_config(
+        self,
+        graph_config: Mapping[str, Any],
+    ) -> NodeFactory:
+        """Return a factory whose nodes receive one frame's scoped graph config.
+
+        Graph scopes are established before node construction because
+        :meth:`Node.post_init` runs inside the node constructor. Implementations
+        must copy any factory-owned :class:`InitParams` and replace its
+        ``graph_config`` rather than mutating configuration shared with parent or
+        sibling frames.
+
+        Args:
+            graph_config: Container-subtree configuration visible to the frame.
+
+        Returns:
+            A factory ready to construct nodes for exactly that graph scope.
+
+        """
+        ...
+
+    @abstractmethod
+    def validate_node(self, node_config: NodeConfigDict) -> NodeExecutionType:
+        """Validate one node against the concrete schema selected by this factory.
+
+        Validation must resolve the same implementation and version as
+        :meth:`create_node`, but it must not construct a node, initialize runtime
+        dependencies, invoke ``post_init()``, or mutate execution state. Graph
+        calls this method for every node in the visible container subtree before
+        constructing any direct-frame node, which makes malformed descendants
+        fail before workflow execution can produce side effects.
+
+        Args:
+            node_config: Base-validated node configuration to resolve and validate.
+
+        Returns:
+            The execution type declared by the resolved node implementation.
+
+        Raises:
+            ValueError: If the node implementation is unknown or its concrete data
+                schema is invalid.
+
+        """
+        ...
 
     @abstractmethod
     def create_node(self, node_config: NodeConfigDict) -> Node:
@@ -111,12 +185,15 @@ class Graph:
         Returns:
             Tuple of `edges`, `in_edges`, and `out_edges` mappings.
 
+        Raises:
+            ValueError: If two edges in this graph use the same public ID.
+
         """
         edges: dict[str, Edge] = {}
+        edge_ids: set[str] = set()
         in_edges: dict[str, list[str]] = defaultdict(list)
         out_edges: dict[str, list[str]] = defaultdict(list)
 
-        edge_counter = 0
         for edge_config in edge_configs:
             source = edge_config.get("source")
             target = edge_config.get("target")
@@ -124,9 +201,11 @@ class Graph:
             if not isinstance(source, str) or not isinstance(target, str):
                 continue
 
-            # Create edge
-            edge_id = f"edge_{edge_counter}"
-            edge_counter += 1
+            edge_id = edge_config["id"]
+            if edge_id in edge_ids:
+                msg = f"Duplicate graph edge ID: {edge_id}"
+                raise ValueError(msg)
+            edge_ids.add(edge_id)
 
             source_handle = edge_config.get("sourceHandle", "source")
             if not isinstance(source_handle, str):
@@ -144,6 +223,95 @@ class Graph:
             in_edges[target].append(edge_id)
 
         return edges, dict(in_edges), dict(out_edges)
+
+    @staticmethod
+    def _prepare_edge_configs(
+        graph_config: Mapping[str, Any],
+        container_ids: Mapping[str, str],
+    ) -> list[dict[str, Any]]:
+        """Copy edge configs and ensure every valid edge has a public DSL ID.
+
+        An edge is valid for legacy numbering when both ``source`` and
+        ``target`` are strings. Missing IDs start with the historical
+        ``edge_N`` ordinal, including edges later ignored because another field
+        is invalid, and advance only when that ID was supplied or generated
+        elsewhere. Supplied IDs are reserved within their owning graph before
+        generation, making mixed explicit and fallback IDs independent of
+        config order without preventing separate graphs from reusing a local
+        ID. The generated public ID is retained in scoped graph configs, so
+        child graphs use the same ID when they are materialized later. Supplied
+        IDs must be non-empty strings.
+
+        Duplicate IDs are deliberately not checked here because this method
+        sees a container subtree, not one materialized graph. ``_build_edges``
+        enforces uniqueness after scoping, allowing separate child graphs to
+        reuse the same local edge ID. Each edge dictionary is copied before an
+        ID is added, so the caller's config is never mutated.
+
+        Args:
+            graph_config: Complete or previously scoped workflow graph config.
+            container_ids: Direct container ID already resolved for every node.
+
+        Returns:
+            Copied edge dictionaries carrying public DSL edge IDs.
+
+        Raises:
+            ValueError: If a supplied edge ID is not a non-empty string.
+
+        """
+        edge_configs = [
+            dict(edge_config)
+            for edge_config in _ListObjectDict.validate_python(
+                graph_config.get("edges", []),
+            )
+        ]
+        edge_container_ids: list[str | None] = []
+        reserved_edge_ids: defaultdict[str | None, set[str]] = defaultdict(set)
+        for edge_config in edge_configs:
+            source = edge_config.get("source")
+            target = edge_config.get("target")
+            source_container_id = (
+                container_ids.get(source) if isinstance(source, str) else None
+            )
+            target_container_id = (
+                container_ids.get(target) if isinstance(target, str) else None
+            )
+            edge_container_id = (
+                source_container_id
+                if source_container_id is not None
+                and source_container_id == target_container_id
+                else None
+            )
+            edge_container_ids.append(edge_container_id)
+            edge_id = edge_config.get("id")
+            if isinstance(edge_id, str) and edge_id:
+                reserved_edge_ids[edge_container_id].add(edge_id)
+
+        edge_counter = 0
+        for edge_config, edge_container_id in zip(
+            edge_configs,
+            edge_container_ids,
+            strict=True,
+        ):
+            if "id" in edge_config and (
+                not isinstance(edge_config["id"], str) or not edge_config["id"]
+            ):
+                msg = "Graph edge ID must be a non-empty string"
+                raise ValueError(msg)
+            source = edge_config.get("source")
+            target = edge_config.get("target")
+            if not isinstance(source, str) or not isinstance(target, str):
+                continue
+            if "id" not in edge_config:
+                fallback_index = edge_counter
+                edge_id = f"edge_{fallback_index}"
+                while edge_id in reserved_edge_ids[edge_container_id]:
+                    fallback_index += 1
+                    edge_id = f"edge_{fallback_index}"
+                edge_config["id"] = edge_id
+                reserved_edge_ids[edge_container_id].add(edge_id)
+            edge_counter += 1
+        return edge_configs
 
     @classmethod
     def _create_node_instances(
@@ -181,26 +349,154 @@ class Graph:
         return GraphBuilder(graph_cls=cls)
 
     @staticmethod
-    def _filter_canvas_only_nodes(
+    def _normalize_nodes(
         node_configs: Sequence[Mapping[str, Any]],
-    ) -> list[dict[str, Any]]:
-        """Remove editor-only nodes before `NodeConfigDict` validation.
+    ) -> tuple[list[dict[str, Any]], dict[str, str]]:
+        """Copy nodes and normalize their direct container IDs once.
 
-        Persisted note widgets use a top-level `type == "custom-note"` but leave
-        `data.type` empty because they are never executable graph nodes. Filter
-        them while configs are still raw dicts so Pydantic does not validate
-        their placeholder payloads against `BaseNodeData.type: NodeType`.
+        This is the compatibility boundary used by :meth:`Graph.init`. It resolves
+        canonical, React Flow, and legacy ownership fields against the complete node
+        hierarchy, removes editor-only note widgets, then writes the result to
+        ``data.container_id`` on copied dictionaries. Filtering happens before
+        Pydantic node validation because notes intentionally have no executable
+        ``data.type``. The caller's persisted input is never modified. Prevalidated
+        :class:`BaseNodeData` values are dumped with ``exclude_unset`` so an unset
+        canonical default cannot hide an explicitly supplied legacy owner.
+
+        Args:
+            node_configs: Raw external node configurations.
 
         Returns:
-            Raw node configs with editor-only note widgets removed.
+            Copied node configurations with canonical container IDs, followed by
+            the same IDs indexed by node ID. ``""`` identifies the root graph.
 
         """
-        filtered_node_configs: list[dict[str, Any]] = []
-        for node_config in node_configs:
-            if node_config.get("type", "") == "custom-note":
+        normalized_nodes = [
+            dict(node_config)
+            for node_config in node_configs
+            if node_config.get("type", "") != "custom-note"
+        ]
+        nodes_by_id = {
+            node_id: node_config
+            for node_config in normalized_nodes
+            if isinstance((node_id := node_config.get("id")), str)
+        }
+        container_ids = {
+            node_id: resolve_container_id(node_config, nodes_by_id=nodes_by_id)
+            for node_id, node_config in nodes_by_id.items()
+        }
+        for node_config in normalized_nodes:
+            node_id = node_config.get("id")
+            if not isinstance(node_id, str):
                 continue
-            filtered_node_configs.append(dict(node_config))
-        return filtered_node_configs
+            data = node_config.get("data")
+            if isinstance(data, BaseNodeData):
+                normalized_data = data.model_dump(mode="python", exclude_unset=True)
+            elif isinstance(data, Mapping):
+                normalized_data = dict(data)
+            else:
+                continue
+            normalized_data["container_id"] = container_ids[node_id]
+            node_config["data"] = normalized_data
+        return normalized_nodes, container_ids
+
+    @classmethod
+    def _scope_graph_config(
+        cls,
+        *,
+        graph_config: Mapping[str, Any],
+        node_configs: list[dict[str, Any]],
+        edge_configs: list[dict[str, Any]],
+        container_ids: Mapping[str, str],
+        container_id: str,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+        """Split a workflow graph into one frame's executable and visible scope.
+
+        The direct node and edge lists contain only objects owned by
+        ``container_id`` and are used to construct the frame's executable
+        :class:`Graph`. The returned graph config also retains recursively nested
+        containers so the frame can later construct its children, while excluding
+        every parent and sibling scope. Edges between different direct owners are
+        invalid because they would bypass the owning container node.
+
+        :param graph_config: complete config visible to the parent frame
+        :param node_configs: copied nodes carrying canonical ``data.container_id``
+        :param edge_configs: validated raw edge dictionaries from that config
+        :param container_ids: direct container ID already resolved for every node
+        :param container_id: direct owner to materialize, or ``""`` for root
+
+        Returns:
+            Direct nodes, direct edges, and the container subtree config.
+
+        Raises:
+            ValueError: If scopes are orphaned, cyclic, or joined by an edge.
+
+        """
+        direct_node_ids = {
+            node_id
+            for node_id, node_container_id in container_ids.items()
+            if node_container_id == container_id
+        }
+        subtree_node_ids = set(direct_node_ids)
+        while descendants := {
+            node_id
+            for node_id, node_container_id in container_ids.items()
+            if node_container_id in subtree_node_ids and node_id not in subtree_node_ids
+        }:
+            subtree_node_ids.update(descendants)
+        if not container_id and subtree_node_ids != set(container_ids):
+            orphan_node_ids = sorted(set(container_ids) - subtree_node_ids)
+            msg = f"Nodes reference unknown or cyclic containers: {orphan_node_ids}"
+            raise ValueError(msg)
+
+        direct_edge_configs: list[dict[str, Any]] = []
+        subtree_edge_configs: list[dict[str, Any]] = []
+        for edge_config in edge_configs:
+            source = edge_config.get("source")
+            target = edge_config.get("target")
+            if not isinstance(source, str) or not isinstance(target, str):
+                continue
+
+            if (
+                source in container_ids
+                and target in container_ids
+                and container_ids[source] != container_ids[target]
+            ):
+                msg = (
+                    f"Edge '{source}->{target}' crosses container scopes "
+                    f"'{container_ids[source]}' and '{container_ids[target]}'"
+                )
+                raise ValueError(msg)
+
+            has_unknown_endpoint = (
+                source not in container_ids or target not in container_ids
+            )
+            if (
+                source in direct_node_ids
+                or target in direct_node_ids
+                or (not container_id and has_unknown_endpoint)
+            ):
+                direct_edge_configs.append(edge_config)
+            if (
+                source in subtree_node_ids
+                or target in subtree_node_ids
+                or (not container_id and has_unknown_endpoint)
+            ):
+                subtree_edge_configs.append(edge_config)
+
+        scoped_graph_config = dict(graph_config)
+        scoped_graph_config["nodes"] = [
+            node_config
+            for node_config in node_configs
+            if node_config.get("id") in subtree_node_ids
+        ]
+        scoped_graph_config["edges"] = subtree_edge_configs
+        direct_node_configs = [
+            node_config
+            for node_config in node_configs
+            if node_config.get("id") in direct_node_ids
+        ]
+        return direct_node_configs, direct_edge_configs, scoped_graph_config
 
     @classmethod
     def _promote_fail_branch_nodes(cls, nodes: dict[str, Node]) -> None:
@@ -309,6 +605,7 @@ class Graph:
         graph_config: Mapping[str, Any],
         node_factory: NodeFactory,
         root_node_id: str,
+        container_id: str = "",
         skip_validation: bool = False,
     ) -> Graph:
         """Initialize a graph with an explicit execution entry point.
@@ -316,6 +613,7 @@ class Graph:
         :param graph_config: graph config containing nodes and edges
         :param node_factory: factory for creating node instances from config data
         :param root_node_id: active root node id
+        :param container_id: direct container scope to materialize; empty for root
 
         Returns:
             Initialized graph instance rooted at `root_node_id`.
@@ -325,36 +623,65 @@ class Graph:
 
         """
         # Parse configs
-        edge_configs = graph_config.get("edges", [])
-        node_configs = graph_config.get("nodes", [])
+        node_configs, container_ids = cls._normalize_nodes(
+            _ListObjectDict.validate_python(graph_config.get("nodes", [])),
+        )
 
-        edge_configs = _ListObjectDict.validate_python(edge_configs)
-        node_configs = _ListObjectDict.validate_python(node_configs)
-        node_configs = cls._filter_canvas_only_nodes(node_configs)
-        node_configs = _ListNodeConfigDict.validate_python(node_configs)
+        direct_node_configs, direct_edge_configs, scoped_graph_config = (
+            cls._scope_graph_config(
+                graph_config=graph_config,
+                node_configs=node_configs,
+                edge_configs=cls._prepare_edge_configs(
+                    graph_config,
+                    container_ids,
+                ),
+                container_ids=container_ids,
+                container_id=container_id,
+            )
+        )
+        node_factory = node_factory.with_graph_config(scoped_graph_config)
+        scoped_node_configs = _ListNodeConfigDict.validate_python(
+            scoped_graph_config["nodes"],
+        )
+        execution_types = {
+            node_config["id"]: node_factory.validate_node(node_config)
+            for node_config in scoped_node_configs
+        }
+        # Every descendant is prevalidated above, so container ownership can be
+        # checked before direct-frame nodes run constructors or post-init hooks.
+        for container_node_id in sorted(
+            {
+                container_ids[node_config["id"]]
+                for node_config in scoped_node_configs
+                if container_ids[node_config["id"]]
+            }
+            & execution_types.keys(),
+        ):
+            if execution_types[container_node_id] != NodeExecutionType.CONTAINER:
+                msg = (
+                    f"Node '{container_node_id}' owns child nodes "
+                    "but is not a container"
+                )
+                raise ValueError(msg)
+        node_configs_map = cls._parse_node_configs(
+            _ListNodeConfigDict.validate_python(direct_node_configs),
+        )
 
-        if not node_configs:
+        if not node_configs_map:
             msg = "Graph must have at least one node"
             raise ValueError(msg)
-
-        # Parse node configurations
-        node_configs_map = cls._parse_node_configs(node_configs)
 
         if root_node_id not in node_configs_map:
             msg = f"Root node id {root_node_id} not found in the graph"
             raise ValueError(msg)
 
         # Build edges
-        edges, in_edges, out_edges = cls._build_edges(edge_configs)
+        edges, in_edges, out_edges = cls._build_edges(direct_edge_configs)
 
         # Create node instances
         nodes = cls._create_node_instances(node_configs_map, node_factory)
-
         # Promote fail-branch nodes to branch execution type at graph level
         cls._promote_fail_branch_nodes(nodes)
-
-        # Get root node instance
-        root_node = nodes[root_node_id]
 
         # Mark inactive root branches as skipped
         cls._mark_inactive_root_branches(
@@ -371,8 +698,8 @@ class Graph:
             edges=edges,
             in_edges=in_edges,
             out_edges=out_edges,
-            root_node=root_node,
-            graph_config=graph_config,
+            root_node=nodes[root_node_id],
+            graph_config=scoped_graph_config,
             node_factory=node_factory,
         )
 

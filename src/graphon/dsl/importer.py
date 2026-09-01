@@ -10,15 +10,15 @@ from uuid import uuid4
 import yaml
 from pydantic import ValidationError
 
-from graphon.entities.graph_init_params import GraphInitParams
+from graphon.engine import Engine
+from graphon.engine.command import CommandChannel
+from graphon.engine.container_handler import ContainerHandlerFactory
 from graphon.enums import BuiltinNodeTypes
 from graphon.graph.graph import Graph
+from graphon.graph.scoping import resolve_container_id
 from graphon.graph.validation import GraphValidationError
-from graphon.graph_engine.command_channels import CommandChannel, InMemoryChannel
-from graphon.graph_engine.config import GraphEngineConfig
-from graphon.graph_engine.container_handlers import ContainerHandlerFactory
-from graphon.graph_engine.graph_engine import GraphEngine
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.init_params import InitParams
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 
 from .entities import (
@@ -94,9 +94,9 @@ def loads(
     run_context: Mapping[str, Any] | None = None,
     start_inputs: Mapping[str, Any] | None = None,
     command_channel: CommandChannel | None = None,
-    config: GraphEngineConfig | None = None,
+    workers: int = 5,
     container_handler_factories: Sequence[ContainerHandlerFactory] = (),
-) -> GraphEngine:
+) -> Engine:
     plan = inspect(dsl, source_kind=source_kind)
     if plan.load_status == LoadStatus.UNSUPPORTED:
         raise _dsl_error(
@@ -128,22 +128,22 @@ def loads(
         run_context=run_context or {},
         start_inputs=start_inputs or {},
     )
-    graph_init_params = GraphInitParams(
+    init_params = InitParams(
         workflow_id=workflow_id,
         graph_config=graph_config,
         run_context=run_context or {},
         call_depth=0,
     )
-    graph_runtime_state = GraphRuntimeState(
+    runtime_state = RuntimeState(
         variable_pool=variable_pool,
         start_at=time.time(),
+        workflow_id=workflow_id,
     )
     parsed_credentials = _parse_credentials(credentials)
-    engine_config = config or GraphEngineConfig()
     node_factory = SlimDslNodeFactory(
         graph_config=graph_config,
-        graph_init_params=graph_init_params,
-        graph_runtime_state=graph_runtime_state,
+        init_params=init_params,
+        runtime_state=runtime_state,
         credentials=parsed_credentials,
         dependencies=list(plan.dependencies),
     )
@@ -170,12 +170,11 @@ def loads(
             kind=plan.document.kind,
         ) from error
 
-    return GraphEngine(
-        workflow_id=workflow_id,
+    return Engine(
         graph=graph,
-        graph_runtime_state=graph_runtime_state,
-        command_channel=command_channel or InMemoryChannel(),
-        config=engine_config,
+        runtime_state=runtime_state,
+        command_channel=command_channel,
+        workers=workers,
         container_handler_factories=container_handler_factories,
     )
 
@@ -618,7 +617,28 @@ def _canonical_vendor(provider: str | None) -> str | None:
     return parts[-1] if parts else provider
 
 
-def _normalize_edges(
+def _node_owner_for_edge_validation(
+    node: Mapping[str, Any],
+    *,
+    nodes_by_id: Mapping[str, Mapping[str, Any]],
+) -> str | None:
+    """Resolve a node's direct graph owner for scoped edge-ID validation.
+
+    The graph scoping resolver owns canonical and legacy hierarchy semantics.
+    Invalid or genuinely ambiguous ownership returns ``None`` here so edge-ID
+    normalization does not mask the more actionable error raised by Graph.
+
+    Returns:
+        The direct container ID, ``""`` for the root graph, or ``None`` when
+        ownership cannot be resolved safely.
+    """
+    try:
+        return resolve_container_id(node, nodes_by_id=nodes_by_id)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_edges(  # ruff:ignore[complex-structure]
     edges: object,
     *,
     nodes: Sequence[Mapping[str, Any]],
@@ -640,8 +660,16 @@ def _normalize_edges(
         for node in nodes
         if isinstance(node.get("data"), Mapping)
     }
+    nodes_by_id = {str(node["id"]): node for node in nodes}
+    node_owners = {
+        node_id: _node_owner_for_edge_validation(
+            node,
+            nodes_by_id=nodes_by_id,
+        )
+        for node_id, node in nodes_by_id.items()
+    }
     normalized_edges: list[dict[str, Any]] = []
-    seen_edge_ids: set[str] = set()
+    seen_edge_ids: set[tuple[str, str]] = set()
     for index, edge in enumerate(edges):
         path = f"/workflow/graph/edges/{index}"
         if not isinstance(edge, Mapping):
@@ -672,18 +700,29 @@ def _normalize_edges(
                 kind=kind,
                 details={"source": source, "target": target},
             )
-        edge_id = edge_mapping.get("id")
-        if isinstance(edge_id, str):
-            if edge_id in seen_edge_ids:
-                msg = f"Duplicate graph edge id: {edge_id}"
+        if "id" in edge_mapping:
+            edge_id = edge_mapping["id"]
+            if not isinstance(edge_id, str) or not edge_id:
+                msg = "Graph edge id must be a non-empty string."
                 raise _dsl_error(
                     msg,
-                    code="graph.duplicate_edge_id",
+                    code="graph.invalid_edge_id",
                     path=f"{path}/id",
                     kind=kind,
-                    details={"edge_id": edge_id},
                 )
-            seen_edge_ids.add(edge_id)
+            source_owner = node_owners[source]
+            if source_owner is not None and source_owner == node_owners[target]:
+                scoped_edge_id = (source_owner, edge_id)
+                if scoped_edge_id in seen_edge_ids:
+                    msg = f"Duplicate graph edge id: {edge_id}"
+                    raise _dsl_error(
+                        msg,
+                        code="graph.duplicate_edge_id",
+                        path=f"{path}/id",
+                        kind=kind,
+                        details={"edge_id": edge_id},
+                    )
+                seen_edge_ids.add(scoped_edge_id)
 
         normalized_edge = deepcopy(dict(edge_mapping))
         data = dict(normalized_edge.get("data") or {})

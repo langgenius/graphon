@@ -4,10 +4,9 @@ import json
 from collections.abc import Generator, Mapping, MutableMapping, Sequence
 from typing import Any, override
 
-from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.node_events.base import (
-    NodeEventBase,
+    NodeEventPayload,
     NodeRunResult,
 )
 from graphon.node_events.node import (
@@ -17,7 +16,8 @@ from graphon.node_events.node import (
 from graphon.nodes.base.node import Node
 from graphon.nodes.variable_assigner.common import helpers as common_helpers
 from graphon.nodes.variable_assigner.common.exc import VariableOperatorNodeError
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.init_params import InitParams
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.variables.consts import SELECTORS_LENGTH
 from graphon.variables.types import SegmentType
 from graphon.variables.variables import VariableBase
@@ -81,14 +81,14 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
         node_id: str,
         data: VariableAssignerNodeData,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        init_params: InitParams,
+        runtime_state: RuntimeState,
     ) -> None:
         super().__init__(
             node_id=node_id,
             data=data,
-            graph_init_params=graph_init_params,
-            graph_runtime_state=graph_runtime_state,
+            init_params=init_params,
+            runtime_state=runtime_state,
         )
 
     @override
@@ -134,14 +134,14 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
         return var_mapping
 
     @override
-    def _run(self) -> Generator[NodeEventBase, None, None]:
+    def _run(self) -> Generator[NodeEventPayload, None, None]:
         inputs = self.node_data.model_dump()
         process_data: dict[str, Any] = {}
         # NOTE: This node has no outputs
         updated_variable_selectors: list[Sequence[str]] = []
         # Preserve intra-node read-after-write behavior without mutating the shared pool
         # until the engine processes the emitted VariableUpdatedEvent instances.
-        working_variable_pool = self.graph_runtime_state.variable_pool.model_copy(
+        working_variable_pool = self.runtime_state.variable_pool.model_copy(
             deep=True,
         )
 

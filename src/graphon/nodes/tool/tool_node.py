@@ -4,7 +4,7 @@ from typing import Any, override
 
 from typing_extensions import TypeIs
 
-from graphon.entities.graph_init_params import GraphInitParams
+from graphon.engine_events.node import NodeRunStartedEvent
 from graphon.enums import (
     BuiltinNodeTypes,
     WorkflowNodeExecutionMetadataKey,
@@ -13,9 +13,8 @@ from graphon.enums import (
 from graphon.file.enums import FileTransferMethod
 from graphon.file.file_factory import get_file_type_by_mime_type
 from graphon.file.models import File
-from graphon.graph_events.node import NodeRunStartedEvent
 from graphon.node_events.base import (
-    NodeEventBase,
+    NodeEventPayload,
     NodeRunResult,
 )
 from graphon.node_events.node import (
@@ -31,7 +30,8 @@ from graphon.nodes.tool_runtime_entities import (
     ToolRuntimeMessage,
     ToolRuntimeParameter,
 )
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.init_params import InitParams
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import ArrayFileSegment
 from graphon.variables.template_resolution import convert_template
@@ -79,8 +79,8 @@ class ToolNode(Node[ToolNodeData]):
         node_id: str,
         data: ToolNodeData,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        init_params: InitParams,
+        runtime_state: RuntimeState,
         tool_file_manager: ToolFileManagerProtocol,
         # TODO @-LAN: See https://github.com/langgenius/graphon/issues/new/choose.  # ruff:ignore[line-contains-todo]
         # Make `runtime` optional once Graphon provides a default tool runtime
@@ -90,8 +90,8 @@ class ToolNode(Node[ToolNodeData]):
         super().__init__(
             node_id=node_id,
             data=data,
-            graph_init_params=graph_init_params,
-            graph_runtime_state=graph_runtime_state,
+            init_params=init_params,
+            runtime_state=runtime_state,
         )
         self._tool_file_manager = tool_file_manager
         self._runtime = runtime
@@ -107,7 +107,7 @@ class ToolNode(Node[ToolNodeData]):
         event.provider_type = self.node_data.provider_type
 
     @override
-    def _run(self) -> Generator[NodeEventBase, None, None]:
+    def _run(self) -> Generator[NodeEventPayload, None, None]:
         """Run the tool node"""
         # fetch tool icon
         tool_info = {
@@ -127,7 +127,7 @@ class ToolNode(Node[ToolNodeData]):
                 self.node_data.version != "1"
                 or self.node_data.tool_node_version is not None
             ):
-                variable_pool = self.graph_runtime_state.variable_pool
+                variable_pool = self.runtime_state.variable_pool
             tool_runtime = self._get_tool_runtime(
                 variable_pool=variable_pool,
                 node_execution_id=self.execution_id,
@@ -150,12 +150,12 @@ class ToolNode(Node[ToolNodeData]):
         )
         parameters = self._generate_parameters(
             tool_parameters=tool_parameters,
-            variable_pool=self.graph_runtime_state.variable_pool,
+            variable_pool=self.runtime_state.variable_pool,
             node_data=self.node_data,
         )
         parameters_for_log = self._generate_parameters(
             tool_parameters=tool_parameters,
-            variable_pool=self.graph_runtime_state.variable_pool,
+            variable_pool=self.runtime_state.variable_pool,
             node_data=self.node_data,
             for_log=True,
         )
@@ -277,7 +277,7 @@ class ToolNode(Node[ToolNodeData]):
         node_id: str,
         tool_runtime: ToolRuntimeHandle,
         **_: Any,
-    ) -> Generator[NodeEventBase, None, None]:
+    ) -> Generator[NodeEventPayload, None, None]:
         """Convert graph-owned tool runtime messages into node outputs."""
         state = _ToolMessageState()
 
@@ -316,7 +316,7 @@ class ToolNode(Node[ToolNodeData]):
         node_id: str,
         tool_runtime: ToolRuntimeHandle,
         **kwargs: Any,
-    ) -> Generator[NodeEventBase, None, None]:
+    ) -> Generator[NodeEventPayload, None, None]:
         """Convert tool runtime messages using the node's public test seam."""
         yield from self._transform_message(
             messages=messages,
@@ -333,7 +333,7 @@ class ToolNode(Node[ToolNodeData]):
         message: ToolRuntimeMessage,
         state: _ToolMessageState,
         node_id: str,
-    ) -> Generator[NodeEventBase, None, None]:
+    ) -> Generator[NodeEventPayload, None, None]:
         match message.type:
             case (
                 ToolRuntimeMessage.MessageType.IMAGE_LINK
@@ -469,7 +469,7 @@ class ToolNode(Node[ToolNodeData]):
         meta: Mapping[str, Any] | None,
         state: _ToolMessageState,
         **_: Any,
-    ) -> Generator[NodeEventBase, None, None]:
+    ) -> Generator[NodeEventPayload, None, None]:
         url = payload.text
         transfer_method = FileTransferMethod.TOOL_FILE
         tool_file_id: str | None = None
@@ -507,7 +507,7 @@ class ToolNode(Node[ToolNodeData]):
         meta: Mapping[str, Any] | None,
         state: _ToolMessageState,
         **_: Any,
-    ) -> Generator[NodeEventBase, None, None]:
+    ) -> Generator[NodeEventPayload, None, None]:
         tool_file_id = (meta or {}).get("tool_file_id")
         if isinstance(tool_file_id, str) and tool_file_id:
             self._resolve_tool_file(
@@ -562,7 +562,7 @@ class ToolNode(Node[ToolNodeData]):
         meta: Mapping[str, Any] | None,
         state: _ToolMessageState,
         **_: Any,
-    ) -> Generator[NodeEventBase, None, None]:
+    ) -> Generator[NodeEventPayload, None, None]:
         if not payload.id:
             msg = "tool blob chunk message is missing id"
             raise ToolFileError(msg)
@@ -603,7 +603,7 @@ class ToolNode(Node[ToolNodeData]):
         state: _ToolMessageState,
         node_id: str,
         **_: Any,
-    ) -> Generator[NodeEventBase, None, None]:
+    ) -> Generator[NodeEventPayload, None, None]:
         state.text += payload.text
         yield StreamChunkEvent(
             selector=[node_id, "text"],
@@ -617,7 +617,7 @@ class ToolNode(Node[ToolNodeData]):
         payload: ToolRuntimeMessage.JsonMessage,
         state: _ToolMessageState,
         **_: Any,
-    ) -> Generator[NodeEventBase, None, None]:
+    ) -> Generator[NodeEventPayload, None, None]:
         if payload.json_object:
             state.json_values.append(payload.json_object)
         yield from ()
@@ -630,7 +630,7 @@ class ToolNode(Node[ToolNodeData]):
         state: _ToolMessageState,
         node_id: str,
         **_: Any,
-    ) -> Generator[NodeEventBase, None, None]:
+    ) -> Generator[NodeEventPayload, None, None]:
         file_obj = (meta or {}).get("file")
         if isinstance(file_obj, File):
             state.files.append(file_obj)
@@ -652,7 +652,7 @@ class ToolNode(Node[ToolNodeData]):
         state: _ToolMessageState,
         node_id: str,
         **_: Any,
-    ) -> Generator[NodeEventBase, None, None]:
+    ) -> Generator[NodeEventPayload, None, None]:
         variable_name = payload.variable_name
         variable_value = payload.variable_value
 
@@ -680,7 +680,7 @@ class ToolNode(Node[ToolNodeData]):
         meta: Mapping[str, Any],
         state: _ToolMessageState,
         **_: Any,
-    ) -> Generator[NodeEventBase, None, None]:
+    ) -> Generator[NodeEventPayload, None, None]:
         del payload
         if "file" not in meta:
             msg = "File message is missing 'file' key in meta"
@@ -699,14 +699,14 @@ class ToolNode(Node[ToolNodeData]):
         *,
         payload: ToolRuntimeMessage.LogMessage,
         **_: Any,
-    ) -> Generator[NodeEventBase, None, None]:
+    ) -> Generator[NodeEventPayload, None, None]:
         del payload
         yield from ()
 
     def _emit_final_stream_events(
         self,
         state: _ToolMessageState,
-    ) -> Generator[NodeEventBase, None, None]:
+    ) -> Generator[NodeEventPayload, None, None]:
         if state.blob_chunks:
             pending_ids = ", ".join(sorted(state.blob_chunks))
             msg = f"tool blob chunk stream ended before completion: {pending_ids}"

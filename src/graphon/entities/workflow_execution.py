@@ -1,6 +1,6 @@
 """Domain entities for workflow execution.
 
-Models describe graph runtime state and avoid infrastructure-specific details.
+Models describe runtime state and avoid infrastructure-specific details.
 """
 
 from __future__ import annotations
@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field
 from graphon.enums import WorkflowExecutionStatus, WorkflowType
 
 
+# TODO: Remove after downstream migration.  # ruff:ignore[line-contains-todo, missing-todo-author, missing-todo-link]
+# Consumers must read graph runtime events/state instead of WorkflowExecution.
 class WorkflowExecution(BaseModel):
     """Domain model for a workflow execution within the graph runtime."""
 

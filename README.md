@@ -8,9 +8,9 @@ protocols, and a runnable end-to-end example.
 
 ## Highlights
 
-- Queue-based `GraphEngine` orchestration with event-driven execution
+- Queue-based `Engine` orchestration with event-driven execution
 - Graph parsing, validation, and fluent graph building
-- Shared runtime state, variable pool, and workflow execution domain models
+- Shared runtime state, variable pool, and workflow execution state
 - Built-in node implementations for common workflow patterns
 - DSL import support with Slim-backed LLM nodes
 - HTTP, file, tool, and human-input integration protocols
@@ -89,9 +89,10 @@ For the exact credential shape and runtime notes, see
 At a high level, direct Graphon usage looks like this:
 
 1. Build or load a graph and instantiate nodes into a `Graph`.
-2. Prepare `GraphRuntimeState` and seed the `VariablePool`.
+2. Prepare `RuntimeState` with the workflow ID and seed the `VariablePool`.
 3. Configure model, file, HTTP, tool, or human-input adapters as needed.
-4. Run `GraphEngine` and consume emitted graph events.
+4. Run `Engine` and consume emitted engine events; a local command channel is
+   created automatically unless an external channel is supplied.
 5. Read final outputs from runtime state.
 
 For Dify DSL documents, use `graphon.dsl.loads()` to build the engine from the
@@ -128,14 +129,15 @@ planned as a separate follow-up.
 ## Project Layout
 
 - `src/graphon/graph`: graph structures, parsing, validation, and builders
-- `src/graphon/graph_engine`: orchestration, workers, command channels, and
-  layers
+- `src/graphon/engine`: dispatch, workers, commands, events, and layers
 - `src/graphon/runtime`: runtime state, read-only wrappers, and variable pool
 - `src/graphon/nodes`: built-in workflow node implementations
 - `src/graphon/model_runtime`: provider/model abstractions and shared model
   entities
 - `src/graphon/dsl`: DSL import support, including Slim-backed runtime adapters
-- `src/graphon/graph_events`: event models emitted during execution
+- `src/graphon/node_events`: payloads emitted by node implementations before
+  execution context is attached
+- `src/graphon/engine_events`: complete events emitted by the engine
 - `src/graphon/http`: HTTP client abstractions and default implementation
 - `src/graphon/file`: workflow file models and file runtime helpers
 - `src/graphon/protocols`: public protocol re-exports for integrations
@@ -144,15 +146,17 @@ planned as a separate follow-up.
 
 ## Internal Docs
 
+- [CHANGELOG.md](CHANGELOG.md): versioned user-facing changes
+- [MIGRATION.md](MIGRATION.md): breaking-release upgrade instructions
 - [CONTRIBUTING.md](CONTRIBUTING.md): contributor workflow, CI, commit/PR rules
 - [examples/slim_llm/README.md](examples/slim_llm/README.md):
   runnable Slim LLM example setup
 - [src/graphon/model_runtime/README.md](src/graphon/model_runtime/README.md):
   model runtime overview
-- [src/graphon/graph_engine/layers/README.md](src/graphon/graph_engine/layers/README.md):
+- [src/graphon/engine/layer/README.md](src/graphon/engine/layer/README.md):
   engine layer extension points
-- [src/graphon/graph_engine/command_channels/README.md](src/graphon/graph_engine/command_channels/README.md):
-  local and distributed command channels
+- [src/graphon/engine/command/README.md](src/graphon/engine/command/README.md):
+  command processing and local or distributed channels
 
 ## Development
 

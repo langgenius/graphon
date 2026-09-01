@@ -6,13 +6,13 @@ from decimal import Decimal
 from textwrap import dedent
 from typing import Any, Protocol, TypeGuard, assert_never, override
 
-from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.node import Node
 from graphon.nodes.code.entities import CodeLanguage, CodeNodeData
 from graphon.nodes.code.limits import CodeNodeLimits
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.init_params import InitParams
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.variables.segments import ArrayFileSegment
 from graphon.variables.types import SegmentType
 
@@ -87,16 +87,16 @@ class CodeNode(Node[CodeNodeData]):
         node_id: str,
         data: CodeNodeData,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        init_params: InitParams,
+        runtime_state: RuntimeState,
         code_executor: CodeExecutorProtocol,
         code_limits: CodeNodeLimits,
     ) -> None:
         super().__init__(
             node_id=node_id,
             data=data,
-            graph_init_params=graph_init_params,
-            graph_runtime_state=graph_runtime_state,
+            init_params=init_params,
+            runtime_state=runtime_state,
         )
         self._code_executor: CodeExecutorProtocol = code_executor
         self._limits = code_limits
@@ -149,7 +149,7 @@ class CodeNode(Node[CodeNodeData]):
         variables = {}
         for variable_selector in self.node_data.variables:
             variable_name = variable_selector.variable
-            variable = self.graph_runtime_state.variable_pool.get(
+            variable = self.runtime_state.variable_pool.get(
                 variable_selector.value_selector,
             )
             if isinstance(variable, ArrayFileSegment):

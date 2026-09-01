@@ -51,7 +51,7 @@ def test_iteration_variable_mapping_filters_container_internal_selectors() -> No
                 "id": "child",
                 "data": {
                     "type": AnswerNode.node_type,
-                    "iteration_id": "iteration",
+                    "container_id": "iteration",
                     "answer": (
                         "{{#source.value#}} {{#iteration.item#}} {{#nested.answer#}}"
                     ),
@@ -61,8 +61,8 @@ def test_iteration_variable_mapping_filters_container_internal_selectors() -> No
                 "id": "nested",
                 "data": {
                     "type": AnswerNode.node_type,
-                    "iteration_id": "iteration",
-                    "answer": "{{#source.other#}}",
+                    "container_id": "iteration",
+                    "answer": "{{#child.answer#}} {{#source.other#}}",
                 },
             },
         ],
@@ -103,7 +103,7 @@ def test_loop_variable_mapping_filters_loop_internal_selectors() -> None:
                 "id": "child",
                 "data": {
                     "type": AnswerNode.node_type,
-                    "loop_id": "loop",
+                    "container_id": "loop",
                     "answer": "{{#source.value#}} {{#loop.acc#}}",
                 },
             },

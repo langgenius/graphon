@@ -5,7 +5,7 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from graphon.entities.graph_init_params import GraphInitParams
+from graphon.runtime.init_params import InitParams
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.variables import Variable
 
@@ -23,14 +23,29 @@ def build_file_reference(*, record_id: str, storage_key: str | None = None) -> s
     return f"{_FILE_REFERENCE_PREFIX}{encoded_payload}"
 
 
-def build_graph_init_params(
+def build_init_params(
     *,
     workflow_id: str = "workflow",
     graph_config: Mapping[str, Any] | None = None,
     run_context: Mapping[str, Any] | None = None,
     call_depth: int = 0,
-) -> GraphInitParams:
-    return GraphInitParams(
+) -> InitParams:
+    """Build the immutable inputs shared by nodes in one test execution.
+
+    Optional mappings default to fresh empty dictionaries so callers can specify
+    only the execution inputs relevant to a test without sharing mutable state.
+
+    Args:
+        workflow_id: Workflow identity exposed to constructed nodes.
+        graph_config: Graph definition visible during node initialization.
+        run_context: Immutable integration context visible to nodes.
+        call_depth: Nested workflow call depth.
+
+    Returns:
+        A fully initialized ``InitParams`` value.
+
+    """
+    return InitParams(
         workflow_id=workflow_id,
         graph_config=graph_config or {},
         run_context=run_context or {},

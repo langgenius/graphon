@@ -17,14 +17,14 @@ from graphon.dsl.entities import (
     PluginDependencyType,
 )
 from graphon.dsl.errors import DslError
-from graphon.entities.graph_config import NodeConfigDict
-from graphon.file.enums import FileTransferMethod, FileType
-from graphon.file.models import File
-from graphon.graph_events.node import (
+from graphon.engine_events.node import (
     NodeRunFailedEvent,
     NodeRunSucceededEvent,
     NodeRunVariableUpdatedEvent,
 )
+from graphon.entities.graph_config import NodeConfigDict
+from graphon.file.enums import FileTransferMethod, FileType
+from graphon.file.models import File
 from graphon.http import HttpResponse
 from graphon.model_runtime.entities.common_entities import I18nObject
 from graphon.model_runtime.entities.llm_entities import LLMResult, LLMUsage
@@ -55,8 +55,8 @@ from graphon.nodes.variable_assigner.v1.node import (
 from graphon.nodes.variable_assigner.v2.node import (
     VariableAssignerNode as VariableAssignerNodeV2,
 )
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
-from tests.helpers import build_graph_init_params, build_variable_pool
+from graphon.runtime.runtime_state import RuntimeState
+from tests.helpers import build_init_params, build_variable_pool
 
 _OPENAI_PLUGIN_ID = "langgenius/openai:0.3.8@test"
 
@@ -361,10 +361,11 @@ def _dsl_node_factory(
 ) -> node_factory_module.SlimDslNodeFactory:
     return node_factory_module.SlimDslNodeFactory(
         graph_config={"nodes": [], "edges": []},
-        graph_init_params=build_graph_init_params(
+        init_params=build_init_params(
             graph_config={"nodes": [], "edges": []},
         ),
-        graph_runtime_state=GraphRuntimeState(
+        runtime_state=RuntimeState(
+            workflow_id="workflow",
             variable_pool=build_variable_pool(variables=variables),
             start_at=0,
         ),
@@ -437,6 +438,30 @@ def _model(name: str) -> dict[str, Any]:
     }
 
 
+def _llm_data() -> dict[str, Any]:
+    """Build the smallest concrete LLM payload accepted by the default factory."""
+    return {
+        "type": "llm",
+        "model": _model("chat-model"),
+        "prompt_template": [{"role": "user", "text": "Hello"}],
+        "context": {"enabled": False},
+    }
+
+
+def _tool_data() -> dict[str, Any]:
+    """Build a valid plugin-tool payload whose dependency can be preflighted."""
+    return {
+        "type": "tool",
+        "provider_id": "langgenius/search/search",
+        "provider_type": "plugin",
+        "provider_name": "langgenius/search/search",
+        "tool_name": "web_search",
+        "tool_label": "Web search",
+        "tool_configurations": {},
+        "tool_parameters": {},
+    }
+
+
 def _question_classifier_data() -> dict[str, Any]:
     return {
         "type": "question-classifier",
@@ -468,17 +493,19 @@ def _parameter_extractor_data() -> dict[str, Any]:
     }
 
 
-def test_slim_dsl_node_factory_rebinds_graph_runtime_state() -> None:
+def test_slim_dsl_node_factory_rebinds_runtime_state() -> None:
     graph_config = {
         "nodes": [{"id": "start", "data": {"type": "start", "variables": []}}],
         "edges": [],
     }
-    graph_init_params = build_graph_init_params(graph_config=graph_config)
-    original_runtime_state = GraphRuntimeState(
+    init_params = build_init_params(graph_config=graph_config)
+    original_runtime_state = RuntimeState(
+        workflow_id="workflow",
         variable_pool=build_variable_pool(variables=[(["start", "query"], "before")]),
         start_at=1,
     )
-    rebound_runtime_state = GraphRuntimeState(
+    rebound_runtime_state = RuntimeState(
+        workflow_id="workflow",
         variable_pool=build_variable_pool(variables=[(["start", "query"], "after")]),
         start_at=2,
     )
@@ -512,8 +539,8 @@ def test_slim_dsl_node_factory_rebinds_graph_runtime_state() -> None:
     ]
     factory = node_factory_module.SlimDslNodeFactory(
         graph_config=graph_config,
-        graph_init_params=graph_init_params,
-        graph_runtime_state=original_runtime_state,
+        init_params=init_params,
+        runtime_state=original_runtime_state,
         credentials=credentials,
         dependencies=dependencies,
     )
@@ -527,13 +554,13 @@ def test_slim_dsl_node_factory_rebinds_graph_runtime_state() -> None:
     )
 
     assert rebound_factory is not factory
-    assert rebound_factory.graph_config is graph_config
-    assert rebound_factory.graph_init_params is graph_init_params
+    assert rebound_factory.graph_config == graph_config
+    assert rebound_factory.init_params is init_params
     assert rebound_factory.credentials is credentials
     assert rebound_factory.dependencies is dependencies
-    assert rebound_factory.graph_runtime_state is rebound_runtime_state
+    assert rebound_factory.runtime_state is rebound_runtime_state
     assert rebound_factory.slim_client_config == factory.slim_client_config
-    assert node.graph_runtime_state is rebound_runtime_state
+    assert node.runtime_state is rebound_runtime_state
 
 
 @pytest.mark.parametrize(
@@ -561,6 +588,110 @@ def test_variable_assigner_invalid_payload_raises_dsl_error() -> None:
 
     assert exc_info.value.code == "node.assigner_invalid_payload"
     assert exc_info.value.path == "/nodes/node/data"
+
+
+def test_loads_validates_malformed_descendant_before_constructing_nodes(
+    mocker: Any,
+) -> None:
+    """Reject a malformed child schema before any root node is constructed.
+
+    Container children are materialized only after their owner runs. Loading must
+    nevertheless validate their concrete schemas up front so a bad child cannot
+    fail after already constructed root nodes initialize runtime collaborators or
+    ``post_init()`` hooks.
+    """
+    create_node = mocker.spy(node_factory_module.SlimDslNodeFactory, "create_node")
+    dsl = _graph_dsl_for_nodes(
+        nodes=[
+            {
+                "id": "loop",
+                "data": {
+                    "type": "loop",
+                    "start_node_id": "loop-start",
+                    "loop_count": 1,
+                    "break_conditions": [],
+                    "logical_operator": "and",
+                },
+            },
+            {
+                "id": "loop-start",
+                "data": {
+                    "type": "loop-start",
+                    "container_id": "loop",
+                },
+            },
+            {
+                "id": "malformed-code",
+                "data": {
+                    "type": "code",
+                    "container_id": "loop",
+                },
+            },
+        ],
+        edges=[
+            {"source": "start", "target": "loop"},
+            {"source": "loop-start", "target": "malformed-code"},
+        ],
+    )
+
+    with pytest.raises(DslError) as exc_info:
+        loads(dsl)
+
+    assert exc_info.value.code == "graph.build_failed"
+    create_node.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("node_data", "expected_code"),
+    [
+        (_llm_data(), "credential.missing_required_key"),
+        (_tool_data(), "dependency.missing_plugin"),
+    ],
+)
+def test_loads_resolves_descendant_dependencies_before_constructing_nodes(
+    mocker: Any,
+    node_data: dict[str, Any],
+    expected_code: str,
+) -> None:
+    """Resolve nested model/tool dependencies during side-effect-free preflight.
+
+    The outer loop is executable from the root frame, while the tested node is
+    materialized only in its child frame. Import must still reject a missing LLM
+    credential or tool plugin before constructing the root Start or Loop node.
+    """
+    create_node = mocker.spy(node_factory_module.SlimDslNodeFactory, "create_node")
+    dsl = _graph_dsl_for_nodes(
+        nodes=[
+            {
+                "id": "loop",
+                "data": {
+                    "type": "loop",
+                    "start_node_id": "loop-start",
+                    "loop_count": 1,
+                    "break_conditions": [],
+                    "logical_operator": "and",
+                },
+            },
+            {
+                "id": "loop-start",
+                "data": {"type": "loop-start", "container_id": "loop"},
+            },
+            {
+                "id": "nested",
+                "data": {**node_data, "container_id": "loop"},
+            },
+        ],
+        edges=[
+            {"source": "start", "target": "loop"},
+            {"source": "loop-start", "target": "nested"},
+        ],
+    )
+
+    with pytest.raises(DslError) as exc_info:
+        loads(dsl)
+
+    assert exc_info.value.code == expected_code
+    create_node.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -661,8 +792,8 @@ def test_dify_exported_app_loads_category_one_and_two_nodes(
         "classifier-model",
         "extractor-model",
     ]
-    env_var = engine.graph_runtime_state.variable_pool.get(["env", "api_key"])
-    conversation_var = engine.graph_runtime_state.variable_pool.get([
+    env_var = engine.runtime_state.variable_pool.get(["env", "api_key"])
+    conversation_var = engine.runtime_state.variable_pool.get([
         "conversation",
         "topic",
     ])
@@ -705,7 +836,7 @@ def test_assigner_node_from_dsl_emits_variable_update() -> None:
         _graph_dsl_for_node(_assigner_v2_data()),
         start_inputs={"value": "after"},
     )
-    engine.graph_runtime_state.variable_pool.add(["conversation", "topic"], "before")
+    engine.runtime_state.variable_pool.add(["conversation", "topic"], "before")
     node = engine.graph.nodes["node"]
     node.bind_execution_id("node-run")
 

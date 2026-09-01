@@ -32,8 +32,8 @@ from graphon.nodes.protocols import (
     ToolFileManagerProtocol,
 )
 from graphon.nodes.runtime import ToolNodeRuntimeProtocol
-from graphon.runtime.graph_runtime_state_protocol import (
-    ReadOnlyGraphRuntimeState,
+from graphon.runtime.runtime_state_protocol import (
+    ReadOnlyRuntimeState,
     ReadOnlyVariablePool,
 )
 from graphon.variable_loader import VariableLoader
@@ -57,7 +57,7 @@ __all__ = [
     "PreparedLLMProtocol",
     "PromptMessageMemory",
     "PromptMessageSerializerProtocol",
-    "ReadOnlyGraphRuntimeState",
+    "ReadOnlyRuntimeState",
     "ReadOnlyVariablePool",
     "RerankModelRuntime",
     "RetrieverAttachmentLoaderProtocol",

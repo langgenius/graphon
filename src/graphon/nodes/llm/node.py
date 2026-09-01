@@ -15,7 +15,6 @@ from jsonschema import Draft7Validator, SchemaError, ValidationError
 from referencing import Registry
 from referencing.exceptions import Unresolvable
 
-from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import (
     BuiltinNodeTypes,
     WorkflowNodeExecutionMetadataKey,
@@ -47,7 +46,7 @@ from graphon.model_runtime.entities.model_entities import ModelFeature
 from graphon.model_runtime.memory.prompt_message_memory import PromptMessageMemory
 from graphon.model_runtime.utils.encoders import jsonable_encoder
 from graphon.node_events.base import (
-    NodeEventBase,
+    NodeEventPayload,
     NodeRunResult,
 )
 from graphon.node_events.node import (
@@ -74,7 +73,8 @@ from graphon.nodes.llm.runtime_protocols import (
     RetrieverAttachmentLoaderProtocol,
 )
 from graphon.prompt_entities import MemoryConfig
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.init_params import InitParams
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.template_rendering import Jinja2TemplateRenderer
 from graphon.variables.segments import (
     ArrayFileSegment,
@@ -154,8 +154,8 @@ class LLMNode(Node[LLMNodeData]):
         node_id: str,
         data: LLMNodeData,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        init_params: InitParams,
+        runtime_state: RuntimeState,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
         model_instance: LLMProtocol,
@@ -170,8 +170,8 @@ class LLMNode(Node[LLMNodeData]):
         super().__init__(
             node_id=node_id,
             data=data,
-            graph_init_params=graph_init_params,
-            graph_runtime_state=graph_runtime_state,
+            init_params=init_params,
+            runtime_state=runtime_state,
         )
         _ = credentials_provider, model_factory, http_client
         self._model_instance = model_instance
@@ -243,7 +243,7 @@ class LLMNode(Node[LLMNodeData]):
         *,
         node_inputs: dict[str, Any],
     ) -> Generator[
-        NodeEventBase,
+        NodeEventPayload,
         None,
         _PreparedRunPrompt,
     ]:
@@ -255,7 +255,7 @@ class LLMNode(Node[LLMNodeData]):
 
         files = (
             llm_utils.fetch_files(
-                variable_pool=self.graph_runtime_state.variable_pool,
+                variable_pool=self.runtime_state.variable_pool,
                 selector=self.node_data.vision.configs.variable_selector,
             )
             if self.node_data.vision.enabled
@@ -294,7 +294,7 @@ class LLMNode(Node[LLMNodeData]):
             memory_config=self.node_data.memory,
             vision_enabled=self.node_data.vision.enabled,
             vision_detail=self.node_data.vision.configs.detail,
-            variable_pool=self.graph_runtime_state.variable_pool,
+            variable_pool=self.runtime_state.variable_pool,
             jinja2_variables=self.node_data.prompt_config.jinja2_variables,
             context_files=collected_context.context_files,
             jinja2_template_renderer=self._jinja2_template_renderer,
@@ -309,7 +309,7 @@ class LLMNode(Node[LLMNodeData]):
         self,
         *,
         node_inputs: dict[str, Any],
-    ) -> Generator[NodeEventBase, None, _CollectedRunContext]:
+    ) -> Generator[NodeEventPayload, None, _CollectedRunContext]:
         context = None
         context_files: Sequence[File] = ()
         for event in self._fetch_context(node_data=self.node_data):
@@ -332,7 +332,7 @@ class LLMNode(Node[LLMNodeData]):
         model_instance = self._model_instance
         model_instance.parameters = llm_utils.resolve_completion_params_variables(
             model_instance.parameters,
-            self.graph_runtime_state.variable_pool,
+            self.runtime_state.variable_pool,
         )
         return model_instance
 
@@ -346,7 +346,7 @@ class LLMNode(Node[LLMNodeData]):
         if not self._default_query_selector:
             return None
 
-        query_variable = self.graph_runtime_state.variable_pool.get(
+        query_variable = self.runtime_state.variable_pool.get(
             self._default_query_selector,
         )
         return query_variable.text if query_variable else None
@@ -362,7 +362,7 @@ class LLMNode(Node[LLMNodeData]):
         stop: Sequence[str] | None,
         model_provider: Any,
         model_name: str,
-    ) -> Generator[NodeEventBase, None, None]:
+    ) -> Generator[NodeEventPayload, None, None]:
         generator = self._invoke_llm_for_run(
             file_outputs=file_outputs,
             prompt_messages=prompt_messages,
@@ -450,7 +450,7 @@ class LLMNode(Node[LLMNodeData]):
         file_outputs: list[File],
         prompt_messages: Sequence[PromptMessage],
         stop: Sequence[str] | None,
-    ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
+    ) -> Generator[NodeEventPayload | LLMStructuredOutput, None, None]:
         polling_model = self._polling_model_instance()
         if polling_model is None:
             return LLMNode.invoke_llm(
@@ -484,7 +484,7 @@ class LLMNode(Node[LLMNodeData]):
         polling_model: LLMPollingCapableProtocol,
         prompt_messages: Sequence[PromptMessage],
         stop: Sequence[str] | None,
-    ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
+    ) -> Generator[NodeEventPayload | LLMStructuredOutput, None, None]:
         config = self._polling_config(polling_model)
         model_parameters = dict(self._model_instance.parameters)
         json_schema = (
@@ -675,7 +675,7 @@ class LLMNode(Node[LLMNodeData]):
             raise LLMNodeError(msg)
 
     def _raise_if_polling_aborted(self) -> None:
-        if self.graph_runtime_state.graph_execution.aborted:
+        if self.runtime_state.graph_execution.aborted:
             msg = "workflow execution was aborted"
             raise LLMNodeError(msg)
 
@@ -741,7 +741,7 @@ class LLMNode(Node[LLMNodeData]):
         file_outputs: list[File],
         node_id: str,
         reasoning_format: Literal["separated", "tagged"] = "tagged",
-    ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
+    ) -> Generator[NodeEventPayload | LLMStructuredOutput, None, None]:
         model_parameters = model_instance.parameters
         invoke_model_parameters = dict(model_parameters)
         invoke_result: LLMResult | Generator[LLMResultChunk, None, None]
@@ -793,7 +793,7 @@ class LLMNode(Node[LLMNodeData]):
         reasoning_format: Literal["separated", "tagged"] = "tagged",
         request_start_time: float | None = None,
         json_schema: Mapping[str, Any] | None = None,
-    ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
+    ) -> Generator[NodeEventPayload | LLMStructuredOutput, None, None]:
         if isinstance(invoke_result, LLMResult):
             yield from LLMNode._yield_blocking_invoke_result(
                 invoke_result=invoke_result,
@@ -855,7 +855,7 @@ class LLMNode(Node[LLMNodeData]):
         reasoning_format: Literal["separated", "tagged"] = "tagged",
         request_start_time: float | None = None,
         json_schema: Mapping[str, Any] | None = None,
-    ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
+    ) -> Generator[NodeEventPayload | LLMStructuredOutput, None, None]:
         start_time = (
             request_start_time
             if request_start_time is not None
@@ -943,7 +943,7 @@ class LLMNode(Node[LLMNodeData]):
         file_saver: LLMFileSaver,
         file_outputs: list[File],
         node_id: str,
-    ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
+    ) -> Generator[NodeEventPayload | LLMStructuredOutput, None, None]:
         for result in invoke_result:
             yield from LLMNode._handle_stream_result(
                 result=result,
@@ -961,7 +961,7 @@ class LLMNode(Node[LLMNodeData]):
         file_saver: LLMFileSaver,
         file_outputs: list[File],
         node_id: str,
-    ) -> Generator[NodeEventBase | LLMStructuredOutput, None, None]:
+    ) -> Generator[NodeEventPayload | LLMStructuredOutput, None, None]:
         if isinstance(result, LLMResultChunkWithStructuredOutput):
             if result.structured_output is not None:
                 state.structured_output = dict(result.structured_output)
@@ -1212,7 +1212,7 @@ class LLMNode(Node[LLMNodeData]):
         yield self._build_array_context_event(context_value_variable)
 
     def _get_required_variable(self, variable_selector: VariableSelector) -> Any:
-        variable = self.graph_runtime_state.variable_pool.get(
+        variable = self.runtime_state.variable_pool.get(
             variable_selector.value_selector,
         )
         if variable is None:
@@ -1299,7 +1299,7 @@ class LLMNode(Node[LLMNodeData]):
     def _get_context_value_variable(self, node_data: LLMNodeData) -> Any | None:
         if not node_data.context.enabled or not node_data.context.variable_selector:
             return None
-        return self.graph_runtime_state.variable_pool.get(
+        return self.runtime_state.variable_pool.get(
             node_data.context.variable_selector,
         )
 

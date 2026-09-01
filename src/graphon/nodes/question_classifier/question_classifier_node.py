@@ -6,7 +6,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, override
 
-from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import (
     BuiltinNodeTypes,
     NodeExecutionType,
@@ -42,7 +41,8 @@ from graphon.nodes.llm.runtime_protocols import (
     LLMProtocol,
     PromptMessageSerializerProtocol,
 )
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.init_params import InitParams
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.template_rendering import Jinja2TemplateRenderer
 from graphon.utils.json_in_md_parser import parse_and_check_json_markdown
 from graphon.variables.template_resolution import convert_template
@@ -108,8 +108,8 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         node_id: str,
         data: QuestionClassifierNodeData,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        init_params: InitParams,
+        runtime_state: RuntimeState,
         dependencies: QuestionClassifierNodeDependencies | None = None,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
@@ -123,8 +123,8 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         super().__init__(
             node_id=node_id,
             data=data,
-            graph_init_params=graph_init_params,
-            graph_runtime_state=graph_runtime_state,
+            init_params=init_params,
+            runtime_state=runtime_state,
         )
         # LLM file outputs, used for MultiModal outputs.
         self._file_outputs = []
@@ -256,7 +256,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
 
     def _prepare_run_context(self) -> _QuestionClassifierRunContext:
         node_data = self.node_data
-        variable_pool = self.graph_runtime_state.variable_pool
+        variable_pool = self.runtime_state.variable_pool
         variable = (
             variable_pool.get(node_data.query_variable_selector)
             if node_data.query_variable_selector
@@ -335,7 +335,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
             sys_files=files,
             vision_enabled=self.node_data.vision.enabled,
             vision_detail=self.node_data.vision.configs.detail,
-            variable_pool=self.graph_runtime_state.variable_pool,
+            variable_pool=self.runtime_state.variable_pool,
             jinja2_variables=[],
             jinja2_template_renderer=self._template_renderer,
         )
@@ -510,7 +510,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
             memory_config=node_data.memory,
             vision_enabled=False,
             vision_detail=node_data.vision.configs.detail,
-            variable_pool=self.graph_runtime_state.variable_pool,
+            variable_pool=self.runtime_state.variable_pool,
             jinja2_variables=[],
             jinja2_template_renderer=self._template_renderer,
         )

@@ -15,14 +15,13 @@ import pytest
 from pytest_benchmark.fixture import BenchmarkFixture
 
 from graphon.dsl import loads
-from graphon.graph_engine import GraphEngine, GraphEngineConfig
-from graphon.graph_events import (
-    GraphEngineEvent,
+from graphon.engine import Engine
+from graphon.engine_events import (
+    EngineEvent,
     GraphRunSucceededEvent,
     NodeRunSucceededEvent,
 )
 
-_WORKERS = 1
 _ROUNDS = 2
 _STEP_NODE_IDS = tuple(f"step-{index}" for index in range(3))
 _EXPECTED_NODE_IDS = ("start", *_STEP_NODE_IDS, "end")
@@ -65,7 +64,7 @@ _WORKFLOW_DSL = json.dumps({
 })
 
 
-def _setup_engine() -> tuple[tuple[GraphEngine], dict[str, object]]:
+def _setup_engine() -> tuple[tuple[Engine], dict[str, object]]:
     """Create the one-shot Engine passed to one benchmark round.
 
     ``pytest-benchmark`` invokes this setup before starting the timer. Building
@@ -77,11 +76,10 @@ def _setup_engine() -> tuple[tuple[GraphEngine], dict[str, object]]:
         Positional and keyword arguments containing one fresh Engine instance.
 
     """
-    config = GraphEngineConfig(min_workers=_WORKERS, max_workers=_WORKERS)
-    return (loads(_WORKFLOW_DSL, config=config),), {}
+    return (loads(_WORKFLOW_DSL),), {}
 
 
-def _run_engine(engine: GraphEngine) -> list[GraphEngineEvent]:
+def _run_engine(engine: Engine) -> list[EngineEvent]:
     """Run one Engine instance to completion and return every emitted event.
 
     ``Engine.run()`` is a lazy generator, so fully materializing it is part of
@@ -98,14 +96,14 @@ def _run_engine(engine: GraphEngine) -> list[GraphEngineEvent]:
 def test_engine_run_benchmark(benchmark: BenchmarkFixture) -> None:
     """Measure a complete local workflow without third-party service nodes.
 
-    The workload is a deterministic single-worker chain containing Start, three
+    The workload is a deterministic sequential chain containing Start, three
     constant Template Transform nodes, and End. Fixed pedantic rounds keep the
     benchmark quick and comparable, while the terminal event, output, and
     node-order checks ensure an implementation cannot appear faster by skipping
     scheduled work.
     """
     events = cast(
-        list[GraphEngineEvent],
+        list[EngineEvent],
         benchmark.pedantic(
             _run_engine,
             setup=_setup_engine,

@@ -8,7 +8,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, assert_never, overload, override
 
-from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import (
     BuiltinNodeTypes,
     WorkflowNodeExecutionMetadataKey,
@@ -44,7 +43,8 @@ from graphon.nodes.llm.runtime_protocols import (
     LLMProtocol,
     PromptMessageSerializerProtocol,
 )
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.init_params import InitParams
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.factory import build_segment_with_type
 from graphon.variables.template_resolution import convert_template
@@ -145,8 +145,8 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         node_id: str,
         data: ParameterExtractorNodeData,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        init_params: InitParams,
+        runtime_state: RuntimeState,
         dependencies: _ParameterExtractorNodeDependencies,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
@@ -161,8 +161,8 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         node_id: str,
         data: ParameterExtractorNodeData,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        init_params: InitParams,
+        runtime_state: RuntimeState,
         dependencies: None = None,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
@@ -177,8 +177,8 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         node_id: str,
         data: ParameterExtractorNodeData,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        init_params: InitParams,
+        runtime_state: RuntimeState,
         dependencies: _ParameterExtractorNodeDependencies | None = None,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
@@ -189,8 +189,8 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         super().__init__(
             node_id=node_id,
             data=data,
-            graph_init_params=graph_init_params,
-            graph_runtime_state=graph_runtime_state,
+            init_params=init_params,
+            runtime_state=runtime_state,
         )
         resolved_dependencies = self._resolve_dependencies(
             dependencies=dependencies,
@@ -352,7 +352,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
 
     def _prepare_run_context(self) -> _ParameterExtractorRunContext:
         node_data = self.node_data
-        variable_pool = self.graph_runtime_state.variable_pool
+        variable_pool = self.runtime_state.variable_pool
         variable = variable_pool.get(node_data.query)
         query = variable.text if variable else ""
         files = (
@@ -1161,7 +1161,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
             memory_config=None,
             vision_enabled=vision_enabled,
             vision_detail=image_detail_config or ImagePromptMessageContent.DETAIL.HIGH,
-            variable_pool=self.graph_runtime_state.variable_pool,
+            variable_pool=self.runtime_state.variable_pool,
             jinja2_variables=[],
         )
         return list(prompt_messages)
