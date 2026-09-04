@@ -4,6 +4,8 @@ import uuid
 from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 
+from pydantic import JsonValue
+
 from graphon.model_runtime.callbacks.base_callback import Callback
 from graphon.model_runtime.callbacks.logging_callback import LoggingCallback
 from graphon.model_runtime.entities.llm_entities import (
@@ -122,6 +124,7 @@ class _LLMChunkAccumulator:
     usage: LLMUsage = field(default_factory=LLMUsage.empty_usage)
     system_fingerprint: str | None = None
     tool_calls: list[AssistantPromptMessage.ToolCall] = field(default_factory=list)
+    opaque_body: JsonValue | None = None
 
     def consume_all(self, chunks: Iterator[LLMResultChunk]) -> None:
         for chunk in chunks:
@@ -135,6 +138,8 @@ class _LLMChunkAccumulator:
             self.usage = chunk.delta.usage
         if chunk.system_fingerprint:
             self.system_fingerprint = chunk.system_fingerprint
+        if chunk.delta.message.opaque_body is not None:
+            self.opaque_body = chunk.delta.message.opaque_body
 
     def _consume_content(self, chunk: LLMResultChunk) -> None:
         content = chunk.delta.message.content
@@ -155,6 +160,7 @@ class _LLMChunkAccumulator:
             message=AssistantPromptMessage(
                 content=self.content or self.content_list,
                 tool_calls=self.tool_calls,
+                opaque_body=self.opaque_body,
             ),
             usage=self.usage,
             system_fingerprint=self.system_fingerprint,
@@ -167,6 +173,7 @@ class _StreamingInvokeAccumulator:
     message_content: list[PromptMessageContentUnionTypes] = field(default_factory=list)
     usage: LLMUsage | None = None
     system_fingerprint: str | None = None
+    opaque_body: JsonValue | None = None
 
     def consume(self, chunk: LLMResultChunk) -> None:
         self._consume_content(chunk.delta.message.content)
@@ -175,6 +182,8 @@ class _StreamingInvokeAccumulator:
             self.usage = chunk.delta.usage
         if chunk.system_fingerprint:
             self.system_fingerprint = chunk.system_fingerprint
+        if chunk.delta.message.opaque_body is not None:
+            self.opaque_body = chunk.delta.message.opaque_body
 
     def _consume_content(
         self,
@@ -196,7 +205,10 @@ class _StreamingInvokeAccumulator:
         return LLMResult(
             model=self.real_model,
             prompt_messages=prompt_messages,
-            message=AssistantPromptMessage(content=self.message_content),
+            message=AssistantPromptMessage(
+                content=self.message_content,
+                opaque_body=self.opaque_body,
+            ),
             usage=self.usage or LLMUsage.empty_usage(),
             system_fingerprint=self.system_fingerprint,
         )
