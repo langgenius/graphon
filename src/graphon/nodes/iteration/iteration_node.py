@@ -8,6 +8,7 @@ from graphon.enums import (
     NodeExecutionType,
     WorkflowNodeExecutionStatus,
 )
+from graphon.graph.scoping import resolve_container_id
 from graphon.node_events.base import NodeEventPayload, NodeRunResult
 from graphon.node_events.iteration import (
     IterationFailedEvent,
@@ -201,8 +202,8 @@ class IterationNode(Node[IterationNodeData]):
         iteration_node_ids = {
             sub_node_id
             for sub_node_id, sub_node_config in node_configs.items()
-            if isinstance((data := sub_node_config.get("data")), Mapping)
-            and data.get("container_id") == node_id
+            if resolve_container_id(sub_node_config, nodes_by_id=node_configs)
+            == node_id
         }
         for sub_node_id, sub_node_config in node_configs.items():
             if sub_node_id not in iteration_node_ids:

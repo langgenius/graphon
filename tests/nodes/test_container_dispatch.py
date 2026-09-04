@@ -1,3 +1,8 @@
+from typing import Any
+
+import pytest
+
+from graphon.entities.graph_config import NodeConfigDictAdapter
 from graphon.enums import ErrorHandleMode
 from graphon.nodes.answer.answer_node import AnswerNode
 from graphon.nodes.container_effects import (
@@ -5,9 +10,7 @@ from graphon.nodes.container_effects import (
     LoopFrameRequest,
     build_container_value,
 )
-from graphon.nodes.iteration.entities import IterationNodeData
 from graphon.nodes.iteration.iteration_node import IterationNode
-from graphon.nodes.loop.entities import LoopNodeData
 from graphon.nodes.loop.loop_node import LoopNode
 
 
@@ -35,8 +38,13 @@ def test_container_await_requests_have_intrinsic_kind_tags() -> None:
     assert iteration_request.kind == "iteration"
 
 
-def test_iteration_variable_mapping_filters_container_internal_selectors() -> None:
-    graph_config = {
+@pytest.mark.parametrize("owner_field", ["container_id", "iteration_id"])
+@pytest.mark.parametrize("typed", [False, True], ids=["raw", "typed"])
+def test_iteration_variable_mapping_filters_container_internal_selectors(
+    owner_field: str,
+    typed: bool,
+) -> None:
+    graph_config: dict[str, Any] = {
         "nodes": [
             {
                 "id": "iteration",
@@ -51,7 +59,7 @@ def test_iteration_variable_mapping_filters_container_internal_selectors() -> No
                 "id": "child",
                 "data": {
                     "type": AnswerNode.node_type,
-                    "container_id": "iteration",
+                    owner_field: "iteration",
                     "answer": (
                         "{{#source.value#}} {{#iteration.item#}} {{#nested.answer#}}"
                     ),
@@ -61,22 +69,22 @@ def test_iteration_variable_mapping_filters_container_internal_selectors() -> No
                 "id": "nested",
                 "data": {
                     "type": AnswerNode.node_type,
-                    "container_id": "iteration",
+                    owner_field: "iteration",
                     "answer": "{{#child.answer#}} {{#source.other#}}",
                 },
             },
         ],
     }
 
-    mapping = IterationNode._extract_variable_selector_to_variable_mapping(
+    if typed:
+        graph_config["nodes"] = [
+            NodeConfigDictAdapter.validate_python(node)
+            for node in graph_config["nodes"]
+        ]
+
+    mapping = IterationNode.extract_variable_selector_to_variable_mapping(
         graph_config=graph_config,
-        node_id="iteration",
-        node_data=IterationNodeData.model_validate({
-            "type": "iteration",
-            "start_node_id": "iteration-start",
-            "iterator_selector": ["input", "items"],
-            "output_selector": ["child", "answer"],
-        }),
+        config=NodeConfigDictAdapter.validate_python(graph_config["nodes"][0]),
     )
 
     assert mapping == {
@@ -86,8 +94,13 @@ def test_iteration_variable_mapping_filters_container_internal_selectors() -> No
     }
 
 
-def test_loop_variable_mapping_filters_loop_internal_selectors() -> None:
-    graph_config = {
+@pytest.mark.parametrize("owner_field", ["container_id", "loop_id"])
+@pytest.mark.parametrize("typed", [False, True], ids=["raw", "typed"])
+def test_loop_variable_mapping_filters_loop_internal_selectors(
+    owner_field: str,
+    typed: bool,
+) -> None:
+    graph_config: dict[str, Any] = {
         "nodes": [
             {
                 "id": "loop",
@@ -97,37 +110,36 @@ def test_loop_variable_mapping_filters_loop_internal_selectors() -> None:
                     "loop_count": 2,
                     "break_conditions": [],
                     "logical_operator": "and",
+                    "loop_variables": [
+                        {
+                            "label": "acc",
+                            "var_type": "string",
+                            "value_type": "variable",
+                            "value": ["start", "seed"],
+                        },
+                    ],
                 },
             },
             {
                 "id": "child",
                 "data": {
                     "type": AnswerNode.node_type,
-                    "container_id": "loop",
+                    owner_field: "loop",
                     "answer": "{{#source.value#}} {{#loop.acc#}}",
                 },
             },
         ],
     }
 
-    mapping = LoopNode._extract_variable_selector_to_variable_mapping(
+    if typed:
+        graph_config["nodes"] = [
+            NodeConfigDictAdapter.validate_python(node)
+            for node in graph_config["nodes"]
+        ]
+
+    mapping = LoopNode.extract_variable_selector_to_variable_mapping(
         graph_config=graph_config,
-        node_id="loop",
-        node_data=LoopNodeData.model_validate({
-            "type": "loop",
-            "start_node_id": "loop-start",
-            "loop_count": 2,
-            "break_conditions": [],
-            "logical_operator": "and",
-            "loop_variables": [
-                {
-                    "label": "acc",
-                    "var_type": "string",
-                    "value_type": "variable",
-                    "value": ["start", "seed"],
-                },
-            ],
-        }),
+        config=NodeConfigDictAdapter.validate_python(graph_config["nodes"][0]),
     )
 
     assert mapping == {
