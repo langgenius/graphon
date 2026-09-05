@@ -391,6 +391,7 @@ class SlimPackageLoader:
             variable=str(value["variable"]),
             label=self._convert_i18n(value.get("label")),
             type=form_type,
+            help=self._convert_optional_i18n(value.get("help")),
             required=bool(value.get("required", True)),
             default=value.get("default"),
             options=[
