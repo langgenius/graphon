@@ -1784,10 +1784,11 @@ def test_dispatcher_polls_commands_while_waiting_for_active_workers() -> None:
 def test_engine_terminal_failure_takes_precedence_over_pause() -> None:
     """Report a real sibling failure instead of an overlapping pause.
 
-    Two workers run sibling nodes. The failing sibling is held until the answer
-    succeeds and queues a pause, reproducing the production race through
+    Two workers run sibling nodes. The pause waits until the failing sibling owns
+    a task, then releases its failure, reproducing the production race through
     ``Engine.run()`` without constructing an impossible partial engine.
     """
+    failure_started = threading.Event()
     failure_may_run = threading.Event()
 
     class PauseBeforeFailure(Layer):
@@ -1803,14 +1804,15 @@ def test_engine_terminal_failure_takes_precedence_over_pause() -> None:
 
             """
             if node.id == "fail":
+                failure_started.set()
                 assert failure_may_run.wait(timeout=1)
 
         def on_event(self, event: EngineEvent) -> None:
             """Queue pause from answer success, then release the failing worker.
 
-            A node-success event is a dispatcher command boundary. Sending the
-            pause here guarantees it is applied before the already-enqueued sibling
-            failure is dispatched, reproducing the terminal-state race.
+            Wait for the failing sibling to own a task so pause cannot defer it.
+            A node-success event is a dispatcher command boundary, so the pause
+            is applied before the released sibling failure is dispatched.
 
             Args:
                 event: Engine event currently being published to this layer.
@@ -1820,6 +1822,7 @@ def test_engine_terminal_failure_takes_precedence_over_pause() -> None:
                 isinstance(event, NodeRunSucceededEvent) and event.node_id == "answer"
             ):
                 return
+            assert failure_started.wait(timeout=1)
             command_channel = self.command_channel
             assert command_channel is not None
             command_channel.send_command(PauseCommand(reason="wait"))

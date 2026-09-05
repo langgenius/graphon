@@ -1,8 +1,8 @@
 """Thread-safe collection and delivery of engine events."""
 
 import logging
+import queue
 from collections.abc import Generator
-from queue import SimpleQueue
 from typing import cast, final
 
 from graphon.engine_events.base import EngineEvent
@@ -34,7 +34,7 @@ class EventStream:
             layers: Mutable list of layers owned by the engine.
 
         """
-        self._events: SimpleQueue[object] = SimpleQueue()
+        self._events: queue.SimpleQueue[object] = queue.SimpleQueue()
         self._layers = layers
 
     def notify_layers(self, event: EngineEvent) -> None:
@@ -69,7 +69,7 @@ class EventStream:
 
     def reset(self) -> None:
         """Discard events and completion state from the previous engine run."""
-        self._events = SimpleQueue()
+        self._events = queue.SimpleQueue()
 
     def emit_events(self) -> Generator[EngineEvent, None, None]:
         """Generator that yields events as they're collected.

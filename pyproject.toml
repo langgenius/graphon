@@ -45,6 +45,7 @@ dev = [
     'ruff',
     'prek',
     'ty',
+    'gevent>=26.8.0',
 ]
 
 [build-system]
