@@ -394,8 +394,15 @@ class ResponseStreamFilter:
 
         variable_selectors = self._get_response_variable_selectors(response_node_id)
         all_complete_paths = self._find_all_paths(root_node_id, response_node_id)
+        blocking_cache: dict[_EdgeID, bool] = {}
         return [
-            _Path(edges=self._get_blocking_edges(path, variable_selectors))
+            _Path(
+                edges=self._get_blocking_edges(
+                    path,
+                    variable_selectors,
+                    blocking_cache,
+                )
+            )
             for path in all_complete_paths
         ]
 
@@ -418,36 +425,66 @@ class ResponseStreamFilter:
         current_path: list[_EdgeID] | None = None,
         visited: set[_NodeID] | None = None,
     ) -> list[list[_EdgeID]]:
-        current_path = current_path or []
-        visited = visited or set()
-        if current_node_id == target_node_id:
-            return [current_path.copy()]
+        graph = self._bound_graph
+        reverse: dict[_NodeID, list[_NodeID]] = {}
+        for node_id in graph.nodes:
+            for edge in graph.get_outgoing_edges(node_id):
+                reverse.setdefault(edge.head, []).append(node_id)
 
-        next_visited = {current_node_id, *visited}
-        paths: list[list[_EdgeID]] = []
-        for edge in self._bound_graph.get_outgoing_edges(current_node_id):
-            if edge.head in next_visited:
-                continue
-            paths.extend(
-                self._find_all_paths(
-                    edge.head,
-                    target_node_id,
-                    [*current_path, edge.id],
-                    next_visited,
-                ),
-            )
-        return paths
+        reachable = {target_node_id}
+        pending = [target_node_id]
+        while pending:
+            node_id = pending.pop()
+            predecessors = [
+                predecessor
+                for predecessor in reverse.get(node_id, ())
+                if predecessor not in reachable
+            ]
+            reachable.update(predecessors)
+            pending.extend(predecessors)
+
+        path_seed = [] if current_path is None else current_path
+        visited_seed = set() if visited is None else visited
+
+        def walk(
+            node_id: _NodeID,
+            path: list[_EdgeID],
+            seen: set[_NodeID],
+        ) -> list[list[_EdgeID]]:
+            if node_id == target_node_id:
+                return [path.copy()]
+            if node_id not in reachable:
+                return []
+
+            next_seen = {node_id, *seen}
+            return [
+                nested_path
+                for edge in graph.get_outgoing_edges(node_id)
+                if edge.head in reachable and edge.head not in next_seen
+                for nested_path in walk(edge.head, [*path, edge.id], next_seen)
+            ]
+
+        return walk(current_node_id, path_seed, visited_seed)
 
     def _get_blocking_edges(
         self,
         path: list[_EdgeID],
         variable_selectors: set[_Selector],
+        blocking_cache: dict[_EdgeID, bool] | None = None,
     ) -> list[_EdgeID]:
-        return [
-            edge_id
-            for edge_id in path
-            if self._is_blocking_edge(edge_id, variable_selectors)
-        ]
+        if blocking_cache is None:
+            blocking_cache = {}
+
+        blocking_edges: list[_EdgeID] = []
+        for edge_id in path:
+            if edge_id not in blocking_cache:
+                blocking_cache[edge_id] = self._is_blocking_edge(
+                    edge_id,
+                    variable_selectors,
+                )
+            if blocking_cache[edge_id]:
+                blocking_edges.append(edge_id)
+        return blocking_edges
 
     def _is_blocking_edge(
         self,
