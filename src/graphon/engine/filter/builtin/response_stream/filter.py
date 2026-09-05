@@ -394,6 +394,7 @@ class ResponseStreamFilter:
 
         variable_selectors = self._get_response_variable_selectors(response_node_id)
         all_complete_paths = self._find_all_paths(root_node_id, response_node_id)
+        # Selectors are fixed for this response; never share the cache across builds.
         blocking_cache: dict[_EdgeID, bool] = {}
         return [
             _Path(
@@ -426,6 +427,7 @@ class ResponseStreamFilter:
         visited: set[_NodeID] | None = None,
     ) -> list[list[_EdgeID]]:
         graph = self._bound_graph
+        # Use the forward traversal's topology, without evaluating runtime conditions.
         reverse: dict[_NodeID, list[_NodeID]] = {}
         for node_id in graph.nodes:
             for edge in graph.get_outgoing_edges(node_id):

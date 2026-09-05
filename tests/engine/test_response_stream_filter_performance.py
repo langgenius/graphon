@@ -5,13 +5,14 @@ from typing import Any
 import pytest
 
 from graphon.engine.filter import ResponseStreamFilter
-from graphon.enums import NodeExecutionType
+from graphon.enums import NodeExecutionType, NodeState
 from graphon.nodes.base.template import Template, VariableSegment
 from tests.engine.test_response_stream_filter import (
     _context,
     _TestEdge,
     _TestGraph,
     _TestNode,
+    _variable_response_graph,
 )
 
 
@@ -111,6 +112,151 @@ def _diamond_with_dead_branch(*, layers: int = 6) -> _CountingGraph:
         edges=edges,
         root_node_id="root",
     )
+
+
+def test_response_filter_paths_keep_parallel_edges_with_distinct_source_handles() -> (
+    None
+):
+    root = _TestNode("root")
+    answer = _TestNode(
+        "answer",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template(segments=[VariableSegment(selector=["root", "answer"])]),
+    )
+    success_edge = _TestEdge("root-success", "root", "answer")
+    success_edge.source_handle = "success"
+    failure_edge = _TestEdge("root-failure", "root", "answer")
+    failure_edge.source_handle = "failure"
+    graph = _TestGraph(
+        nodes={"root": root, "answer": answer},
+        edges={
+            success_edge.id: success_edge,
+            failure_edge.id: failure_edge,
+        },
+        root_node_id="root",
+    )
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+
+    assert {success_edge.source_handle, failure_edge.source_handle} == {
+        "success",
+        "failure",
+    }
+    assert event_filter._find_all_paths("root", "answer") == [
+        ["root-success"],
+        ["root-failure"],
+    ]
+
+
+def test_response_filter_paths_keep_skipped_edge_for_otherwise_reachable_target() -> (
+    None
+):
+    root = _TestNode("root")
+    live = _TestNode("live")
+    answer = _TestNode(
+        "answer",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template(segments=[VariableSegment(selector=["root", "answer"])]),
+    )
+    skipped_edge = _TestEdge("root-skipped", "root", "answer")
+    skipped_edge.state = NodeState.SKIPPED
+    graph = _TestGraph(
+        nodes={"root": root, "live": live, "answer": answer},
+        edges={
+            skipped_edge.id: skipped_edge,
+            "root-live": _TestEdge("root-live", "root", "live"),
+            "live-answer": _TestEdge("live-answer", "live", "answer"),
+        },
+        root_node_id="root",
+    )
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+
+    assert event_filter._find_all_paths("root", "answer") == [
+        ["root-skipped"],
+        ["root-live", "live-answer"],
+    ]
+
+
+def test_response_filter_builds_selector_specific_blocking_paths_per_response() -> None:
+    nodes = {
+        "root": _TestNode("root"),
+        "shared": _TestNode("shared"),
+        "merge": _TestNode("merge"),
+        "other": _TestNode("other"),
+        "answer-a": _TestNode(
+            "answer-a",
+            execution_type=NodeExecutionType.RESPONSE,
+            template=Template(
+                segments=[VariableSegment(selector=["shared", "answer"])],
+            ),
+        ),
+        "answer-b": _TestNode(
+            "answer-b",
+            execution_type=NodeExecutionType.RESPONSE,
+            template=Template(
+                segments=[VariableSegment(selector=["other", "answer"])],
+            ),
+        ),
+    }
+    graph = _TestGraph(
+        nodes=nodes,
+        edges={
+            "root-shared": _TestEdge("root-shared", "root", "shared"),
+            "shared-merge": _TestEdge("shared-merge", "shared", "merge"),
+            "merge-answer-a": _TestEdge("merge-answer-a", "merge", "answer-a"),
+            "merge-answer-b": _TestEdge("merge-answer-b", "merge", "answer-b"),
+            "root-other": _TestEdge("root-other", "root", "other"),
+            "other-answer-b": _TestEdge("other-answer-b", "other", "answer-b"),
+        },
+        root_node_id="root",
+    )
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+
+    assert [path.edges for path in event_filter._paths_maps["answer-a"]] == [
+        ["shared-merge"],
+    ]
+    assert [path.edges for path in event_filter._paths_maps["answer-b"]] == [
+        [],
+        ["other-answer-b"],
+    ]
+
+
+def test_response_filter_reinitialization_recomputes_selector_dependent_blocking() -> (
+    None
+):
+    first_graph = _variable_response_graph(selector=["source", "answer"])
+    second_graph = _variable_response_graph(selector=["other", "answer"])
+    event_filter = ResponseStreamFilter()
+
+    event_filter.initialize(_context(first_graph))
+    assert [path.edges for path in event_filter._paths_maps["answer"]] == [["edge-1"]]
+
+    event_filter.initialize(_context(second_graph))
+    assert [path.edges for path in event_filter._paths_maps["answer"]] == [[]]
+
+
+def test_response_filter_find_all_paths_handles_root_target_with_backedge() -> None:
+    root = _TestNode(
+        "root",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template(segments=[]),
+    )
+    branch = _TestNode("branch")
+    graph = _TestGraph(
+        nodes={"root": root, "branch": branch},
+        edges={
+            "root-branch": _TestEdge("root-branch", "root", "branch"),
+            "branch-root": _TestEdge("branch-root", "branch", "root"),
+        },
+        root_node_id="root",
+    )
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+
+    assert event_filter._find_all_paths("root", "root") == [[]]
+    assert event_filter._find_all_paths("branch", "root") == [["branch-root"]]
 
 
 def test_response_filter_does_not_expand_dead_branches() -> None:
