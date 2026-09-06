@@ -1,7 +1,9 @@
 import queue
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
-from threading import Event, Lock, Thread
+from threading import Event, Lock, Thread, current_thread
 from types import SimpleNamespace
 from typing import cast
 
@@ -81,6 +83,39 @@ class _RecordingLayer(Layer):
     def __init__(self) -> None:
         super().__init__()
         self.end_events: list[NodeEvent | None] = []
+        self.active_execution: ContextVar[str | None] = ContextVar(
+            "active_execution", default=None
+        )
+        self.context_events: list[tuple[str, str, str | None]] = []
+        self.hook_contexts: list[str | None] = []
+
+    @contextmanager
+    def node_run_context(
+        self,
+        node: Node,
+        *,
+        parent_execution_id: str | None = None,
+    ) -> Iterator[None]:
+        assert self.active_execution.get() is None
+        token = self.active_execution.set(node.execution_id)
+        self.context_events.append((
+            "enter",
+            current_thread().name,
+            parent_execution_id,
+        ))
+        try:
+            yield
+        finally:
+            self.active_execution.reset(token)
+            self.context_events.append((
+                "exit",
+                current_thread().name,
+                self.active_execution.get(),
+            ))
+
+    def on_node_run_start(self, node: Node) -> None:
+        _ = node
+        self.hook_contexts.append(self.active_execution.get())
 
     def on_graph_start(self) -> None:
         return
@@ -100,6 +135,7 @@ class _RecordingLayer(Layer):
         _ = node
         _ = error
         self.end_events.append(result_event)
+        self.hook_contexts.append(self.active_execution.get())
 
 
 def test_ready_queue_round_trips_start_and_resume_tasks() -> None:
@@ -193,7 +229,10 @@ def test_ready_queue_uses_only_public_queue_api(
     assert not join_thread.is_alive()
 
 
-def test_worker_suspends_and_resumes_container_invocation() -> None:
+@pytest.mark.parametrize("resume_fails", [False, True])
+def test_worker_suspends_and_resumes_container_invocation(resume_fails: bool) -> None:  # ruff: ignore[too-many-statements, too-many-locals]
+    layer = _RecordingLayer()
+
     class ContainerNode:
         id = "loop"
         node_type = BuiltinNodeTypes.LOOP
@@ -203,6 +242,7 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
         def __init__(self) -> None:
             self.await_was_reached = False
             self.body_after_await_was_consumed = False
+            self.contexts: list[str | None] = []
 
         def bind_execution_id(self, execution_id: str) -> None:
             self.execution_id = execution_id
@@ -210,6 +250,7 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
         def run(
             self,
         ) -> Generator[NodeEvent | LoopFrameRequest, object, None]:
+            self.contexts.append(layer.active_execution.get())
             started_at = datetime.now(UTC).replace(tzinfo=None)
             yield NodeRunStartedEvent(
                 id=self.execution_id,
@@ -236,6 +277,10 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
             result: ContainerRunResult,
             started_at: datetime,
         ) -> Generator[NodeEvent | LoopFrameRequest, None, None]:
+            self.contexts.append(layer.active_execution.get())
+            if resume_fails:
+                msg = "resume failed"
+                raise RuntimeError(msg)
             assert isinstance(result, ContainerExecutionResult)
             node_run_result = NodeRunResult(
                 status=result.node_run_result.status,
@@ -281,7 +326,6 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
             runtime_state=runtime_state,
         ),
     )
-    layer = _RecordingLayer()
     task_acquisition_enabled = Event()
     task_acquisition_enabled.set()
     worker = Worker(
@@ -312,7 +356,25 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
         assert node_execution.execution_id == started.event.id
         assert run_state.started_at == started.event.start_at
         assert layer.end_events == []
-
+    finally:
+        worker.stop()
+        worker.join(timeout=1)
+    assert not worker.is_alive()
+    assert layer.context_events == [
+        ("enter", "EngineWorker-0", None),
+        ("exit", "EngineWorker-0", None),
+    ]
+    resumed_worker = Worker(
+        ready_queue=ready_queue,
+        dispatch_queue=dispatch_queue,
+        frame_registry=frame_registry,
+        layers=[layer],
+        task_acquisition_lock=Lock(),
+        task_acquisition_enabled=task_acquisition_enabled,
+        worker_id=1,
+    )
+    resumed_worker.start()
+    try:
         ready_queue.put(
             ResumeTask(
                 invocation_id=await_task.invocation_id,
@@ -321,15 +383,28 @@ def test_worker_suspends_and_resumes_container_invocation() -> None:
         )
         succeeded = dispatch_queue.get(timeout=1)
     finally:
-        worker.stop()
-        worker.join(timeout=1)
+        resumed_worker.stop()
+        resumed_worker.join(timeout=1)
 
     assert isinstance(succeeded, NodeEventTask)
-    assert isinstance(succeeded.event, NodeRunSucceededEvent)
-    assert succeeded.event.node_run_result.outputs == {"answer": "ok"}
+    if resume_fails:
+        assert isinstance(succeeded.event, NodeRunFailedEvent)
+        assert succeeded.event.error == "resume failed"
+        assert layer.end_events == [None]
+    else:
+        assert isinstance(succeeded.event, NodeRunSucceededEvent)
+        assert succeeded.event.node_run_result.outputs == {"answer": "ok"}
+        assert layer.end_events == [succeeded.event]
     with pytest.raises(KeyError):
         runtime_state.get_container_run(await_task.invocation_id)
-    assert layer.end_events == [succeeded.event]
+    assert container_node.contexts == [started.event.id, started.event.id]
+    assert layer.hook_contexts == [started.event.id, started.event.id]
+    assert layer.context_events == [
+        ("enter", "EngineWorker-0", None),
+        ("exit", "EngineWorker-0", None),
+        ("enter", "EngineWorker-1", None),
+        ("exit", "EngineWorker-1", None),
+    ]
 
 
 def test_worker_reports_resume_failure_on_suspended_invocation_frame() -> None:

@@ -12,6 +12,15 @@ Base class with optional lifecycle hooks for layers.
 - `on_graph_start()` - Execution start hook
 - `on_event()` - Process all events
 - `on_graph_end()` - Execution end hook
+- `node_run_context(node, parent_execution_id=...)` - Context manager activated
+  for each worker task, including every container resume. Entry and exit always
+  occur in the same worker context, even on suspension or failure. The parent ID
+  is the direct container's node execution ID, or `None` for root-frame nodes.
+- `on_node_run_start(node)` / `on_node_run_end(node, error, result_event)` - Logical
+  node lifetime hooks. A container may suspend between these hooks and finish on
+  another worker. Keep tracing spans alive across suspension, but activate their
+  context only inside `node_run_context`; do not carry context tokens between
+  logical lifetime hooks. These contexts are not included in runtime snapshots.
 
 ## Usage
 

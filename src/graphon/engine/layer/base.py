@@ -4,6 +4,8 @@ This module defines the lifecycle hooks and shared runtime binding used by layer
 that intercept and respond to Engine events.
 """
 
+from contextlib import AbstractContextManager, nullcontext
+
 from graphon.engine.command.protocol import CommandChannel
 from graphon.engine_events.base import (
     EngineEvent,
@@ -97,11 +99,39 @@ class Layer:
 
         """
 
+    def node_run_context(
+        self,
+        node: Node,
+        *,
+        parent_execution_id: str | None = None,
+    ) -> AbstractContextManager[None]:
+        """Activate context for one worker task, including container resumes.
+
+        Entered before node hooks and exited on completion, suspension, or error
+        in the same worker context. A suspended container keeps its logical
+        execution ID, but each resume gets a fresh context manager. Keep context
+        tokens inside this manager, not between ``on_node_run_start`` and
+        ``on_node_run_end``, which may run on different workers.
+
+        ``parent_execution_id`` identifies the directly owning container's node
+        execution (including custom containers), or is ``None`` in the root
+        frame. It is independent of graph-local node IDs. Context manager errors
+        are logged and isolated like other layer hooks; managers cannot suppress
+        node execution errors.
+
+        Returns:
+            A new context manager for this worker task.
+
+        """
+        _ = node
+        _ = parent_execution_id
+        return nullcontext()
+
     def on_node_run_start(self, node: Node) -> None:
         """Called immediately before a node begins execution.
 
         Layers can override to inject behavior (e.g., start spans)
-        prior to node execution.
+        prior to node execution. This is not called again on container resume.
         The node's execution ID is available via `node._node_execution_id` and will be
         consistent with all events emitted by this node execution.
 
@@ -119,6 +149,8 @@ class Layer:
     ) -> None:
         """Called after a node finishes execution.
 
+        A suspended container does not finish until its final resume, which can
+        run on a different worker from ``on_node_run_start``.
         The node's execution ID is available via `node._node_execution_id` and matches
         the `id` field in all events emitted by this node execution.
 
