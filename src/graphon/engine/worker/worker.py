@@ -6,9 +6,10 @@ to the dispatch queue for the dispatcher to process.
 
 import logging
 import queue
+import sys
 import threading
 from collections.abc import Iterator, Sequence
-from contextlib import AbstractContextManager, nullcontext
+from contextlib import AbstractContextManager, ExitStack, contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import final, override
@@ -220,7 +221,13 @@ class Worker(threading.Thread):
         error: Exception | None = None
         result_event: NodeEvent | None = None
         suspended = False
-        with self._execution_context:
+        with self._execution_context, ExitStack() as contexts:
+            if self._layers:
+                parent_execution_id = self._parent_execution_id()
+                for layer in self._layers:
+                    contexts.enter_context(
+                        self._node_run_context(layer, node, parent_execution_id),
+                    )
             if invocation_id is None:
                 self._invoke_node_run_start_hooks(node)
             try:
@@ -237,6 +244,51 @@ class Worker(threading.Thread):
             finally:
                 if not suspended:
                     self._invoke_node_run_end_hooks(node, error, result_event)
+
+    def _parent_execution_id(self) -> str | None:
+        if self._current_frame_id == ROOT_FRAME_ID:
+            return None
+        root_state = self._frame_registry[ROOT_FRAME_ID].state
+        frame_state = root_state.get_container_frame(self._current_frame_id)
+        parent_run = root_state.get_container_run(frame_state.parent_invocation_id)
+        parent_state = self._frame_registry[parent_run.frame_id].state
+        return parent_state.graph_execution.get_or_create_node_execution(
+            frame_id=parent_run.frame_id,
+            node_id=parent_run.node_id,
+        ).execution_id
+
+    @contextmanager
+    def _node_run_context(
+        self,
+        layer: Layer,
+        node: Node,
+        parent_execution_id: str | None,
+    ) -> Iterator[None]:
+        try:
+            context = layer.node_run_context(
+                node, parent_execution_id=parent_execution_id
+            )
+            # Isolate activation failures separately from errors raised by the node.
+            context.__enter__()  # ruff: ignore[unnecessary-dunder-call]
+        except Exception:
+            logger.exception(
+                "Layer %s failed entering node_run_context for node %s",
+                type(layer).__name__,
+                node.id,
+            )
+            yield
+            return
+        try:
+            yield
+        finally:
+            try:
+                context.__exit__(*sys.exc_info())
+            except Exception:
+                logger.exception(
+                    "Layer %s failed exiting node_run_context for node %s",
+                    type(layer).__name__,
+                    node.id,
+                )
 
     def _consume_node_events(
         self,
