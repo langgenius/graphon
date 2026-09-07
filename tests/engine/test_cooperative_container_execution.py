@@ -439,8 +439,11 @@ def test_worker_suspends_and_resumes_container_invocation(resume_fails: bool) ->
         assert layer.end_events == [succeeded.event]
     with pytest.raises(KeyError):
         runtime_state.get_container_run(await_task.invocation_id)
-    assert container_node.contexts == [started.event.id, started.event.id]
-    assert layer.hook_contexts == [started.event.id, started.event.id]
+    assert container_node.contexts == [
+        started.event.node_execution_id,
+        started.event.node_execution_id,
+    ]
+    assert layer.hook_contexts == container_node.contexts
     assert layer.context_events == [
         ("enter", "EngineWorker-0", None),
         ("exit", "EngineWorker-0", None),

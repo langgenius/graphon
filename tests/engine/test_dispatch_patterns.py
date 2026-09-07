@@ -2055,7 +2055,7 @@ def test_loop_exception_preserves_default_outputs() -> None:
         frame_registry=frame_registry,
     )
     event = NodeRunExceptionEvent(
-        id="loop-run",
+        node_execution_id="loop-run",
         node_id="loop",
         node_type=BuiltinNodeTypes.LOOP,
         start_at=datetime.now(UTC).replace(tzinfo=None),
