@@ -114,11 +114,10 @@ See [examples/slim_llm/dsl.py](examples/slim_llm/dsl.py) for the DSL import
 version and [examples/slim_llm/code.py](examples/slim_llm/code.py) for the
 Python graph construction version.
 
-Default DSL import currently supports `start`, `end`, `answer`, `if-else`,
-`template-transform`, `code`, `llm`, `tool`, `http-request`,
-`variable-aggregator`, `assigner`, `list-operator`, `question-classifier`, and
-`parameter-extractor`. HTTP request import covers text request bodies and text
-responses; file request bodies still require application-level file adapters.
+The default DSL node set is defined by
+[`SlimDslNodeFactory.NODE_BUILDERS`](src/graphon/dsl/node_factory.py).
+HTTP request import covers text request bodies and text responses; file request
+bodies still require application-level file adapters.
 
 For direct Python graph construction, use `graphon.dsl.slim.SlimLLM` as the
 standard Slim-backed LLM runtime. Integrations that need to replace model
@@ -146,17 +145,12 @@ planned as a separate follow-up.
 
 ## Internal Docs
 
-- [CHANGELOG.md](CHANGELOG.md): versioned user-facing changes
-- [MIGRATION.md](MIGRATION.md): breaking-release upgrade instructions
-- [CONTRIBUTING.md](CONTRIBUTING.md): contributor workflow, CI, commit/PR rules
-- [examples/slim_llm/README.md](examples/slim_llm/README.md):
-  runnable Slim LLM example setup
-- [src/graphon/model_runtime/README.md](src/graphon/model_runtime/README.md):
-  model runtime overview
-- [src/graphon/engine/layer/README.md](src/graphon/engine/layer/README.md):
-  engine layer extension points
-- [src/graphon/engine/command/README.md](src/graphon/engine/command/README.md):
-  command processing and local or distributed channels
+- [Repository knowledge](docs/README.md): architecture, development guide,
+  component references, and maintenance
+- [Architecture](ARCHITECTURE.md): execution flow, boundaries, and invariants
+- [Contributing](CONTRIBUTING.md): contributor workflow, CI, commit/PR rules
+- [Migration guide](MIGRATION.md) and [changelog](CHANGELOG.md): upgrade
+  instructions and versioned user-facing changes
 
 ## Development
 
