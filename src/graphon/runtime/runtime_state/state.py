@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Mapping
-from contextlib import AbstractContextManager, nullcontext
 from copy import deepcopy
 from typing import TYPE_CHECKING, Literal
 
@@ -56,7 +55,6 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         deferred_ready_queue: ReadyQueue | None = None,
         workflow_id: str | None = None,
         graph_execution: GraphExecution | None = None,
-        execution_context: AbstractContextManager[object] | None = None,
     ) -> None:
         """Initialize all mutable state owned by one graph execution frame.
 
@@ -76,7 +74,6 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
             deferred_ready_queue: Queue for tasks held while execution is paused.
             workflow_id: Identity used to create a new execution aggregate.
             graph_execution: Existing aggregate shared by child or restored frames.
-            execution_context: Context entered by workers around node execution.
 
         Raises:
             ValueError: If ``node_run_steps`` is negative, neither identity form
@@ -111,9 +108,6 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
             else _new_ready_queue()
         )
         self._graph_execution = graph_execution
-        self._execution_context = (
-            execution_context if execution_context is not None else nullcontext()
-        )
         self._container_runs: dict[str, ContainerRunState] = {}
         self._container_frames: dict[str, ContainerFrameState] = {}
         self._pending_graph_node_states: dict[str, NodeState] = {}
@@ -137,10 +131,6 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
     @property
     def graph_execution(self) -> GraphExecution:
         return self._graph_execution
-
-    @property
-    def execution_context(self) -> AbstractContextManager[object]:
-        return self._execution_context
 
     @property
     def start_at(self) -> float:

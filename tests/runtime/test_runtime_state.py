@@ -161,14 +161,6 @@ def test_attach_graph_rejects_saved_state_missing_current_graph_entries(
 
 
 class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
-    def test_execution_context_defaults_to_empty_context(self) -> None:
-        state = RuntimeState(
-            workflow_id="workflow", variable_pool=VariablePool(), start_at=time()
-        )
-
-        with state.execution_context:
-            assert state.execution_context is not None
-
     def test_property_getters(self) -> None:
         variable_pool = VariablePool()
         start_time = time()

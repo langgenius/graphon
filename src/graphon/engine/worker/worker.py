@@ -9,7 +9,7 @@ import queue
 import sys
 import threading
 from collections.abc import Iterator, Sequence
-from contextlib import AbstractContextManager, ExitStack, contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import final, override
@@ -75,7 +75,6 @@ class Worker(threading.Thread):
         task_acquisition_lock: threading.Lock,
         task_acquisition_enabled: threading.Event,
         worker_id: int = 0,
-        execution_context: AbstractContextManager[object] | None = None,
         file_runtime: WorkflowFileRuntimeProtocol | None = None,
     ) -> None:
         """Initialize worker thread.
@@ -90,7 +89,6 @@ class Worker(threading.Thread):
             task_acquisition_enabled: Shared flag indicating whether workers may
                 acquire new ready tasks.
             worker_id: Unique identifier for this worker
-            execution_context: Optional execution context for context preservation
             file_runtime: File adapter supplied by the engine.
 
         """
@@ -99,9 +97,6 @@ class Worker(threading.Thread):
         self._dispatch_queue = dispatch_queue
         self._frame_registry = frame_registry
         self._file_runtime = file_runtime
-        self._execution_context = (
-            execution_context if execution_context is not None else nullcontext()
-        )
         self._stop_event = threading.Event()
         self._layers = layers
         self._task_acquisition_lock = task_acquisition_lock
@@ -237,7 +232,7 @@ class Worker(threading.Thread):
         error: Exception | None = None
         result_event: NodeEvent | None = None
         suspended = False
-        with self._execution_context, ExitStack() as contexts:
+        with ExitStack() as contexts:
             if self._layers:
                 parent_execution_id = self._parent_execution_id()
                 for layer in self._layers:

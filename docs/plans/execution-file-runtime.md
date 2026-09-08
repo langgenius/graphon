@@ -1,7 +1,8 @@
 # Execution-scoped file runtime
 
-**Status:** completed locally; implementation, independent reviews, final naming
-pass, and checks are complete. Not merged or released. Updated 2026-09-08.
+**Status:** implementation and follow-up cleanup completed locally; independent
+reviews, final naming passes, and checks are complete. Not merged or released.
+Updated 2026-09-08.
 
 **Tracking:** [TD-04](../technical-debt.md#td-04--execution-scoped-file-integration),
 [issue #282](https://github.com/langgenius/graphon/issues/282).
@@ -85,3 +86,18 @@ The final naming pass renamed the test factories to `_make_file_adapter`,
 These mechanical changes preserve behavior and public names. After renaming,
 the focused command passed all 18 tests in 1.01 seconds and `just check` passed.
 The documentation check passed after the completion records were updated.
+
+### Follow-up cleanup (2026-09-08)
+
+Removed the redundant file runtime registry and configuration alias while
+retaining the set/get/peek/use helpers and process fallback. Removed
+`RuntimeState.execution_context` and its worker plumbing; host node-task scopes
+use `Layer.node_run_context`. File scopes and filter metadata remain separate.
+The [migration guide](../../MIGRATION.md#layers-filters-and-commands) covers the
+removed APIs and their differing return and failure behavior.
+
+All 79 relevant tests passed before and after the cleanup. `just test` passed all
+830 tests in 7.82 seconds, and `just check` passed. Independent test, code, and
+knowledge reviews and the documentation check are complete. The final naming pass
+required no renames. The earlier test counts and naming results above describe
+the original implementation.

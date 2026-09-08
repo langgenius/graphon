@@ -3,7 +3,6 @@
 import logging
 import queue
 import threading
-from contextlib import AbstractContextManager
 from typing import final
 
 from graphon.engine.frame import FrameRegistry
@@ -27,7 +26,6 @@ class WorkerPool:
         frame_registry: FrameRegistry,
         layers: list[Layer],
         workers: int,
-        execution_context: AbstractContextManager[object] | None = None,
         file_runtime: WorkflowFileRuntimeProtocol | None = None,
     ) -> None:
         """Initialize the fixed-size worker pool.
@@ -38,7 +36,6 @@ class WorkerPool:
             frame_registry: Registry containing frame-local graphs to execute
             layers: Engine layers for node execution hooks
             workers: Fixed number of worker threads to create
-            execution_context: Optional execution context for context preservation
             file_runtime: File adapter supplied by the engine.
 
         Raises:
@@ -52,7 +49,6 @@ class WorkerPool:
         self._ready_queue = ready_queue
         self._dispatch_queue = dispatch_queue
         self._frame_registry = frame_registry
-        self._execution_context = execution_context
         self._file_runtime = file_runtime
         self._layers = layers
         self._worker_count = workers
@@ -127,7 +123,6 @@ class WorkerPool:
             frame_registry=self._frame_registry,
             layers=self._layers,
             worker_id=worker_id,
-            execution_context=self._execution_context,
             file_runtime=self._file_runtime,
             task_acquisition_lock=self._task_acquisition_lock,
             task_acquisition_enabled=self._task_acquisition_enabled,

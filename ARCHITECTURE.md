@@ -54,7 +54,8 @@ flowchart LR
    traversal events.
 3. [Scheduler](src/graphon/engine/scheduler.py) queues frame-qualified `StartTask`
    values. [Workers](src/graphon/engine/worker/worker.py) bind execution IDs,
-   execute node generators inside runtime/layer contexts, and queue results.
+   execute node generators inside [layer task contexts](src/graphon/engine/layer/README.md),
+   and queue results.
 4. [Node.run](src/graphon/nodes/base/node.py) wraps `_run()`, emits the start event,
    converts node payloads into engine events, and converts execution exceptions
    into failed-node events. Node implementations live in [nodes](src/graphon/nodes/).

@@ -23,7 +23,7 @@ from graphon.engine_events.graph import (
 from graphon.engine_events.node import NodeRunStreamChunkEvent
 from graphon.file import File, FileTransferMethod, FileType
 from graphon.file.file_manager import to_prompt_message_content
-from graphon.file.runtime import WorkflowFileRuntimeRegistry, set_workflow_file_runtime
+from graphon.file.runtime import set_workflow_file_runtime
 from graphon.graph.graph import Graph
 from graphon.model_runtime.entities.message_entities import DocumentPromptMessageContent
 from graphon.nodes.base.entities import OutputVariableEntity
@@ -50,9 +50,7 @@ from tests.helpers.workflow_events import final_outputs
 
 @pytest.fixture(autouse=True)
 def _reset_file_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        runtime_module, "_workflow_file_runtime_registry", WorkflowFileRuntimeRegistry()
-    )
+    monkeypatch.setattr(runtime_module, "_default_workflow_file_runtime", None)
 
 
 def _make_file_adapter(name: str, *, send_format: str = "url") -> MagicMock:

@@ -48,6 +48,11 @@ before upgrading an integration.
 
 ### Removed
 
+- Removed `WorkflowFileRuntimeRegistry` and `configure_workflow_file_runtime()`;
+  use the existing [file runtime helpers](MIGRATION.md#file-runtime-isolation).
+- Removed `RuntimeState.execution_context` and its constructor/worker arguments;
+  use `Layer.node_run_context()` for host node-task scopes. See the
+  [migration notes](MIGRATION.md#layers-filters-and-commands) for failure handling.
 - Removed `GraphEngineConfig`, dynamic worker scaling, `GraphEngineManager`,
   `DebugLoggingLayer`, `ResumableGraphEventFilter`, and the old read/write lock.
 - Removed the `graphon.graph_engine`, `graphon.graph_events`, and `graphon.filters`

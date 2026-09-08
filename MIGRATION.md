@@ -20,6 +20,15 @@ will bump it to `0.8.0` separately.
 
 ### File runtime isolation
 
+`graphon.file.runtime.WorkflowFileRuntimeRegistry` and
+`configure_workflow_file_runtime()` were removed. Use `set_workflow_file_runtime()`
+for the process default, `get_workflow_file_runtime()` for a required adapter, and
+`peek_workflow_file_runtime()` for an optional lookup. The removed configuration
+alias returned its adapter; `set_workflow_file_runtime()` returns `None`, so retain
+the adapter separately if the old call was used in an assignment or expression.
+For independent adapters, use engine injection or the scope below instead of
+creating registry instances.
+
 Pass `Engine(..., file_runtime=adapter)` to select an execution's
 `WorkflowFileRuntimeProtocol`. Omitting it or passing `None` captures the current
 scoped adapter or process default **at engine construction**, including an
@@ -242,6 +251,18 @@ Import `ROOT_FRAME_ID` from `graphon.runtime.execution`, not the ready-queue
 package.
 
 ### Layers, filters, and commands
+
+`RuntimeState(execution_context=...)`, its `execution_context` property, and the
+matching `Worker`/`WorkerPool` arguments were removed. Move host node-task context
+activation into `Layer.node_run_context(node, parent_execution_id=...)` and
+register the layer with `engine.add_layer(layer)`. Return a fresh context manager
+for each task, including container resumes; see [layer scopes](src/graphon/engine/layer/README.md).
+
+This changes failure handling: the former runtime manager used ordinary `with`
+semantics. Layer context entry/exit exceptions are logged and isolated, and the
+manager cannot suppress node execution errors. Move setup that must prevent
+execution on failure before running the engine or into the node's execution path. These
+task scopes do not replace file-runtime scopes or response-filter metadata.
 
 - `Layer` lifecycle hooks have no-op defaults. `DebugLoggingLayer` and
   `GraphEngineLayerNotInitializedError` were removed. `LimitType` and the old

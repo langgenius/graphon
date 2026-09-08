@@ -248,9 +248,9 @@ implementation evidence, not a merge or release claim.
 
 ## TD-04 — Execution-scoped file integration
 
-**Implementation update (2026-09-08):** completed locally for
-[issue #282](https://github.com/langgenius/graphon/issues/282); independent test,
-knowledge, and naming reviews and checks are complete. The
+**Implementation update (2026-09-08):** implementation and follow-up cleanup
+completed locally for [issue #282](https://github.com/langgenius/graphon/issues/282);
+independent reviews, final naming passes, and checks are complete. The
 [execution file runtime plan](plans/execution-file-runtime.md) records
 decisions and validation evidence. This work is not merged or released.
 

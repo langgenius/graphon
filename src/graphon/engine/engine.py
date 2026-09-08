@@ -149,7 +149,6 @@ class Engine:
             dispatch_queue=dispatch_queue,
             frame_registry=self._frame_registry,
             layers=self._layers,
-            execution_context=self._runtime_state.execution_context,
             file_runtime=self._file_runtime,
             workers=workers,
         )
