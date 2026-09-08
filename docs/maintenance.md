@@ -74,12 +74,26 @@ API documentation. Never record credentials or private operational data in it.
 
 ## Review for drift
 
-When a task exposes stale knowledge, fix it with that task. During a broader
-documentation review, start with the local link check, then compare claims about
-changed modules against their current code and tests. Check whether linked open
-work has landed; replace proposal links with repository-local decisions when
-available. Remove duplicate or unused material and record unresolved gaps with
-evidence instead of assigning unsupported quality grades.
+At the end of each development cycle, complete the independent knowledge review
+required by [Development Style](../CONTRIBUTING.md#context-free-reviews) before
+the final naming pass. Give the subagent the revision's requirements and diff so
+it can identify the affected knowledge through the index and relevant links.
+
+Limit both review and edits exclusively to information relevant to this revision:
+changed behavior, APIs, workflows, affected guides, and their navigation or
+source/test references. A document being touched does not make every section
+in scope. Do not turn this step into a repository-wide audit or unrelated cleanup.
+
+The subagent must compare relevant claims against current source, tests, and
+requirements, then apply necessary corrections. Remove redundant explanations,
+prefer links to maintained definitions, and shorten detail that does not help
+with the revised behavior or workflow. Preserve required rules, compatibility
+guidance, useful decisions, and supporting evidence. Do not make edits merely to
+produce a cleanup diff.
+
+After editing, repair affected links and run the documentation check above.
+Report the changes made, or that no relevant cleanup was needed. Keep review
+dates limited to claims actually checked. Broader audits remain outside this step.
 
 This is an ordinary contribution workflow. There is no scheduled maintenance
 agent or semantic freshness checker configured by these documents.

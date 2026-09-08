@@ -179,6 +179,11 @@ and retain [runtime coverage](../tests/runtime/test_runtime_state.py).
 
 ## TD-02 — Graph construction and structural validation
 
+**Planning update (2026-09-08):** recommended as the next implementation priority.
+The [graph validation plan](plans/graph-validation.md) records verified failures,
+scope, compatibility proposals, acceptance checks, and current tracking. An
+implementation owner is not yet assigned; remediation remains proposed.
+
 **Working well:** DSL normalization rejects duplicate IDs and invalid edge
 endpoints; `GraphBuilder` rejects duplicate nodes. Scoped ownership and descendant
 schema validation are already covered. Keep intentionally supported editor

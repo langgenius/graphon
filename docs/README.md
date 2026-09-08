@@ -4,6 +4,10 @@ Start with the question you need to answer, then follow the links to code and
 tests. These documents describe this checkout; they do not substitute for the
 implementation or establish new public contracts.
 
+At the start of every development workflow, read and follow
+[Development Style](../CONTRIBUTING.md#development-style) for tests first,
+independent test and knowledge reviews, and the final naming pass.
+
 ## Map
 
 | Question | Start here |
@@ -15,6 +19,7 @@ implementation or establish new public contracts.
 | How do I keep knowledge current or record a longer task? | [Knowledge maintenance](maintenance.md) |
 | What breaks when upgrading? | [Migration guide](../MIGRATION.md), [changelog](../CHANGELOG.md) |
 | What structural debt has been identified, and what should improve next? | [Architecture review and technical debt](technical-debt.md) |
+| What debt is planned for the next implementation? | [TD-02 graph validation plan](plans/graph-validation.md) |
 
 ## Component references
 
