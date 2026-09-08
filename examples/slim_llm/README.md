@@ -1,3 +1,6 @@
+<!-- knowledge
+last_checked: "2026-09-08T17:04:02Z"
+-->
 # Slim LLM Example
 
 This directory has two versions of the same LLM workflow:
@@ -43,8 +46,10 @@ Slim-backed LLM runtime. Configure it with the Slim client settings, plugin ID,
 provider, model name, and credentials. Optional completion parameters can be
 supplied by the Python construction when needed.
 
-For local mode, keep `slim.mode` as `local`. Put `dify-plugin-daemon-slim` in
-`PATH`, set `SLIM_BINARY_PATH`, or place a `slim` binary in this directory.
+Both modes require the Slim client binary. Put `dify-plugin-daemon-slim` in
+`PATH`, set `SLIM_BINARY_PATH`, or place an executable `slim` binary in this directory.
+
+For local mode, keep `slim.mode` as `local`.
 
 For remote mode, set `slim.mode` to `remote`, then fill in `daemon_addr` and
 `daemon_key`.

@@ -1,3 +1,6 @@
+<!-- knowledge
+last_checked: "2026-09-08T00:00:00Z"
+-->
 # Architecture review and technical debt
 
 **Reviewed:** 2026-09-08, Graphon 0.7.0, commit

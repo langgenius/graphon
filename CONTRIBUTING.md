@@ -1,3 +1,6 @@
+<!-- knowledge
+last_checked: "2026-09-08T17:06:45Z"
+-->
 # Contributing to Graphon
 
 This guide reflects the repository's current local tooling and GitHub Actions
@@ -207,6 +210,11 @@ Pull requests targeting `main` currently run three kinds of checks:
 2. `just check` including `uv.lock` freshness validation
 3. `uv run pytest` on Python 3.12 and 3.13
 
+The separate [Knowledge checks workflow](.github/workflows/knowledge.yml) runs
+on all pull requests (including stacked branches), pushes to `main`, daily on the
+default branch, and manual dispatch. It checks document links, required metadata,
+and the [seven-day review deadline](docs/maintenance.md#document-metadata-and-review-deadline).
+
 Keep local workflow aligned with those checks. A green local `just test` plus
 `just check` is useful, but it is not a complete substitute for the exact CI
 flow because CI also validates PR titles and a Python version matrix.
@@ -218,14 +226,17 @@ and the tests relevant to a change. Keep affected documentation and source/test
 links current in the same change. See [Knowledge maintenance](docs/maintenance.md)
 for document placement, review, and plans for work that spans sessions.
 
-The normal pytest suite includes a local documentation link and reachability
-check. To run it alone:
+The normal pytest suite checks local documentation links, reachability, and
+review metadata, failing if the oldest review is more than seven days old.
+To run these checks alone:
 
 ```bash
 uv run pytest -n 0 tests/test_repository_docs.py
 ```
 
-This check verifies navigation, not whether prose still describes the code.
+These checks verify navigation and recorded review age. Review the page's claims
+before updating its `last_checked` timestamp; see the
+[metadata format and scope](docs/maintenance.md#document-metadata-and-review-deadline).
 
 ## Git Commits
 

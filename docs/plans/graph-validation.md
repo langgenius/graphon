@@ -1,3 +1,6 @@
+<!-- knowledge
+last_checked: "2026-09-08T00:00:00Z"
+-->
 # TD-02: Reject invalid graphs before execution
 
 **Status:** completed locally; implementation, independent reviews, and checks complete.

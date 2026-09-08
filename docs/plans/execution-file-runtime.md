@@ -1,3 +1,6 @@
+<!-- knowledge
+last_checked: "2026-09-08T00:00:00Z"
+-->
 # Execution-scoped file runtime
 
 **Status:** implementation, independent reviews, final naming pass, and checks

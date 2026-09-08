@@ -1,3 +1,6 @@
+<!-- knowledge
+last_checked: "2026-09-08T00:00:00Z"
+-->
 # Architecture
 
 Current implementation, verified against source and tests on 2026-09-08.

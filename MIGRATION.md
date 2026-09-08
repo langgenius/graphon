@@ -1,3 +1,6 @@
+<!-- knowledge
+last_checked: "2026-09-08T17:06:16Z"
+-->
 # Migration guide
 
 ## 0.7.x to 0.8.0 (Unreleased)
@@ -170,9 +173,9 @@ fallback to later parent-pool changes.
 
 An abort or fatal failure now wins over a concurrent pause. Persist resumable state
 only after the engine emits `GraphRunPausedEvent` and its run iterator has been
-fully consumed; do not infer a pause from a queued command. Loop handlers write
-only their configured selectors back to the parent, while iteration frame state
-remains isolated.
+fully consumed; do not infer a pause from a queued command. Loop variable-update
+events write back to existing parent-pool variables; propagation continues
+through nested Loops and stops at isolated Iteration pools.
 
 ### Graph validation
 
