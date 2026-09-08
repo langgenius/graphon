@@ -154,6 +154,12 @@ docs(contributing): clarify CI workflow
 refactor(api)!: remove deprecated runtime entrypoint
 ```
 
+## Architecture Decision Records
+
+The canonical ADR policy and workflow live in
+[`docs/adr/0001-adopt-architecture-decision-records.md`](docs/adr/0001-adopt-architecture-decision-records.md).
+Use that document as the source of truth for ADR decisions and PR wording.
+
 ## Issues
 
 Before you start implementation or open a new issue, search the existing open
@@ -188,6 +194,8 @@ When you open a pull request:
 - use a Conventional Commits title, and mark breaking changes with `!`, because
   the pull request title becomes the squash merge commit message
 - link the related issue in the pull request body
+- use the PR template ADR field to point to the relevant ADR path, or mark
+  `N/A` when ADR 0001 says none is needed
 - follow [`.github/pull_request_template.md`](.github/pull_request_template.md)
   exactly
 - do not delete required headings or checklist items from the template; if a

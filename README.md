@@ -149,6 +149,10 @@ planned as a separate follow-up.
 - [CHANGELOG.md](CHANGELOG.md): versioned user-facing changes
 - [MIGRATION.md](MIGRATION.md): breaking-release upgrade instructions
 - [CONTRIBUTING.md](CONTRIBUTING.md): contributor workflow, CI, commit/PR rules
+- [docs/adr/README.md](docs/adr/README.md):
+  architecture decision record index
+- [docs/adr/0001-adopt-architecture-decision-records.md](docs/adr/0001-adopt-architecture-decision-records.md):
+  canonical ADR policy and workflow
 - [examples/slim_llm/README.md](examples/slim_llm/README.md):
   runnable Slim LLM example setup
 - [src/graphon/model_runtime/README.md](src/graphon/model_runtime/README.md):
