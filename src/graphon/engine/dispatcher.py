@@ -12,6 +12,8 @@ from graphon.engine_events.node import (
     NodeRunModelPollingProgressEvent,
     NodeRunSucceededEvent,
 )
+from graphon.file.protocols import WorkflowFileRuntimeProtocol
+from graphon.file.runtime import use_workflow_file_runtime
 from graphon.runtime.execution import GraphExecution
 
 from .command.processor import CommandProcessor
@@ -47,6 +49,7 @@ class Dispatcher:
         command_processor: CommandProcessor,
         worker_pool: WorkerPool,
         event_stream: EventStream,
+        file_runtime: WorkflowFileRuntimeProtocol | None = None,
     ) -> None:
         """Initialize the dispatcher.
 
@@ -58,6 +61,7 @@ class Dispatcher:
             command_processor: Processor for external engine commands
             worker_pool: Pool executing ready node tasks
             event_stream: Stream to mark complete when dispatch ends.
+            file_runtime: File adapter supplied by the engine.
 
         """
         self._dispatch_queue = dispatch_queue
@@ -67,6 +71,7 @@ class Dispatcher:
         self._command_processor = command_processor
         self._worker_pool = worker_pool
         self._event_stream = event_stream
+        self._file_runtime = file_runtime
 
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -92,7 +97,10 @@ class Dispatcher:
 
     def _dispatcher_loop(self) -> None:
         """Main dispatcher loop."""
-        with self._graph_execution.track_execution():
+        with (
+            use_workflow_file_runtime(self._file_runtime),
+            self._graph_execution.track_execution(),
+        ):
             self._dispatch_until_complete()
 
     def _dispatch_until_complete(self) -> None:

@@ -82,6 +82,19 @@ in `InitParams`. See [frame construction](src/graphon/engine/frame.py),
 [runtime state](src/graphon/runtime/runtime_state/state.py), and
 [dispatch tests](tests/engine/test_dispatch_patterns.py).
 
+**File adapters belong to the engine.** `Engine(file_runtime=adapter)` retains
+that adapter; omitting it or passing `None` captures the scoped or process default
+at construction, including an unconfigured state. Workers, the dispatcher, and
+layer hooks bind it across root, child, and resumed execution. The caller's file
+scope is restored before each event yield and after closing or failing the run.
+`EngineEventFilterContext.from_engine()` carries the same adapter to
+`ResponseStreamFilter`. Host rendering and custom filters can bind it explicitly
+with `use_workflow_file_runtime(engine.file_runtime)`; scoped `None` disables
+resolution. File values and snapshots contain no adapter, so hosts supply one
+again when rebuilding an engine. See [file runtime](src/graphon/file/runtime.py),
+[execution isolation tests](tests/engine/test_file_runtime.py), and the
+[migration guidance](MIGRATION.md#file-runtime-isolation).
+
 **Container scopes are explicit.** `data.container_id` is the canonical direct
 owner; [scoping](src/graphon/graph/scoping.py) resolves supported legacy/editor
 fields. A graph executes only its direct nodes while retaining descendant

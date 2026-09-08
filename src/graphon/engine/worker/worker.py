@@ -29,6 +29,8 @@ from graphon.engine_events.node import (
     is_node_result_event,
 )
 from graphon.enums import WorkflowNodeExecutionStatus
+from graphon.file.protocols import WorkflowFileRuntimeProtocol
+from graphon.file.runtime import use_workflow_file_runtime
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.node import Node
 from graphon.nodes.container_effects import (
@@ -74,6 +76,7 @@ class Worker(threading.Thread):
         task_acquisition_enabled: threading.Event,
         worker_id: int = 0,
         execution_context: AbstractContextManager[object] | None = None,
+        file_runtime: WorkflowFileRuntimeProtocol | None = None,
     ) -> None:
         """Initialize worker thread.
 
@@ -88,12 +91,14 @@ class Worker(threading.Thread):
                 acquire new ready tasks.
             worker_id: Unique identifier for this worker
             execution_context: Optional execution context for context preservation
+            file_runtime: File adapter supplied by the engine.
 
         """
         super().__init__(name=f"EngineWorker-{worker_id}", daemon=True)
         self._ready_queue = ready_queue
         self._dispatch_queue = dispatch_queue
         self._frame_registry = frame_registry
+        self._file_runtime = file_runtime
         self._execution_context = (
             execution_context if execution_context is not None else nullcontext()
         )
@@ -124,9 +129,10 @@ class Worker(threading.Thread):
         """
         frames = self._frame_registry.frames()
         with (
+            use_workflow_file_runtime(self._file_runtime),
             frames[0].state.graph_execution.track_execution()
             if frames
-            else nullcontext()
+            else nullcontext(),
         ):
             self._run_tasks()
 

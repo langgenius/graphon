@@ -8,6 +8,7 @@ from typing import final
 
 from graphon.engine.frame import FrameRegistry
 from graphon.engine.ready_queue import ReadyQueue, ReadyTask
+from graphon.file.protocols import WorkflowFileRuntimeProtocol
 
 from ..layer import Layer
 from .worker import DispatchTask, Worker
@@ -27,6 +28,7 @@ class WorkerPool:
         layers: list[Layer],
         workers: int,
         execution_context: AbstractContextManager[object] | None = None,
+        file_runtime: WorkflowFileRuntimeProtocol | None = None,
     ) -> None:
         """Initialize the fixed-size worker pool.
 
@@ -37,6 +39,7 @@ class WorkerPool:
             layers: Engine layers for node execution hooks
             workers: Fixed number of worker threads to create
             execution_context: Optional execution context for context preservation
+            file_runtime: File adapter supplied by the engine.
 
         Raises:
             ValueError: If ``workers`` is not a positive integer.
@@ -50,6 +53,7 @@ class WorkerPool:
         self._dispatch_queue = dispatch_queue
         self._frame_registry = frame_registry
         self._execution_context = execution_context
+        self._file_runtime = file_runtime
         self._layers = layers
         self._worker_count = workers
 
@@ -124,6 +128,7 @@ class WorkerPool:
             layers=self._layers,
             worker_id=worker_id,
             execution_context=self._execution_context,
+            file_runtime=self._file_runtime,
             task_acquisition_lock=self._task_acquisition_lock,
             task_acquisition_enabled=self._task_acquisition_enabled,
         )

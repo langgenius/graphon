@@ -3,9 +3,10 @@
 **Reviewed:** 2026-09-08, Graphon 0.7.0, commit
 `9d13c716d527a8b7099df00cc448254ac7b6e98b`.
 **Status:** original review complete; TD-02 implementation and reviews are complete
-locally. TD-03 implementation and independent reviews are complete locally. Other
-remediation remains proposed, not accepted architecture policy. Priorities express
-the original review's judgment.
+locally. TD-03 implementation and independent reviews are complete locally.
+TD-04 implementation, independent reviews, final naming pass, and checks are
+complete locally. Other remediation remains proposed, not accepted architecture
+policy. Priorities express the original review's judgment.
 **Scope:** repository structure, execution and integration boundaries, developer
 feedback, and knowledge maintenance. Evidence includes source, callers, test
 definitions, focused tests, and small local reproductions. This is not a
@@ -55,7 +56,7 @@ approved package names or team assignments.
 | Node behavior | [nodes](../src/graphon/nodes/) | Grouping each node's data and behavior by capability is useful. Base-node infrastructure is shared; a new node type does not require a new bounded context. |
 | Model capabilities and provider metadata | [model_runtime](../src/graphon/model_runtime/README.md) | A supporting model with its own vocabulary. Graph-facing invocation and provider capability wrappers serve different clients; preserve their distinction. |
 | External Dify configuration and composition | [dsl](../src/graphon/dsl/), [scoping](../src/graphon/graph/scoping.py) | `inspect()` and `loads()` translate external configuration and assemble the engine. Legacy owner normalization also lives in graph scoping because direct graph construction accepts those forms. |
-| Files, HTTP, code, and tools | [file](../src/graphon/file/), [http](../src/graphon/http/), [node ports](../src/graphon/nodes/protocols.py), [DSL adapters](../src/graphon/dsl/node_factory.py) | Mostly explicit host integration seams. File runtime lookup still introduces ambient process state. |
+| Files, HTTP, code, and tools | [file](../src/graphon/file/), [http](../src/graphon/http/), [node ports](../src/graphon/nodes/protocols.py), [DSL adapters](../src/graphon/dsl/node_factory.py) | Explicit host integration seams. Engines retain file adapters; the process default remains available at construction and for unscoped host operations. |
 | Values and public event language | [variables](../src/graphon/variables/), [entities](../src/graphon/entities/), [node events](../src/graphon/node_events/), [engine events](../src/graphon/engine_events/) | Useful shared vocabulary. These folders contain schemas and transport values as well as domain concepts; their names do not establish ownership or DDD semantics by themselves. |
 | Consumer presentation | [event filters](../src/graphon/engine/filter/) | Raw execution and response formatting are separate APIs despite filters living under `engine/`. That behavioral boundary matters more than moving the folder. |
 | Public integration facade | [protocols](../src/graphon/protocols/__init__.py) | Discoverable re-exports are useful. Importing them should not implicitly register concrete nodes. |
@@ -129,10 +130,12 @@ queue dependency and facade side effects below have concrete isolation costs.
 
 ## Debt register
 
-TD-02 and TD-03 are **implemented locally**; other entries remain **proposed**. P1
-means a reproduced correctness problem or a boundary that must be addressed before
-the stated deployment use. P2 is targeted architecture or feedback work. P3 can
-follow the more consequential changes.
+TD-02 and TD-03 are **implemented locally**. TD-04 is **completed locally**, with
+required reviews and checks complete. Other entries remain **proposed**. P1 means
+a reproduced correctness problem or a boundary that must be addressed before
+the stated deployment use.
+P2 is targeted architecture or feedback work. P3 can follow the more consequential
+changes.
 Suggested owners are responsibility areas, not assigned people; effort is a
 relative change size, not a delivery estimate.
 
@@ -141,7 +144,7 @@ relative change size, not a delivery estimate.
 | TD-01 | Dependency direction and runtime queue ownership | P2 | Engine/runtime | Medium |
 | TD-02 | [Graph construction and structural validation](#td-02--graph-construction-and-structural-validation), implemented locally | P1 | Graph/DSL | Medium |
 | TD-03 | [Snapshot consistency at the public boundary](#td-03--snapshot-consistency-at-the-public-boundary), implemented locally | P2 | Runtime/engine | Medium |
-| TD-04 | Execution-scoped file integration | P2; P1 before concurrent distinct host adapters | File/host integration | Medium–large |
+| TD-04 | [Execution-scoped file integration](#td-04--execution-scoped-file-integration), completed locally | P2; P1 before concurrent distinct host adapters | File/host integration | Medium–large |
 | TD-05 | Side effects of importing public contracts | P2 | Public API/node bootstrap | Small–medium |
 | TD-06 | Ignored LLM integration arguments | P2 | Model/node API | Small, with a compatibility window |
 | TD-07 | Optional capability dependencies | P2 | Packaging/document extraction | Medium |
@@ -245,39 +248,38 @@ implementation evidence, not a merge or release claim.
 
 ## TD-04 — Execution-scoped file integration
 
-**Working well:** [File](../src/graphon/file/models.py) carries metadata and opaque
-references rather than tenant policy. Existing file and node protocols already
-describe the necessary host services. HTTP nodes capture their injected client,
-which is a useful existing pattern.
+**Implementation update (2026-09-08):** completed locally for
+[issue #282](https://github.com/langgenius/graphon/issues/282); independent test,
+knowledge, and naming reviews and checks are complete. The
+[execution file runtime plan](plans/execution-file-runtime.md) records
+decisions and validation evidence. This work is not merged or released.
 
-**Evidence and consequence:** [file/runtime.py](../src/graphon/file/runtime.py)
-holds one mutable process registry. `File.generate_url()`, `to_dict()`, Markdown,
-and plugin parameter conversion reach it through
-[helpers](../src/graphon/file/helpers.py).
-[File manager](../src/graphon/file/file_manager.py) performs further global
-lookups. Callers include file URL selectors in
-[VariablePool](../src/graphon/runtime/variable_pool.py),
-[LLM prompt compilation](../src/graphon/nodes/llm/llm_utils.py), and
-[document extraction](../src/graphon/nodes/document_extractor/node.py).
-A probe showed the same File switching from `host-a/file-a` to `host-b/file-a`
-when a second runtime was installed. This demonstrates dependency switching,
-not an observed authorization incident. One process-wide adapter remains a
-valid deployment choice; concurrent distinct host adapters are not isolated.
+**Original evidence:** the mutable process registry let the same
+[File](../src/graphon/file/models.py) switch from `host-a/file-a` to `host-b/file-a`
+when a second runtime was installed. Shared helper and
+[file manager](../src/graphon/file/file_manager.py) lookups affected selectors,
+prompt conversion, and extraction. This demonstrated dependency switching, not
+an observed authorization incident. [Merged PR #69](https://github.com/langgenius/graphon/pull/69)
+provided explicit configuration but did not establish execution isolation.
 
-**Proposed change:** retain or pass the execution's `WorkflowFileRuntimeProtocol`
-through resolution, prompt conversion, and download callers. Reuse existing
-ports and preserve a documented process-default fallback during migration.
-Keep metadata serialization usable independently of URL resolution. Merely
-replacing the registry with a `ContextVar` is insufficient without propagating
-the binding to worker threads and event consumers. Keep host credentials and
-runtime objects out of persisted file values.
+**Current result:** [Engine](../src/graphon/engine/engine.py) retains its adapter,
+including an unconfigured construction-time default. Workers, the dispatcher,
+layer hooks, and response filters bind that adapter through
+[the existing file runtime helpers](../src/graphon/file/runtime.py). Host consumers
+can enter the same scope when rendering delivered values; yielded events do not
+change their caller's binding. File metadata and persisted formats are unchanged.
+Rebuilt engines need host adapters supplied again. See
+[migration guidance](../MIGRATION.md#file-runtime-isolation) for the public API and
+the distinction between engine selection and exact scoped `None` binding.
 
-**Done when:** two interleaved executions resolve their own URLs and bytes through
-selectors, prompts, and extraction, including resumed work; metadata and legacy
-references round-trip. Extend [file runtime tests](../tests/file/test_runtime.py)
-and the relevant node tests. The existing tests verify registry behavior, not
-execution isolation. [Merged PR #69](https://github.com/langgenius/graphon/pull/69)
-is relevant history for explicit configuration, not proof of concurrent isolation.
+**Evidence of remediation:** [execution file tests](../tests/engine/test_file_runtime.py)
+cover interleaved URL/byte operations, selectors, prompts, extraction, layer hooks,
+paused child restoration, filter rendering and template callbacks, and caller
+restoration at yield, close, and failure.
+[File runtime tests](../tests/file/test_runtime.py) cover nested
+scopes and explicit unconfigured bindings. The plan records focused and full-suite
+results and their limits. This is local implementation evidence, not a merge or
+release claim.
 
 ## TD-05 — Side effects of importing public contracts
 
@@ -453,9 +455,11 @@ generator are not prerequisites. No recurring automation was configured here.
    implementation and completed reviews are tracked in the
    [graph validation plan](plans/graph-validation.md).
 2. TD-03's local implementation enforces quiescent snapshots; live checkpoints
-   remain outside its scope. Define TD-04's file adapter scope before promising
-   concurrent distinct host integrations. TD-04 may be staged if all deployed
-   hosts use one process-wide adapter.
+   remain outside its scope. TD-04 now retains file adapters per engine; its
+   completed reviews and checks are recorded in the
+   [execution file runtime plan](plans/execution-file-runtime.md).
+   Hosts must bind delivered file rendering and rebind restored
+   engines as described in the migration guide.
 3. Combine the related import work in TD-01 and TD-05, with a focused boundary
    test for each. Handle TD-06 in a separately documented API transition.
 4. Add TD-08's offline example; use it in TD-07's minimal-install check. Continue

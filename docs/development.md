@@ -19,7 +19,7 @@ define their behavior; it does not replace those rules.
 | Change variables or secrets | [variable pool](../src/graphon/runtime/variable_pool.py), [variables](../src/graphon/variables/) | [variable pool tests](../tests/runtime/test_variable_pool.py), [variable tests](../tests/variables/), [HTTP secret masking](../tests/http/test_executor_secret_masking.py) |
 | Change persistence or resume | [runtime state](../src/graphon/runtime/runtime_state/), [container state](../src/graphon/runtime/container_state.py) | [runtime tests](../tests/runtime/), [engine serialization](../tests/engine/test_runtime_state_serialization.py), [version isolation](../tests/test_snapshot_version_isolation.py) |
 | Change model invocation | [graph-facing LLM protocol](../src/graphon/nodes/llm/runtime_protocols.py), [Slim adapter](../src/graphon/dsl/slim/llm.py), [model runtime](../src/graphon/model_runtime/) | [LLM node tests](../tests/nodes/llm/), [Slim tests](../tests/dsl/test_slim_llm.py), [model dispatch](../tests/model_runtime/test_model_dispatch.py) |
-| Change file or HTTP integration | [file](../src/graphon/file/), [HTTP](../src/graphon/http/), [node ports](../src/graphon/nodes/protocols.py) | [file tests](../tests/file/), [HTTP tests](../tests/http/), [HTTP node tests](../tests/nodes/http_request/), [extractor tests](../tests/nodes/document_extractor/) |
+| Change file or HTTP integration | [file](../src/graphon/file/), [engine adapter binding](../src/graphon/engine/engine.py), [HTTP](../src/graphon/http/), [node ports](../src/graphon/nodes/protocols.py) | [file tests](../tests/file/), [execution file isolation](../tests/engine/test_file_runtime.py), [HTTP tests](../tests/http/), [HTTP node tests](../tests/nodes/http_request/), [extractor tests](../tests/nodes/document_extractor/) |
 
 ## Add or extend a node
 
@@ -65,9 +65,13 @@ public surface.
   [model runtime guide](../src/graphon/model_runtime/README.md) and
   [dispatch tests](../tests/model_runtime/test_model_dispatch.py).
 - **Files and HTTP:** [WorkflowFileRuntimeProtocol](../src/graphon/file/protocols.py)
-  covers storage, URLs, downloads, and preview signatures. Configure it through
-  [set_workflow_file_runtime](../src/graphon/file/runtime.py) when those helpers
-  are needed. Node-specific download, file-reference, and tool-file ports live
+  covers storage, URLs, downloads, and preview signatures. Pass it to
+  `Engine(file_runtime=adapter)`, or set the scoped/process default before
+  constructing the engine. For DSL construction and host rendering, use
+  [use_workflow_file_runtime](../src/graphon/file/runtime.py); the
+  [migration example](../MIGRATION.md#file-runtime-isolation) shows both boundaries.
+  Use `EngineEventFilterContext.from_engine()` when wiring response filters.
+  Node-specific download, file-reference, and tool-file ports live
   in [nodes/protocols.py](../src/graphon/nodes/protocols.py); generated LLM files use
   [LLMFileSaver](../src/graphon/nodes/llm/file_saver.py). The
   [HTTP runtime](../src/graphon/http/runtime.py) supplies a default HTTPX client.
@@ -120,10 +124,13 @@ revision. Once all other development steps are complete, finish with the
   Preserve historical snapshot fixture bytes in [runtime fixtures](../tests/runtime/fixtures/)
   and [engine fixtures](../tests/engine/fixtures/) when changing current writers;
   those files are compatibility inputs, not regenerated expectations.
-- File and HTTP defaults are process-level configuration. Tests that replace them
-  must restore their state; [file runtime tests](../tests/file/test_runtime.py)
-  show registry isolation. File operations that require a runtime raise when
-  none is configured.
+- Engines retain their file adapter at construction, including an unconfigured
+  state; changing the process default later does not reconfigure them. Rebind
+  adapters when rebuilding from snapshots. Raw event consumers render in their
+  own file scope, so bind `engine.file_runtime` when resolving delivered values.
+  [Execution file tests](../tests/engine/test_file_runtime.py) cover these boundaries;
+  [file runtime tests](../tests/file/test_runtime.py) cover nested scope restoration.
+  File and HTTP process defaults still require restoration when replaced in tests.
 - Built-in node availability and default DSL support differ. Consult
   [the factory](../src/graphon/dsl/node_factory.py) before promising import support.
   Its default file adapters reject unsupported file operations; adding host file

@@ -9,6 +9,12 @@ before upgrading an integration.
 
 ### Changed
 
+- Engines now retain their file adapter at construction and use it across
+  execution threads, child/resumed runs, and response-stream rendering.
+  `Engine(file_runtime=...)` and `use_workflow_file_runtime(...)` support distinct
+  host adapters in one process. Configure defaults before constructing engines;
+  rebind adapters when restoring engines. File values and snapshot formats are
+  unchanged. See [file runtime isolation](MIGRATION.md#file-runtime-isolation).
 - Public runtime snapshots now reject active engine runs and execution threads,
   including threads still running after shutdown times out. Persist paused state
   after fully consuming the run iterator, or from a quiescent `on_graph_end` hook.

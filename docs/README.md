@@ -21,6 +21,7 @@ independent test and knowledge reviews, and the final naming pass.
 | What structural debt has been identified, and what should improve next? | [Architecture review and technical debt](technical-debt.md) |
 | What is the progress and evidence for TD-02? | [Graph validation plan](plans/graph-validation.md) |
 | What is the progress and evidence for TD-03? | [Snapshot eligibility plan](plans/snapshot-eligibility.md) |
+| What is the progress and evidence for TD-04? | [Execution file runtime plan](plans/execution-file-runtime.md) |
 
 ## Component references
 
@@ -30,6 +31,7 @@ Keep detailed component knowledge next to its implementation and link it here.
 | --- | --- | --- |
 | Engine lifecycle extensions | [Layers](../src/graphon/engine/layer/README.md) | [Layer base](../src/graphon/engine/layer/base.py), [worker context tests](../tests/engine/test_layer_node_run_context.py) |
 | Pause, abort, variable updates | [Commands](../src/graphon/engine/command/README.md) | [Command processor](../src/graphon/engine/command/processor.py), [dispatch tests](../tests/engine/test_dispatch_patterns.py) |
+| Execution and host file rendering | [File runtime isolation](../MIGRATION.md#file-runtime-isolation) | [File runtime](../src/graphon/file/runtime.py), [execution file tests](../tests/engine/test_file_runtime.py) |
 | Model capabilities and providers | [Model runtime](../src/graphon/model_runtime/README.md) | [Public protocols](../src/graphon/protocols/__init__.py), [model dispatch tests](../tests/model_runtime/test_model_dispatch.py) |
 | DSL and direct Python construction | [Slim example setup](../examples/slim_llm/README.md) | [DSL example](../examples/slim_llm/dsl.py), [Python example](../examples/slim_llm/code.py), [example tests](../tests/examples/test_slim_llm_example.py) |
 

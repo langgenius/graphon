@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 from .protocols import WorkflowFileRuntimeProtocol
 
 
@@ -42,6 +46,25 @@ class WorkflowFileRuntimeRegistry:
 
 
 _workflow_file_runtime_registry = WorkflowFileRuntimeRegistry()
+_current_workflow_file_runtime: ContextVar[WorkflowFileRuntimeProtocol | None] = (
+    ContextVar("workflow_file_runtime")
+)
+
+
+@contextmanager
+def use_workflow_file_runtime(
+    runtime: WorkflowFileRuntimeProtocol | None,
+) -> Iterator[None]:
+    """Bind file helpers in this context; None explicitly disables resolution.
+
+    Hosts can use this when constructing an engine or rendering its file values.
+    The previous binding is restored on exit, including when an operation fails.
+    """
+    token = _current_workflow_file_runtime.set(runtime)
+    try:
+        yield
+    finally:
+        _current_workflow_file_runtime.reset(token)
 
 
 def configure_workflow_file_runtime(
@@ -56,8 +79,11 @@ def set_workflow_file_runtime(runtime: WorkflowFileRuntimeProtocol) -> None:
 
 
 def get_workflow_file_runtime() -> WorkflowFileRuntimeProtocol:
-    return _workflow_file_runtime_registry.get()
+    runtime = peek_workflow_file_runtime()
+    if runtime is None:
+        raise _not_configured_error()
+    return runtime
 
 
 def peek_workflow_file_runtime() -> WorkflowFileRuntimeProtocol | None:
-    return _workflow_file_runtime_registry.peek()
+    return _current_workflow_file_runtime.get(_workflow_file_runtime_registry.peek())

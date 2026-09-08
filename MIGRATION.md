@@ -18,6 +18,48 @@ until its state has been restored and serialized by 0.8.0.
 The package version remains `0.7.0` on this development branch. The release PR
 will bump it to `0.8.0` separately.
 
+### File runtime isolation
+
+Pass `Engine(..., file_runtime=adapter)` to select an execution's
+`WorkflowFileRuntimeProtocol`. Omitting it or passing `None` captures the current
+scoped adapter or process default **at engine construction**, including an
+unconfigured state. Configure the process default before constructing engines;
+changing it later no longer changes existing engines' file operations.
+
+The engine binds its adapter in workers, the dispatcher, and layer hooks,
+including child and resumed execution. `EngineEventFilterContext.from_engine()`
+carries it to `ResponseStreamFilter`, including a restored filter. Custom filters
+can use `context.file_runtime` with the context manager below. The built-in filter
+binds it during `initialize()`, `on_event()`, `flush()`, and `loads()`, including
+streaming-template callbacks, and restores the caller's scope on return or failure.
+Constructing a filter context directly captures its current scoped/process default when
+`file_runtime` is omitted; prefer `from_engine()` to retain the engine's selection.
+
+For DSL construction and host-side rendering of delivered files, use
+`use_workflow_file_runtime` from `graphon.file.runtime`:
+
+```python
+from graphon.dsl import loads
+from graphon.file.runtime import use_workflow_file_runtime
+
+with use_workflow_file_runtime(adapter):
+    engine = loads(dsl)
+
+for event in engine.run():
+    with use_workflow_file_runtime(engine.file_runtime):
+        consume(event)  # File.to_dict(), markdown, or plugin parameter rendering
+```
+
+Engine iteration restores the caller's binding before yielding each event and
+after close or failure. Scoped `None` disables resolution even if a process
+default exists. Direct file helpers outside a scope still use the process default.
+Explicitly injected HTTP clients and node-specific file ports remain independent.
+
+Adapters are transient: pass them again when rebuilding an engine from
+`RuntimeState.from_snapshot()`. File metadata, references, and snapshot formats
+are unchanged. Use `File.model_dump(mode="json")` for metadata without URL
+resolution; `to_dict()`, Markdown, and plugin parameters still resolve URLs.
+
 ### Public names and imports
 
 | 0.7.x | 0.8.0 |

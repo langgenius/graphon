@@ -65,3 +65,29 @@ def test_set_workflow_file_runtime_updates_module_runtime() -> None:
     set_workflow_file_runtime(configured_runtime)
 
     assert get_workflow_file_runtime() is configured_runtime
+
+
+@pytest.mark.usefixtures("_reset_workflow_file_runtime_registry")
+def test_file_runtime_scope_restores_nested_and_unconfigured_callers() -> None:
+    outer = MagicMock()
+    inner = MagicMock()
+    default = MagicMock()
+
+    def fail_in_inner_scope() -> None:
+        with runtime_module.use_workflow_file_runtime(inner):
+            assert get_workflow_file_runtime() is inner
+            message = "file read failed"
+            raise RuntimeError(message)
+
+    with runtime_module.use_workflow_file_runtime(outer):
+        assert get_workflow_file_runtime() is outer
+        set_workflow_file_runtime(default)
+        with pytest.raises(RuntimeError, match="file read failed"):
+            fail_in_inner_scope()
+        assert get_workflow_file_runtime() is outer
+        with runtime_module.use_workflow_file_runtime(None):
+            assert peek_workflow_file_runtime() is None
+            with pytest.raises(WorkflowFileRuntimeNotConfiguredError):
+                get_workflow_file_runtime()
+        assert get_workflow_file_runtime() is outer
+    assert get_workflow_file_runtime() is default

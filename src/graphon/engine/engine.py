@@ -19,6 +19,11 @@ from graphon.engine_events.graph import (
     GraphRunSucceededEvent,
 )
 from graphon.entities.workflow_start_reason import WorkflowStartReason
+from graphon.file.protocols import WorkflowFileRuntimeProtocol
+from graphon.file.runtime import (
+    peek_workflow_file_runtime,
+    use_workflow_file_runtime,
+)
 from graphon.graph.graph import Graph
 from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
@@ -61,6 +66,8 @@ class Engine:
         command_channel: CommandChannel | None = None,
         workers: int = 5,
         container_handler_factories: Sequence[ContainerHandlerFactory] = (),
+        *,
+        file_runtime: WorkflowFileRuntimeProtocol | None = None,
     ) -> None:
         """Build an engine for one graph execution.
 
@@ -76,6 +83,9 @@ class Engine:
                 A process-local in-memory channel is created when omitted.
             workers: Fixed number of worker threads to create while running.
             container_handler_factories: Additional container handler factories.
+            file_runtime: File adapter for this execution. None captures the
+                current scoped or process default, even if it is unconfigured.
+                Supply it again when rebuilding an engine from a snapshot.
 
         Raises:
             ValueError: If ``workers`` is not a positive integer.
@@ -88,6 +98,9 @@ class Engine:
         # Bind runtime state to current workflow context
         self._graph = graph
         self._runtime_state = runtime_state
+        self._file_runtime = (
+            file_runtime if file_runtime is not None else peek_workflow_file_runtime()
+        )
         self._command_channel = (
             command_channel if command_channel is not None else InMemoryChannel()
         )
@@ -137,6 +150,7 @@ class Engine:
             frame_registry=self._frame_registry,
             layers=self._layers,
             execution_context=self._runtime_state.execution_context,
+            file_runtime=self._file_runtime,
             workers=workers,
         )
 
@@ -157,6 +171,7 @@ class Engine:
             command_processor=command_processor,
             worker_pool=self._worker_pool,
             event_stream=self._event_stream,
+            file_runtime=self._file_runtime,
         )
 
         # === Validation ===
@@ -182,10 +197,11 @@ class Engine:
         by :meth:`run`; registration itself does not start graph execution.
         """
         self._layers.append(layer)
-        layer.initialize(
-            ReadOnlyRuntimeStateWrapper(self._runtime_state),
-            self._command_channel,
-        )
+        with use_workflow_file_runtime(self._file_runtime):
+            layer.initialize(
+                ReadOnlyRuntimeStateWrapper(self._runtime_state),
+                self._command_channel,
+            )
 
     def request_abort(self, reason: str | None = None) -> None:
         """Queue an abort command for this engine."""
@@ -194,12 +210,33 @@ class Engine:
         )
 
     def run(self) -> Generator[EngineEvent, None, None]:
-        """Execute the graph using the modular architecture.
+        """Execute the graph without leaking its file adapter to event consumers.
 
         Yields:
             `EngineEvent` instances emitted during workflow execution.
 
         """
+        events = self._run()
+        error: BaseException | None = None
+        try:
+            while True:
+                with use_workflow_file_runtime(self._file_runtime):
+                    try:
+                        event = next(events) if error is None else events.throw(error)
+                    except StopIteration:
+                        return
+                try:
+                    yield event
+                except BaseException as exc:  # ruff:ignore[blind-except]
+                    # Forward consumer errors under the engine's file scope.
+                    error = exc
+                else:
+                    error = None
+        finally:
+            with use_workflow_file_runtime(self._file_runtime):
+                events.close()
+
+    def _run(self) -> Generator[EngineEvent, None, None]:
         try:
             with self._graph_execution.track_execution():
                 try:
@@ -364,6 +401,11 @@ class Engine:
                 )
 
     # Public property accessors for attributes that need external access
+    @property
+    def file_runtime(self) -> WorkflowFileRuntimeProtocol | None:
+        """File adapter retained for this engine, separate from persisted state."""
+        return self._file_runtime
+
     @property
     def graph(self) -> Graph:
         """Get the graph bound to this engine."""
