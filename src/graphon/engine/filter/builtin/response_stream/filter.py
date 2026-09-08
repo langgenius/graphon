@@ -652,6 +652,13 @@ class ResponseStreamFilter:
                     )
                 )
             else:
+                if not event.graph_id or not event.execution_id:
+                    event = event.model_copy(
+                        update={
+                            "graph_id": event.graph_id or self._graph_id,
+                            "execution_id": event.execution_id or self._execution_id,
+                        }
+                    )
                 events.append(event)
 
         if self._stream_buffers.is_closed(segment.selector):

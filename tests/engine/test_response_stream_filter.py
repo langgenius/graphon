@@ -765,21 +765,87 @@ def test_response_stream_filter_does_not_migrate_version_2_edge_ids() -> None:
     assert [event.chunk for event in chunks] == ["value"]
 
 
-def test_response_stream_filter_round_trips_resume_state() -> None:
+@pytest.mark.parametrize(
+    ("graph_id", "execution_id"),
+    [("saved-graph", "saved-run"), ("saved-graph", ""), ("", "saved-run")],
+)
+def test_response_stream_filter_round_trips_resume_state(
+    graph_id: str, execution_id: str
+) -> None:
     graph = _variable_response_graph()
     context = _context(graph)
     first_filter = ResponseStreamFilter()
     first_filter.initialize(context)
     raw_chunk = _stream_chunk("resumed")
+    raw_chunk.graph_id = graph_id
+    raw_chunk.execution_id = execution_id
+    saved_fields = raw_chunk.model_dump()
     assert list(first_filter.on_event(raw_chunk)) == []
 
     restored_filter = ResponseStreamFilter()
     restored_filter.initialize(context)
     restored_filter.loads(first_filter.dumps())
+    restored_filter.on_event(
+        GraphRunStartedEvent(graph_id="resumed-graph", execution_id="resumed-run")
+    )
     output = list(restored_filter.on_event(_edge_taken()))
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
-    assert [event.chunk for event in chunks] == ["resumed"]
+    assert [event.model_dump() for event in chunks] == [
+        {
+            **saved_fields,
+            "graph_id": graph_id or "resumed-graph",
+            "execution_id": execution_id or "resumed-run",
+        }
+    ]
+    assert raw_chunk.model_dump() == saved_fields
+
+
+@pytest.mark.parametrize("version", ["1.0", "2.0"])
+@pytest.mark.parametrize("load_first", [False, True])
+def test_response_stream_filter_fills_run_ids_on_old_chunks(
+    version: str, load_first: bool
+) -> None:
+    snapshot_data = json.loads(_V1_SIMPLE_SNAPSHOT)
+    snapshot_data["version"] = version
+    snapshot_data["stream_buffers"] = [
+        {
+            "selector": ["source", "answer"],
+            "events": [
+                {
+                    "id": "source-run",
+                    "node_id": "source",
+                    "node_type": "llm",
+                    "selector": ["source", "answer"],
+                    "chunk": "saved before upgrade",
+                }
+            ],
+        }
+    ]
+    context = _context(_variable_response_graph(edge_id="edge_0"))
+    restored_filter = ResponseStreamFilter()
+    if not load_first:
+        restored_filter.initialize(context)
+    restored_filter.loads(json.dumps(snapshot_data))
+    if load_first:
+        restored_filter.initialize(context)
+    saved_chunk = json.loads(restored_filter.dumps())["stream_buffers"][0]["events"][0]
+
+    restored_filter.on_event(
+        GraphRunStartedEvent(graph_id="resumed-graph", execution_id="resumed-run")
+    )
+    output = list(restored_filter.on_event(_edge_taken(edge_id="edge_0")))
+
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert [event.model_dump(mode="json") for event in chunks] == [
+        {
+            **saved_chunk,
+            "graph_id": "resumed-graph",
+            "execution_id": "resumed-run",
+        }
+    ]
+    assert chunks[0].node_execution_id == "source-run"
+    assert chunks[0].id != "source-run"
 
 
 def test_response_stream_filter_restores_ids_for_new_chunks() -> None:
