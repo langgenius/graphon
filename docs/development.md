@@ -124,6 +124,12 @@ revision. Once all other development steps are complete, finish with the
   [the factory](../src/graphon/dsl/node_factory.py) before promising import support.
   Its default file adapters reject unsupported file operations; adding host file
   support also requires wiring the appropriate node dependencies.
+- Default graph construction checks input and topology throughout the retained
+  subtree before constructing nodes; root type is checked on the resolved node.
+  Use acyclic edges inside each container; invalid fields or duplicate IDs
+  are rejected instead of being silently discarded. See the
+  [graph validation migration notes](../MIGRATION.md#graph-validation) for the
+  supported defaults and trusted validation bypasses.
 
 When a change alters these workflows, update this page and the linked source or
 tests in the same change. Put user-visible compatibility changes in

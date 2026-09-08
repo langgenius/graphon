@@ -111,6 +111,39 @@ only after the engine emits `GraphRunPausedEvent`; do not infer a pause from a
 queued command. Loop handlers write only their configured selectors back to the
 parent, while iteration frame state remains isolated.
 
+### Graph validation
+
+Default `Graph.init()`, `graphon.dsl.loads()`, and `Graph.new().build()` now reject
+execution cycles, including self-edges and cycles in inactive paths or nested
+containers. Express repetition through Loop, Iteration, or a custom container
+handler with acyclic internal edges. Valid disconnected graphs and multiple
+roots remain supported.
+
+Executable node IDs must be non-empty strings and unique across the supplied
+configuration. Edges must name existing nodes in the same direct scope, and an
+explicit `sourceHandle` must be a string. Omitting it still defaults to `"source"`;
+other string handles retain their existing behavior. Duplicate edge IDs are
+rejected within each scope, including descendants, while sibling scopes may
+reuse IDs. Supported editor notes and legacy ownership fields still normalize.
+
+For configured graphs, input and topology checks run before node constructors
+or `post_init()` hooks throughout the retained subtree. A child graph's cycle
+check excludes its parent and sibling scopes.
+Root type is checked afterward against the resolved node, so custom factory
+aliases for loop and iteration entry nodes remain supported.
+The Python builder receives existing nodes and rejects invalid graphs by
+`build()`. Graph validation errors retain structured issues; DSL loading exposes
+them as `DslError(code="graph.validation_failed")` rather than an `AttributeError`.
+Existing DSL normalization errors keep their codes.
+
+Correct previously accepted invalid definitions before loading or restoring them.
+Snapshot formats and edge IDs for valid graphs are unchanged.
+`Graph.init(skip_validation=True)` still bypasses endpoint existence, root type,
+and cycle checks; raw field/ID/schema/ownership checks and root ID presence
+remain mandatory. The low-level `Graph(...)` constructor remains unchecked.
+These trusted paths do not
+provide the guarantees of default construction.
+
 ### Edge identity
 
 `Edge.id` is now the DSL edge ID and is unique only inside one graph. Code that

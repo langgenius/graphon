@@ -6,8 +6,11 @@ import pytest
 import yaml
 
 from graphon.dsl import inspect as inspect_dsl
+from graphon.dsl import loads
 from graphon.dsl.entities import LoadStatus
 from graphon.dsl.errors import DslError
+from graphon.engine_events.graph import GraphRunSucceededEvent
+from graphon.engine_events.node import NodeRunSucceededEvent
 
 _OPENAI_PLUGIN_ID = "langgenius/openai:0.3.8@test"
 
@@ -127,6 +130,89 @@ def _parameter_extractor_data() -> dict[str, Any]:
         "instruction": "Extract the requested location.",
         "reasoning_mode": "prompt",
     }
+
+
+@pytest.mark.parametrize("has_cycle", [False, True])
+def test_graph_loading_rejects_cycles_and_runs_dags(has_cycle: bool) -> None:
+    edges = [
+        {"source": "start", "target": "a"},
+        {"source": "a", "target": "b"},
+    ]
+    if has_cycle:
+        edges.append({"source": "b", "target": "a"})
+    dsl = _graph_dsl_for_nodes(
+        nodes=[
+            {
+                "id": node_id,
+                "data": {
+                    "type": "template-transform",
+                    "variables": [],
+                    "template": node_id,
+                },
+            }
+            for node_id in ("a", "b")
+        ],
+        edges=edges,
+    )
+
+    if has_cycle:
+        with pytest.raises(DslError) as exc_info:
+            loads(dsl)
+
+        assert exc_info.value.code == "graph.validation_failed"
+        issues = exc_info.value.details["issues"]
+        assert any(issue["node_id"] in {"a", "b"} for issue in issues)
+        assert all(issue["code"] and issue["message"] for issue in issues)
+    else:
+        events = list(loads(dsl).run())
+
+        assert isinstance(events[-1], GraphRunSucceededEvent)
+        assert {
+            event.node_id
+            for event in events
+            if isinstance(event, NodeRunSucceededEvent)
+        } == {"start", "a", "b"}
+
+
+@pytest.mark.parametrize("source_handle", [None, 1])
+def test_graph_loading_rejects_non_string_handles(source_handle: object) -> None:
+    dsl = _graph_dsl_for_nodes(
+        nodes=[
+            {
+                "id": "node",
+                "data": {
+                    "type": "template-transform",
+                    "variables": [],
+                    "template": "hello",
+                },
+            },
+        ],
+        edges=[
+            {"source": "start", "target": "node", "sourceHandle": source_handle},
+        ],
+    )
+
+    with pytest.raises(DslError):
+        loads(dsl)
+
+
+def test_graph_loading_reports_invalid_root_as_structured_error() -> None:
+    dsl = _graph_dsl_for_node({
+        "type": "template-transform",
+        "variables": [],
+        "template": "hello",
+    })
+
+    with pytest.raises(DslError) as exc_info:
+        loads(dsl, root_node_id="node")
+
+    assert exc_info.value.code == "graph.validation_failed"
+    assert any(
+        issue["code"] == "INVALID_ROOT"
+        and issue["node_id"] == "node"
+        and issue["message"]
+        for issue in exc_info.value.details["issues"]
+    )
 
 
 @pytest.mark.parametrize(

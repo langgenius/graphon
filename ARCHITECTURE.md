@@ -42,10 +42,12 @@ flowchart LR
     Stream --> Consumer[Engine.run consumer]
 ```
 
-1. [Graph.init](src/graphon/graph/graph.py) normalizes external node ownership,
-   scopes the graph, validates node schemas, constructs direct-frame nodes, and
-   runs structural validation. `Graph.new()` supplies the fluent builder for
-   directly instantiated nodes.
+1. [Graph.init](src/graphon/graph/graph.py) validates input IDs and edge fields,
+   normalizes ownership, scopes the graph, and prevalidates node schemas,
+   endpoints, and execution cycles throughout the retained subtree before
+   constructing direct-frame nodes. Root type is checked on the resolved node.
+   `Graph.new()` supplies the fluent builder for directly instantiated nodes and
+   validates their graph at `build()`.
 2. [Engine](src/graphon/engine/engine.py) binds a root frame, command processor,
    event stream, fixed worker pool, and dispatcher. Calling `run()` starts or
    resumes execution and yields graph lifecycle events plus processed node and
@@ -92,10 +94,17 @@ traversal events also carry `frame_id`. See [scoping tests](tests/graph/test_gra
 resolve the same class/version as `create_node()` without constructing a node,
 running `post_init()`, or initializing runtime dependencies. Factories rebind
 runtime state and scoped graph configuration without mutating parent/sibling
-configuration. The built-in structural rules check edge endpoints and root type;
-they do not provide general execution-graph cycle detection. See
+configuration. Default construction rejects invalid or duplicate node IDs,
+malformed edges, missing endpoints, and execution cycles throughout the retained
+subtree, including inactive paths. Container handlers provide repetition; each
+scope's edges must be acyclic. Root eligibility is checked afterward on the
+constructed node, preserving custom factory aliases for loop and iteration
+entry nodes.
+`skip_validation=True` bypasses endpoint existence, root type, and cycle checks,
+but still validates input fields, IDs, schemas, and ownership. The low-level
+`Graph(...)` constructor remains trusted assembly. See
 [factory contract](src/graphon/graph/graph.py), [validators](src/graphon/graph/validation.py),
-and [validation tests](tests/graph/test_graph_validation.py).
+and [scoping and preflight tests](tests/graph/test_graph_scoping.py).
 
 **Joins wait for branch resolution.** A node with incoming edges is ready only
 when none remain `UNKNOWN` and at least one is `TAKEN`. Branch completion selects

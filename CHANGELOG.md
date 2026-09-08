@@ -9,6 +9,11 @@ before upgrading an integration.
 
 ### Changed
 
+- Graph construction now rejects invalid or duplicate node IDs, malformed edge
+  fields, duplicate edge IDs within a scope, and execution cycles
+  before constructing configured nodes, including errors in nested scopes.
+  The Python builder also rejects invalid IDs, handles, and cycles. DSL graph
+  validation failures now preserve their structured issue details.
 - Renamed the public execution API around `Engine`, `EngineEvent`, `NodeEvent`,
   `RuntimeState`, and `InitParams`; the corresponding packages now use singular,
   responsibility-based names.

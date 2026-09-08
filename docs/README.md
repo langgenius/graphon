@@ -19,7 +19,7 @@ independent test and knowledge reviews, and the final naming pass.
 | How do I keep knowledge current or record a longer task? | [Knowledge maintenance](maintenance.md) |
 | What breaks when upgrading? | [Migration guide](../MIGRATION.md), [changelog](../CHANGELOG.md) |
 | What structural debt has been identified, and what should improve next? | [Architecture review and technical debt](technical-debt.md) |
-| What debt is planned for the next implementation? | [TD-02 graph validation plan](plans/graph-validation.md) |
+| What is the progress and evidence for TD-02? | [Graph validation plan](plans/graph-validation.md) |
 
 ## Component references
 

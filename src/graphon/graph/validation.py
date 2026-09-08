@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from graphlib import CycleError, TopologicalSorter
 from typing import TYPE_CHECKING, Protocol
 
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType, NodeType
 
 if TYPE_CHECKING:
+    from .edge import Edge
     from .graph import Graph
 
 
@@ -41,38 +43,71 @@ class GraphValidationRule(Protocol):
         ...
 
 
-@dataclass(frozen=True, slots=True)
-class _EdgeEndpointValidator:
-    """Ensures all edges reference existing nodes."""
+def get_edge_issues(
+    node_scopes: Mapping[str, str],
+    edges: Iterable[Edge],
+) -> list[GraphValidationIssue]:
+    """Check edge fields, endpoints, and cycles without constructing nodes.
 
-    missing_node_code: str = "MISSING_NODE"
+    Cross-scope edges are rejected during scoping, so one topological check
+    covers all disconnected scopes in a retained subtree.
 
+    Args:
+        node_scopes: Node IDs mapped to their direct container IDs.
+        edges: Edges from the scopes being validated.
+
+    Returns:
+        Issues for invalid edges or a cycle; empty for a valid graph.
+    """
+    issues: list[GraphValidationIssue] = []
+    predecessors: dict[str, list[str]] = {node_id: [] for node_id in node_scopes}
+    for edge in edges:
+        if not isinstance(edge.source_handle, str):
+            issues.append(
+                GraphValidationIssue(
+                    code="INVALID_EDGE",
+                    message=f"Edge {edge.id!r} sourceHandle must be a string.",
+                    node_id=edge.tail,
+                )
+            )
+        for field, node_id in (("source", edge.tail), ("target", edge.head)):
+            if node_id not in node_scopes:
+                issues.append(
+                    GraphValidationIssue(
+                        code="MISSING_NODE",
+                        message=(
+                            f"Edge {edge.id} references unknown {field} node "
+                            f"'{node_id}'."
+                        ),
+                        node_id=node_id,
+                    ),
+                )
+        if edge.tail in node_scopes and edge.head in node_scopes:
+            predecessors[edge.head].append(edge.tail)
+    if not issues:
+        try:
+            TopologicalSorter(predecessors).prepare()
+        except CycleError as error:
+            cycle_node_ids: list[str] = error.args[1]
+            issues.append(
+                GraphValidationIssue(
+                    code="CYCLE",
+                    message=(
+                        f"Graph scope {node_scopes[cycle_node_ids[0]]!r} "
+                        f"contains a cycle: {' -> '.join(cycle_node_ids)}"
+                    ),
+                    node_id=cycle_node_ids[0],
+                )
+            )
+    return issues
+
+
+class _EdgeValidator:
     def validate(self, graph: Graph) -> Sequence[GraphValidationIssue]:
-        issues: list[GraphValidationIssue] = []
-        for edge in graph.edges.values():
-            if edge.tail not in graph.nodes:
-                issues.append(
-                    GraphValidationIssue(
-                        code=self.missing_node_code,
-                        message=(
-                            f"Edge {edge.id} references unknown source node "
-                            f"'{edge.tail}'."
-                        ),
-                        node_id=edge.tail,
-                    ),
-                )
-            if edge.head not in graph.nodes:
-                issues.append(
-                    GraphValidationIssue(
-                        code=self.missing_node_code,
-                        message=(
-                            f"Edge {edge.id} references unknown target node "
-                            f"'{edge.head}'."
-                        ),
-                        node_id=edge.head,
-                    ),
-                )
-        return issues
+        return get_edge_issues(
+            dict.fromkeys(graph.nodes, ""),
+            graph.edges.values(),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,7 +170,7 @@ class GraphValidator:
 
 
 _DEFAULT_RULES: tuple[GraphValidationRule, ...] = (
-    _EdgeEndpointValidator(),
+    _EdgeValidator(),
     _RootNodeValidator(),
 )
 

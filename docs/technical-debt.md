@@ -2,8 +2,9 @@
 
 **Reviewed:** 2026-09-08, Graphon 0.7.0, commit
 `9d13c716d527a8b7099df00cc448254ac7b6e98b`.
-**Status:** review complete; the remediation below is proposed, not implemented
-or accepted architecture policy. Priorities express this review's judgment.
+**Status:** original review complete; TD-02 implementation and reviews are complete
+locally. Other remediation remains proposed, not accepted architecture
+policy. Priorities express the original review's judgment.
 **Scope:** repository structure, execution and integration boundaries, developer
 feedback, and knowledge maintenance. Evidence includes source, callers, test
 definitions, focused tests, and small local reproductions. This is not a
@@ -100,7 +101,7 @@ queue dependency and facade side effects below have concrete isolation costs.
   from construction. [Factory tests](../tests/dsl/test_node_factory.py) protect
   validation before adapter initialization. Canonical ownership and explicit
   legacy translation in [scoping](../src/graphon/graph/scoping.py) are useful
-  protections; TD-02 covers the remaining structural gaps.
+  protections; TD-02 addresses the structural gaps found in the original review.
 - **Ports mostly follow actual consumers.** HTTP nodes capture their injected
   client, code nodes accept an executor, and provider wrappers require only
   their capability contracts. [Model dispatch tests](../tests/model_runtime/test_model_dispatch.py)
@@ -127,8 +128,9 @@ queue dependency and facade side effects below have concrete isolation costs.
 
 ## Debt register
 
-All entries are **proposed**. P1 means a reproduced correctness problem or a
-boundary that must be addressed before the stated deployment use. P2 is targeted
+TD-02 is **implemented locally**; other entries remain **proposed**. P1 means a
+reproduced correctness problem or a boundary that must be addressed before the
+stated deployment use. P2 is targeted
 architecture or feedback work. P3 can follow the more consequential changes.
 Suggested owners are responsibility areas, not assigned people; effort is a
 relative change size, not a delivery estimate.
@@ -136,7 +138,7 @@ relative change size, not a delivery estimate.
 | ID | Section | Priority | Suggested owner | Size |
 | --- | --- | --- | --- | --- |
 | TD-01 | Dependency direction and runtime queue ownership | P2 | Engine/runtime | Medium |
-| TD-02 | Graph construction and structural validation | P1 | Graph/DSL | Medium |
+| TD-02 | [Graph construction and structural validation](#td-02--graph-construction-and-structural-validation), implemented locally | P1 | Graph/DSL | Medium |
 | TD-03 | Snapshot consistency at the public boundary | P2 | Runtime/engine | Medium |
 | TD-04 | Execution-scoped file integration | P2; P1 before concurrent distinct host adapters | File/host integration | Medium–large |
 | TD-05 | Side effects of importing public contracts | P2 | Public API/node bootstrap | Small–medium |
@@ -179,53 +181,37 @@ and retain [runtime coverage](../tests/runtime/test_runtime_state.py).
 
 ## TD-02 — Graph construction and structural validation
 
-**Planning update (2026-09-08):** recommended as the next implementation priority.
-The [graph validation plan](plans/graph-validation.md) records verified failures,
-scope, compatibility proposals, acceptance checks, and current tracking. An
-implementation owner is not yet assigned; remediation remains proposed.
+**Implementation update (2026-09-08):** implemented locally by the current
+Graph/DSL development task on `laipz8200/graph-validation`; independent reviews and
+checks are complete. The [graph validation plan](plans/graph-validation.md) records decisions,
+checks, and tracking. [Implementation issue #277](https://github.com/langgenius/graphon/issues/277)
+tracks this fix and its pull request;
+[issue #131](https://github.com/langgenius/graphon/issues/131) remains related
+authoring work.
 
-**Working well:** DSL normalization rejects duplicate IDs and invalid edge
-endpoints; `GraphBuilder` rejects duplicate nodes. Scoped ownership and descendant
-schema validation are already covered. Keep intentionally supported editor
-metadata and legacy container forms.
+**Original evidence:** direct `Graph.init()` silently overwrote duplicate node IDs
+and discarded malformed edges. Default validators accepted execution cycles, so
+`start → a → b → a` could emit `GraphRunSucceededEvent` after only `start` ran,
+leaving `a` and `b` `UNKNOWN`. Public `dsl.loads()` reproduced that false success.
+The DSL normalizer already rejected some invalid inputs, but these checks did
+not establish a shared construction boundary.
 
-**Evidence and consequence:** protections differ between entry points.
-[Graph._normalize_nodes and _parse_node_configs](../src/graphon/graph/graph.py)
-index node IDs without rejecting duplicates. `_build_edges()` drops edges with
-non-string endpoints or source handles. The
-[DSL normalizer](../src/graphon/dsl/importer.py) catches duplicate node IDs and bad
-endpoints, but does not establish a complete shared graph contract.
-[Default structural validators](../src/graphon/graph/validation.py) cover endpoints
-and root type, not execution cycles. [Scheduler](../src/graphon/engine/scheduler.py)
-waits for incoming edges to resolve but declares completion when no enqueued
-work remains.
+**Current result:** [graph construction](../src/graphon/graph/graph.py) rejects
+invalid/duplicate IDs and malformed edges before indexing or filtering.
+[Shared validation](../src/graphon/graph/validation.py) checks endpoints and cycles
+throughout the retained subtree before node construction and through the Python
+builder. [DSL loading](../src/graphon/dsl/importer.py) preserves structured
+validation issues. Scheduler behavior is unchanged. Supported ownership forms,
+resolved factory root types, edge identities, and trusted bypasses are retained;
+see the [migration guidance](../MIGRATION.md#graph-validation).
 
-Local probes established three behaviors: direct `Graph.init()` accepts a
-duplicate ID with the last configuration winning; an explicitly null
-`sourceHandle` can disappear from the executable graph; and
-`start → a → b → a` can emit `GraphRunSucceededEvent` after only `start` executes,
-leaving `a` and `b` `UNKNOWN`. The cycle was also reproduced through public
-`dsl.loads()`. These are narrower claims than saying all DSL validation is
-missing.
-
-**Proposed change:** establish the shared graph invariants before lossy indexing
-or filtering. Reject duplicate IDs and malformed executable edges, preserving
-documented normalization such as a missing source handle default. Reject
-unsupported cycles within each executable scope; stdlib
-`graphlib.TopologicalSorter` is sufficient if the intended contract is acyclic
-scopes with explicit Loop/Iteration containers. Check the same structural rule
-through the builder. Validate descendants before constructor side effects where
-possible. Do not change join semantics to make unsupported cycles appear to run.
-
-**Done when:** focused regressions cover all three cases through the applicable
-construction APIs, one engine regression rules out false success, and existing
-multi-root, branch, nested-container, and preflight cases remain valid. Extend
-[graph validation](../tests/graph/test_graph_validation.py),
-[scoping](../tests/graph/test_graph_scoping.py), and
-[workflow tests](../tests/workflows/test_full_engine_events.py). Stricter rejection
-changes accepted input behavior and needs migration notes. Coordinate with open
-[graph authoring issue #131](https://github.com/langgenius/graphon/issues/131)
-before implementation, without making a new authoring API a prerequisite.
+**Evidence of remediation:** [scoping tests](../tests/graph/test_graph_scoping.py),
+[builder tests](../tests/graph/test_graph.py), and
+[public loading tests](../tests/dsl/test_importer.py) cover the defects and valid
+controls. The focused graph/DSL command passes 136 tests; `just test` passes 815,
+and `just check` passes on Python 3.12.13. The plan records the initial failures,
+full-suite caveat, and remaining validation limits. This is local implementation
+evidence, not a merged fix or a release claim.
 
 ## TD-03 — Snapshot consistency at the public boundary
 
@@ -465,8 +451,9 @@ generator are not prerequisites. No recurring automation was configured here.
 
 ## Suggested order and limits
 
-1. Fix TD-02 first: it has a reproduced false-success outcome and can be corrected
-   within existing graph boundaries.
+1. TD-02 was selected first for its reproduced false-success outcome. Its local
+   implementation and completed reviews are tracked in the
+   [graph validation plan](plans/graph-validation.md).
 2. Define TD-03's snapshot eligibility and TD-04's file adapter scope before
    promising live checkpoints or concurrent distinct host integrations. TD-04
    may be staged if all deployed hosts use one process-wide adapter.
@@ -504,37 +491,8 @@ uv run pytest -n 0 \
 ```
 
 Additional ephemeral probes established the graph, file runtime, and import
-behaviors described in TD-01, TD-02, TD-04, and TD-05. For example, this public-API
-reproduction on the reviewed commit produces success after only the start node:
-
-```bash
-uv run python - <<'PY'
-import json
-from graphon.dsl import loads
-from graphon.engine_events import NodeRunSucceededEvent
-
-nodes = [{"id": "start", "data": {"type": "start", "variables": []}}]
-nodes += [
-    {"id": name, "data": {
-        "type": "template-transform", "variables": [], "template": "ok"
-    }}
-    for name in ("a", "b")
-]
-edges = [
-    {"source": source, "target": target}
-    for source, target in (("start", "a"), ("a", "b"), ("b", "a"))
-]
-engine = loads(json.dumps({
-    "kind": "graph", "dependencies": [], "graph": {"nodes": nodes, "edges": edges}
-}))
-events = list(engine.run())
-print(type(events[-1]).__name__)
-print([event.node_id for event in events if isinstance(event, NodeRunSucceededEvent)])
-print({name: node.state.value for name, node in engine.graph.nodes.items()})
-PY
-```
-
-Observed output:
+behaviors described in TD-01, TD-02, TD-04, and TD-05 on the original reviewed
+commit. The public cycle probe returned:
 
 ```text
 GraphRunSucceededEvent
@@ -542,8 +500,13 @@ GraphRunSucceededEvent
 {'start': 'taken', 'a': 'unknown', 'b': 'unknown'}
 ```
 
-Passing existing tests does not refute gaps those tests do not cover. The full
-suite, Python 3.13 matrix, benchmarks, and live external integrations were not
-run for this documentation review. After writing the report, the documentation
-check passed again and the embedded reproduction was executed verbatim with the
-output above. No runtime behavior was changed.
+That result is historical evidence. The permanent
+[DSL loading regression](../tests/dsl/test_importer.py) now requires the same
+cycle to fail during loading and its acyclic control to execute every node.
+See the [TD-02 plan](plans/graph-validation.md#validation-and-outcome) for current
+implementation checks.
+
+The original documentation review did not run the full suite, Python 3.13 matrix,
+benchmarks, or live external integrations, and changed no runtime behavior.
+Its documentation check passed after the report was written. Other debt entries
+retain that original review scope and evidence.

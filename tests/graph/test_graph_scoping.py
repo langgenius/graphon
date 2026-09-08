@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from typing import Any, cast
 from unittest.mock import Mock
@@ -10,10 +11,13 @@ import pytest
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.entities.graph_config import NodeConfigDict, NodeConfigDictAdapter
 from graphon.enums import NodeExecutionType, NodeState
+from graphon.graph.edge import Edge
 from graphon.graph.graph import Graph
 from graphon.graph.validation import GraphValidationError
 from graphon.nodes.base.node import Node
+from graphon.nodes.loop.loop_start_node import LoopStartNode
 from graphon.runtime.runtime_state import RuntimeState
+from tests.helpers import build_init_params, build_variable_pool
 
 
 class _NodeDataWithContainerDefault(BaseNodeData):
@@ -134,6 +138,277 @@ def _config_edges(graph_config: Mapping[str, Any]) -> set[tuple[str, str]]:
 
 def _graph_edges(graph: Graph) -> set[tuple[str, str]]:
     return {(edge.tail, edge.head) for edge in graph.edges.values()}
+
+
+@pytest.mark.parametrize("node_id", [None, "", 42, [], "start", "a-start"])
+def test_invalid_node_ids_fail_before_construction(node_id: object) -> None:
+    graph_config = _scoped_graph_config()
+    graph_config["nodes"].append({"id": node_id, "data": {"type": "answer"}})
+    node_factory = _RecordingNodeFactory()
+
+    with pytest.raises(GraphValidationError):
+        Graph.init(
+            graph_config=graph_config,
+            node_factory=node_factory,
+            root_node_id="start",
+        )
+
+    assert node_factory.created_node_ids == []
+
+
+@pytest.mark.parametrize(
+    ("edge_index", "edge_field", "invalid_value"),
+    [
+        (0, "source", None),
+        (0, "target", 42),
+        (0, "sourceHandle", None),
+        (5, "source", []),
+        (5, "target", "missing"),
+        (5, "sourceHandle", {}),
+    ],
+)
+def test_invalid_edges_fail_before_construction(
+    edge_index: int,
+    edge_field: str,
+    invalid_value: object,
+) -> None:
+    graph_config = _scoped_graph_config()
+    graph_config["edges"][edge_index][edge_field] = invalid_value
+    node_factory = _RecordingNodeFactory()
+
+    with pytest.raises(GraphValidationError):
+        Graph.init(
+            graph_config=graph_config,
+            node_factory=node_factory,
+            root_node_id="start",
+        )
+
+    assert node_factory.created_node_ids == []
+
+
+@pytest.mark.parametrize(
+    ("source", "target", "container_id"),
+    [
+        ("end", "container-a", ""),
+        ("end", "end", ""),
+        ("nested-end", "nested-start", "nested-container"),
+    ],
+)
+def test_cycles_fail_before_construction(
+    source: str, target: str, container_id: str
+) -> None:
+    graph_config = _scoped_graph_config()
+    graph_config["edges"].append(_edge(source, target))
+    node_factory = _RecordingNodeFactory()
+
+    with pytest.raises(GraphValidationError, match=r"(?i)cycle") as error:
+        Graph.init(
+            graph_config=graph_config,
+            node_factory=node_factory,
+            root_node_id="start",
+        )
+
+    assert source in str(error.value)
+    assert target in str(error.value)
+    if container_id:
+        assert container_id in str(error.value)
+    assert node_factory.created_node_ids == []
+
+
+@pytest.mark.parametrize("has_inactive_root", [False, True])
+def test_cycles_outside_the_active_path_are_rejected(has_inactive_root: bool) -> None:
+    graph_config = _scoped_graph_config()
+    graph_config["nodes"].extend([_node("a"), _node("b")])
+    graph_config["edges"].extend([_edge("a", "b"), _edge("b", "a")])
+    if has_inactive_root:
+        graph_config["nodes"].append(_node("other-start", node_type="start"))
+        graph_config["edges"].append(_edge("other-start", "a"))
+    node_factory = _RecordingNodeFactory()
+
+    with pytest.raises(GraphValidationError, match=r"(?i)cycle"):
+        Graph.init(
+            graph_config=graph_config,
+            node_factory=node_factory,
+            root_node_id="start",
+        )
+
+    assert node_factory.created_node_ids == []
+
+
+def test_child_validation_does_not_include_sibling_cycles() -> None:
+    graph_config = _scoped_graph_config()
+    graph_config["edges"].append(_edge("b-end", "b-start"))
+
+    graph = Graph.init(
+        graph_config=graph_config,
+        node_factory=_RecordingNodeFactory(),
+        root_node_id="a-start",
+        container_id="container-a",
+    )
+
+    assert set(graph.nodes) == {"a-start", "nested-container", "a-end"}
+
+
+def test_graph_init_preserves_input_and_handles() -> None:
+    graph_config = _scoped_graph_config()
+    graph_config["nodes"].append({"id": "start", "type": "custom-note", "data": {}})
+    graph_config["edges"][1]["sourceHandle"] = ""
+    graph_config["edges"][2]["sourceHandle"] = "custom"
+    original_graph_config = deepcopy(graph_config)
+
+    graph = Graph.init(
+        graph_config=graph_config,
+        node_factory=_RecordingNodeFactory(),
+        root_node_id="start",
+    )
+
+    assert graph_config == original_graph_config
+    assert [edge.source_handle for edge in graph.edges.values()] == [
+        "source",
+        "",
+        "custom",
+    ]
+
+
+def test_skip_validation_allows_cycle_and_missing_target() -> None:
+    graph_config = _scoped_graph_config()
+    graph_config["edges"].extend([
+        _edge("end", "container-a"),
+        _edge("end", "missing"),
+    ])
+
+    graph = Graph.init(
+        graph_config=graph_config,
+        node_factory=_RecordingNodeFactory(),
+        root_node_id="end",
+        skip_validation=True,
+    )
+
+    assert graph.root_node.id == "end"
+    assert ("end", "missing") in _graph_edges(graph)
+    assert ("end", "container-a") in _graph_edges(graph)
+
+
+@pytest.mark.parametrize("invalid_input", ["duplicate", "handle"])
+def test_skip_validation_still_rejects_invalid_input(invalid_input: str) -> None:
+    graph_config = _scoped_graph_config()
+    if invalid_input == "duplicate":
+        graph_config["nodes"].append(_node("end"))
+    else:
+        graph_config["edges"][0]["sourceHandle"] = None
+
+    with pytest.raises(GraphValidationError):
+        Graph.init(
+            graph_config=graph_config,
+            node_factory=_RecordingNodeFactory(),
+            root_node_id="start",
+            skip_validation=True,
+        )
+
+
+def test_invalid_root_is_rejected() -> None:
+    node_factory = _RecordingNodeFactory()
+
+    with pytest.raises(GraphValidationError) as error:
+        Graph.init(
+            graph_config=_scoped_graph_config(),
+            node_factory=node_factory,
+            root_node_id="end",
+        )
+
+    assert any(issue.code == "INVALID_ROOT" for issue in error.value.issues)
+
+
+def test_root_validation_accepts_factory_alias_for_loop_entry() -> None:
+    class LoopStartNodeFactory(_RecordingNodeFactory):
+        def validate_node(self, node_config: NodeConfigDict) -> NodeExecutionType:
+            LoopStartNode.validate_node_data(node_config["data"])
+            return LoopStartNode.execution_type
+
+        def create_node(self, node_config: NodeConfigDict) -> Node:
+            return LoopStartNode(
+                node_id=node_config["id"],
+                data=LoopStartNode.validate_node_data(node_config["data"]),
+                init_params=build_init_params(graph_config=self.graph_config),
+                runtime_state=RuntimeState(
+                    workflow_id="workflow",
+                    variable_pool=build_variable_pool(),
+                    start_at=0,
+                ),
+            )
+
+    graph = Graph.init(
+        graph_config={
+            "nodes": [_node("entry", node_type="entry-alias")],
+            "edges": [],
+        },
+        node_factory=LoopStartNodeFactory(),
+        root_node_id="entry",
+    )
+
+    assert isinstance(graph.root_node, LoopStartNode)
+
+
+@pytest.mark.parametrize("target", ["missing", "other-start"])
+def test_skip_validation_allows_invalid_inactive_branches(target: str) -> None:
+    graph = Graph.init(
+        graph_config={
+            "nodes": [
+                _node("start", node_type="start"),
+                _node("other-start", node_type="start"),
+            ],
+            "edges": [_edge("other-start", target)],
+        },
+        node_factory=_RecordingNodeFactory(),
+        root_node_id="start",
+        skip_validation=True,
+    )
+
+    assert graph.root_node.id == "start"
+    assert graph.nodes["other-start"].state == NodeState.SKIPPED
+    assert ("other-start", target) in _graph_edges(graph)
+
+
+def test_duplicate_child_edge_ids_fail_before_construction() -> None:
+    graph_config = _scoped_graph_config()
+    graph_config["edges"][3]["id"] = "duplicate"
+    graph_config["edges"][4]["id"] = "duplicate"
+    node_factory = _RecordingNodeFactory()
+
+    with pytest.raises(ValueError, match="Duplicate graph edge ID: duplicate"):
+        Graph.init(
+            graph_config=graph_config,
+            node_factory=node_factory,
+            root_node_id="start",
+        )
+
+    assert node_factory.created_node_ids == []
+
+
+def test_skip_validation_still_rejects_cross_scope_edges() -> None:
+    graph_config = _scoped_graph_config()
+    graph_config["edges"].append(_edge("start", "nested-end"))
+    node_factory = _RecordingNodeFactory()
+
+    with pytest.raises(ValueError, match="crosses container scopes"):
+        Graph.init(
+            graph_config=graph_config,
+            node_factory=node_factory,
+            root_node_id="start",
+            skip_validation=True,
+        )
+
+    assert node_factory.created_node_ids == []
+
+
+def test_graph_constructor_accepts_cycle() -> None:
+    root = cast(Node, Mock(spec=Node, id="node"))
+    edge = Edge(id="cycle", tail="node", head="node")
+
+    graph = Graph(root_node=root, nodes={"node": root}, edges={"cycle": edge})
+
+    assert graph.root_node is root
+    assert graph.edges["cycle"] is edge
 
 
 def test_graph_init_materializes_only_root_scope_by_default() -> None:
