@@ -14,6 +14,7 @@ implementation or establish new public contracts.
 | How do I set up, check, and contribute changes? | [Contributing](../CONTRIBUTING.md) |
 | How do I keep knowledge current or record a longer task? | [Knowledge maintenance](maintenance.md) |
 | What breaks when upgrading? | [Migration guide](../MIGRATION.md), [changelog](../CHANGELOG.md) |
+| What structural debt has been identified, and what should improve next? | [Architecture review and technical debt](technical-debt.md) |
 
 ## Component references
 
