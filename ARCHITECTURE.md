@@ -84,8 +84,9 @@ in `InitParams`. See [frame construction](src/graphon/engine/frame.py),
 [dispatch tests](tests/engine/test_dispatch_patterns.py).
 
 **File adapters belong to the engine.** `Engine(file_runtime=adapter)` retains
-that adapter; omitting it or passing `None` captures the scoped or process default
-at construction, including an unconfigured state. Workers, the dispatcher, and
+that adapter; omitting it or passing `None` captures the current scope
+at construction, including an unconfigured state. There is no process default.
+Workers, the dispatcher, and
 layer hooks bind it across root, child, and resumed execution. The caller's file
 scope is restored before each event yield and after closing or failing the run.
 `EngineEventFilterContext.from_engine()` carries the same adapter to

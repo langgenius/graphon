@@ -10,7 +10,7 @@ from graphon.file.enums import (
     FileType,
 )
 from graphon.file.models import File
-from graphon.http import HttpClientProtocol, get_http_client
+from graphon.http import HttpClientProtocol, HttpxHttpClient
 from graphon.nodes.protocols import (
     FileReferenceFactoryProtocol,
     ToolFileManagerProtocol,
@@ -87,7 +87,7 @@ class FileSaverImpl(LLMFileSaver):
         self._tool_file_manager = tool_file_manager
         self._file_reference_factory = file_reference_factory
         self._http_client = (
-            http_client if http_client is not None else get_http_client()
+            http_client if http_client is not None else HttpxHttpClient()
         )
 
     @classmethod

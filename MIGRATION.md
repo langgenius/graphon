@@ -20,20 +20,16 @@ will bump it to `0.8.0` separately.
 
 ### File runtime isolation
 
-`graphon.file.runtime.WorkflowFileRuntimeRegistry` and
-`configure_workflow_file_runtime()` were removed. Use `set_workflow_file_runtime()`
-for the process default, `get_workflow_file_runtime()` for a required adapter, and
-`peek_workflow_file_runtime()` for an optional lookup. The removed configuration
-alias returned its adapter; `set_workflow_file_runtime()` returns `None`, so retain
-the adapter separately if the old call was used in an assignment or expression.
-For independent adapters, use engine injection or the scope below instead of
-creating registry instances.
+`graphon.file.runtime.WorkflowFileRuntimeRegistry`,
+`configure_workflow_file_runtime()`, and `set_workflow_file_runtime()` were removed.
+There is no process default. Use engine injection or the scope below to supply
+adapters. `get_workflow_file_runtime()` requires an active adapter;
+`peek_workflow_file_runtime()` returns `None` when unconfigured.
 
 Pass `Engine(..., file_runtime=adapter)` to select an execution's
 `WorkflowFileRuntimeProtocol`. Omitting it or passing `None` captures the current
-scoped adapter or process default **at engine construction**, including an
-unconfigured state. Configure the process default before constructing engines;
-changing it later no longer changes existing engines' file operations.
+scoped adapter **at engine construction**, including an unconfigured state.
+Later scopes do not change existing engines' file operations.
 
 The engine binds its adapter in workers, the dispatcher, and layer hooks,
 including child and resumed execution. `EngineEventFilterContext.from_engine()`
@@ -41,7 +37,7 @@ carries it to `ResponseStreamFilter`, including a restored filter. Custom filter
 can use `context.file_runtime` with the context manager below. The built-in filter
 binds it during `initialize()`, `on_event()`, `flush()`, and `loads()`, including
 streaming-template callbacks, and restores the caller's scope on return or failure.
-Constructing a filter context directly captures its current scoped/process default when
+Constructing a filter context directly captures its current scoped adapter when
 `file_runtime` is omitted; prefer `from_engine()` to retain the engine's selection.
 
 For DSL construction and host-side rendering of delivered files, use
@@ -60,14 +56,29 @@ for event in engine.run():
 ```
 
 Engine iteration restores the caller's binding before yielding each event and
-after close or failure. Scoped `None` disables resolution even if a process
-default exists. Direct file helpers outside a scope still use the process default.
+after close or failure. Scoped `None` disables resolution even inside another
+adapter scope. Direct file helpers outside a scope have no configured adapter.
 Explicitly injected HTTP clients and node-specific file ports remain independent.
 
 Adapters are transient: pass them again when rebuilding an engine from
 `RuntimeState.from_snapshot()`. File metadata, references, and snapshot formats
 are unchanged. Use `File.model_dump(mode="json")` for metadata without URL
 resolution; `to_dict()`, Markdown, and plugin parameters still resolve URLs.
+
+### HTTP client ownership
+
+`graphon.http.runtime` and the `get_http_client()`, `get_default_http_client()`,
+and `set_http_client()` helpers were removed. Pass `http_client=...` to
+`HttpRequestNode`, `DocumentExtractorNode`, or `FileSaverImpl` for a custom client.
+Without injection, each consumer creates its own `HttpxHttpClient`. A host can
+share a client by explicitly passing the same instance to its consumers.
+
+### Tokenizer ownership
+
+`GPT2Tokenizer.get_encoder()` and `get_num_tokens()` are now instance methods;
+construct `GPT2Tokenizer()` before calling them. Each `SlimLLM` owns a lazy
+tokenizer cache and initialization lock. Tiktoken remains preferred, with
+Transformers as fallback; dependency-internal caches are unchanged.
 
 ### Public names and imports
 

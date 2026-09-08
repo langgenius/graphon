@@ -66,15 +66,15 @@ public surface.
   [dispatch tests](../tests/model_runtime/test_model_dispatch.py).
 - **Files and HTTP:** [WorkflowFileRuntimeProtocol](../src/graphon/file/protocols.py)
   covers storage, URLs, downloads, and preview signatures. Pass it to
-  `Engine(file_runtime=adapter)`, or set the scoped/process default before
+  `Engine(file_runtime=adapter)`, or enter an explicit file scope before
   constructing the engine. For DSL construction and host rendering, use
   [use_workflow_file_runtime](../src/graphon/file/runtime.py); the
   [migration example](../MIGRATION.md#file-runtime-isolation) shows both boundaries.
   Use `EngineEventFilterContext.from_engine()` when wiring response filters.
   Node-specific download, file-reference, and tool-file ports live
   in [nodes/protocols.py](../src/graphon/nodes/protocols.py); generated LLM files use
-  [LLMFileSaver](../src/graphon/nodes/llm/file_saver.py). The
-  [HTTP runtime](../src/graphon/http/runtime.py) supplies a default HTTPX client.
+  [LLMFileSaver](../src/graphon/nodes/llm/file_saver.py). Each HTTP consumer accepts
+  an injected client or constructs its own [HTTPX client](../src/graphon/http/client.py).
 - **Tools and code:** implement [ToolNodeRuntimeProtocol](../src/graphon/nodes/runtime.py)
   or [CodeExecutorProtocol](../src/graphon/nodes/code/code_node.py). Default DSL
   adapters live in [tool_runtime.py](../src/graphon/dsl/tool_runtime.py) and
@@ -125,12 +125,14 @@ revision. Once all other development steps are complete, finish with the
   and [engine fixtures](../tests/engine/fixtures/) when changing current writers;
   those files are compatibility inputs, not regenerated expectations.
 - Engines retain their file adapter at construction, including an unconfigured
-  state; changing the process default later does not reconfigure them. Rebind
+  state; later scopes do not reconfigure them. Rebind
   adapters when rebuilding from snapshots. Raw event consumers render in their
   own file scope, so bind `engine.file_runtime` when resolving delivered values.
   [Execution file tests](../tests/engine/test_file_runtime.py) cover these boundaries;
   [file runtime tests](../tests/file/test_runtime.py) cover nested scope restoration.
-  File and HTTP process defaults still require restoration when replaced in tests.
+  File scopes restore their caller's binding on exit; HTTP clients belong to
+  their consumers. Follow [explicit state ownership](../CONTRIBUTING.md#explicit-state-ownership)
+  when adding integrations or caches.
 - Built-in node availability and default DSL support differ. Consult
   [the factory](../src/graphon/dsl/node_factory.py) before promising import support.
   Its default file adapters reject unsupported file operations; adding host file

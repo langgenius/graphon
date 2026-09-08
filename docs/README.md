@@ -14,6 +14,7 @@ independent test and knowledge reviews, and the final naming pass.
 | --- | --- |
 | What is Graphon and how do I run it? | [Project README](../README.md), [Slim example](../examples/slim_llm/README.md) |
 | Where does execution happen, and who owns state? | [Architecture](../ARCHITECTURE.md) |
+| How should runtime dependencies and mutable state be owned? | [Explicit state ownership](../CONTRIBUTING.md#explicit-state-ownership) |
 | Which files and tests should I change? | [Development guide](development.md) |
 | How do I set up, check, and contribute changes? | [Contributing](../CONTRIBUTING.md) |
 | How do I keep knowledge current or record a longer task? | [Knowledge maintenance](maintenance.md) |

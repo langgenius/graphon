@@ -33,7 +33,7 @@ from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.file import file_manager
 from graphon.file.enums import FileTransferMethod
 from graphon.file.models import File
-from graphon.http import HttpClientProtocol, get_http_client
+from graphon.http import HttpClientProtocol, HttpxHttpClient
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.node import Node
 from graphon.runtime.init_params import InitParams
@@ -302,7 +302,9 @@ class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
         self._unstructured_api_config = (
             unstructured_api_config or UnstructuredApiConfig()
         )
-        self._http_client = http_client or get_http_client()
+        self._http_client = (
+            http_client if http_client is not None else HttpxHttpClient()
+        )
 
     @property
     def http_client(self) -> HttpClientProtocol:

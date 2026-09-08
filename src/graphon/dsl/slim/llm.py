@@ -127,6 +127,7 @@ class SlimLLM(LLMProtocol):
         self._parameters: dict[str, Any] = dict(parameters or {})
         self._stop = list(stop) if stop is not None else None
         self._client = SlimClient(config=config)
+        self._tokenizer = GPT2Tokenizer()
 
     @property
     @override
@@ -189,7 +190,7 @@ class SlimLLM(LLMProtocol):
                 self._provider,
                 self._model_name,
             )
-            return _estimate_prompt_message_tokens(prompt_messages)
+            return _estimate_prompt_message_tokens(prompt_messages, self._tokenizer)
         return int(result["num_tokens"])
 
     @overload
@@ -658,7 +659,9 @@ def _serialize_prompt_messages(
     return [jsonable_encoder(item) for item in prompt_messages]
 
 
-def _estimate_prompt_message_tokens(prompt_messages: Sequence[PromptMessage]) -> int:
+def _estimate_prompt_message_tokens(
+    prompt_messages: Sequence[PromptMessage], tokenizer: GPT2Tokenizer
+) -> int:
     # Fallback estimate only considers text content. Multimodal token accounting
     # remains provider-specific and should use Slim token counting when available.
     text = "\n".join(
@@ -668,7 +671,7 @@ def _estimate_prompt_message_tokens(prompt_messages: Sequence[PromptMessage]) ->
     if not text:
         return 0
     try:
-        return GPT2Tokenizer.get_num_tokens(text)
+        return tokenizer.get_num_tokens(text)
     except Exception:  # ruff:ignore[blind-except]
         return max(1, len(text) // 4)
 

@@ -9,7 +9,7 @@ from typing import Any, assert_never, cast, override
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.file.enums import FileTransferMethod
 from graphon.file.models import File
-from graphon.http import HttpClientProtocol, get_http_client
+from graphon.http import HttpClientProtocol, HttpxHttpClient
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base import variable_template_parser
 from graphon.nodes.base.entities import VariableSelector
@@ -80,7 +80,11 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
             file_reference_factory=file_reference_factory,
         )
         self._http_request_config = http_request_config
-        self._http_client = resolved_dependencies.http_client or get_http_client()
+        self._http_client = (
+            resolved_dependencies.http_client
+            if resolved_dependencies.http_client is not None
+            else HttpxHttpClient()
+        )
         self._tool_file_manager_factory = (
             resolved_dependencies.tool_file_manager_factory
         )

@@ -4,9 +4,10 @@
 `9d13c716d527a8b7099df00cc448254ac7b6e98b`.
 **Status:** original review complete; TD-02 implementation and reviews are complete
 locally. TD-03 implementation and independent reviews are complete locally.
-TD-04 implementation, independent reviews, final naming pass, and checks are
-complete locally. Other remediation remains proposed, not accepted architecture
-policy. Priorities express the original review's judgment.
+TD-04's 2026-09-09 explicit state ownership follow-up has passed checks,
+independent reviews, and its final naming pass.
+Other remediation remains proposed, not accepted architecture policy. Priorities
+express the original review's judgment.
 **Scope:** repository structure, execution and integration boundaries, developer
 feedback, and knowledge maintenance. Evidence includes source, callers, test
 definitions, focused tests, and small local reproductions. This is not a
@@ -56,7 +57,7 @@ approved package names or team assignments.
 | Node behavior | [nodes](../src/graphon/nodes/) | Grouping each node's data and behavior by capability is useful. Base-node infrastructure is shared; a new node type does not require a new bounded context. |
 | Model capabilities and provider metadata | [model_runtime](../src/graphon/model_runtime/README.md) | A supporting model with its own vocabulary. Graph-facing invocation and provider capability wrappers serve different clients; preserve their distinction. |
 | External Dify configuration and composition | [dsl](../src/graphon/dsl/), [scoping](../src/graphon/graph/scoping.py) | `inspect()` and `loads()` translate external configuration and assemble the engine. Legacy owner normalization also lives in graph scoping because direct graph construction accepts those forms. |
-| Files, HTTP, code, and tools | [file](../src/graphon/file/), [http](../src/graphon/http/), [node ports](../src/graphon/nodes/protocols.py), [DSL adapters](../src/graphon/dsl/node_factory.py) | Explicit host integration seams. Engines retain file adapters; the process default remains available at construction and for unscoped host operations. |
+| Files, HTTP, code, and tools | [file](../src/graphon/file/), [http](../src/graphon/http/), [node ports](../src/graphon/nodes/protocols.py), [DSL adapters](../src/graphon/dsl/node_factory.py) | Explicit host integration seams. Engines retain injected or scoped file adapters; unscoped file operations have no adapter. HTTP consumers own their default clients. |
 | Values and public event language | [variables](../src/graphon/variables/), [entities](../src/graphon/entities/), [node events](../src/graphon/node_events/), [engine events](../src/graphon/engine_events/) | Useful shared vocabulary. These folders contain schemas and transport values as well as domain concepts; their names do not establish ownership or DDD semantics by themselves. |
 | Consumer presentation | [event filters](../src/graphon/engine/filter/) | Raw execution and response formatting are separate APIs despite filters living under `engine/`. That behavioral boundary matters more than moving the folder. |
 | Public integration facade | [protocols](../src/graphon/protocols/__init__.py) | Discoverable re-exports are useful. Importing them should not implicitly register concrete nodes. |
@@ -248,9 +249,10 @@ implementation evidence, not a merge or release claim.
 
 ## TD-04 — Execution-scoped file integration
 
-**Implementation update (2026-09-08):** implementation and follow-up cleanup
-completed locally for [issue #282](https://github.com/langgenius/graphon/issues/282);
-independent reviews, final naming passes, and checks are complete. The
+**Implementation update (2026-09-09):** the explicit state ownership follow-up
+for [issue #282](https://github.com/langgenius/graphon/issues/282) removes process
+defaults. Implementation, checks, independent reviews, and the final naming
+pass are complete locally. The
 [execution file runtime plan](plans/execution-file-runtime.md) records
 decisions and validation evidence. This work is not merged or released.
 
@@ -262,9 +264,9 @@ prompt conversion, and extraction. This demonstrated dependency switching, not
 an observed authorization incident. [Merged PR #69](https://github.com/langgenius/graphon/pull/69)
 provided explicit configuration but did not establish execution isolation.
 
-**Current result:** [Engine](../src/graphon/engine/engine.py) retains its adapter,
-including an unconfigured construction-time default. Workers, the dispatcher,
-layer hooks, and response filters bind that adapter through
+**Current result:** [Engine](../src/graphon/engine/engine.py) retains its injected
+adapter or construction-time scope, including an unconfigured state. Workers,
+the dispatcher, layer hooks, and response filters bind that adapter through
 [the existing file runtime helpers](../src/graphon/file/runtime.py). Host consumers
 can enter the same scope when rendering delivered values; yielded events do not
 change their caller's binding. File metadata and persisted formats are unchanged.

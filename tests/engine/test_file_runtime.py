@@ -9,7 +9,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import graphon.file.runtime as runtime_module
 from graphon.dsl import loads
 from graphon.engine import Engine
 from graphon.engine.filter import EngineEventFilterContext, ResponseStreamFilter
@@ -23,7 +22,8 @@ from graphon.engine_events.graph import (
 from graphon.engine_events.node import NodeRunStreamChunkEvent
 from graphon.file import File, FileTransferMethod, FileType
 from graphon.file.file_manager import to_prompt_message_content
-from graphon.file.runtime import set_workflow_file_runtime
+from graphon.file.protocols import WorkflowFileRuntimeProtocol
+from graphon.file.runtime import use_workflow_file_runtime
 from graphon.graph.graph import Graph
 from graphon.model_runtime.entities.message_entities import DocumentPromptMessageContent
 from graphon.nodes.base.entities import OutputVariableEntity
@@ -48,11 +48,6 @@ from tests.engine.test_runtime_state_serialization import (
 from tests.helpers.workflow_events import final_outputs
 
 
-@pytest.fixture(autouse=True)
-def _reset_file_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(runtime_module, "_default_workflow_file_runtime", None)
-
-
 def _make_file_adapter(name: str, *, send_format: str = "url") -> MagicMock:
     return MagicMock(
         multimodal_send_format=send_format,
@@ -72,7 +67,9 @@ def _make_file() -> File:
     )
 
 
-def _make_file_engine(file: File) -> Engine:
+def _make_file_engine(
+    file: File, *, file_runtime: WorkflowFileRuntimeProtocol | None = None
+) -> Engine:
     state = _new_runtime_state({"file": file})
     params = InitParams(
         workflow_id="workflow", graph_config={}, run_context={}, call_depth=0
@@ -110,7 +107,7 @@ def _make_file_engine(file: File) -> Engine:
         )
         .build()
     )
-    return Engine(graph, state, workers=1)
+    return Engine(graph, state, workers=1, file_runtime=file_runtime)
 
 
 class _FileLayer(Layer):
@@ -163,55 +160,58 @@ def test_interleaved_engines_retain_file_adapters_without_changing_shared_files(
     engines = []
     layers = []
     for adapter in adapters:
-        set_workflow_file_runtime(adapter)
-        engine = _make_file_engine(file)
+        engine = _make_file_engine(file, file_runtime=adapter)
         layer = _FileLayer(file)
         engine.add_layer(layer)
         engines.append(engine)
         layers.append(layer)
     caller = _make_file_adapter("caller")
-    set_workflow_file_runtime(caller)
-    streams = [engine.run() for engine in engines]
-    events: list[list[EngineEvent]] = [[], []]
-    try:
-        for pair in zip_longest(*streams):
-            for index, event in enumerate(pair):
-                if event is not None:
-                    events[index].append(event)
-            assert file.markdown == "[report.txt](https://caller.example/report.txt)"
-    finally:
-        for stream in streams:
-            stream.close()
+    with use_workflow_file_runtime(caller):
+        streams = [engine.run() for engine in engines]
+        events: list[list[EngineEvent]] = [[], []]
+        try:
+            for pair in zip_longest(*streams):
+                for index, event in enumerate(pair):
+                    if event is not None:
+                        events[index].append(event)
+                assert (
+                    file.markdown == "[report.txt](https://caller.example/report.txt)"
+                )
+        finally:
+            for stream in streams:
+                stream.close()
 
-    for name, engine_events in zip(("a", "b"), events, strict=True):
-        assert final_outputs(engine_events) == {
-            "text": f"Document from {name}",
-            "url": f"https://{name}.example/report.txt",
-        }
-    for name, layer in zip(("a", "b"), layers, strict=True):
-        assert {url for _, url in layer.reads} == {f"https://{name}.example/report.txt"}
-        assert {kind for kind, _ in layer.reads} >= {
-            "graph-start",
-            "graph-end",
-            "NodeRunSucceededEvent",
-            "enter:extract",
-            "exit:extract",
-            "end:extract",
-        }
-    assert layers[0].prompts
-    assert all(
-        content.url == "https://a.example/report.txt" and not content.base64_data
-        for content in layers[0].prompts
-    )
-    assert layers[1].prompts
-    assert all(
-        content.base64_data == base64.b64encode(b"Document from b").decode()
-        and not content.url
-        for content in layers[1].prompts
-    )
-    assert [engine.file_runtime for engine in engines] == adapters
-    assert file.model_dump(mode="json") == persisted_file
-    assert file.generate_url() == "https://caller.example/report.txt"
+        for name, engine_events in zip(("a", "b"), events, strict=True):
+            assert final_outputs(engine_events) == {
+                "text": f"Document from {name}",
+                "url": f"https://{name}.example/report.txt",
+            }
+        for name, layer in zip(("a", "b"), layers, strict=True):
+            assert {url for _, url in layer.reads} == {
+                f"https://{name}.example/report.txt"
+            }
+            assert {kind for kind, _ in layer.reads} >= {
+                "graph-start",
+                "graph-end",
+                "NodeRunSucceededEvent",
+                "enter:extract",
+                "exit:extract",
+                "end:extract",
+            }
+        assert layers[0].prompts
+        assert all(
+            content.url == "https://a.example/report.txt" and not content.base64_data
+            for content in layers[0].prompts
+        )
+        assert layers[1].prompts
+        assert all(
+            content.base64_data == base64.b64encode(b"Document from b").decode()
+            and not content.url
+            for content in layers[1].prompts
+        )
+        assert [engine.file_runtime for engine in engines] == adapters
+        assert file.model_dump(mode="json") == persisted_file
+        assert file.generate_url() == "https://caller.example/report.txt"
 
 
 @pytest.mark.parametrize("configured", [False, True])
@@ -219,24 +219,25 @@ def test_engine_captures_scoped_or_unconfigured_file_runtime(configured: bool) -
     file = _make_file()
     adapter = _make_file_adapter("scoped")
     if configured:
-        with runtime_module.use_workflow_file_runtime(adapter):
+        with use_workflow_file_runtime(adapter):
             engine = _make_file_engine(file)
             engine = Engine(
                 engine.graph, engine.runtime_state, workers=1, file_runtime=None
             )
     else:
         engine = _make_file_engine(file)
-    set_workflow_file_runtime(_make_file_adapter("caller"))
-
-    if configured:
-        assert final_outputs(list(engine.run())) == {
-            "text": "Document from scoped",
-            "url": "https://scoped.example/report.txt",
-        }
-    else:
-        with pytest.raises(Exception, match="workflow file runtime is not configured"):
-            list(engine.run())
-    assert file.generate_url() == "https://caller.example/report.txt"
+    with use_workflow_file_runtime(_make_file_adapter("caller")):
+        if configured:
+            assert final_outputs(list(engine.run())) == {
+                "text": "Document from scoped",
+                "url": "https://scoped.example/report.txt",
+            }
+        else:
+            with pytest.raises(
+                Exception, match="workflow file runtime is not configured"
+            ):
+                list(engine.run())
+        assert file.generate_url() == "https://caller.example/report.txt"
 
 
 @pytest.mark.parametrize("finish", ["close", "failure"])
@@ -245,29 +246,28 @@ def test_engine_restores_caller_file_runtime_after_close_or_failure(
 ) -> None:
     file = _make_file()
     adapter = _make_file_adapter("engine")
-    set_workflow_file_runtime(adapter)
-    engine = _make_file_engine(file)
+    engine = _make_file_engine(file, file_runtime=adapter)
     layer = _FileLayer(file)
     engine.add_layer(layer)
     caller = _make_file_adapter("caller")
-    set_workflow_file_runtime(caller)
-    stream = engine.run()
-    try:
-        assert isinstance(next(stream), GraphRunStartedEvent)
-        assert file.generate_url() == "https://caller.example/report.txt"
-        if finish == "failure":
-            assert isinstance(
-                stream.throw(RuntimeError("file read failed")), GraphRunFailedEvent
-            )
+    with use_workflow_file_runtime(caller):
+        stream = engine.run()
+        try:
+            assert isinstance(next(stream), GraphRunStartedEvent)
             assert file.generate_url() == "https://caller.example/report.txt"
-            with pytest.raises(RuntimeError, match="file read failed"):
-                next(stream)
-    finally:
-        stream.close()
+            if finish == "failure":
+                assert isinstance(
+                    stream.throw(RuntimeError("file read failed")), GraphRunFailedEvent
+                )
+                assert file.generate_url() == "https://caller.example/report.txt"
+                with pytest.raises(RuntimeError, match="file read failed"):
+                    next(stream)
+        finally:
+            stream.close()
 
-    assert file.generate_url() == "https://caller.example/report.txt"
-    assert ("graph-end", "https://engine.example/report.txt") in layer.reads
-    assert {url for _, url in layer.reads} == {"https://engine.example/report.txt"}
+        assert file.generate_url() == "https://caller.example/report.txt"
+        assert ("graph-end", "https://engine.example/report.txt") in layer.reads
+        assert {url for _, url in layer.reads} == {"https://engine.example/report.txt"}
 
 
 def test_paused_child_files_restore_with_an_explicit_engine_adapter() -> None:
@@ -280,36 +280,42 @@ def test_paused_child_files_restore_with_an_explicit_engine_adapter() -> None:
         observed_urls.append(value.text)
         return PauseRequested(session_id="file-approval")
 
-    set_workflow_file_runtime(_make_file_adapter("original"))
-    engine = _hitl_engine(
-        _loop_dsl(), runtime_state=_new_runtime_state({"file": file}), callback=pause
-    )
-    set_workflow_file_runtime(_make_file_adapter("caller"))
-    snapshot, _ = _snapshot_after_hitl_pause(engine)
-    assert observed_urls == ["https://original.example/report.txt"]
-    assert "original.example" not in snapshot
-    restored = RuntimeState.from_snapshot(snapshot)
-    restored_file = restored.variable_pool.get_file(("sys", "file"))
-    assert restored_file is not None
-    assert restored_file.value.model_dump(mode="json") == file.model_dump(mode="json")
+    with use_workflow_file_runtime(_make_file_adapter("original")):
+        engine = _hitl_engine(
+            _loop_dsl(),
+            runtime_state=_new_runtime_state({"file": file}),
+            callback=pause,
+        )
+    with use_workflow_file_runtime(_make_file_adapter("caller")):
+        snapshot, _ = _snapshot_after_hitl_pause(engine)
+        assert observed_urls == ["https://original.example/report.txt"]
+        assert "original.example" not in snapshot
+        restored = RuntimeState.from_snapshot(snapshot)
+        restored_file = restored.variable_pool.get_file(("sys", "file"))
+        assert restored_file is not None
+        assert restored_file.value.model_dump(mode="json") == file.model_dump(
+            mode="json"
+        )
 
-    def complete(context: HITLContext) -> Completed:
-        value = context.variable_pool.get(("sys", "file", "url"))
-        assert value is not None
-        return _completed_hitl(value.text)
+        def complete(context: HITLContext) -> Completed:
+            value = context.variable_pool.get(("sys", "file", "url"))
+            assert value is not None
+            return _completed_hitl(value.text)
 
-    rebuilt = _hitl_engine(_loop_dsl(), runtime_state=restored, callback=complete)
-    adapter = _make_file_adapter("restored")
-    resumed = Engine(rebuilt.graph, restored, workers=1, file_runtime=adapter)
-    layer = _FileLayer(restored_file.value)
-    resumed.add_layer(layer)
-    events = list(resumed.run())
-    assert isinstance(events[-1], GraphRunSucceededEvent)
-    assert restored.variable_pool.get_file(("sys", "file")) == restored_file
-    assert {url for _, url in layer.reads} == {"https://restored.example/report.txt"}
-    assert sum(kind == "enter:loop" for kind, _ in layer.reads) >= 2
-    assert resumed.file_runtime is adapter
-    assert file.generate_url() == "https://caller.example/report.txt"
+        rebuilt = _hitl_engine(_loop_dsl(), runtime_state=restored, callback=complete)
+        adapter = _make_file_adapter("restored")
+        resumed = Engine(rebuilt.graph, restored, workers=1, file_runtime=adapter)
+        layer = _FileLayer(restored_file.value)
+        resumed.add_layer(layer)
+        events = list(resumed.run())
+        assert isinstance(events[-1], GraphRunSucceededEvent)
+        assert restored.variable_pool.get_file(("sys", "file")) == restored_file
+        assert {url for _, url in layer.reads} == {
+            "https://restored.example/report.txt"
+        }
+        assert sum(kind == "enter:loop" for kind, _ in layer.reads) >= 2
+        assert resumed.file_runtime is adapter
+        assert file.generate_url() == "https://caller.example/report.txt"
 
 
 @pytest.mark.parametrize("restore_before_flush", [False, True])
@@ -318,49 +324,49 @@ def test_response_filter_renders_files_with_its_engine_adapter(
 ) -> None:
     file = _make_file()
     adapter = _make_file_adapter("response")
-    set_workflow_file_runtime(adapter)
-    engine = loads(
-        json.dumps({
-            "kind": "graph",
-            "graph": {
-                "nodes": [
-                    {"id": "start", "data": {"type": "start", "variables": []}},
-                    {
-                        "id": "answer",
-                        "data": {"type": "answer", "answer": "{{#sys.file#}}"},
-                    },
-                ],
-                "edges": [{"source": "start", "target": "answer"}],
-            },
-        }),
-        workers=1,
-    )
-    context = EngineEventFilterContext.from_engine(engine)
-    set_workflow_file_runtime(_make_file_adapter("caller"))
-    stream_filter = ResponseStreamFilter()
-    stream_filter.initialize(context)
-    if restore_before_flush:
-        list(stream_filter.on_event(GraphRunStartedEvent()))
-        snapshot = stream_filter.dumps()
-        stream_filter = ResponseStreamFilter()
-        stream_filter.loads(snapshot)
-        stream_filter.initialize(context)
-    engine.runtime_state.variable_pool.add(("sys", "file"), file)
-    output = list(
-        stream_filter.flush()
-        if restore_before_flush
-        else stream_filter.on_event(GraphRunStartedEvent())
-    )
-    assert (
-        "".join(
-            event.chunk
-            for event in output
-            if isinstance(event, NodeRunStreamChunkEvent)
+    with use_workflow_file_runtime(adapter):
+        engine = loads(
+            json.dumps({
+                "kind": "graph",
+                "graph": {
+                    "nodes": [
+                        {"id": "start", "data": {"type": "start", "variables": []}},
+                        {
+                            "id": "answer",
+                            "data": {"type": "answer", "answer": "{{#sys.file#}}"},
+                        },
+                    ],
+                    "edges": [{"source": "start", "target": "answer"}],
+                },
+            }),
+            workers=1,
         )
-        == "[report.txt](https://response.example/report.txt)"
-    )
-    assert context.file_runtime is adapter
-    assert file.generate_url() == "https://caller.example/report.txt"
+        context = EngineEventFilterContext.from_engine(engine)
+    with use_workflow_file_runtime(_make_file_adapter("caller")):
+        stream_filter = ResponseStreamFilter()
+        stream_filter.initialize(context)
+        if restore_before_flush:
+            list(stream_filter.on_event(GraphRunStartedEvent()))
+            snapshot = stream_filter.dumps()
+            stream_filter = ResponseStreamFilter()
+            stream_filter.loads(snapshot)
+            stream_filter.initialize(context)
+        engine.runtime_state.variable_pool.add(("sys", "file"), file)
+        output = list(
+            stream_filter.flush()
+            if restore_before_flush
+            else stream_filter.on_event(GraphRunStartedEvent())
+        )
+        assert (
+            "".join(
+                event.chunk
+                for event in output
+                if isinstance(event, NodeRunStreamChunkEvent)
+            )
+            == "[report.txt](https://response.example/report.txt)"
+        )
+        assert context.file_runtime is adapter
+        assert file.generate_url() == "https://caller.example/report.txt"
 
 
 @pytest.mark.parametrize("operation", ["initialize", "loads"])
@@ -370,8 +376,7 @@ def test_response_template_callbacks_use_the_filter_adapter(
 ) -> None:
     file = _make_file()
     adapter = _make_file_adapter("response")
-    set_workflow_file_runtime(adapter)
-    engine = _make_file_engine(file)
+    engine = _make_file_engine(file, file_runtime=adapter)
     context = EngineEventFilterContext.from_engine(engine)
     stream_filter = ResponseStreamFilter()
     stream_filter.initialize(context)
@@ -388,19 +393,19 @@ def test_response_template_callbacks_use_the_filter_adapter(
     monkeypatch.setattr(
         engine.graph.nodes["end"], "get_streaming_template", get_template
     )
-    set_workflow_file_runtime(_make_file_adapter("caller"))
+    with use_workflow_file_runtime(_make_file_adapter("caller")):
 
-    def apply_template() -> None:
-        if operation == "initialize":
-            stream_filter.initialize(context)
+        def apply_template() -> None:
+            if operation == "initialize":
+                stream_filter.initialize(context)
+            else:
+                stream_filter.loads(snapshot)
+
+        if fail:
+            with pytest.raises(RuntimeError, match="template failed"):
+                apply_template()
         else:
-            stream_filter.loads(snapshot)
-
-    if fail:
-        with pytest.raises(RuntimeError, match="template failed"):
             apply_template()
-    else:
-        apply_template()
-    assert urls
-    assert set(urls) == {"https://response.example/report.txt"}
-    assert file.generate_url() == "https://caller.example/report.txt"
+        assert urls
+        assert set(urls) == {"https://response.example/report.txt"}
+        assert file.generate_url() == "https://caller.example/report.txt"

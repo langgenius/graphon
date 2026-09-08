@@ -84,7 +84,7 @@ class Engine:
             workers: Fixed number of worker threads to create while running.
             container_handler_factories: Additional container handler factories.
             file_runtime: File adapter for this execution. None captures the
-                current scoped or process default, even if it is unconfigured.
+                current scoped adapter, even if it is unconfigured.
                 Supply it again when rebuilding an engine from a snapshot.
 
         Raises:

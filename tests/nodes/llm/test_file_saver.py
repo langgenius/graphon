@@ -6,7 +6,7 @@ from typing import Any, cast
 import pytest
 
 from graphon.file.models import File
-from graphon.http import HttpResponse, HttpxHttpClient, get_http_client
+from graphon.http import HttpResponse, HttpxHttpClient
 from graphon.nodes.llm.file_saver import FileSaverImpl
 
 
@@ -87,13 +87,19 @@ def test_file_saver_impl_with_runtime_accepts_explicit_http_client() -> None:
     assert file_saver.http_client is http_client
 
 
-def test_file_saver_impl_with_runtime_uses_default_http_client() -> None:
-    file_saver = FileSaverImpl.with_runtime(
+def test_file_savers_create_separate_http_clients() -> None:
+    first = FileSaverImpl.with_runtime(
+        tool_file_manager=_ToolFileManager(),
+        file_reference_factory=_FileReferenceFactory(),
+    )
+    second = FileSaverImpl(
         tool_file_manager=_ToolFileManager(),
         file_reference_factory=_FileReferenceFactory(),
     )
 
-    assert file_saver.http_client is get_http_client()
+    assert isinstance(first.http_client, HttpxHttpClient)
+    assert isinstance(second.http_client, HttpxHttpClient)
+    assert first.http_client is not second.http_client
 
 
 def test_file_saver_impl_with_runtime_preserves_falsey_http_client() -> None:

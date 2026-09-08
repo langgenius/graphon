@@ -1,8 +1,8 @@
 # Execution-scoped file runtime
 
-**Status:** implementation and follow-up cleanup completed locally; independent
-reviews, final naming passes, and checks are complete. Not merged or released.
-Updated 2026-09-08.
+**Status:** implementation, independent reviews, final naming pass, and checks
+for the explicit state ownership follow-up are complete locally. Not merged or
+released. Updated 2026-09-09.
 
 **Tracking:** [TD-04](../technical-debt.md#td-04--execution-scoped-file-integration),
 [issue #282](https://github.com/langgenius/graphon/issues/282).
@@ -12,11 +12,12 @@ This branch builds on snapshot eligibility in
 ## Objective and scope
 
 Keep each engine's file URL and byte operations on its own host adapter, including
-child frames, resumed execution, and response-stream rendering. Preserve the
-process default for existing integrations. File values and persisted snapshots
-remain metadata; hosts supply adapters again when rebuilding engines.
+child frames, resumed execution, and response-stream rendering. File values and
+persisted snapshots remain metadata; hosts supply adapters again when rebuilding
+engines. The 2026-09-09 follow-up removes process defaults and gives HTTP consumers
+and Slim LLMs ownership of their clients and tokenizer caches.
 
-## Steps
+## Original steps (2026-09-08)
 
 - [x] Inspect the file helpers, engine threads, response filter, and callers;
   search existing issues and PRs.
@@ -47,6 +48,8 @@ The current API and host integration steps live in the
 describes execution ownership.
 
 ## Validation and outcome
+
+### Initial implementation (2026-09-08)
 
 Before implementation, `just check` passed. A public `dsl.loads()` probe created
 an engine with host A, changed the default to host B, and observed host B's URL
@@ -101,3 +104,25 @@ All 79 relevant tests passed before and after the cleanup. `just test` passed al
 knowledge reviews and the documentation check are complete. The final naming pass
 required no renames. The earlier test counts and naming results above describe
 the original implementation.
+
+### Explicit state ownership follow-up (2026-09-09)
+
+At the user's request, contributor guidance now requires
+[explicit state ownership](../../CONTRIBUTING.md#explicit-state-ownership) to
+avoid hidden mutable dependencies that complicate debugging. This supersedes
+the earlier decision to retain process defaults.
+
+Removed the file setter and process fallback; file resolution now requires an
+explicit adapter or scope. Removed the HTTP runtime helpers; each consumer owns
+its default client and preserves injected clients, including falsey ones. Each
+`SlimLLM` owns a lazy tokenizer cache and initialization lock; dependency-internal
+caches are unchanged. The [migration guide](../../MIGRATION.md#file-runtime-isolation)
+records the affected APIs.
+
+Independent test reviews cover scope restoration, HTTP ownership and injection,
+and lazy and concurrent tokenizer initialization. Focused file, HTTP, and Slim LLM
+checks passed 39, 133, and 12 tests respectively. `just test` passed all 835 tests
+in 7.83 seconds, and `just check` passed. Independent knowledge review corrected
+the affected guides and historical status records; the documentation check
+passed. The final naming pass clarified tokenizer test/helper names; all 12 Slim
+LLM tests passed again after those mechanical renames.
