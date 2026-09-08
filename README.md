@@ -165,10 +165,6 @@ CI currently validates pull request titles, runs `just check` including
 3.13. Python 3.14 is currently excluded because `unstructured` does not yet
 support it.
 
-The [knowledge checks](.github/workflows/knowledge.yml) also check document links
-and the [seven-day review deadline](docs/maintenance.md#document-metadata-and-review-deadline)
-on every pull request, pushes to `main`, and a daily schedule.
-
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).

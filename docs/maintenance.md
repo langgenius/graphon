@@ -89,12 +89,11 @@ compares the earliest `last_checked` across the entire scope with the current UT
 time and fails when its age exceeds seven 24-hour days; exactly seven days passes.
 The failure identifies the oldest file and its timestamp.
 
-The [Knowledge checks workflow](../.github/workflows/knowledge.yml) runs on all
-pull requests, pushes to `main`, daily on the default branch, and manual dispatch.
-It scans the full scope without changed-file filters. The same check runs in
-the normal pytest suite and with the focused command above. Date-only review
-evidence imported during the initial rollout uses midnight UTC on that date as a
-conservative lower bound, rather than claiming a new review at migration time.
+The check runs in the normal pytest suite, including the existing CI jobs for
+pull requests targeting `main` and release tags, and with the focused command
+above. It scans the full scope without changed-file filters. Date-only review
+evidence imported during the initial rollout uses midnight UTC on that date as
+a conservative lower bound, rather than claiming a new review at migration time.
 
 ## Plans for work that needs durable context
 
@@ -140,6 +139,3 @@ produce a cleanup diff.
 After editing, repair affected links and run the documentation check above.
 Report the changes made, or that no relevant cleanup was needed. Keep review
 dates limited to claims actually checked. Broader audits remain outside this step.
-
-This is an ordinary contribution workflow. The scheduled check enforces recorded
-review age; it does not review or rewrite prose automatically.

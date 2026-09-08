@@ -210,11 +210,6 @@ Pull requests targeting `main` currently run three kinds of checks:
 2. `just check` including `uv.lock` freshness validation
 3. `uv run pytest` on Python 3.12 and 3.13
 
-The separate [Knowledge checks workflow](.github/workflows/knowledge.yml) runs
-on all pull requests (including stacked branches), pushes to `main`, daily on the
-default branch, and manual dispatch. It checks document links, required metadata,
-and the [seven-day review deadline](docs/maintenance.md#document-metadata-and-review-deadline).
-
 Keep local workflow aligned with those checks. A green local `just test` plus
 `just check` is useful, but it is not a complete substitute for the exact CI
 flow because CI also validates PR titles and a Python version matrix.

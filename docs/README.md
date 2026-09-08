@@ -50,7 +50,7 @@ exercised. Linked tests show where to verify a change;
 The [documentation test](../tests/test_repository_docs.py) checks local file
 links, whether this knowledge base is reachable from [AGENTS.md](../AGENTS.md),
 and whether every maintained page has been checked within seven days. It runs
-in pytest and the dedicated knowledge CI workflow. Recorded timestamps do not
+as part of the normal pytest suite in CI. Recorded timestamps do not
 prove that prose matches behavior; review source and tests when updating a page.
 
 ## Related work
