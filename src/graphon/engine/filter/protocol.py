@@ -28,7 +28,7 @@ class EngineEventFilterContext:
 
     @classmethod
     def from_engine(cls, engine: Engine) -> EngineEventFilterContext:
-        """Bind output sequencing to the engine's persisted execution state."""
+        """Use the engine's saved state to keep event numbers increasing."""
         return cls(
             graph=engine.graph,
             runtime_state=ReadOnlyRuntimeStateWrapper(

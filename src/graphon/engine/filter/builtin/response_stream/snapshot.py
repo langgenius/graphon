@@ -28,11 +28,11 @@ class StreamBufferState(BaseModel):
 
     @field_validator("events", mode="before")
     @classmethod
-    def _restore_node_execution_ids(cls, events: object) -> object:
-        """Separate legacy buffered node execution IDs from new event IDs."""
+    def _update_old_event_ids(cls, events: object) -> object:
+        """Move node execution IDs from the old id field to node_execution_id."""
         if not isinstance(events, list):
             return events
-        restored = []
+        updated_events = []
         for event in events:
             if (
                 isinstance(event, dict)
@@ -40,12 +40,12 @@ class StreamBufferState(BaseModel):
                 and "schema_version" not in event
                 and "id" in event
             ):
-                migrated = event.copy()
-                migrated["node_execution_id"] = migrated.pop("id")
-                restored.append(migrated)
+                updated_event = event.copy()
+                updated_event["node_execution_id"] = updated_event.pop("id")
+                updated_events.append(updated_event)
             else:
-                restored.append(event)
-        return restored
+                updated_events.append(event)
+        return updated_events
 
 
 class StreamPositionState(BaseModel):

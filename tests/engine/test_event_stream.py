@@ -14,7 +14,7 @@ from graphon.engine_events.base import EngineEvent
 from graphon.engine_events.graph import GraphRunStartedEvent, GraphRunSucceededEvent
 
 
-def test_emit_events_waits_for_completion_and_drains_pending_events() -> None:
+def test_emit_events_waits_for_completion_and_yields_pending_events() -> None:
     stream = EventStream([], graph_id="graph", execution_id="execution")
     event = GraphRunStartedEvent()
     emitted: list[EngineEvent] = []
@@ -34,7 +34,7 @@ def test_emit_events_waits_for_completion_and_drains_pending_events() -> None:
     assert emitted == [event]
 
 
-def test_concurrent_collection_assigns_sequences_in_emission_order() -> None:
+def test_threads_assign_sequences_in_output_order() -> None:
     layer = MagicMock(spec=Layer)
     stream = EventStream([layer], graph_id="graph", execution_id="execution")
     events = [GraphRunStartedEvent() for _ in range(8)]
@@ -73,11 +73,11 @@ def test_layer_observes_event_before_consumer() -> None:
         consumer_received.set()
 
     consumer = Thread(target=consume, daemon=True)
-    observed_during_callback: list[bool] = []
+    received_while_notifying_layers: list[bool] = []
 
     def on_event(_: EngineEvent) -> None:
         consumer.start()
-        observed_during_callback.append(consumer_received.wait(timeout=0.1))
+        received_while_notifying_layers.append(consumer_received.wait(timeout=0.1))
 
     layer.on_event.side_effect = on_event
     event = GraphRunStartedEvent()
@@ -85,7 +85,7 @@ def test_layer_observes_event_before_consumer() -> None:
     stream.collect(event)
     consumer.join(timeout=1)
 
-    assert observed_during_callback == [False]
+    assert received_while_notifying_layers == [False]
     assert emitted == [event]
 
 
@@ -102,7 +102,7 @@ def test_consumed_event_is_removed_from_stream_buffer() -> None:
     assert list(emitted) == []
 
 
-def test_collect_buffers_before_synchronously_notifying_layers() -> None:
+def test_collect_stores_event_before_calling_layers() -> None:
     failing_layer = MagicMock(spec=Layer)
     failing_layer.on_event.side_effect = RuntimeError("layer failed")
     recording_layer = MagicMock(spec=Layer)
@@ -124,12 +124,12 @@ def test_collect_buffers_before_synchronously_notifying_layers() -> None:
     assert buffered_when_notified == [(event,)]
 
 
-def test_reset_discards_pending_events_without_resetting_sequence() -> None:
+def test_reset_clears_pending_events_without_resetting_sequence() -> None:
     stream = EventStream([], graph_id="graph", execution_id="execution")
-    lifecycle_event = GraphRunStartedEvent()
-    stale_event = GraphRunStartedEvent()
-    stream.notify_layers(lifecycle_event)
-    stream.collect(stale_event)
+    notified_event = GraphRunStartedEvent()
+    pending_event = GraphRunStartedEvent()
+    stream.notify_layers(notified_event)
+    stream.collect(pending_event)
     stream.mark_complete()
 
     stream.reset()
@@ -138,24 +138,24 @@ def test_reset_discards_pending_events_without_resetting_sequence() -> None:
     stream.mark_complete()
 
     assert list(stream.emit_events()) == [current_event]
-    assert [lifecycle_event.sequence, stale_event.sequence, current_event.sequence] == [
-        1,
-        2,
-        3,
-    ]
+    assert [
+        notified_event.sequence,
+        pending_event.sequence,
+        current_event.sequence,
+    ] == [1, 2, 3]
 
 
-def test_completion_rejects_late_collection_but_allows_terminal_notification() -> None:
+def test_completed_stream_rejects_new_events_but_can_notify_layers() -> None:
     stream = EventStream([], graph_id="graph", execution_id="execution")
     stream.mark_complete()
-    terminal_event = GraphRunStartedEvent()
+    notified_event = GraphRunStartedEvent()
     late_event = GraphRunStartedEvent()
 
-    stream.notify_layers(terminal_event)
+    stream.notify_layers(notified_event)
 
     with pytest.raises(RuntimeError, match="after execution is complete"):
         stream.collect(late_event)
-    assert terminal_event.sequence == 1
+    assert notified_event.sequence == 1
     assert late_event.sequence == 0
 
 

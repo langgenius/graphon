@@ -782,7 +782,7 @@ def test_response_stream_filter_round_trips_resume_state() -> None:
     assert [event.chunk for event in chunks] == ["resumed"]
 
 
-def test_response_stream_filter_restores_identity_for_synthesized_chunks() -> None:
+def test_response_stream_filter_restores_ids_for_new_chunks() -> None:
     graph = _variable_response_graph()
     variable_pool = VariablePool()
     variable_pool.add(["source", "answer"], StringSegment(value="resumed"))

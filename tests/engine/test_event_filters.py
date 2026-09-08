@@ -104,23 +104,23 @@ def test_filter_chain_initializes_and_chains_drop_and_split() -> None:
     assert [event.sequence for event in output] == [1, 2]
 
 
-def test_filter_chain_sequences_expanded_and_flushed_output() -> None:
+def test_filter_chain_assigns_sequences_to_added_events() -> None:
     start = GraphRunStartedEvent(sequence=1)
-    terminal = GraphRunSucceededEvent(sequence=2)
+    finished_event = GraphRunSucceededEvent(sequence=2)
 
     output = list(
         filter_engine_events(
-            [start, terminal],
+            [start, finished_event],
             context=_context(),
             filters=[_SplitStartFilter(), _FlushFilter()],
         )
     )
 
     assert [event.sequence for event in output] == [1, 2, 3, 4]
-    assert [start.sequence, terminal.sequence] == [1, 2]
+    assert [start.sequence, finished_event.sequence] == [1, 2]
 
 
-def test_filter_chain_restores_expanded_and_flushed_sequences() -> None:
+def test_filter_chain_keeps_sequences_after_restore() -> None:
     state = RuntimeState(
         workflow_id="workflow", variable_pool=VariablePool(), start_at=0
     )

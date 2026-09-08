@@ -37,9 +37,9 @@ class EventStream:
         self._next_sequence = next_sequence
 
     def notify_layers(self, event: EngineEvent) -> None:
-        """Stamp an unbuffered lifecycle event and notify registered layers."""
+        """Set event fields and notify layers without adding it to the buffer."""
         with self._condition:
-            self._stamp(event)
+            self._set_event_fields(event)
             self._notify_layers(event)
 
     def collect(self, event: EngineEvent) -> None:
@@ -48,7 +48,7 @@ class EventStream:
             if self._execution_complete:
                 msg = "Cannot collect events after execution is complete"
                 raise RuntimeError(msg)
-            self._stamp(event)
+            self._set_event_fields(event)
             self._events.append(event)
             # Layers observe stream order before the consumer can wake.
             self._notify_layers(event)
@@ -78,7 +78,7 @@ class EventStream:
                 event = self._events.popleft()
             yield event  # ruff:ignore[unnecessary-assign-before-yield]
 
-    def _stamp(self, event: EngineEvent) -> None:
+    def _set_event_fields(self, event: EngineEvent) -> None:
         event.graph_id = self._graph_id
         event.execution_id = self._execution_id
         event.sequence = self._next_sequence()

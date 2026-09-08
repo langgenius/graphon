@@ -214,7 +214,7 @@ class GraphExecution:
         return self.last_event_sequence
 
     def next_filtered_event_sequence(self, minimum_sequence: int) -> int:
-        """Allocate an output sequence without changing raw event ordering."""
+        """Return the next filtered event number, at least minimum_sequence."""
         self.last_filtered_event_sequence = max(
             self.last_filtered_event_sequence + 1, minimum_sequence
         )

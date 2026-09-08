@@ -13,14 +13,14 @@ def filter_engine_events(
     context: EngineEventFilterContext,
     filters: Iterable[EngineEventFilter],
 ) -> Iterable[EngineEvent]:
-    """Apply filters in order; use a from_engine context for resumable sequences."""
+    """Apply filters in order; from_engine keeps event numbers across runs."""
     filter_list = list(filters)
     for event_filter in filter_list:
         event_filter.initialize(context)
 
     last_sequence = 0
 
-    def sequence_output(event: EngineEvent) -> EngineEvent:
+    def set_event_sequence(event: EngineEvent) -> EngineEvent:
         nonlocal last_sequence
         last_sequence = (
             context.next_sequence(event.sequence)
@@ -33,12 +33,12 @@ def filter_engine_events(
 
     for event in events:
         for output_event in _apply_filters(event, filter_list):
-            yield sequence_output(output_event)
+            yield set_event_sequence(output_event)
 
     for index, event_filter in enumerate(filter_list):
         for event in event_filter.flush():
             for output_event in _apply_filters(event, filter_list[index + 1 :]):
-                yield sequence_output(output_event)
+                yield set_event_sequence(output_event)
 
 
 def _apply_filters(
@@ -48,9 +48,9 @@ def _apply_filters(
     pending_events = [event]
     for event_filter in filters:
         pending_events = [
-            output
-            for pending in pending_events
-            for output in event_filter.on_event(pending)
+            output_event
+            for pending_event in pending_events
+            for output_event in event_filter.on_event(pending_event)
         ]
         if not pending_events:
             break
