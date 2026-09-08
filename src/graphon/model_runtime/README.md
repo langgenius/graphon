@@ -1,11 +1,13 @@
 # Model Runtime
 
-This module provides the interfaces for invoking and authenticating various
-models, and offers Dify a unified information and credentials form rule for
-model providers.
+This package defines provider schemas, credential validation, capability-specific
+runtime contracts, and model wrappers. Host applications supply concrete runtime
+adapters; any provider-selection or credential UI belongs to the host.
 
-- On one hand, it decouples models from upstream and downstream processes, facilitating horizontal expansion for developers,
-- On the other hand, it allows for direct display of providers and models in the frontend interface by simply defining them in the backend, eliminating the need to modify frontend logic.
+For graph-facing LLM nodes, start with
+[LLMProtocol](../nodes/llm/runtime_protocols.py) and
+[SlimLLM](../dsl/slim/llm.py). Those adapters are distinct from the provider and
+capability wrappers described below.
 
 ## Features
 
@@ -18,15 +20,12 @@ model providers.
   - `Text-to-speech Model` - Text to speech capability
   - `Moderation` - Moderation capability
 
-- Model provider display
+- Provider and model metadata
 
-  Displays a list of all supported providers, including provider names, icons, supported model types list, predefined model list, configuration method, and credentials form rules, etc.
-
-- Selectable model list display
-
-  After configuring provider/model credentials, the dropdown (application orchestration interface/default model) allows viewing of the available LLM list. Greyed out items represent predefined model lists from providers without configured credentials, facilitating user review of supported models.
-
-  In addition, this list also returns configurable parameter information and rules for LLM. These parameters are all defined in the backend, allowing different settings for various parameters supported by different models.
+  [ModelProviderFactory](model_providers/model_provider_factory.py) exposes provider
+  schemas, model lists, icons, and credential validation through an injected
+  runtime. [Entity definitions](entities/) describe model parameters and credential
+  form rules that host applications can use.
 
 - Provider/model credential authentication
 
@@ -66,4 +65,6 @@ Model Runtime is divided into protocol and implementation layers:
 
 ## Documentation
 
-For detailed documentation on how to add new providers or models, please refer to the [Dify documentation](https://docs.dify.ai/).
+Follow [model dispatch tests](../../../tests/model_runtime/test_model_dispatch.py)
+for capability-specific adapters and the
+[development guide](../../../docs/development.md) for host integration points.

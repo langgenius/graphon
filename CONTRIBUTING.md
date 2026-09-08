@@ -78,7 +78,7 @@ Use these commands for normal development:
 - `just format`: run `uv run ruff format`
 - `just lint`: run `just format`, then `uv run ruff check --fix`
 - `just tc`: run `just lint`, then `uv run ty check`
-- `just check`: run `uv run prek validate-config prek.toml && uv lock --check && uv run ruff format --check && uv run ruff check && uv run ty check`
+- `just check`: run `uv lock --check && uv run ruff format --check && uv run ruff check && uv run ty check`
 - `just test`: run `just tc`, then `uv run pytest`
 - `just build`: build the package distributions
 - `just clean`: remove build artifacts and caches
@@ -118,6 +118,22 @@ Pull requests targeting `main` currently run three kinds of checks:
 Keep local workflow aligned with those checks. A green local `just test` plus
 `just check` is useful, but it is not a complete substitute for the exact CI
 flow because CI also validates PR titles and a Python version matrix.
+
+## Repository Knowledge
+
+Use the [knowledge index](docs/README.md) to find architecture, component guides,
+and the tests relevant to a change. Keep affected documentation and source/test
+links current in the same change. See [Knowledge maintenance](docs/maintenance.md)
+for document placement, review, and plans for work that spans sessions.
+
+The normal pytest suite includes a local documentation link and reachability
+check. To run it alone:
+
+```bash
+uv run pytest -n 0 tests/test_repository_docs.py
+```
+
+This check verifies navigation, not whether prose still describes the code.
 
 ## Git Commits
 
