@@ -48,3 +48,10 @@ class MetricsLayer(Layer):
 
 `engine.add_layer()` binds the read-only runtime state before execution, so
 `runtime_state` is always available inside layer hooks.
+
+`runtime_state.dumps()` requires quiescent execution. Start, node, and event
+callbacks (including terminal events) raise `RuntimeError` if they try to take
+a runtime snapshot. Persist in `on_graph_end` after execution threads have stopped,
+or after fully consuming the run iterator. See the
+[snapshot migration guidance](../../../../MIGRATION.md#snapshot-eligibility) for
+resumable pauses and shutdown timeouts.

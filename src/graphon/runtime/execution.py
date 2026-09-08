@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Annotated, Final, Literal
 from uuid import uuid4
@@ -107,6 +110,48 @@ class GraphExecution:
         default_factory=dict[tuple[str, str], NodeExecution],
     )
     exceptions_count: int = 0
+
+    _active_executions: int = field(default=0, init=False, repr=False, compare=False)
+    _snapshot_lock: threading.Lock = field(
+        # Resolve at construction so late gevent patching is honored.
+        default_factory=lambda: threading.Lock(),  # ruff: ignore[unnecessary-lambda]
+        init=False,
+        repr=False,
+        compare=False,
+    )
+
+    @contextmanager
+    def track_execution(self) -> Iterator[None]:
+        """Keep snapshots disabled for one engine run or execution thread.
+
+        Each participant remains active until it exits, even if a shutdown join
+        times out. This accounting is transient and shared by all runtime frames.
+        """
+        with self._snapshot_lock:
+            self._active_executions += 1
+        try:
+            yield
+        finally:
+            with self._snapshot_lock:
+                self._active_executions -= 1
+
+    @contextmanager
+    def lock_for_snapshot(self) -> Iterator[None]:
+        """Exclude execution startup and other snapshots during serialization.
+
+        Raises:
+            RuntimeError: If an engine run or execution thread is still active.
+
+        """
+        with self._snapshot_lock:
+            if self._active_executions:
+                msg = (
+                    "Cannot serialize runtime state during active execution; "
+                    "finish consuming or close Engine.run() and wait for all "
+                    "execution threads to stop"
+                )
+                raise RuntimeError(msg)
+            yield
 
     def start(self) -> None:
         """Mark the graph execution as started."""

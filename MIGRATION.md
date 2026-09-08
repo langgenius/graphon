@@ -107,9 +107,10 @@ do not expose siblings or parent graph structure. They do not provide a live
 fallback to later parent-pool changes.
 
 An abort or fatal failure now wins over a concurrent pause. Persist resumable state
-only after the engine emits `GraphRunPausedEvent`; do not infer a pause from a
-queued command. Loop handlers write only their configured selectors back to the
-parent, while iteration frame state remains isolated.
+only after the engine emits `GraphRunPausedEvent` and its run iterator has been
+fully consumed; do not infer a pause from a queued command. Loop handlers write
+only their configured selectors back to the parent, while iteration frame state
+remains isolated.
 
 ### Graph validation
 
@@ -218,6 +219,25 @@ package.
   and expiry operations. For a rolling deployment, keep the legacy pending marker
   and wrapped update payload for at least one configured command TTL after all old
   consumers have stopped.
+
+### Snapshot eligibility
+
+`RuntimeState.dumps()` and the layer read-only wrapper now raise `RuntimeError`
+while an engine run or any of its execution threads is active. This includes
+start, node, and event callbacks, even when a pause or completion flag is set.
+Receiving a terminal event alone does not finish the run iterator.
+
+For resumable persistence, request a cooperative pause and fully consume the
+iterator before taking a snapshot. Layers can persist from `on_graph_end` once
+all execution threads have stopped. Closing an iterator also initiates teardown,
+but aborts, failures, and early closure can leave threads alive beyond the shutdown
+timeout; snapshots remain unavailable until those threads exit. Closing alone
+does not establish a resumable pause.
+
+Pre-run and restored states remain serializable, subject to existing migration
+requirements. Snapshot formats are unchanged. Serialization excludes engine
+startup and other snapshot writers across all frames; the host must avoid
+concurrent direct mutations of runtime objects.
 
 ### Persisted state
 

@@ -20,6 +20,7 @@ independent test and knowledge reviews, and the final naming pass.
 | What breaks when upgrading? | [Migration guide](../MIGRATION.md), [changelog](../CHANGELOG.md) |
 | What structural debt has been identified, and what should improve next? | [Architecture review and technical debt](technical-debt.md) |
 | What is the progress and evidence for TD-02? | [Graph validation plan](plans/graph-validation.md) |
+| What is the progress and evidence for TD-03? | [Snapshot eligibility plan](plans/snapshot-eligibility.md) |
 
 ## Component references
 

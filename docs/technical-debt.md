@@ -3,8 +3,9 @@
 **Reviewed:** 2026-09-08, Graphon 0.7.0, commit
 `9d13c716d527a8b7099df00cc448254ac7b6e98b`.
 **Status:** original review complete; TD-02 implementation and reviews are complete
-locally. Other remediation remains proposed, not accepted architecture
-policy. Priorities express the original review's judgment.
+locally. TD-03 implementation and independent reviews are complete locally. Other
+remediation remains proposed, not accepted architecture policy. Priorities express
+the original review's judgment.
 **Scope:** repository structure, execution and integration boundaries, developer
 feedback, and knowledge maintenance. Evidence includes source, callers, test
 definitions, focused tests, and small local reproductions. This is not a
@@ -128,10 +129,10 @@ queue dependency and facade side effects below have concrete isolation costs.
 
 ## Debt register
 
-TD-02 is **implemented locally**; other entries remain **proposed**. P1 means a
-reproduced correctness problem or a boundary that must be addressed before the
-stated deployment use. P2 is targeted
-architecture or feedback work. P3 can follow the more consequential changes.
+TD-02 and TD-03 are **implemented locally**; other entries remain **proposed**. P1
+means a reproduced correctness problem or a boundary that must be addressed before
+the stated deployment use. P2 is targeted architecture or feedback work. P3 can
+follow the more consequential changes.
 Suggested owners are responsibility areas, not assigned people; effort is a
 relative change size, not a delivery estimate.
 
@@ -139,7 +140,7 @@ relative change size, not a delivery estimate.
 | --- | --- | --- | --- | --- |
 | TD-01 | Dependency direction and runtime queue ownership | P2 | Engine/runtime | Medium |
 | TD-02 | [Graph construction and structural validation](#td-02--graph-construction-and-structural-validation), implemented locally | P1 | Graph/DSL | Medium |
-| TD-03 | Snapshot consistency at the public boundary | P2 | Runtime/engine | Medium |
+| TD-03 | [Snapshot consistency at the public boundary](#td-03--snapshot-consistency-at-the-public-boundary), implemented locally | P2 | Runtime/engine | Medium |
 | TD-04 | Execution-scoped file integration | P2; P1 before concurrent distinct host adapters | File/host integration | Medium–large |
 | TD-05 | Side effects of importing public contracts | P2 | Public API/node bootstrap | Small–medium |
 | TD-06 | Ignored LLM integration arguments | P2 | Model/node API | Small, with a compatibility window |
@@ -215,35 +216,32 @@ evidence, not a merged fix or a release claim.
 
 ## TD-03 — Snapshot consistency at the public boundary
 
-**Working well:** the dispatcher already stops acquisition, drains active work,
-and snapshots child frames on cooperative pause. Version handling and defensive
-output copies are strong.
+**Implementation update (2026-09-08):** implemented locally for
+[issue #279](https://github.com/langgenius/graphon/issues/279), with independent test,
+knowledge, and naming reviews complete. The
+[snapshot eligibility plan](plans/snapshot-eligibility.md) records scope, decisions,
+and checks.
 
-**Evidence and consequence:** [ReadOnlyRuntimeState.dumps](../src/graphon/runtime/runtime_state_protocol.py)
-advertises snapshot access as read-only; its
-[wrapper](../src/graphon/runtime/read_only_wrappers.py) forwards to runtime.
-The [v3 writer](../src/graphon/runtime/runtime_state/v3.py) reads graph state,
-variables, execution state, and queues separately.
-[InMemoryReadyQueue.dumps](../src/graphon/engine/ready_queue/in_memory.py) drains
-and reinserts queued tasks and explicitly requires quiescent producers and
-consumers. [RuntimeState.dumps](../src/graphon/runtime/runtime_state/state.py)
-guards pending migration, but does not enforce that execution is quiescent.
-Thus callers can reach an operation whose consistency prerequisite is only
-documented inside the queue. No concurrent corruption was reproduced in this
-review; this is a contract and consistency risk.
+**Original evidence:** public runtime and layer snapshots could read graph state,
+variables, execution state, and shared queues during execution. Queue serialization
+requires quiescence, but the public boundary did not enforce it. Pause and
+completion flags did not prove worker/dispatcher inactivity, especially after
+bounded shutdown joins. The original review identified a consistency risk without
+reproducing concurrent corruption.
 
-**Proposed change:** define snapshot eligibility at the public runtime/layer API.
-Reject serialization while execution is active, or provide an engine-controlled
-checkpoint using the existing pause/drain path. Account for worker activity,
-not just the moment a pause flag is set. Start with the existing lifecycle
-mechanism; a lock around queue serialization alone cannot make all frame state
-consistent. Preserve valid pre-run, paused, completed, and restored-state use.
+**Current result:** [RuntimeState.dumps](../src/graphon/runtime/runtime_state/state.py)
+enforces [quiescent snapshots](../ARCHITECTURE.md#state-and-execution-invariants) across
+all frames, including threads that outlive shutdown. Internal frame snapshots and
+persisted formats are unchanged. The
+[migration guidance](../MIGRATION.md#snapshot-eligibility) defines the public
+contract and host responsibilities.
 
-**Done when:** snapshot attempts from an active layer callback have defined,
-tested behavior; a paused dump/restore preserves queued tasks and nested frames;
-historical fixtures and format isolation still pass. Extend
-[runtime tests](../tests/runtime/test_runtime_state.py) and
-[engine serialization tests](../tests/engine/test_runtime_state_serialization.py).
+**Evidence of remediation:** six new
+[serialization cases](../tests/engine/test_runtime_state_serialization.py) reproduce
+and prevent active callback snapshots, paused child-frame snapshots, snapshots
+while threads outlive shutdown, and concurrent startup/writer overlap. Focused
+compatibility and full-suite results are recorded in the plan. This is local
+implementation evidence, not a merge or release claim.
 
 ## TD-04 — Execution-scoped file integration
 
@@ -454,9 +452,10 @@ generator are not prerequisites. No recurring automation was configured here.
 1. TD-02 was selected first for its reproduced false-success outcome. Its local
    implementation and completed reviews are tracked in the
    [graph validation plan](plans/graph-validation.md).
-2. Define TD-03's snapshot eligibility and TD-04's file adapter scope before
-   promising live checkpoints or concurrent distinct host integrations. TD-04
-   may be staged if all deployed hosts use one process-wide adapter.
+2. TD-03's local implementation enforces quiescent snapshots; live checkpoints
+   remain outside its scope. Define TD-04's file adapter scope before promising
+   concurrent distinct host integrations. TD-04 may be staged if all deployed
+   hosts use one process-wide adapter.
 3. Combine the related import work in TD-01 and TD-05, with a focused boundary
    test for each. Handle TD-06 in a separately documented API transition.
 4. Add TD-08's offline example; use it in TD-07's minimal-install check. Continue

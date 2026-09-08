@@ -108,6 +108,10 @@ revision. Once all other development steps are complete, finish with the
 
 ## Runtime pitfalls
 
+- Once execution starts, `RuntimeState.dumps()` requires teardown and all
+  execution threads to stop. Start, node, and event callbacks cannot take runtime
+  snapshots; quiescent `on_graph_end` hooks can. See the
+  [snapshot eligibility guidance](../MIGRATION.md#snapshot-eligibility).
 - A direct `Node.run()` call requires `bind_execution_id()` first. The engine
   normally handles this; [the binding test](../tests/nodes/base/test_node_execution_binding.py)
   captures the failure when it is missing.

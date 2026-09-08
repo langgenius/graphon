@@ -83,5 +83,11 @@ class ReadOnlyRuntimeState(Protocol):
 
     @abstractmethod
     def dumps(self) -> str:
-        """Serialize the runtime state into a JSON snapshot (read-only)."""
+        """Serialize quiescent runtime state without changing its values.
+
+        Raises:
+            RuntimeError: While the engine run or any execution thread is active,
+                or a restored migration still requires graph attachment.
+
+        """
         ...
