@@ -42,39 +42,21 @@ class _PassThroughFilter:
         return ()
 
 
-class _DropTraversalFilter:
-    def initialize(self, context: EngineEventFilterContext) -> None:
-        self.context = context
-
+class _DropTraversalFilter(_PassThroughFilter):
     def on_event(self, event: EngineEvent) -> Iterable[EngineEvent]:
         if isinstance(event, GraphEdgeTakenEvent):
             return ()
         return (event,)
 
-    def flush(self) -> Iterable[EngineEvent]:
-        return ()
 
-
-class _SplitStartFilter:
-    def initialize(self, context: EngineEventFilterContext) -> None:
-        self.context = context
-
+class _SplitStartFilter(_PassThroughFilter):
     def on_event(self, event: EngineEvent) -> Iterable[EngineEvent]:
         if isinstance(event, GraphRunStartedEvent):
             return (event, event.model_copy())
         return (event,)
 
-    def flush(self) -> Iterable[EngineEvent]:
-        return ()
 
-
-class _FlushFilter:
-    def initialize(self, context: EngineEventFilterContext) -> None:
-        self.context = context
-
-    def on_event(self, event: EngineEvent) -> Iterable[EngineEvent]:
-        return (event,)
-
+class _FlushFilter(_PassThroughFilter):
     def flush(self) -> Iterable[EngineEvent]:
         return (
             GraphEdgeTakenEvent(

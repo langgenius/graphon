@@ -5,6 +5,7 @@ import threading
 from collections import deque
 from collections.abc import Callable, Generator
 from datetime import UTC, datetime
+from itertools import count
 from typing import final
 
 from graphon.engine_events.base import EngineEvent
@@ -31,8 +32,9 @@ class EventStream:
         self._condition = threading.Condition()
         self._layers = layers
         self._execution_complete = False
+        if next_sequence is None:
+            next_sequence = count(1).__next__
         self._next_sequence = next_sequence
-        self._local_sequence = 0
 
     def notify_layers(self, event: EngineEvent) -> None:
         """Stamp an unbuffered lifecycle event and notify registered layers."""
@@ -79,11 +81,7 @@ class EventStream:
     def _stamp(self, event: EngineEvent) -> None:
         event.graph_id = self._graph_id
         event.execution_id = self._execution_id
-        if self._next_sequence is None:
-            self._local_sequence += 1
-            event.sequence = self._local_sequence
-        else:
-            event.sequence = self._next_sequence()
+        event.sequence = self._next_sequence()
         event.emitted_at = datetime.now(UTC)
 
     def _notify_layers(self, event: EngineEvent) -> None:

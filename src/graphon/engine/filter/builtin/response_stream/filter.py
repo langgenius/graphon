@@ -603,21 +603,7 @@ class ResponseStreamFilter:
         chunk: str,
         is_final: bool = False,
     ) -> NodeRunStreamChunkEvent:
-        graph = self._bound_graph
-        if selector and selector[0] not in graph.nodes and self._active_session:
-            response_node = graph.nodes[self._active_session.node_id]
-            return NodeRunStreamChunkEvent(
-                graph_id=self._graph_id,
-                execution_id=self._execution_id,
-                node_execution_id=node_execution_id,
-                node_id=response_node.id,
-                node_type=response_node.node_type,
-                selector=list(selector),
-                chunk=chunk,
-                is_final=is_final,
-            )
-
-        node = graph.nodes[node_id]
+        node = self._bound_graph.nodes[node_id]
         return NodeRunStreamChunkEvent(
             graph_id=self._graph_id,
             execution_id=self._execution_id,

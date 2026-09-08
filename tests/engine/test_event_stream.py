@@ -186,11 +186,8 @@ def test_event_stream_cooperates_with_gevent_patched_before_import(reset: bool) 
         from graphon.engine.event.stream import EventStream
         from graphon.engine_events.graph import GraphRunStartedEvent
 
-        stream = EventStream([]) if {reset!r} else None
-
-        if stream is None:
-            stream = EventStream([])
-        else:
+        stream = EventStream([])
+        if {reset!r}:
             stream.reset()
 
         event = GraphRunStartedEvent()

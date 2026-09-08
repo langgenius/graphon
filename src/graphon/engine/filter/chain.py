@@ -22,46 +22,36 @@ def filter_engine_events(
 
     def sequence_output(event: EngineEvent) -> EngineEvent:
         nonlocal last_sequence
-        next_sequence = (
+        last_sequence = (
             context.next_sequence(event.sequence)
             if context.next_sequence is not None
             else max(last_sequence + 1, event.sequence)
         )
-        last_sequence = next_sequence
-        if event.sequence == next_sequence:
+        if event.sequence == last_sequence:
             return event
-        return event.model_copy(update={"sequence": next_sequence})
+        return event.model_copy(update={"sequence": last_sequence})
 
     for event in events:
-        for output_event in _apply_filters(
-            event,
-            filters=filter_list,
-            start_index=0,
-        ):
+        for output_event in _apply_filters(event, filter_list):
             yield sequence_output(output_event)
 
     for index, event_filter in enumerate(filter_list):
         for event in event_filter.flush():
-            for output_event in _apply_filters(
-                event,
-                filters=filter_list,
-                start_index=index + 1,
-            ):
+            for output_event in _apply_filters(event, filter_list[index + 1 :]):
                 yield sequence_output(output_event)
 
 
 def _apply_filters(
     event: EngineEvent,
-    *,
     filters: list[EngineEventFilter],
-    start_index: int,
 ) -> Iterable[EngineEvent]:
     pending_events = [event]
-    for event_filter in filters[start_index:]:
-        next_events: list[EngineEvent] = []
-        for pending_event in pending_events:
-            next_events.extend(event_filter.on_event(pending_event))
-        pending_events = next_events
+    for event_filter in filters:
+        pending_events = [
+            output
+            for pending in pending_events
+            for output in event_filter.on_event(pending)
+        ]
         if not pending_events:
             break
     yield from pending_events
