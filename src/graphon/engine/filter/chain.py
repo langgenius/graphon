@@ -13,7 +13,7 @@ def filter_engine_events(
     context: EngineEventFilterContext,
     filters: Iterable[EngineEventFilter],
 ) -> Iterable[EngineEvent]:
-    """Apply engine event filters in registration order."""
+    """Apply filters in order; use a from_engine context for resumable sequences."""
     filter_list = list(filters)
     for event_filter in filter_list:
         event_filter.initialize(context)
@@ -22,7 +22,11 @@ def filter_engine_events(
 
     def sequence_output(event: EngineEvent) -> EngineEvent:
         nonlocal last_sequence
-        next_sequence = max(last_sequence + 1, event.sequence)
+        next_sequence = (
+            context.next_sequence(event.sequence)
+            if context.next_sequence is not None
+            else max(last_sequence + 1, event.sequence)
+        )
         last_sequence = next_sequence
         if event.sequence == next_sequence:
             return event

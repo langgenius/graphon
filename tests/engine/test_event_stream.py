@@ -176,17 +176,17 @@ def test_event_stream_reset_starts_a_new_fifo_run() -> None:
 
 
 @pytest.mark.parametrize("reset", [False, True])
-def test_event_stream_cooperates_with_gevent_patched_after_import(reset: bool) -> None:
+def test_event_stream_cooperates_with_gevent_patched_before_import(reset: bool) -> None:
     script = dedent(
         f"""
+        from gevent import monkey
+        monkey.patch_all()
+        import gevent
+
         from graphon.engine.event.stream import EventStream
         from graphon.engine_events.graph import GraphRunStartedEvent
 
         stream = EventStream([]) if {reset!r} else None
-
-        from gevent import monkey
-        monkey.patch_all()
-        import gevent
 
         if stream is None:
             stream = EventStream([])

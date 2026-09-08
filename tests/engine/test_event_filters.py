@@ -1,4 +1,5 @@
 from collections.abc import Iterable
+from types import SimpleNamespace
 from typing import Any, cast
 
 from graphon.engine.filter import (
@@ -6,11 +7,21 @@ from graphon.engine.filter import (
     filter_engine_events,
 )
 from graphon.engine_events.base import EngineEvent
-from graphon.engine_events.graph import GraphRunStartedEvent, GraphRunSucceededEvent
+from graphon.engine_events.graph import (
+    GraphRunPausedEvent,
+    GraphRunStartedEvent,
+    GraphRunSucceededEvent,
+)
 from graphon.engine_events.traversal import GraphEdgeTakenEvent
+from graphon.runtime.runtime_state import RuntimeState
+from graphon.runtime.variable_pool import VariablePool
 
 
-def _context() -> EngineEventFilterContext:
+def _context(state: RuntimeState | None = None) -> EngineEventFilterContext:
+    if state is not None:
+        return EngineEventFilterContext.from_engine(
+            cast(Any, SimpleNamespace(graph=object(), runtime_state=state))
+        )
     return EngineEventFilterContext(
         graph=cast(Any, object()),
         runtime_state=cast(Any, object()),
@@ -125,6 +136,48 @@ def test_filter_chain_sequences_expanded_and_flushed_output() -> None:
 
     assert [event.sequence for event in output] == [1, 2, 3, 4]
     assert [start.sequence, terminal.sequence] == [1, 2]
+
+
+def test_filter_chain_restores_expanded_and_flushed_sequences() -> None:
+    state = RuntimeState(
+        workflow_id="workflow", variable_pool=VariablePool(), start_at=0
+    )
+    execution = state.graph_execution
+    started = GraphRunStartedEvent(
+        execution_id=execution.execution_id, sequence=execution.next_event_sequence()
+    )
+    paused = GraphRunPausedEvent(
+        execution_id=execution.execution_id, sequence=execution.next_event_sequence()
+    )
+    before_pause = list(
+        filter_engine_events(
+            [started, paused],
+            context=_context(state),
+            filters=[_SplitStartFilter(), _FlushFilter()],
+        )
+    )
+
+    restored_state = RuntimeState.from_snapshot(state.dumps())
+    restored_execution = restored_state.graph_execution
+    resumed = GraphRunStartedEvent(
+        execution_id=restored_execution.execution_id,
+        sequence=restored_execution.next_event_sequence(),
+    )
+    after_resume = list(
+        filter_engine_events(
+            [resumed],
+            context=_context(restored_state),
+            filters=[_SplitStartFilter(), _FlushFilter()],
+        )
+    )
+
+    assert [event.sequence for event in before_pause + after_resume] == list(
+        range(1, 8)
+    )
+    assert started.execution_id == resumed.execution_id
+    assert [started.sequence, paused.sequence, resumed.sequence] == [1, 2, 3]
+    assert restored_execution.last_event_sequence == 3
+    assert restored_execution.last_filtered_event_sequence == 7
 
 
 def test_filter_chain_sends_flush_output_to_downstream_filters() -> None:

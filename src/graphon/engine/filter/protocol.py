@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
@@ -24,15 +24,18 @@ class EngineEventFilterContext:
     file_runtime: WorkflowFileRuntimeProtocol | None = field(
         default_factory=peek_workflow_file_runtime,
     )
+    next_sequence: Callable[[int], int] | None = None
 
     @classmethod
     def from_engine(cls, engine: Engine) -> EngineEventFilterContext:
+        """Bind output sequencing to the engine's persisted execution state."""
         return cls(
             graph=engine.graph,
             runtime_state=ReadOnlyRuntimeStateWrapper(
                 engine.runtime_state,
             ),
             file_runtime=engine.file_runtime,
+            next_sequence=engine.runtime_state.graph_execution.next_filtered_event_sequence,
         )
 
 

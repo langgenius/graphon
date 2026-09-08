@@ -5,7 +5,7 @@ from importlib import import_module
 from types import ModuleType
 from typing import Literal, cast
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from graphon.engine_events.node import NodeRunStreamChunkEvent
 from graphon.runtime.runtime_state import GraphProtocol
@@ -25,6 +25,27 @@ class StreamBufferState(BaseModel):
 
     selector: Selector
     events: list[NodeRunStreamChunkEvent] = Field(default_factory=list)
+
+    @field_validator("events", mode="before")
+    @classmethod
+    def _restore_node_execution_ids(cls, events: object) -> object:
+        """Separate legacy buffered node execution IDs from new event IDs."""
+        if not isinstance(events, list):
+            return events
+        restored = []
+        for event in events:
+            if (
+                isinstance(event, dict)
+                and "node_execution_id" not in event
+                and "schema_version" not in event
+                and "id" in event
+            ):
+                migrated = event.copy()
+                migrated["node_execution_id"] = migrated.pop("id")
+                restored.append(migrated)
+            else:
+                restored.append(event)
+        return restored
 
 
 class StreamPositionState(BaseModel):

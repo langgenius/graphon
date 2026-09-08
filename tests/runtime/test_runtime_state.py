@@ -836,4 +836,5 @@ def test_version_2_graph_execution_without_sequence_defaults_to_zero() -> None:
 
     assert execution.execution_id == "execution"
     assert execution.last_event_sequence == 0
+    assert execution.last_filtered_event_sequence == 0
     assert execution.next_event_sequence() == 1
