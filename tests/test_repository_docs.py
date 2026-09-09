@@ -2,9 +2,10 @@
 
 Historical documents under docs/archive are excluded.
 
-Fenced code, external URLs, and fragments are ignored. Reference links, HTML,
-link titles, and paths containing spaces or parentheses are outside this check;
-it does not verify heading anchors or the semantic freshness of documentation.
+Inline local links and ATX heading fragments (including duplicate headings) are
+checked. Fenced code and external URLs are ignored. Reference links, HTML anchors,
+Setext headings, link titles, and paths containing spaces or parentheses are
+outside this check. Prose accuracy still requires human review.
 """
 
 import re
@@ -169,6 +170,38 @@ def test_legal_and_template_files_do_not_require_reviews(
     check_document_reviews(tmp_path, datetime(2026, 9, 9, tzinfo=UTC))
 
 
+def read_document_lines(document: Path) -> list[tuple[int, str]]:
+    """Return source lines outside fenced code with their original line numbers."""
+    lines: list[tuple[int, str]] = []
+    fence = ""
+    for number, line in enumerate(document.read_text(encoding="utf-8").splitlines(), 1):
+        marker = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
+        if marker:
+            delimiter = marker[1]
+            if not fence:
+                fence = delimiter
+            elif delimiter[0] == fence[0] and len(delimiter) >= len(fence):
+                fence = ""
+        elif not fence:
+            lines.append((number, line))
+    return lines
+
+
+def find_heading_anchors(lines: list[tuple[int, str]]) -> set[str]:
+    anchors: set[str] = set()
+    for _, line in lines:
+        heading = re.match(r"^ {0,3}#{1,6}\s+(.+?)(?:\s+#+)?$", line)
+        if heading:
+            slug = re.sub(r"[^\w\- ]", "", heading[1].lower()).replace(" ", "-")
+            anchor = slug
+            suffix = 0
+            while anchor in anchors:
+                suffix += 1
+                anchor = f"{slug}-{suffix}"
+            anchors.add(anchor)
+    return anchors
+
+
 def check_document_links(root: Path) -> None:
     documents = find_repository_documents(root)
     knowledge = {
@@ -176,28 +209,33 @@ def check_document_links(root: Path) -> None:
     } | {root / "ARCHITECTURE.md"}
     links: dict[Path, set[Path]] = {document: set() for document in documents}
 
-    for document in sorted(documents):
-        fence = ""
-        lines = document.read_text(encoding="utf-8").splitlines()
-        for number, line in enumerate(lines, 1):
-            marker = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
-            if marker:
-                delimiter = marker[1]
-                if not fence:
-                    fence = delimiter
-                elif delimiter[0] == fence[0] and len(delimiter) >= len(fence):
-                    fence = ""
-                continue
-            if fence:
-                continue
+    lines_by_document = {
+        document: read_document_lines(document) for document in documents
+    }
+    anchors_by_document = {
+        document: find_heading_anchors(lines)
+        for document, lines in lines_by_document.items()
+    }
+
+    for document, lines in lines_by_document.items():
+        for number, line in lines:
             for destination in re.findall(r"\[[^\]\n]+\]\(([^()\s]+)\)", line):
                 url = urlsplit(destination)
-                if url.scheme or url.netloc or not url.path:
+                if url.scheme or url.netloc:
                     continue
-                target = (document.parent / unquote(url.path)).resolve()
+                target = (
+                    (document.parent / unquote(url.path)).resolve()
+                    if url.path
+                    else document
+                )
                 assert target.exists(), (
                     f"Broken link: {document.relative_to(root)}:{number}: {destination}"
                 )
+                if url.fragment and target in anchors_by_document:
+                    assert unquote(url.fragment) in anchors_by_document[target], (
+                        f"Broken heading: {document.relative_to(root)}:{number}: "
+                        f"{destination}"
+                    )
                 links[document].add(target)
 
     reached: set[Path] = set()
@@ -247,3 +285,32 @@ def test_archived_plans_are_excluded_from_knowledge_checks(
             AssertionError, match=r"Broken link: docs/plans/completed.md"
         ):
             check_document_links(tmp_path)
+
+
+@pytest.mark.parametrize("destination", ["#missing", "guide.md#missing"])
+def test_document_links_reject_missing_headings(
+    tmp_path: Path, destination: str
+) -> None:
+    (tmp_path / "AGENTS.md").write_text(
+        f"# Index\n[Architecture](ARCHITECTURE.md)\n[Guide]({destination})\n"
+    )
+    (tmp_path / "ARCHITECTURE.md").write_text("# Architecture\n")
+    (tmp_path / "guide.md").write_text("# Guide\n```markdown\n# Missing\n```\n")
+    with pytest.raises(AssertionError, match=r"Broken heading: AGENTS.md"):
+        check_document_links(tmp_path)
+
+
+def test_document_links_accept_heading_fragments(tmp_path: Path) -> None:
+    (tmp_path / "AGENTS.md").write_text(
+        "# Index\n[Self](#index)\n[Architecture](ARCHITECTURE.md#state--ownership)\n"
+        "[Repeated](ARCHITECTURE.md#state--ownership-1)\n"
+        "[Unicode](ARCHITECTURE.md#%E7%8A%B6%E6%80%81)\n"
+        "[Archived](docs/archive/plans/old.md#obsolete)\n"
+    )
+    (tmp_path / "ARCHITECTURE.md").write_text(
+        "# Architecture\n## State & `Ownership`\n## State & `Ownership`\n## 状态\n"
+    )
+    archived = tmp_path / "docs/archive/plans/old.md"
+    archived.parent.mkdir(parents=True)
+    archived.write_text("Historical content\n")
+    check_document_links(tmp_path)

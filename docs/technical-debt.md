@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-09-09T21:14:48Z"
+last_checked: "2026-09-09T21:56:06Z"
 -->
 # Technical debt
 
@@ -8,7 +8,7 @@ assigned tasks. Current behavior and boundaries live in
 [Architecture](../ARCHITECTURE.md); contributor workflow lives in
 [CONTRIBUTING.md](../CONTRIBUTING.md). Follow the
 [completion and archive rules](maintenance.md#archive-completed-work) when an
-item is resolved, retaining the IDs of remaining items.
+item is resolved.
 
 | ID | Unresolved work | Priority | Area |
 | --- | --- | --- | --- |
@@ -65,10 +65,8 @@ the remaining dependencies and version matrix before changing that claim.
 
 ## TD-08 — Offline execution example
 
-The public [Slim examples](../examples/slim_llm/README.md) need credentials and a
-daemon. [Example tests](../tests/examples/test_slim_llm_example.py) exercise setup
-helpers, so contributors lack a documented standalone workflow that separates
-engine behavior from external setup.
+The [Slim example setup](../examples/slim_llm/README.md) couples engine evaluation
+to external services, making small engine reproductions harder to share.
 
 Publish one small credential-free Start → Template → End example using public
 APIs and the workload pattern in [the benchmark](../benchmarks/test_engine_performance.py).
@@ -81,10 +79,8 @@ successful node order. Keep the example small enough to serve as a reproduction.
 
 ## TD-09 — Performance feedback
 
-[The benchmark](../benchmarks/test_engine_performance.py) measures two rounds of a
-five-node sequential execution. Graph construction happens outside the timer;
-response-filter initialization is absent. Those timings cannot establish the
-cost of construction, filtering, branching, or larger graphs.
+The [benchmark](../benchmarks/test_engine_performance.py) does not isolate the
+response-filter initialization cost, leaving a gap in performance feedback.
 
 Continue [PR #271](https://github.com/langgenius/graphon/pull/271) for the known
 response-filter initialization path and

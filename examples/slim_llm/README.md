@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-09-09T20:55:58Z"
+last_checked: "2026-09-09T21:56:06Z"
 -->
 # Slim LLM Example
 
@@ -9,14 +9,14 @@ This directory has two versions of the same LLM workflow:
 start -> llm -> answer
 ```
 
-## Files
+## Source and setup
 
-- `graph.yml`: the DSL graph
-- `dsl.py`: imports `graph.yml` and streams response events with `ResponseStreamFilter`
-- `code.py`: builds the graph with Python code
-- `settings.py`: shared credentials and Slim setup
-- `credentials.example.json`: credentials template
-- `credentials.json`: your local credentials
+[graph.yml](graph.yml) defines the workflow; [dsl.py](dsl.py) imports it and
+[code.py](code.py) constructs it directly. [settings.py](settings.py) handles
+example configuration; the [Slim client](../../src/graphon/dsl/slim/client.py)
+defines daemon configuration and binary lookup. Use
+[credentials.example.json](credentials.example.json) as the credential schema.
+Complete [repository setup](../../CONTRIBUTING.md#development-setup) first.
 
 ## Prepare
 
@@ -25,33 +25,22 @@ cd examples/slim_llm
 cp credentials.example.json credentials.json
 ```
 
-Fill in `credentials.json`.
+Fill in `credentials.json`. See the [Git ignore rule](../../.gitignore) and
+[PR file check](../../.github/workflows/pr.yml) for local-configuration exclusions.
 
 ## DSL Import
 
 ```bash
-python3 dsl.py
-python3 dsl.py "Reply with only the word Graphon."
+uv run python dsl.py
+uv run python dsl.py "Reply with only the word Graphon."
 ```
 
 ## Code Construction
 
 ```bash
-python3 code.py
-python3 code.py "Reply with only the word Graphon."
+uv run python code.py
+uv run python code.py "Reply with only the word Graphon."
 ```
 
-The Python construction example uses `graphon.dsl.slim.SlimLLM` as the standard
-Slim-backed LLM runtime. Configure it with the Slim client settings, plugin ID,
-provider, model name, and credentials. Optional completion parameters can be
-supplied by the Python construction when needed.
-
-Both modes require the Slim client binary. Put `dify-plugin-daemon-slim` in
-`PATH`, set `SLIM_BINARY_PATH`, or place an executable `slim` binary in this directory.
-
-For local mode, keep `slim.mode` as `local`.
-
-For remote mode, set `slim.mode` to `remote`, then fill in `daemon_addr` and
-`daemon_key`.
-
-`credentials.json` is local-only and should not be committed.
+Both examples invoke a real model. Use [settings.py](settings.py) to choose local
+or remote daemon setup and resolve configuration errors.
