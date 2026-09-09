@@ -9,6 +9,9 @@ last_checked: "2026-09-08T00:00:00Z"
 locally. TD-03 implementation and independent reviews are complete locally.
 TD-04's 2026-09-09 explicit state ownership follow-up has passed checks,
 independent reviews, and its final naming pass.
+TD-01 and TD-05's initial implementation and architectural layering follow-up
+are complete locally. Validation and independent reviews are recorded in
+the [import boundaries plan](plans/runtime-import-boundaries.md).
 Other remediation remains proposed, not accepted architecture policy. Priorities
 express the original review's judgment.
 **Scope:** repository structure, execution and integration boundaries, developer
@@ -63,30 +66,30 @@ approved package names or team assignments.
 | Files, HTTP, code, and tools | [file](../src/graphon/file/), [http](../src/graphon/http/), [node ports](../src/graphon/nodes/protocols.py), [DSL adapters](../src/graphon/dsl/node_factory.py) | Explicit host integration seams. Engines retain injected or scoped file adapters; unscoped file operations have no adapter. HTTP consumers own their default clients. |
 | Values and public event language | [variables](../src/graphon/variables/), [entities](../src/graphon/entities/), [node events](../src/graphon/node_events/), [engine events](../src/graphon/engine_events/) | Useful shared vocabulary. These folders contain schemas and transport values as well as domain concepts; their names do not establish ownership or DDD semantics by themselves. |
 | Consumer presentation | [event filters](../src/graphon/engine/filter/) | Raw execution and response formatting are separate APIs despite filters living under `engine/`. That behavioral boundary matters more than moving the folder. |
-| Public integration facade | [protocols](../src/graphon/protocols/__init__.py) | Discoverable re-exports are useful. Importing them should not implicitly register concrete nodes. |
+| Public integration facade | [protocols](../src/graphon/protocols/__init__.py) | Discoverable re-exports preserve contract identity without registering concrete nodes. |
 | Host application | Outside this repository | Owns tenant policy, credentials, persistence, and presentation. Graphon should expose the needed ports and retain opaque host references. |
-| Engineering feedback and knowledge | [tests](../tests/), [benchmarks](../benchmarks/), [examples](../examples/), [docs](README.md), [CI](../.github/workflows/) | Existing checks and navigation are valuable. Gaps are specific: dependency enforcement, a public offline example, and performance coverage of a known hot path. |
+| Engineering feedback and knowledge | [tests](../tests/), [benchmarks](../benchmarks/), [examples](../examples/), [docs](README.md), [CI](../.github/workflows/) | Existing checks and navigation now include dependency enforcement. Remaining gaps include a public offline example and performance coverage of a known hot path. |
 
-An import scan of all 276 Python source files, including local and type-checking
-imports, found the following selected relationships. This diagram shows current
-coupling, not a proposed permitted-dependency graph:
+The original review scanned 276 Python source files, including local and
+type-checking imports. This selected dependency map includes the subsequent
+TD-01/TD-05 changes; enforced rules now live in
+[architecture](../ARCHITECTURE.md#import-boundaries) and Import Linter:
 
 ```mermaid
 flowchart LR
     DSL[DSL composition] --> Engine
     DSL --> Graph
     Engine --> Graph
-    Engine --> Runtime
+    Engine -->|queue types and execution state| Runtime
     Graph --> Nodes
     Nodes --> Graph
     Nodes --> Runtime
-    Runtime -->|queue types and default queue| Engine
-    Facade[Public protocols] -->|eager imports| Concrete[Code and LLM nodes]
+    Facade[Public protocols] --> Contracts[Consumer contracts]
 ```
 
 The graph/node relationship partly reflects graph-aware container behavior;
 it is not evidence that every reciprocal package import is a bug. The runtime
-queue dependency and facade side effects below have concrete isolation costs.
+queue dependency and facade side effects identified below are now removed locally.
 
 ## What is working well
 
@@ -135,7 +138,8 @@ queue dependency and facade side effects below have concrete isolation costs.
 ## Debt register
 
 TD-02 and TD-03 are **implemented locally**. TD-04 is **completed locally**, with
-required reviews and checks complete. Other entries remain **proposed**. P1 means
+required reviews and checks complete. TD-01 and TD-05 are **completed locally**,
+with reviews and checks recorded in their plan. Other entries remain **proposed**. P1 means
 a reproduced correctness problem or a boundary that must be addressed before
 the stated deployment use.
 P2 is targeted architecture or feedback work. P3 can follow the more consequential
@@ -145,11 +149,11 @@ relative change size, not a delivery estimate.
 
 | ID | Section | Priority | Suggested owner | Size |
 | --- | --- | --- | --- | --- |
-| TD-01 | Dependency direction and runtime queue ownership | P2 | Engine/runtime | Medium |
+| TD-01 | Dependency direction and runtime queue ownership, completed locally | P2 | Engine/runtime | Medium |
 | TD-02 | [Graph construction and structural validation](#td-02--graph-construction-and-structural-validation), implemented locally | P1 | Graph/DSL | Medium |
 | TD-03 | [Snapshot consistency at the public boundary](#td-03--snapshot-consistency-at-the-public-boundary), implemented locally | P2 | Runtime/engine | Medium |
 | TD-04 | [Execution-scoped file integration](#td-04--execution-scoped-file-integration), completed locally | P2; P1 before concurrent distinct host adapters | File/host integration | Medium–large |
-| TD-05 | Side effects of importing public contracts | P2 | Public API/node bootstrap | Small–medium |
+| TD-05 | Side effects of importing public contracts, completed locally | P2 | Public API/node bootstrap | Small–medium |
 | TD-06 | Ignored LLM integration arguments | P2 | Model/node API | Small, with a compatibility window |
 | TD-07 | Optional capability dependencies | P2 | Packaging/document extraction | Medium |
 | TD-08 | Offline execution and diagnostic example | P2 | Examples/developer experience | Small |
@@ -158,34 +162,28 @@ relative change size, not a delivery estimate.
 
 ## TD-01 — Dependency direction and runtime queue ownership
 
-**Working well:** runtime already has a queue protocol and a small
-[GraphProtocol](../src/graphon/runtime/runtime_state/protocol.py), so it need not
-depend on the whole execution implementation to describe state.
+**Implementation update (2026-09-09):** runtime owns the existing queue protocol,
+ready task values, and in-memory implementation under
+[runtime/ready_queue](../src/graphon/runtime/ready_queue/). Engine queue paths
+retain compatibility exports with the same object identities. Default runtime
+construction and the v1 loader use the runtime-owned definitions. Queue behavior,
+custom queue factories, and snapshot formats are unchanged.
 
-**Evidence and consequence:** [RuntimeState._new_ready_queue](../src/graphon/runtime/runtime_state/state.py)
-imports `engine.ready_queue.InMemoryReadyQueue`.
-[The runtime queue protocol](../src/graphon/runtime/ready_queue.py) imports task
-values from `engine.ready_queue.entities`, and the
-[v1 loader](../src/graphon/runtime/runtime_state/v1.py) imports `StartTask` there.
-The engine imports runtime in return. A fresh-process probe confirmed that
-constructing a default runtime loads `graphon.engine.engine` and a concrete Loop
-node. The local import postpones this coupling; it does not remove it.
-The [tool configuration](../pyproject.toml) has no general package import rule.
+**Original evidence:** runtime imported engine-owned queue definitions, and
+constructing its default queue loaded the engine and concrete Loop nodes. Local
+imports delayed that coupling without removing it.
 
-**Proposed change:** move the existing task values and in-memory queue to a
-runtime-owned queue package, retaining engine-path compatibility re-exports.
-Reuse the existing protocol. Add a short dependency table to architecture and
-targeted structural checks: runtime must not import the engine implementation;
-execution core must not import concrete DSL/Slim adapters. Describe legitimate
-schema dependencies and any temporary exceptions explicitly. Do not require
-every package to fit a universal layer sequence or introduce a new DI framework.
-
-**Done when:** a fresh-process runtime construction and current snapshot
-round-trip do not load engine implementations or built-in nodes; existing custom
-queue and historical snapshot tests pass; an intentionally forbidden import is
-detected with a message naming the boundary and the correct home. Follow the
-subprocess pattern in [snapshot isolation](../tests/test_snapshot_version_isolation.py)
-and retain [runtime coverage](../tests/runtime/test_runtime_state.py).
+**Current evidence:** [runtime import tests](../tests/runtime/test_runtime_imports.py)
+exercise a fresh-process current snapshot round-trip without loading the engine
+or registering nodes, then verify old queue export identities.
+[Existing runtime tests](../tests/runtime/test_runtime_state.py) cover custom
+queues and historical snapshots. The [Import Linter layers contract](../pyproject.toml)
+enforces dependency direction across every top-level package and module,
+including indirect and type-checking imports.
+[Layer tests](../tests/test_import_layers.py) cover upward dependencies and
+mandatory classification of new modules. [Architecture](../ARCHITECTURE.md#import-boundaries)
+defines the checked boundaries and legitimate schema dependencies;
+[the plan](plans/runtime-import-boundaries.md) records verification and reviews.
 
 ## TD-02 — Graph construction and structural validation
 
@@ -288,31 +286,25 @@ release claim.
 
 ## TD-05 — Side effects of importing public contracts
 
-**Working well:** [graphon.protocols](../src/graphon/protocols/__init__.py) gives
-integrators a stable discovery surface and
-[export tests](../tests/test_protocols_exports.py) preserve object identity.
+**Implementation update (2026-09-09):**
+[CodeExecutorProtocol](../src/graphon/nodes/code/protocols.py) now lives outside
+its node implementation. Its old implementation-module and public facade exports
+retain identity. Code and LLM package class exports load implementations only
+when requested; public contract and bare package imports no longer register them.
+Explicit node class and implementation imports preserve registration.
 
-**Evidence and consequence:** the facade imports `CodeExecutorProtocol` from
-[code_node.py](../src/graphon/nodes/code/code_node.py). Importing LLM contract
-submodules executes [llm/__init__.py](../src/graphon/nodes/llm/__init__.py), which
-imports `LLMNode`. [Node.__init_subclass__](../src/graphon/nodes/base/node.py)
-registers implementations on import. A fresh-process probe that imported Node,
-captured its registry, then imported `graphon.protocols` added `code` and `llm`.
-A declaration import therefore changes executable availability. Existing export
-identity tests do not detect this because implementations are already imported.
+**Original evidence:** importing the facade registered Code and LLM nodes through
+its code executor import and eager LLM package initializer. The previous export
+identity tests imported implementations first and could not detect this effect.
 
-**Proposed change:** move the code executor contract out of the implementation
-module, and make LLM contract imports independent of eager implementation
-imports. Preserve current explicit node import paths and their intended
-registration, using a compatibility export only where needed. Retain
-consumer-owned contracts; no universal contract hierarchy or replacement plugin
-discovery system is necessary.
-
-**Done when:** a fresh-process public-contract import adds no concrete node
-registrations, explicit imports still register those nodes, and existing public
-export identities remain valid. Add this check beside
-[protocol exports](../tests/test_protocols_exports.py). Coordinate with TD-01,
-since runtime construction can otherwise load nodes indirectly.
+**Current evidence:** [public protocol tests](../tests/test_protocols_exports.py)
+check registration in a fresh process, explicit class imports, and existing export
+identities. The [Import Linter layers contract](../pyproject.toml) places the
+public facade below the engine and above the execution model it exposes.
+The subprocess check protects node registration; the layers permit facade
+imports of concrete node implementations. See
+[bootstrap migration](../MIGRATION.md#runtime-queues-and-node-imports) and
+[the shared plan](plans/runtime-import-boundaries.md).
 
 ## TD-06 — Ignored LLM integration arguments
 
@@ -465,8 +457,9 @@ generator are not prerequisites. No recurring automation was configured here.
    [execution file runtime plan](plans/execution-file-runtime.md).
    Hosts must bind delivered file rendering and rebind restored
    engines as described in the migration guide.
-3. Combine the related import work in TD-01 and TD-05, with a focused boundary
-   test for each. Handle TD-06 in a separately documented API transition.
+3. TD-01 and TD-05 are completed locally; validation and independent reviews are
+   recorded in the [shared plan](plans/runtime-import-boundaries.md).
+   Handle TD-06 next in a separately documented API transition.
 4. Add TD-08's offline example; use it in TD-07's minimal-install check. Continue
    the existing TD-09 and TD-10 work without duplicate proposals.
 

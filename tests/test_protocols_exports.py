@@ -1,3 +1,7 @@
+import subprocess  # ruff: ignore[suspicious-subprocess-import]
+import sys
+from textwrap import dedent
+
 from graphon import protocols
 from graphon.file.protocols import WorkflowFileRuntimeProtocol
 from graphon.graph.graph import NodeFactory
@@ -87,6 +91,31 @@ from graphon.runtime.runtime_state_protocol import (
     ReadOnlyVariablePool,
 )
 from graphon.variable_loader import VariableLoader
+
+
+def test_public_protocol_import_leaves_node_registration_to_explicit_imports() -> None:
+    script = dedent(
+        """
+        from graphon.nodes.base.node import Node
+
+        registered = Node.get_node_type_classes_mapping()
+        import graphon.protocols
+
+        assert Node.get_node_type_classes_mapping() == registered
+
+        from graphon.nodes.code import CodeNode
+        from graphon.nodes.code.code_node import CodeNode as ImplementationCodeNode
+        from graphon.nodes.llm import LLMNode
+        from graphon.nodes.llm.node import LLMNode as ImplementationLLMNode
+
+        assert CodeNode is ImplementationCodeNode
+        assert LLMNode is ImplementationLLMNode
+        registered = Node.get_node_type_classes_mapping()
+        assert registered[CodeNode.node_type][CodeNode.version()] is CodeNode
+        assert registered[LLMNode.node_type][LLMNode.version()] is LLMNode
+        """
+    )
+    subprocess.run([sys.executable, "-c", script], check=True)  # ruff: ignore[subprocess-without-shell-equals-true]
 
 
 def test_public_protocol_exports_match_canonical_definitions() -> None:

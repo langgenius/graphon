@@ -14,6 +14,7 @@ define their behavior; it does not replace those rules.
 
 | Task | Start in source | Relevant checks |
 | --- | --- | --- |
+| Change package dependencies or queue ownership | [Import boundaries](../ARCHITECTURE.md#import-boundaries), [runtime queues](../src/graphon/runtime/ready_queue/) | `just imports`, [runtime isolation](../tests/runtime/test_runtime_imports.py), [public contract imports](../tests/test_protocols_exports.py) |
 | Parse or validate a graph | [graph](../src/graphon/graph/), [graph config](../src/graphon/entities/graph_config.py) | [graph tests](../tests/graph/), especially validation and scoping |
 | Import Dify DSL or wire node dependencies | [importer](../src/graphon/dsl/importer.py), [node factory](../src/graphon/dsl/node_factory.py) | [DSL tests](../tests/dsl/), especially importer, node factory, and app bootstrap |
 | Change a built-in node | [nodes](../src/graphon/nodes/), [base node](../src/graphon/nodes/base/node.py) | Matching [node tests](../tests/nodes/); [workflow events](../tests/workflows/test_full_engine_events.py) for graph-visible changes |
@@ -39,8 +40,10 @@ define their behavior; it does not replace those rules.
    `Node[YourNodeData]`. Supply `node_type`, a numeric-string `version()`, and
    `_run()`. Existing nodes such as [StartNode](../src/graphon/nodes/start/start_node.py)
    show the result-returning form; streaming nodes emit node event payloads.
-3. Import the node module during host bootstrap. Subclasses register when their
-   modules are imported; registry lookup does not discover or import packages.
+3. Import the node class during host bootstrap. Subclasses register when their
+   implementation modules load; registry lookup does not discover or import
+   packages. Bare Code/LLM package imports do not load their classes; see
+   [bootstrap migration](../MIGRATION.md#runtime-queues-and-node-imports).
    Registration alone does not add support to the default DSL importer:
    [SlimDslNodeFactory.NODE_BUILDERS](../src/graphon/dsl/node_factory.py) explicitly
    controls that surface and wires its dependencies.
@@ -79,7 +82,7 @@ public surface.
   [LLMFileSaver](../src/graphon/nodes/llm/file_saver.py). Each HTTP consumer accepts
   an injected client or constructs its own [HTTPX client](../src/graphon/http/client.py).
 - **Tools and code:** implement [ToolNodeRuntimeProtocol](../src/graphon/nodes/runtime.py)
-  or [CodeExecutorProtocol](../src/graphon/nodes/code/code_node.py). Default DSL
+  or [CodeExecutorProtocol](../src/graphon/nodes/code/protocols.py). Default DSL
   adapters live in [tool_runtime.py](../src/graphon/dsl/tool_runtime.py) and
   [code_runtime.py](../src/graphon/dsl/code_runtime.py); the latter calls a Dify
   sandbox service. Follow the [tool tests](../tests/nodes/tool/) and

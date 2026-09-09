@@ -26,6 +26,7 @@ independent test and knowledge reviews, and the final naming pass.
 | What is the progress and evidence for TD-02? | [Graph validation plan](plans/graph-validation.md) |
 | What is the progress and evidence for TD-03? | [Snapshot eligibility plan](plans/snapshot-eligibility.md) |
 | What is the progress and evidence for TD-04? | [Execution file runtime plan](plans/execution-file-runtime.md) |
+| What is the progress and evidence for TD-01 and TD-05? | [Runtime import boundaries plan](plans/runtime-import-boundaries.md) |
 
 ## Component references
 

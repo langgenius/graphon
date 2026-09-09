@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable, Mapping
 from copy import deepcopy
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from graphon.enums import NodeState
 from graphon.model_runtime.entities.llm_entities import LLMUsage
@@ -12,23 +12,12 @@ from graphon.runtime.container_state import (
     ContainerRunState,
     FrameRuntimeData,
 )
-from graphon.runtime.ready_queue import ReadyQueue
+from graphon.runtime.ready_queue import InMemoryReadyQueue, ReadyQueue, ReadyTask
 from graphon.runtime.variable_pool import VariablePool
 
 from ..execution import GraphExecution
 from .protocol import GraphProtocol
 from .snapshot import GraphStateMigration, load_snapshot
-
-if TYPE_CHECKING:
-    from graphon.engine.ready_queue import ReadyTask
-
-
-def _new_ready_queue() -> ReadyQueue:
-    from graphon.engine.ready_queue import (  # ruff:ignore[import-outside-top-level]
-        InMemoryReadyQueue,
-    )
-
-    return InMemoryReadyQueue()
 
 
 class RuntimeState:  # ruff:ignore[too-many-public-methods]
@@ -100,12 +89,12 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         self._node_run_steps = node_run_steps
         self._graph: GraphProtocol | None = None
         self._ready_queue = (
-            ready_queue if ready_queue is not None else _new_ready_queue()
+            ready_queue if ready_queue is not None else InMemoryReadyQueue()
         )
         self._deferred_ready_queue = (
             deferred_ready_queue
             if deferred_ready_queue is not None
-            else _new_ready_queue()
+            else InMemoryReadyQueue()
         )
         self._graph_execution = graph_execution
         self._container_runs: dict[str, ContainerRunState] = {}
@@ -289,7 +278,7 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         cls: type[RuntimeState],
         data: str,
         *,
-        ready_queue_factory: Callable[[], ReadyQueue] = _new_ready_queue,
+        ready_queue_factory: Callable[[], ReadyQueue] = InMemoryReadyQueue,
     ) -> RuntimeState:
         """Restore a snapshot with the loader named by its serialized version.
 

@@ -132,7 +132,8 @@ source .venv/bin/activate
 The repository uses [`uv`](https://docs.astral.sh/uv/) for dependency and
 virtual environment management. The default development environment includes
 [`ruff`](https://docs.astral.sh/ruff/), [`pytest`](https://docs.pytest.org/),
-`pytest-xdist`, `pytest-cov`, `pytest-mock`, and
+`pytest-xdist`, `pytest-cov`, `pytest-mock`,
+[Import Linter](https://import-linter.readthedocs.io/), and
 [`prek`](https://prek.j178.dev/).
 
 ### Git Hooks
@@ -146,7 +147,7 @@ The current hook set includes:
 - BOM cleanup and line ending normalization
 - TOML and YAML validation
 - shebang executable checks
-- local `just tc` (which runs `format`, `lint`, and `ty check` in sequence)
+- local `just tc` (formatting, lint, import contracts, and type checking)
 
 Useful direct commands:
 
@@ -172,8 +173,9 @@ Use these commands for normal development:
 - `just`: list available recipes
 - `just format`: run `uv run ruff format`
 - `just lint`: run `just format`, then `uv run ruff check --fix`
-- `just tc`: run `just lint`, then `uv run ty check`
-- `just check`: run `uv lock --check && uv run ruff format --check && uv run ruff check && uv run ty check`
+- `just imports`: run Import Linter's dependency contracts from `pyproject.toml`
+- `just tc`: run `just lint`, `just imports`, then `uv run ty check`
+- `just check`: check lockfile freshness, formatting, lint, types, and import contracts without rewriting source
 - `just test`: run `just tc`, then `uv run pytest`
 - `just build`: build the package distributions
 - `just clean`: remove build artifacts and caches
@@ -182,11 +184,11 @@ Notes:
 
 - `just lint` is mutating. It may rewrite files.
 - `just tc` is the local type-check entrypoint used by Git hooks. It includes
-  formatting and lint fixes first.
+  formatting and lint fixes first, then import contracts and types.
 - `just test` is the progressive local full-chain target. It formats, applies
-  lint fixes, runs `ty check`, and then runs the test suite.
+  lint fixes, checks import contracts and types, and then runs the test suite.
 - `just check` aggregates the same non-mutating lockfile, lint, and type-check
-  commands used by CI.
+  commands and import contracts used by CI.
 - [`pytest`](https://docs.pytest.org/) is configured with `-n auto` and
   `testpaths = ['tests']`, so the test suite runs in parallel by default.
 - If you change dependencies, refresh and commit `uv.lock` before opening a
@@ -199,7 +201,7 @@ just test
 just check
 ```
 
-`just test` applies local fixes, runs `ty check`, and then runs the test suite.
+`just test` applies local fixes, checks import contracts and types, and runs tests.
 `just check` then confirms the non-mutating CI check job will pass.
 
 ### CI Checks
@@ -207,7 +209,7 @@ just check
 Pull requests targeting `main` currently run three kinds of checks:
 
 1. PR title validation with `amannn/action-semantic-pull-request`
-2. `just check` including `uv.lock` freshness validation
+2. `just check` including `uv.lock` freshness and import-contract validation
 3. `uv run pytest` on Python 3.12 and 3.13
 
 Keep local workflow aligned with those checks. A green local `just test` plus

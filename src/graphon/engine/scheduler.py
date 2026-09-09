@@ -7,9 +7,8 @@ from graphon.engine_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTake
 from graphon.enums import NodeExecutionType, NodeState
 from graphon.graph.edge import Edge
 from graphon.graph.graph import Graph
+from graphon.runtime.ready_queue import ReadyTask, StartTask
 from graphon.runtime.runtime_state import RuntimeState
-
-from .ready_queue import ReadyTask, StartTask
 
 type GraphTraversalEvent = GraphEdgeTakenEvent | GraphEdgeSkippedEvent
 

@@ -17,11 +17,6 @@ from uuid import uuid4
 
 from graphon.engine.frame import FrameRegistry
 from graphon.engine.layer import Layer
-from graphon.engine.ready_queue import (
-    ReadyQueue,
-    ReadyTask,
-    StartTask,
-)
 from graphon.engine_events.base import NodeEvent
 from graphon.engine_events.node import (
     NodeRunFailedEvent,
@@ -38,6 +33,11 @@ from graphon.nodes.container_effects import (
 )
 from graphon.runtime.container_state import create_container_run_state
 from graphon.runtime.execution import ROOT_FRAME_ID
+from graphon.runtime.ready_queue import (
+    ReadyQueue,
+    ReadyTask,
+    StartTask,
+)
 
 logger = logging.getLogger(__name__)
 

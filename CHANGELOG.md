@@ -9,6 +9,11 @@ before upgrading an integration.
 
 ### Changed
 
+- Runtime now owns ready queues and task values; existing engine queue imports
+  remain aliases. Runtime construction and current snapshot restoration avoid
+  loading the engine. Public contract and bare Code/LLM package imports no longer
+  register nodes; bootstrap uses explicit class imports. See
+  [import migration](MIGRATION.md#runtime-queues-and-node-imports).
 - Engines now retain their file adapter at construction and use it across
   execution threads, child/resumed runs, and response-stream rendering.
   `Engine(file_runtime=...)` and `use_workflow_file_runtime(...)` support distinct

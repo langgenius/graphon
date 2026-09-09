@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from graphon.engine.ready_queue import StartTask
 from graphon.enums import NodeState
 from graphon.runtime.execution import ROOT_FRAME_ID
+from graphon.runtime.ready_queue import StartTask
 
 from .protocol import GraphProtocol
 from .snapshot import BaseSnapshot, ReadyQueueFactory, new_state
