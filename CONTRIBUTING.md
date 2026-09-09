@@ -97,6 +97,22 @@ Notes:
 - If you change dependencies, refresh and commit `uv.lock` before opening a
   pull request.
 
+### Benchmarks
+
+The repository includes performance benchmarks in the `benchmarks/` directory.
+Benchmarks are disabled by default because [`pytest`](https://docs.pytest.org/)
+is configured with `--benchmark-disable`.
+
+Run benchmarks explicitly with:
+
+```bash
+pytest --benchmark-enable -n 0 benchmarks/
+```
+
+The `-n 0` flag disables `pytest-xdist` parallel execution so benchmark
+measurements remain accurate. The current benchmark suite includes engine
+performance tests.
+
 For most changes, a good local sequence is:
 
 ```bash
