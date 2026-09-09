@@ -49,8 +49,8 @@ just test
 
 `just dev` installs the project, syncs development dependencies, and sets up
 [`prek`](https://prek.j178.dev/) Git hooks. `just test` is the progressive
-local validation entrypoint: it formats, applies lint fixes, runs `ty check`,
-and then runs [`pytest`](https://docs.pytest.org/).
+local validation entrypoint: it formats, applies lint fixes, checks import
+contracts, runs `ty check`, and then runs [`pytest`](https://docs.pytest.org/).
 
 ## Run the Example Workflows
 
