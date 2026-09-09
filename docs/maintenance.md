@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-09-09T21:14:48Z"
+last_checked: "2026-09-09T21:27:27Z"
 -->
 # Maintaining repository knowledge
 
@@ -7,6 +7,61 @@ The [knowledge index](README.md) is the entry point for durable context.
 [CONTRIBUTING.md](../CONTRIBUTING.md) remains the authority for contributor
 workflow. The author of a change updates affected knowledge; its reviewer checks
 the claims against the linked implementation and evidence.
+
+## Repository knowledge maintenance
+
+Apply these principles to both everyday documentation changes and full inspections:
+
+- **Verify claims against evidence.** Read the relevant implementation, callers,
+  tests, and tooling before correcting a claim. Investigate disagreements between
+  code and prose; do not infer design intent from implementation shape.
+- **Separate current behavior, proposals, and history.** Confirm issue/PR status
+  before calling work complete. A local implementation is not a merged change,
+  and a merge is not proof of a release. Label proposals and uncertainty explicitly;
+  consult [related work](README.md#related-work) before introducing new conventions.
+- **Keep guidance useful beyond one task.** Retain purpose, ownership, constraints,
+  failure modes, compatibility requirements, and verification paths. Remove
+  conversation history, temporary branch ownership, one-off progress reports,
+  and unsupported assertions from active guides.
+- **Give each fact a stable home.** Use the placement table below and link to
+  maintained definitions instead of copying commands, API lists, or examples.
+  Keep AGENTS.md and the knowledge index small and navigable. Link active pages
+  from the index or an already indexed guide, and repair references when files move.
+- **Retire completed work.** Extract reusable guidance before removing resolved
+  debt and completed tasks from active documents. Archive completed plans under
+  `docs/archive/plans/` using the [archive rules](#archive-completed-work); keep
+  historical material out of routine reviews and freshness checks.
+- **Keep review evidence honest.** Advance `last_checked` only after reviewing the
+  whole page. Distinguish reading source or tests from running them. Record actual
+  check results and limitations; never relabel historical test counts as current
+  results or refresh timestamps just to pass CI.
+- **Make focused corrections and validate them.** Remove stale, invalid, redundant,
+  or overly specific content while preserving useful decisions and constraints.
+  Avoid edits made solely to produce a cleanup diff. Mechanical checks do not
+  establish prose accuracy; verify claims as well as navigation and examples.
+
+### Repository-wide inspections
+
+A scheduled or explicitly requested full inspection has a broader scope than a
+normal change's [knowledge review](#review-for-drift):
+
+1. Check existing issues and PRs before starting. For a new inspection, fetch the
+   latest default branch and create a fresh worktree from that fetched revision.
+   Continue follow-up revisions on the existing review branch instead of opening
+   a duplicate PR.
+2. Start at the [knowledge index](README.md), follow its links, and reconcile it
+   with the [maintained document scope](#document-metadata-and-review-deadline)
+   to catch unindexed pages. Exclude `docs/archive/`.
+3. Review every active page against the checked revision, applying the principles
+   above. Verify external tracking claims when relevant, correct the content, and
+   only then update that page's review timestamp.
+4. Run [validation](#validation) and complete the independent knowledge review
+   followed by the final naming pass required by
+   [CONTRIBUTING.md](../CONTRIBUTING.md#context-free-reviews).
+5. Submit the revisions in a focused PR linked to its tracking issue. Report the
+   checked revision, reviewed scope, actual check results, and unresolved limits
+   there; keep run-specific reports out of permanent guidance. Follow the existing
+   [PR requirements](../CONTRIBUTING.md#pull-requests).
 
 ## Put information where it belongs
 
@@ -16,28 +71,11 @@ the claims against the linked implementation and evidence.
 | Package boundaries and execution flow | [ARCHITECTURE.md](../ARCHITECTURE.md) |
 | How to locate code, extend it, and exercise it | [Development guide](development.md) |
 | Component-specific details | The component's existing README, linked from the index |
+| Unresolved technical debt | [Technical debt](technical-debt.md) |
 | A complex task's progress and unresolved decisions | A linked plan under `docs/plans/`, created when needed |
 | Completed plans retained as history | [Archived plans](archive/plans/), excluded from routine knowledge checks |
 
-Prefer a link to a maintained definition over another copied command, API list,
-or code example. Record only context that helps someone make a change: purpose,
-ownership, constraints, failure modes, and how to verify it. Link to source files
-and focused tests so the reader can check your claim.
-
-Separate observed implementation from intentional contracts and proposals.
-Do not infer design rationale from a code shape, backfill an approval that did
-not happen, or describe an open issue as shipped. Decision-record work already
-exists in [PR #200](https://github.com/langgenius/graphon/pull/200); consult it
-before starting overlapping work.
-
-## Keep a change self-contained
-
-1. Read the relevant guide and linked code before editing.
-2. Update the guide when changing its behavior, boundary, public name, or path.
-3. Link new knowledge from the index or an already indexed guide. Remove obsolete
-   text rather than accumulating contradictory instructions.
-4. Keep any review date honest: advance it only after checking that page's claims.
-5. Run the documentation check and the behavior checks appropriate to the change.
+## Validation
 
 Use relative inline Markdown links for repository files, including evidence in
 tables. Keep examples inside fenced code blocks. The existing test suite checks
@@ -48,11 +86,15 @@ links in root Markdown files and Markdown files under `docs/`, `src/`, and
 uv run pytest -n 0 tests/test_repository_docs.py
 ```
 
-The check catches missing local paths and enforces reachability from `AGENTS.md`
-for `ARCHITECTURE.md` and active pages under `docs/`, plus the review metadata below.
+The [documentation check](../tests/test_repository_docs.py) catches missing local
+paths and enforces reachability from `AGENTS.md` for `ARCHITECTURE.md` and active
+pages under `docs/`, plus the review metadata below.
 It does not validate heading anchors, external URLs, reference-style links, or
 prose accuracy. When it fails, repair the link, add a route from an indexed page,
 or review the overdue document; do not weaken the check to hide obsolete knowledge.
+Manually verify affected heading anchors, external references, and examples that
+the checker cannot validate. Run the relevant behavior checks and broader
+[repository validation](../CONTRIBUTING.md#testing-and-validation) for the change.
 
 ## Document metadata and review deadline
 
@@ -146,18 +188,14 @@ required by [Development Style](../CONTRIBUTING.md#context-free-reviews) before
 the final naming pass. Give the subagent the revision's requirements and diff so
 it can identify the affected knowledge through the index and relevant links.
 
-Limit both review and edits exclusively to information relevant to this revision:
-changed behavior, APIs, workflows, affected guides, and their navigation or
-source/test references. A document being touched does not make every section
-in scope. Do not turn this step into a repository-wide audit or unrelated cleanup.
+For a normal development change, limit this review and its edits to the revision's
+changed behavior, APIs, workflows, guides, and references. Touching a document
+does not bring every section into scope. A full inspection is a separate
+[explicitly requested or scheduled workflow](#repository-wide-inspections), not
+an automatic addition to every code change.
 
-The subagent must compare relevant claims against current source, tests, and
-requirements, then apply necessary corrections. Remove redundant explanations,
-prefer links to maintained definitions, and shorten detail that does not help
-with the revised behavior or workflow. Preserve required rules, compatibility
-guidance, useful decisions, and supporting evidence. Do not make edits merely to
-produce a cleanup diff.
-
-After editing, repair affected links and run the documentation check above.
-Report the changes made, or that no relevant cleanup was needed. Keep review
-dates limited to claims actually checked. Broader audits remain outside this step.
+The independent reviewer applies the [maintenance principles](#repository-knowledge-maintenance)
+to the relevant claims and makes necessary corrections itself. After edits, repair
+affected links and run the documentation check. Report the changes made or that
+no relevant cleanup was needed; keep review dates limited to whole pages actually
+checked.
