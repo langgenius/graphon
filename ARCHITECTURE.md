@@ -121,8 +121,7 @@ events; [filter_engine_events](src/graphon/engine/filter/chain.py) and
 [ResponseStreamFilter](src/graphon/engine/filter/builtin/response_stream/filter.py)
 can transform that stream separately. See [raw-event tests](tests/engine/test_raw_engine_events.py)
 and [filter tests](tests/engine/test_event_filters.py). For restoring response
-filters, follow the [migration guide](MIGRATION.md#persisted-state) and
-[restore tests](tests/engine/test_response_stream_filter.py).
+filters, follow the [restore tests](tests/engine/test_response_stream_filter.py).
 
 ## State and execution invariants
 
