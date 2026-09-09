@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
+from dataclasses import asdict
 from enum import StrEnum, auto
 from typing import Any, cast
 from uuid import uuid4
@@ -161,7 +162,7 @@ def loads(
             str(error),
             code="graph.validation_failed",
             kind=plan.document.kind,
-            details={"issues": [issue.__dict__ for issue in error.issues]},
+            details={"issues": [asdict(issue) for issue in error.issues]},
         ) from error
     except Exception as error:
         raise _dsl_error(

@@ -8,6 +8,85 @@ By default, use `just` for routine development. Direct
 [`pytest`](https://docs.pytest.org/), and [`prek`](https://prek.j178.dev/)
 usage is still fine when you need a targeted command.
 
+## Development Style
+
+Read and follow this section at the start of every development workflow,
+including work performed by agents.
+
+### Tests first
+
+Follow test-driven development for behavior changes and bug fixes:
+
+1. Write or update the smallest behavior-focused test that expresses the
+   requirement or reproduces the bug before writing the implementation.
+2. Run the test and confirm it fails for the intended missing or incorrect
+   behavior. Unrelated setup or fixture failures do not establish this. If the
+   test already passes, investigate whether the behavior already exists or the
+   test misses the problem before changing the implementation.
+3. Delegate review of the tests and their observed failure to a
+   [fresh, context-free subagent](#context-free-reviews). Resolve its findings
+   before implementation.
+4. Write the minimum implementation needed to make the test pass, then run it
+   again to confirm the result.
+5. Refactor with the tests kept green, then run the relevant broader checks from
+   [Testing and Validation](#testing-and-validation).
+
+Choose tests around observable behavior and meaningful scenarios. Avoid overly
+fine-grained tests for every helper or private method. Assert only what the
+requirement depends on; do not assume internal call order, private structure, or
+unrelated outputs. Keep fixtures, mocks, and input assumptions limited to what
+the scenario needs, and ground expected results in the intended behavior.
+
+### Concrete names
+
+Use simple, intuitive, easily understood words for functions, methods, files,
+classes, and variables. Name functions and methods for what they do, files and
+classes for what they contain or represent, and variables for the values they
+hold. Avoid names built around abstract concepts or generic design-pattern
+labels that hide the actual action or data.
+
+Prefer concrete names such as `load_graph`, `Graph`, `node_ids`, and `graph.py`.
+Keep names concise without obscure abbreviations or loss of meaning.
+
+### Context-free reviews
+
+Delegate test review, knowledge review, and the final naming pass to separate,
+newly spawned subagents. Start each with no inherited conversation history
+(`fork_turns="none"` when using `spawn_agent`); do not reuse an implementation
+agent or an earlier reviewer. Supply only the task requirements, repository
+location, files or diff to review, repository rules, and relevant test
+commands/results. Do not pass the parent agent's plan, implementation narrative,
+or previous review conclusions. The subagent should inspect repository source,
+tests, and callers independently.
+
+- **Test review:** the subagent checks that tests express the requirements, fail
+  for the intended reason, use meaningful behavioral scenarios, and avoid
+  excessive granularity or unsupported assumptions. Resolve findings and have
+  the revised tests reviewed by a new context-free subagent. Later changes to
+  test behavior or assertions also require a fresh review; mechanical reference
+  updates during renaming only require verification.
+- **Knowledge review:** after each development cycle's implementation and
+  ordinary checks, an independent subagent reviews and updates the knowledge
+  relevant exclusively to the current revision. It must correct outdated
+  information, remove redundancy, and shorten overly detailed material where
+  needed, applying the edits itself. Follow the
+  [scope and validation guidance](docs/maintenance.md#review-for-drift).
+  Complete this review before the final naming pass.
+- **Final naming pass:** after implementation, refactoring, test and knowledge
+  reviews, all other reviews and fixes, documentation, and ordinary validation
+  are complete, spawn a new context-free naming subagent. It must identify and
+  rename non-compliant function, method, file, class, and variable names
+  introduced or changed by the task. Reporting suggestions alone does not complete
+  the pass.
+  Update affected callers, imports, tests, and documentation as part of each
+  rename, preserving behavior and following repository compatibility rules.
+  Keep renames within the task's scope.
+
+After the naming subagent finishes, rerun the checks affected by its renames and
+inspect the diff before handoff. If further substantive development is needed,
+complete it and repeat the knowledge review followed by the final naming pass,
+each with a new context-free subagent.
+
 ## Development Setup
 
 ### Requirements
@@ -210,8 +289,8 @@ When you open a pull request:
   section is not applicable, say so explicitly
 - if CLA Assistant prompts you, sign [CLA.md](CLA.md) in the pull request
   conversation before merge
-- add or update tests for behavior changes unless the change genuinely does not
-  require them
+- follow [Development Style](#development-style) for tests, independent reviews,
+  and the final naming pass
 - update contributor-facing or user-facing documentation when needed
 
 ## CLA

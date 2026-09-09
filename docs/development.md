@@ -1,5 +1,8 @@
 # Development navigation
 
+At the start of every development workflow, read and follow
+[Development Style](../CONTRIBUTING.md#development-style).
+
 Read [CONTRIBUTING.md](../CONTRIBUTING.md) for setup, validation commands, CI,
 and contribution rules. This page connects changes to the code and tests that
 define their behavior; it does not replace those rules.
@@ -20,26 +23,33 @@ define their behavior; it does not replace those rules.
 
 ## Add or extend a node
 
-1. Read the closest existing implementation and its tests. Define validated data
+1. Read the closest existing implementation and its tests. Write behavior tests
+   next to the related node tests and run them to confirm the intended failure
+   before implementing the node. If DSL support changes, exercise `loads()` as
+   well. For changes to branching, outputs, failure handling, or containers,
+   assert the complete engine behavior using the existing
+   [workflow tests](../tests/workflows/test_full_engine_events.py).
+   Complete the [context-free test review](../CONTRIBUTING.md#context-free-reviews)
+   before implementation.
+2. Define validated data
    with [BaseNodeData](../src/graphon/entities/base_node_data.py), then subclass
    `Node[YourNodeData]`. Supply `node_type`, a numeric-string `version()`, and
    `_run()`. Existing nodes such as [StartNode](../src/graphon/nodes/start/start_node.py)
    show the result-returning form; streaming nodes emit node event payloads.
-2. Import the node module during host bootstrap. Subclasses register when their
+3. Import the node module during host bootstrap. Subclasses register when their
    modules are imported; registry lookup does not discover or import packages.
    Registration alone does not add support to the default DSL importer:
    [SlimDslNodeFactory.NODE_BUILDERS](../src/graphon/dsl/node_factory.py) explicitly
    controls that surface and wires its dependencies.
-3. For a custom host factory, follow [NodeFactory](../src/graphon/graph/graph.py).
+4. For a custom host factory, follow [NodeFactory](../src/graphon/graph/graph.py).
    `validate_node()` must resolve the same class/version as `create_node()` without
    constructing nodes, initializing services, or mutating execution state.
    `with_runtime_state()` and `with_graph_config()` must keep parent and sibling
    frames isolated. `post_init()` runs in the node constructor, so the scoped
    graph config must already be bound then.
-4. Add coverage next to the related node tests. If DSL support changes, exercise
-   `loads()` as well. If the change affects branching, outputs, failure handling,
-   or containers, assert the complete engine behavior using the existing
-   [workflow tests](../tests/workflows/test_full_engine_events.py).
+5. Run the tests again to confirm they pass, then refactor with the tests kept
+   green. Complete the [validation and final reviews](#validate-the-behavior-you-changed)
+   described below.
 
 ## Integrate host services
 
@@ -92,6 +102,9 @@ Before handing off a code change, follow the validation sequence in
 [CONTRIBUTING.md](../CONTRIBUTING.md#testing-and-validation). `just test` and
 `just tc` apply formatting and lint fixes, so review the diff afterward.
 For dependency changes, update [uv.lock](../uv.lock) with the package metadata.
+Complete the [knowledge review](maintenance.md#review-for-drift) for the current
+revision. Once all other development steps are complete, finish with the
+[context-free naming pass and rename verification](../CONTRIBUTING.md#context-free-reviews).
 
 ## Runtime pitfalls
 
@@ -111,6 +124,12 @@ For dependency changes, update [uv.lock](../uv.lock) with the package metadata.
   [the factory](../src/graphon/dsl/node_factory.py) before promising import support.
   Its default file adapters reject unsupported file operations; adding host file
   support also requires wiring the appropriate node dependencies.
+- Default graph construction checks input and topology throughout the retained
+  subtree before constructing nodes; root type is checked on the resolved node.
+  Use acyclic edges inside each container; invalid fields or duplicate IDs
+  are rejected instead of being silently discarded. See the
+  [graph validation migration notes](../MIGRATION.md#graph-validation) for the
+  supported defaults and trusted validation bypasses.
 
 When a change alters these workflows, update this page and the linked source or
 tests in the same change. Put user-visible compatibility changes in

@@ -4,6 +4,10 @@ All agents working in this repository must follow the guidance in
 [CONTRIBUTING.md](CONTRIBUTING.md). If there is any ambiguity, treat
 `CONTRIBUTING.md` as the source of truth.
 
+At the start of every development workflow, read and follow
+[Development Style](CONTRIBUTING.md#development-style), including the required
+independent test review, knowledge review, and final naming pass.
+
 ## Where to start
 
 - [README.md](README.md): project overview and runnable examples.

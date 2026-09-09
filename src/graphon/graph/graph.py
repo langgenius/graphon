@@ -15,7 +15,12 @@ from graphon.nodes.base.node import Node
 
 from .edge import Edge
 from .scoping import resolve_container_id
-from .validation import get_graph_validator
+from .validation import (
+    GraphValidationError,
+    GraphValidationIssue,
+    get_edge_issues,
+    get_graph_validator,
+)
 
 if TYPE_CHECKING:
     from graphon.runtime.runtime_state import RuntimeState
@@ -195,11 +200,8 @@ class Graph:
         out_edges: dict[str, list[str]] = defaultdict(list)
 
         for edge_config in edge_configs:
-            source = edge_config.get("source")
-            target = edge_config.get("target")
-
-            if not isinstance(source, str) or not isinstance(target, str):
-                continue
+            source = edge_config["source"]
+            target = edge_config["target"]
 
             edge_id = edge_config["id"]
             if edge_id in edge_ids:
@@ -208,8 +210,6 @@ class Graph:
             edge_ids.add(edge_id)
 
             source_handle = edge_config.get("sourceHandle", "source")
-            if not isinstance(source_handle, str):
-                continue
 
             edge = Edge(
                 id=edge_id,
@@ -229,24 +229,20 @@ class Graph:
         graph_config: Mapping[str, Any],
         container_ids: Mapping[str, str],
     ) -> list[dict[str, Any]]:
-        """Copy edge configs and ensure every valid edge has a public DSL ID.
+        """Validate edge fields and copy configs with public DSL IDs.
 
-        An edge is valid for legacy numbering when both ``source`` and
-        ``target`` are strings. Missing IDs start with the historical
-        ``edge_N`` ordinal, including edges later ignored because another field
-        is invalid, and advance only when that ID was supplied or generated
-        elsewhere. Supplied IDs are reserved within their owning graph before
+        Missing IDs start with the historical ``edge_N`` ordinal and advance
+        past IDs supplied or generated elsewhere in the same scope.
+        Supplied IDs are reserved within their owning graph before
         generation, making mixed explicit and fallback IDs independent of
         config order without preventing separate graphs from reusing a local
         ID. The generated public ID is retained in scoped graph configs, so
         child graphs use the same ID when they are materialized later. Supplied
         IDs must be non-empty strings.
 
-        Duplicate IDs are deliberately not checked here because this method
-        sees a container subtree, not one materialized graph. ``_build_edges``
-        enforces uniqueness after scoping, allowing separate child graphs to
-        reuse the same local edge ID. Each edge dictionary is copied before an
-        ID is added, so the caller's config is never mutated.
+        Duplicate IDs are rejected within their owning scope, allowing separate
+        child graphs to reuse the same local edge ID. Each dictionary is copied
+        before an ID is added, so the caller's config is never mutated.
 
         Args:
             graph_config: Complete or previously scoped workflow graph config.
@@ -256,6 +252,7 @@ class Graph:
             Copied edge dictionaries carrying public DSL edge IDs.
 
         Raises:
+            GraphValidationError: If edge fields or scoped edge IDs are invalid.
             ValueError: If a supplied edge ID is not a non-empty string.
 
         """
@@ -267,15 +264,26 @@ class Graph:
         ]
         edge_container_ids: list[str | None] = []
         reserved_edge_ids: defaultdict[str | None, set[str]] = defaultdict(set)
-        for edge_config in edge_configs:
+        for edge_index, edge_config in enumerate(edge_configs):
             source = edge_config.get("source")
             target = edge_config.get("target")
-            source_container_id = (
-                container_ids.get(source) if isinstance(source, str) else None
-            )
-            target_container_id = (
-                container_ids.get(target) if isinstance(target, str) else None
-            )
+            for field, value in (
+                ("source", source),
+                ("target", target),
+                ("sourceHandle", edge_config.get("sourceHandle", "source")),
+            ):
+                if not isinstance(value, str):
+                    raise GraphValidationError([
+                        GraphValidationIssue(
+                            code="INVALID_EDGE",
+                            message=(
+                                f"Graph edge at index {edge_index}: "
+                                f"{field} must be a string."
+                            ),
+                        )
+                    ])
+            source_container_id = container_ids.get(source)
+            target_container_id = container_ids.get(target)
             edge_container_id = (
                 source_container_id
                 if source_container_id is not None
@@ -285,32 +293,37 @@ class Graph:
             edge_container_ids.append(edge_container_id)
             edge_id = edge_config.get("id")
             if isinstance(edge_id, str) and edge_id:
+                if (
+                    edge_container_id is not None
+                    and edge_id in reserved_edge_ids[edge_container_id]
+                ):
+                    raise GraphValidationError([
+                        GraphValidationIssue(
+                            code="DUPLICATE_EDGE_ID",
+                            message=(
+                                f"Duplicate graph edge ID: {edge_id} "
+                                f"in scope {edge_container_id!r}"
+                            ),
+                        )
+                    ])
                 reserved_edge_ids[edge_container_id].add(edge_id)
 
-        edge_counter = 0
-        for edge_config, edge_container_id in zip(
-            edge_configs,
-            edge_container_ids,
-            strict=True,
+        for edge_index, (edge_config, edge_container_id) in enumerate(
+            zip(edge_configs, edge_container_ids, strict=True),
         ):
             if "id" in edge_config and (
                 not isinstance(edge_config["id"], str) or not edge_config["id"]
             ):
                 msg = "Graph edge ID must be a non-empty string"
                 raise ValueError(msg)
-            source = edge_config.get("source")
-            target = edge_config.get("target")
-            if not isinstance(source, str) or not isinstance(target, str):
-                continue
             if "id" not in edge_config:
-                fallback_index = edge_counter
+                fallback_index = edge_index
                 edge_id = f"edge_{fallback_index}"
                 while edge_id in reserved_edge_ids[edge_container_id]:
                     fallback_index += 1
                     edge_id = f"edge_{fallback_index}"
                 edge_config["id"] = edge_id
                 reserved_edge_ids[edge_container_id].add(edge_id)
-            edge_counter += 1
         return edge_configs
 
     @classmethod
@@ -370,25 +383,42 @@ class Graph:
             Copied node configurations with canonical container IDs, followed by
             the same IDs indexed by node ID. ``""`` identifies the root graph.
 
+        Raises:
+            GraphValidationError: If node IDs are invalid or duplicated.
+
         """
         normalized_nodes = [
             dict(node_config)
             for node_config in node_configs
             if node_config.get("type", "") != "custom-note"
         ]
-        nodes_by_id = {
-            node_id: node_config
-            for node_config in normalized_nodes
-            if isinstance((node_id := node_config.get("id")), str)
-        }
+        nodes_by_id: dict[str, dict[str, Any]] = {}
+        for node_config in normalized_nodes:
+            node_id = node_config.get("id")
+            if not isinstance(node_id, str) or not node_id:
+                raise GraphValidationError([
+                    GraphValidationIssue(
+                        code="INVALID_NODE_ID",
+                        message=(
+                            f"Graph node ID must be a non-empty string: {node_id!r}"
+                        ),
+                    )
+                ])
+            if node_id in nodes_by_id:
+                raise GraphValidationError([
+                    GraphValidationIssue(
+                        code="DUPLICATE_NODE_ID",
+                        message=f"Duplicate graph node ID: {node_id}",
+                        node_id=node_id,
+                    )
+                ])
+            nodes_by_id[node_id] = node_config
         container_ids = {
             node_id: resolve_container_id(node_config, nodes_by_id=nodes_by_id)
             for node_id, node_config in nodes_by_id.items()
         }
         for node_config in normalized_nodes:
-            node_id = node_config.get("id")
-            if not isinstance(node_id, str):
-                continue
+            node_id = node_config["id"]
             data = node_config.get("data")
             if isinstance(data, BaseNodeData):
                 normalized_data = data.model_dump(mode="python", exclude_unset=True)
@@ -452,10 +482,8 @@ class Graph:
         direct_edge_configs: list[dict[str, Any]] = []
         subtree_edge_configs: list[dict[str, Any]] = []
         for edge_config in edge_configs:
-            source = edge_config.get("source")
-            target = edge_config.get("target")
-            if not isinstance(source, str) or not isinstance(target, str):
-                continue
+            source = edge_config["source"]
+            target = edge_config["target"]
 
             if (
                 source in container_ids
@@ -552,7 +580,6 @@ class Graph:
         :param active_root_id: ID of the active root node
         """
         # Find all top-level root nodes
-        # (nodes with ROOT execution type and no incoming edges)
         top_level_roots: list[str] = [
             node.id
             for node in nodes.values()
@@ -572,11 +599,15 @@ class Graph:
             if root_id in nodes:
                 nodes[root_id].state = NodeState.SKIPPED
 
+        # Unchecked graphs can contain cycles or missing targets.
+        visited_node_ids: set[str] = set()
+
         # Recursively mark downstream nodes and edges
         def mark_downstream(node_id: str) -> None:
             """Recursively mark downstream nodes and edges as skipped."""
-            if nodes[node_id].state != NodeState.SKIPPED:
+            if node_id in visited_node_ids or nodes[node_id].state != NodeState.SKIPPED:
                 return
+            visited_node_ids.add(node_id)
             # If this node is skipped, mark all its outgoing edges as skipped
             out_edge_ids = out_edges.get(node_id, [])
             for edge_id in out_edge_ids:
@@ -584,7 +615,9 @@ class Graph:
                 edge.state = NodeState.SKIPPED
 
                 # Check the target node of this edge
-                target_node = nodes[edge.head]
+                target_node = nodes.get(edge.head)
+                if target_node is None:
+                    continue
                 in_edge_ids = in_edges.get(target_node.id, [])
                 in_edge_states = [edges[eid].state for eid in in_edge_ids]
 
@@ -597,6 +630,30 @@ class Graph:
         # Process each inactive root and its downstream nodes
         for root_id in inactive_roots:
             mark_downstream(root_id)
+
+    @staticmethod
+    def _validate_subtree_edges(
+        graph_config: Mapping[str, Any],
+        container_ids: Mapping[str, str],
+    ) -> None:
+        """Validate retained subtree edges before any node is constructed."""
+        issues = get_edge_issues(
+            {
+                node_config["id"]: container_ids[node_config["id"]]
+                for node_config in graph_config["nodes"]
+            },
+            (
+                Edge(
+                    id=edge_config["id"],
+                    tail=edge_config["source"],
+                    head=edge_config["target"],
+                    source_handle=edge_config.get("sourceHandle", "source"),
+                )
+                for edge_config in graph_config["edges"]
+            ),
+        )
+        if issues:
+            raise GraphValidationError(issues)
 
     @classmethod
     def init(
@@ -614,6 +671,8 @@ class Graph:
         :param node_factory: factory for creating node instances from config data
         :param root_node_id: active root node id
         :param container_id: direct container scope to materialize; empty for root
+        :param skip_validation: bypass endpoint existence, root type, and cycle
+            checks; input fields, IDs, schemas, and ownership are still validated
 
         Returns:
             Initialized graph instance rooted at `root_node_id`.
@@ -674,6 +733,12 @@ class Graph:
         if root_node_id not in node_configs_map:
             msg = f"Root node id {root_node_id} not found in the graph"
             raise ValueError(msg)
+
+        if not skip_validation:
+            cls._validate_subtree_edges(
+                scoped_graph_config,
+                container_ids,
+            )
 
         # Build edges
         edges, in_edges, out_edges = cls._build_edges(direct_edge_configs)
@@ -845,8 +910,8 @@ class GraphBuilder:
         return graph
 
     def _register_node(self, node: Node) -> None:
-        if not node.id:
-            msg = "Node must have a non-empty id"
+        if not isinstance(node.id, str) or not node.id:
+            msg = "Node must have a non-empty string id"
             raise ValueError(msg)
         if node.id in self._nodes_by_id:
             msg = f"Duplicate node id detected: {node.id}"
