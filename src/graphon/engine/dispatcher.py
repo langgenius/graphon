@@ -92,6 +92,11 @@ class Dispatcher:
 
     def _dispatcher_loop(self) -> None:
         """Main dispatcher loop."""
+        with self._graph_execution.track_execution():
+            self._dispatch_until_complete()
+
+    def _dispatch_until_complete(self) -> None:
+        """Process results and publish completion before releasing activity."""
         try:
             paused = self._run_until_exit()
             self._finish_dispatching(paused)

@@ -266,6 +266,11 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
     def dumps(self) -> str:
         """Serialize runtime state into a version 3 JSON string.
 
+        Finish consuming or close the engine run iterator and wait for all
+        execution threads to stop first. The guard is shared by child frames and
+        excludes engine startup and other snapshots throughout serialization.
+        Hosts must also avoid concurrent direct mutations of runtime objects.
+
         A restored state with a graph-aware migration must first attach its graph
         so persisted identities can be converted safely. Refusing to serialize
         before that point prevents unconverted data from being labeled current.
@@ -274,7 +279,8 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
             The complete version 3 runtime snapshot as JSON.
 
         Raises:
-            RuntimeError: If a snapshot migration is waiting for graph attachment.
+            RuntimeError: If execution is active or a snapshot migration is
+                waiting for graph attachment.
 
         """
         if self._graph_state_migration is not None:
@@ -285,7 +291,8 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
             raise RuntimeError(msg)
         from .v3 import dumps  # ruff:ignore[import-outside-top-level]
 
-        return dumps(self)
+        with self._graph_execution.lock_for_snapshot():
+            return dumps(self)
 
     @classmethod
     def from_snapshot(

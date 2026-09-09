@@ -137,6 +137,16 @@ IDs after migration. See
 [runtime tests](tests/runtime/test_runtime_state.py), and
 [version-isolation test](tests/test_snapshot_version_isolation.py).
 
+**Public snapshots require quiescence.** `RuntimeState.dumps()` and its read-only
+wrapper reject active engine runs and execution threads, including pause draining
+and threads that outlive shutdown timeouts. A transient guard on the shared
+[GraphExecution](src/graphon/runtime/execution.py) covers all frames and excludes
+execution startup and other snapshot writers throughout serialization. Internal
+frame snapshots remain engine operations. See
+[snapshot eligibility](MIGRATION.md#snapshot-eligibility) for persistence timing
+and host responsibilities, and
+[serialization tests](tests/engine/test_runtime_state_serialization.py) for evidence.
+
 ## Extension seams
 
 | Change | Start here | Existing check |

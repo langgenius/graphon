@@ -201,17 +201,21 @@ class Engine:
 
         """
         try:
-            yield from self._run_graph()
-        except Exception as error:
-            failed_event = GraphRunFailedEvent(
-                error=str(error),
-                exceptions_count=self._graph_execution.exceptions_count,
-            )
-            self._event_stream.notify_layers(failed_event)
-            yield failed_event
-            raise
+            with self._graph_execution.track_execution():
+                try:
+                    yield from self._run_graph()
+                except Exception as error:
+                    failed_event = GraphRunFailedEvent(
+                        error=str(error),
+                        exceptions_count=self._graph_execution.exceptions_count,
+                    )
+                    self._event_stream.notify_layers(failed_event)
+                    yield failed_event
+                    raise
+                finally:
+                    self._stop_execution()
         finally:
-            self._stop_execution()
+            self._notify_graph_end()
 
     def _run_graph(self) -> Generator[EngineEvent, None, None]:
         self._event_stream.reset()
@@ -348,7 +352,8 @@ class Engine:
         self._worker_pool.stop()
         # Don't mark complete here as the dispatcher already does it
 
-        # Notify layers
+    def _notify_graph_end(self) -> None:
+        """Notify layers after teardown so quiescent state can be persisted."""
         for layer in self._layers:
             try:
                 layer.on_graph_end(self._graph_execution.error)

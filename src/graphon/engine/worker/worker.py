@@ -122,6 +122,16 @@ class Worker(threading.Thread):
         Continuously pulls node IDs from ready_queue, executes them,
         and pushes results to the dispatch queue until stopped.
         """
+        frames = self._frame_registry.frames()
+        with (
+            frames[0].state.graph_execution.track_execution()
+            if frames
+            else nullcontext()
+        ):
+            self._run_tasks()
+
+    def _run_tasks(self) -> None:
+        """Acquire and execute tasks until this worker is stopped."""
         while not self._stop_event.is_set():
             with self._task_acquisition_lock:
                 if not self._task_acquisition_enabled.is_set():

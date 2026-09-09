@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import queue
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from threading import Event, Lock
+from threading import Event, Lock, Thread, current_thread
 from time import monotonic, sleep
 from types import SimpleNamespace
 from typing import Any, ClassVar, cast
@@ -20,6 +20,7 @@ from graphon.dsl.node_factory import SlimDslNodeFactory
 from graphon.engine import Engine
 from graphon.engine.container_handler import LoopContainerHandler
 from graphon.engine.frame import ExecutionFrame, FrameRegistry
+from graphon.engine.layer import Layer
 from graphon.engine.ready_queue.entities import ResumeTask, StartTask
 from graphon.engine.ready_queue.in_memory import InMemoryReadyQueue
 from graphon.engine.scheduler import Scheduler
@@ -28,6 +29,7 @@ from graphon.engine_events.base import EngineEvent
 from graphon.engine_events.graph import (
     GraphRunPausedEvent,
     GraphRunStartedEvent,
+    GraphRunSucceededEvent,
 )
 from graphon.engine_events.iteration import (
     NodeRunIterationStartedEvent,
@@ -39,6 +41,7 @@ from graphon.engine_events.loop import (
 )
 from graphon.engine_events.node import (
     NodeRunPauseRequestedEvent,
+    NodeRunStartedEvent,
     NodeRunSucceededEvent,
 )
 from graphon.entities.graph_config import NodeConfigDict
@@ -324,6 +327,261 @@ def _complete_iteration_hitl(context: HITLContext) -> Completed:
     item = context.variable_pool.get(("iteration", "item"))
     assert item is not None
     return _completed_hitl(f"{item.text}!")
+
+
+def _try_snapshot(dumps: Callable[[], str]) -> str | Exception:
+    """Keep snapshot failures observable outside exception-isolating callbacks."""
+    try:
+        return dumps()
+    except Exception as error:  # ruff: ignore[blind-except]
+        return error
+
+
+def test_runtime_snapshot_rejects_active_callbacks() -> None:
+    state = _new_runtime_state({})
+    snapshots: dict[str, str | Exception] = {}
+
+    class SnapshotLayer(Layer):
+        def on_graph_start(self) -> None:
+            snapshots["graph_start"] = _try_snapshot(self.runtime_state.dumps)
+
+        def on_event(self, event: EngineEvent) -> None:
+            if isinstance(
+                event,
+                (GraphRunStartedEvent, NodeRunSucceededEvent, GraphRunSucceededEvent),
+            ):
+                snapshots[type(event).__name__] = _try_snapshot(
+                    self.runtime_state.dumps
+                )
+
+        def on_node_run_start(self, node: Node) -> None:
+            snapshots["node_start"] = _try_snapshot(self.runtime_state.dumps)
+            snapshots["node_runtime"] = _try_snapshot(node.runtime_state.dumps)
+
+        def on_graph_end(self, error: Exception | None) -> None:
+            _ = error
+            snapshots["graph_end"] = _try_snapshot(self.runtime_state.dumps)
+
+    engine = _hitl_engine(
+        _graph_dsl(nodes=[_start_node()], edges=[]),
+        runtime_state=state,
+        callback=_complete_loop_hitl,
+    )
+    engine.add_layer(SnapshotLayer())
+    assert RuntimeState.from_snapshot(state.dumps()).dumps()
+    events = engine.run()
+    assert isinstance(next(events), GraphRunStartedEvent)
+    snapshots["started_iterator"] = _try_snapshot(state.dumps)
+    assert isinstance(list(events)[-1], GraphRunSucceededEvent)
+
+    completed = state.dumps()
+    assert RuntimeState.from_snapshot(completed).dumps()
+    assert isinstance(snapshots.pop("graph_end"), str)
+    assert set(snapshots) == {
+        "graph_start",
+        "GraphRunStartedEvent",
+        "GraphRunSucceededEvent",
+        "NodeRunSucceededEvent",
+        "node_start",
+        "node_runtime",
+        "started_iterator",
+    }
+    assert all(isinstance(result, RuntimeError) for result in snapshots.values()), {
+        name: type(result).__name__ for name, result in snapshots.items()
+    }
+
+
+def test_runtime_snapshot_rejects_paused_workers_and_child_frames() -> None:
+    state = _new_runtime_state({"items": ["alpha", "beta"]})
+    alpha_started = Event()
+    child_states: list[RuntimeState] = []
+    snapshots: list[str | Exception] = []
+
+    class ChildStateLayer(Layer):
+        def on_node_run_start(self, node: Node) -> None:
+            if node.id == "human-input":
+                item = node.runtime_state.variable_pool.get(("iteration", "item"))
+                if item is not None and item.text == "alpha":
+                    child_states.append(node.runtime_state)
+
+    layer = ChildStateLayer()
+
+    def pause_with_active_sibling(context: HITLContext) -> Completed | PauseRequested:
+        item = context.variable_pool.get(("iteration", "item"))
+        assert item is not None
+        if item.text == "beta":
+            assert alpha_started.wait(timeout=2)
+            return PauseRequested(session_id="session-beta")
+        alpha_started.set()
+        deadline = monotonic() + 2
+        while not state.graph_execution.paused:
+            assert monotonic() < deadline
+            sleep(0.001)
+        snapshots.extend([
+            _try_snapshot(layer.runtime_state.dumps),
+            _try_snapshot(child_states[0].dumps),
+        ])
+        return _completed_hitl("alpha!")
+
+    engine = _hitl_engine(
+        _iteration_dsl(), runtime_state=state, callback=pause_with_active_sibling
+    )
+    engine.add_layer(layer)
+    snapshot, _ = _snapshot_after_hitl_pause(engine)
+    restored = RuntimeState.from_snapshot(snapshot)
+    assert restored.dumps()
+    resumed = list(
+        _hitl_engine(
+            _iteration_dsl(),
+            runtime_state=restored,
+            callback=_complete_iteration_hitl,
+        ).run()
+    )
+
+    assert child_states[0] is not state
+    assert final_outputs(resumed) == {"items": ["alpha!", "beta!"]}
+    assert len(snapshots) == 2
+    assert all(isinstance(result, RuntimeError) for result in snapshots), [
+        type(result).__name__ for result in snapshots
+    ]
+
+
+@pytest.mark.parametrize("thread_kind", ["worker", "dispatcher"])
+def test_runtime_snapshot_rejects_thread_alive_after_iterator_close(  # ruff: ignore[complex-structure]
+    thread_kind: str,
+) -> None:
+    state = _new_runtime_state({})
+    thread_blocked = Event()
+    release_thread = Event()
+    blocked_threads: list[Thread] = []
+    worker_threads: set[Thread] = set()
+    released: list[bool] = []
+
+    def block_thread() -> None:
+        blocked_threads.append(current_thread())
+        thread_blocked.set()
+        released.append(release_thread.wait(timeout=10))
+
+    class BlockingLayer(Layer):
+        def on_node_run_start(self, node: Node) -> None:
+            _ = node
+            worker_threads.add(current_thread())
+
+        def on_event(self, event: EngineEvent) -> None:
+            if (
+                thread_kind == "dispatcher"
+                and isinstance(event, NodeRunStartedEvent)
+                and event.node_id == "human-input"
+            ):
+                block_thread()
+
+    def wait_for_release(context: HITLContext) -> Completed:
+        _ = context
+        if thread_kind == "worker":
+            block_thread()
+        return _completed_hitl("done")
+
+    engine = _hitl_engine(
+        _graph_dsl(
+            nodes=[
+                _start_node(),
+                {"id": "human-input", "data": {"type": "human-input"}},
+                _end_node([]),
+            ],
+            edges=[_edge("start", "human-input"), _edge("human-input", "end")],
+        ),
+        runtime_state=state,
+        callback=wait_for_release,
+    )
+    engine.add_layer(BlockingLayer())
+    events = engine.run()
+    try:
+        for event in events:
+            if (
+                isinstance(event, NodeRunStartedEvent)
+                and event.node_id == "human-input"
+            ):
+                break
+        assert thread_blocked.wait(timeout=2)
+        events.close()
+        assert list(events) == []
+        assert blocked_threads[0].is_alive()
+        if thread_kind == "dispatcher":
+            assert worker_threads
+            assert all(not worker.is_alive() for worker in worker_threads)
+        snapshot = _try_snapshot(state.dumps)
+    finally:
+        release_thread.set()
+        events.close()
+        for thread in {*worker_threads, *blocked_threads}:
+            thread.join(timeout=2)
+
+    assert released == [True]
+    assert all(not thread.is_alive() for thread in {*worker_threads, *blocked_threads})
+    assert state.dumps()
+    assert isinstance(snapshot, RuntimeError), type(snapshot).__name__
+
+
+@pytest.mark.parametrize("operation", ["run", "dump"])
+def test_runtime_snapshot_excludes_concurrent_operations(
+    operation: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = _new_runtime_state({})
+    snapshot_started = Event()
+    release_snapshot = Event()
+    operation_started = Event()
+    overlap = Event()
+    results: list[object] = []
+    queue_dumps = state.ready_queue.dumps
+
+    def hold_snapshot() -> str:
+        if snapshot_started.is_set():
+            if not release_snapshot.is_set():
+                overlap.set()
+        else:
+            snapshot_started.set()
+            assert release_snapshot.wait(timeout=2)
+        return queue_dumps()
+
+    class SnapshotOverlapLayer(Layer):
+        def on_graph_start(self) -> None:
+            if not release_snapshot.is_set():
+                overlap.set()
+
+    engine = _hitl_engine(
+        _graph_dsl(nodes=[_start_node()], edges=[]),
+        runtime_state=state,
+        callback=_complete_loop_hitl,
+    )
+    engine.add_layer(SnapshotOverlapLayer())
+    monkeypatch.setattr(state.ready_queue, "dumps", hold_snapshot)
+
+    def run_operation() -> None:
+        operation_started.set()
+        if operation == "run":
+            results.append(list(engine.run()))
+        else:
+            results.append(_try_snapshot(state.dumps))
+
+    snapshot_thread = Thread(target=lambda: results.append(_try_snapshot(state.dumps)))
+    competing_thread = Thread(target=run_operation)
+    snapshot_thread.start()
+    try:
+        assert snapshot_started.wait(timeout=1)
+        competing_thread.start()
+        assert operation_started.wait(timeout=1)
+        overlapped = overlap.wait(timeout=0.1)
+    finally:
+        release_snapshot.set()
+        snapshot_thread.join(timeout=2)
+        if competing_thread.ident is not None:
+            competing_thread.join(timeout=2)
+
+    assert not snapshot_thread.is_alive()
+    assert not competing_thread.is_alive()
+    assert len(results) == 2
+    assert not any(isinstance(result, Exception) for result in results)
+    assert not overlapped
 
 
 def _execution_frame(

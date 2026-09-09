@@ -9,6 +9,10 @@ before upgrading an integration.
 
 ### Changed
 
+- Public runtime snapshots now reject active engine runs and execution threads,
+  including threads still running after shutdown times out. Persist paused state
+  after fully consuming the run iterator, or from a quiescent `on_graph_end` hook.
+  Snapshot formats are unchanged.
 - Graph construction now rejects invalid or duplicate node IDs, malformed edge
   fields, duplicate edge IDs within a scope, and execution cycles
   before constructing configured nodes, including errors in nested scopes.
@@ -31,7 +35,8 @@ before upgrading an integration.
 - Made `NodeFactory.with_runtime_state()` part of the public protocol used to bind
   nodes to child-frame state.
 - Made aborts and fatal failures take precedence over a concurrent pause. Persist
-  resumable state only after receiving `GraphRunPausedEvent`.
+  resumable state only after receiving `GraphRunPausedEvent` and fully consuming
+  the run iterator.
 - Kept loop write-backs explicit and parent-owned while iteration frame state
   remains isolated; external variable-update commands stay authoritative.
 

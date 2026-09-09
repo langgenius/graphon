@@ -70,5 +70,5 @@ class ReadOnlyRuntimeStateWrapper:
         return self._state.get_output(key, default)
 
     def dumps(self) -> str:
-        """Serialize the underlying runtime state for external persistence."""
+        """Serialize quiescent state, enforcing the runtime's snapshot guard."""
         return self._state.dumps()
