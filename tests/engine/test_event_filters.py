@@ -20,7 +20,10 @@ from graphon.runtime.variable_pool import VariablePool
 def _context(state: RuntimeState | None = None) -> EngineEventFilterContext:
     if state is not None:
         return EngineEventFilterContext.from_engine(
-            cast(Any, SimpleNamespace(graph=object(), runtime_state=state))
+            cast(
+                Any,
+                SimpleNamespace(graph=object(), runtime_state=state, file_runtime=None),
+            )
         )
     return EngineEventFilterContext(
         graph=cast(Any, object()),

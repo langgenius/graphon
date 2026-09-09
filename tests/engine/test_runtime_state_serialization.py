@@ -455,6 +455,7 @@ def test_runtime_snapshot_rejects_thread_alive_after_iterator_close(  # ruff: ig
     state = _new_runtime_state({})
     thread_blocked = Event()
     release_thread = Event()
+    finish_node = Event()
     blocked_threads: list[Thread] = []
     worker_threads: set[Thread] = set()
     released: list[bool] = []
@@ -472,7 +473,7 @@ def test_runtime_snapshot_rejects_thread_alive_after_iterator_close(  # ruff: ig
         def on_event(self, event: EngineEvent) -> None:
             if (
                 thread_kind == "dispatcher"
-                and isinstance(event, NodeRunStartedEvent)
+                and isinstance(event, NodeRunSucceededEvent)
                 and event.node_id == "human-input"
             ):
                 block_thread()
@@ -481,6 +482,8 @@ def test_runtime_snapshot_rejects_thread_alive_after_iterator_close(  # ruff: ig
         _ = context
         if thread_kind == "worker":
             block_thread()
+        else:
+            assert finish_node.wait(timeout=10)
         return _completed_hitl("done")
 
     engine = _hitl_engine(
@@ -504,6 +507,7 @@ def test_runtime_snapshot_rejects_thread_alive_after_iterator_close(  # ruff: ig
                 and event.node_id == "human-input"
             ):
                 break
+        finish_node.set()
         assert thread_blocked.wait(timeout=2)
         events.close()
         assert list(events) == []
@@ -513,6 +517,7 @@ def test_runtime_snapshot_rejects_thread_alive_after_iterator_close(  # ruff: ig
             assert all(not worker.is_alive() for worker in worker_threads)
         snapshot = _try_snapshot(state.dumps)
     finally:
+        finish_node.set()
         release_thread.set()
         events.close()
         for thread in {*worker_threads, *blocked_threads}:
