@@ -1,13 +1,13 @@
 <!-- knowledge
-last_checked: "2026-09-08T00:00:00Z"
+last_checked: "2026-09-09T21:00:17Z"
 -->
 # Snapshot eligibility (TD-03)
 
-**Status:** implementation and reviews complete locally, 2026-09-08.
+**Status:** completed; merged in [PR #280](https://github.com/langgenius/graphon/pull/280)
+on 2026-09-09.
 **Tracking:** [issue #279](https://github.com/langgenius/graphon/issues/279),
 [TD-03](../technical-debt.md#td-03--snapshot-consistency-at-the-public-boundary).
-**Branch:** `laipz8200/snapshot-eligibility`, stacked on
-[PR #278](https://github.com/langgenius/graphon/pull/278).
+Built on graph validation in [PR #278](https://github.com/langgenius/graphon/pull/278).
 
 ## Objective and scope
 
@@ -46,11 +46,13 @@ Internal frame snapshots remain part of engine execution.
 
 ## Validation and outcome
 
+These are the 2026-09-08 implementation results; test counts are historical.
+
 `uv run pytest -n 0 tests/engine/test_runtime_state_serialization.py -k test_runtime_snapshot`
 failed all six reviewed cases for the intended missing behavior: active callbacks,
 paused child frames, and workers/dispatchers surviving iterator closure could
 serialize; concurrent startup and snapshot writers overlapped a held snapshot.
-Fresh independent test review completed before implementation; all six cases pass
+Fresh independent test review completed before implementation; all six cases passed
 with the guard in place.
 
 Existing [serialization tests](../../tests/engine/test_runtime_state_serialization.py),
@@ -59,16 +61,16 @@ Existing [serialization tests](../../tests/engine/test_runtime_state_serializati
 containers, task preservation, historical snapshots, and current formats.
 
 The focused serialization/runtime/isolation/dispatch/container/layer-context set
-passes **100 tests**. `just test` passes **821 tests** on Python 3.12.13. An earlier
+passed **100 tests**. `just test` passed **821 tests** on Python 3.12.13. An earlier
 run caught an assumption that standalone workers always have a root frame; the
 guard now uses the shared execution from any registered frame, preserving empty
 and child-only registry controls. An initial full run also hit the existing
 gevent subprocess's ten-second timeout; the final full run passed both variants.
-`just check` and `git diff --check` pass. Independent knowledge review checked
+`just check` and `git diff --check` passed. Independent knowledge review checked
 the guard, lifecycle, child-frame sharing, and unchanged snapshot codecs against
 source and tests, corrected the debt register, and consolidated repeated guidance.
-`uv run pytest -n 0 tests/test_repository_docs.py` passes (**1 test**) after those edits.
+`uv run pytest -n 0 tests/test_repository_docs.py` passed (**1 test**) after those edits.
 The independent final naming pass renamed the snapshot lock method and test
-helpers/variables without changing behavior; all six regression cases pass after
+helpers/variables without changing behavior; all six regression cases passed after
 the renames. Publication is tracked through issue #279.
 Python 3.13 and live external integrations were not exercised locally.

@@ -1,16 +1,15 @@
 <!-- knowledge
-last_checked: "2026-09-08T20:47:59Z"
+last_checked: "2026-09-09T20:55:58Z"
 -->
 # Runtime and public contract imports
 
-**Status:** initial implementation and architectural layering follow-up completed
-locally, 2026-09-09.
-**Owner:** current development task on `laipz8200/runtime-import-boundaries`.
+**Status:** completed, including the architectural layering follow-up; merged
+in [PR #287](https://github.com/langgenius/graphon/pull/287) on 2026-09-09.
 **Tracking:** [implementation issue #286](https://github.com/langgenius/graphon/issues/286),
 [TD-01 and TD-05](../technical-debt.md), originating in
 [architecture review #275](https://github.com/langgenius/graphon/issues/275).
-The change is published in [PR #287](https://github.com/langgenius/graphon/pull/287),
-stacked on [PR #285](https://github.com/langgenius/graphon/pull/285).
+Built on knowledge metadata checks in
+[PR #285](https://github.com/langgenius/graphon/pull/285).
 
 ## Objective and scope
 
@@ -45,6 +44,8 @@ local and CI checks.
   initializer effects that static dependency checks do not represent.
 
 ## Initial implementation validation and outcome
+
+The results in this plan are historical implementation checks from 2026-09-09.
 
 Before implementation, the two fresh-process tests failed at the intended engine
 import and registry assertions; existing public export checks passed. Import

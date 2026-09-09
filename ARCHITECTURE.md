@@ -1,9 +1,9 @@
 <!-- knowledge
-last_checked: "2026-09-08T00:00:00Z"
+last_checked: "2026-09-09T20:55:58Z"
 -->
 # Architecture
 
-Current implementation, verified against source and tests on 2026-09-08.
+Current implementation; the metadata records the latest source and test review.
 This is a navigation map, not a record of historical design decisions.
 Contributor commands and contribution rules live in [CONTRIBUTING.md](CONTRIBUTING.md).
 

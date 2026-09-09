@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-09-08T17:06:45Z"
+last_checked: "2026-09-09T20:55:58Z"
 -->
 # Repository knowledge
 
@@ -49,13 +49,14 @@ exercised. Linked tests show where to verify a change;
 
 The [documentation test](../tests/test_repository_docs.py) checks local file
 links, whether this knowledge base is reachable from [AGENTS.md](../AGENTS.md),
-and whether every maintained page has been checked within seven days. It runs
+and whether every maintained page has been checked within seven days. Reachability
+is enforced for `ARCHITECTURE.md` and pages under `docs/`. It runs
 as part of the normal pytest suite in CI. Recorded timestamps do not
 prove that prose matches behavior; review source and tests when updating a page.
 
 ## Related work
 
-As checked on 2026-09-08, design-decision capture is being discussed in
+As checked on 2026-09-09, design-decision capture is being discussed in
 [issue #199](https://github.com/langgenius/graphon/issues/199) and implemented in
 [PR #200](https://github.com/langgenius/graphon/pull/200). Those proposals are not
 accepted policy in this checkout. When they land, link the decision index here

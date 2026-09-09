@@ -1,15 +1,14 @@
 <!-- knowledge
-last_checked: "2026-09-08T00:00:00Z"
+last_checked: "2026-09-09T20:55:58Z"
 -->
 # Execution-scoped file runtime
 
-**Status:** implementation, independent reviews, final naming pass, and checks
-for the explicit state ownership follow-up are complete locally. Not merged or
-released. Updated 2026-09-09.
+**Status:** completed, including the explicit state ownership follow-up; merged
+in [PR #283](https://github.com/langgenius/graphon/pull/283) on 2026-09-09.
 
 **Tracking:** [TD-04](../technical-debt.md#td-04--execution-scoped-file-integration),
 [issue #282](https://github.com/langgenius/graphon/issues/282).
-This branch builds on snapshot eligibility in
+Built on snapshot eligibility in
 [PR #280](https://github.com/langgenius/graphon/pull/280).
 
 ## Objective and scope
@@ -107,7 +106,7 @@ the original implementation.
 
 ### Explicit state ownership follow-up (2026-09-09)
 
-At the user's request, contributor guidance now requires
+Contributor guidance requires
 [explicit state ownership](../../CONTRIBUTING.md#explicit-state-ownership) to
 avoid hidden mutable dependencies that complicate debugging. This supersedes
 the earlier decision to retain process defaults.

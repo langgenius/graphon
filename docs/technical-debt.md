@@ -1,19 +1,14 @@
 <!-- knowledge
-last_checked: "2026-09-08T00:00:00Z"
+last_checked: "2026-09-09T21:00:17Z"
 -->
 # Architecture review and technical debt
 
 **Reviewed:** 2026-09-08, Graphon 0.7.0, commit
 `9d13c716d527a8b7099df00cc448254ac7b6e98b`.
-**Status:** original review complete; TD-02 implementation and reviews are complete
-locally. TD-03 implementation and independent reviews are complete locally.
-TD-04's 2026-09-09 explicit state ownership follow-up has passed checks,
-independent reviews, and its final naming pass.
-TD-01 and TD-05's initial implementation and architectural layering follow-up
-are complete locally. Validation and independent reviews are recorded in
-the [import boundaries plan](plans/runtime-import-boundaries.md).
-Other remediation remains proposed, not accepted architecture policy. Priorities
-express the original review's judgment.
+**Status (2026-09-09):** TD-01 through TD-05 are merged into `main`; the
+linked plans record implementation decisions and historical validation. Other
+remediation remains proposed. Priorities express the original review's judgment,
+not accepted architecture policy.
 **Scope:** repository structure, execution and integration boundaries, developer
 feedback, and knowledge maintenance. Evidence includes source, callers, test
 definitions, focused tests, and small local reproductions. This is not a
@@ -22,9 +17,9 @@ production reliability assessment or a full security audit.
 Graphon already has a coherent execution model and a useful repository knowledge
 system. Preserve its frame isolation, explicit integration ports, versioned
 snapshots, and separation of execution events from response presentation. The
-highest-value changes are to reject lossy graph inputs, make execution boundaries
-consistent at public APIs, and enforce a few dependency rules. A wholesale folder
-reorganization would offer less value than those specific changes.
+first five debt items addressed lossy graph inputs, execution boundaries,
+and dependency rules. The remaining proposals below retain the original review's
+scope and limits.
 
 ## Reading the article in Graphon's context
 
@@ -89,7 +84,7 @@ flowchart LR
 
 The graph/node relationship partly reflects graph-aware container behavior;
 it is not evidence that every reciprocal package import is a bug. The runtime
-queue dependency and facade side effects identified below are now removed locally.
+queue dependency and facade side effects identified below are now removed.
 
 ## What is working well
 
@@ -137,11 +132,9 @@ queue dependency and facade side effects identified below are now removed locall
 
 ## Debt register
 
-TD-02 and TD-03 are **implemented locally**. TD-04 is **completed locally**, with
-required reviews and checks complete. TD-01 and TD-05 are **completed locally**,
-with reviews and checks recorded in their plan. Other entries remain **proposed**. P1 means
-a reproduced correctness problem or a boundary that must be addressed before
-the stated deployment use.
+TD-01 through TD-05 are **merged**; other entries remain **proposed**.
+P1 means a reproduced correctness problem or a boundary that must be addressed
+before the stated deployment use.
 P2 is targeted architecture or feedback work. P3 can follow the more consequential
 changes.
 Suggested owners are responsibility areas, not assigned people; effort is a
@@ -149,11 +142,11 @@ relative change size, not a delivery estimate.
 
 | ID | Section | Priority | Suggested owner | Size |
 | --- | --- | --- | --- | --- |
-| TD-01 | Dependency direction and runtime queue ownership, completed locally | P2 | Engine/runtime | Medium |
-| TD-02 | [Graph construction and structural validation](#td-02--graph-construction-and-structural-validation), implemented locally | P1 | Graph/DSL | Medium |
-| TD-03 | [Snapshot consistency at the public boundary](#td-03--snapshot-consistency-at-the-public-boundary), implemented locally | P2 | Runtime/engine | Medium |
-| TD-04 | [Execution-scoped file integration](#td-04--execution-scoped-file-integration), completed locally | P2; P1 before concurrent distinct host adapters | File/host integration | Medium–large |
-| TD-05 | Side effects of importing public contracts, completed locally | P2 | Public API/node bootstrap | Small–medium |
+| TD-01 | Dependency direction and runtime queue ownership, merged | P2 | Engine/runtime | Medium |
+| TD-02 | [Graph construction and structural validation](#td-02--graph-construction-and-structural-validation), merged | P1 | Graph/DSL | Medium |
+| TD-03 | [Snapshot consistency at the public boundary](#td-03--snapshot-consistency-at-the-public-boundary), merged | P2 | Runtime/engine | Medium |
+| TD-04 | [Execution-scoped file integration](#td-04--execution-scoped-file-integration), merged | P2; P1 before concurrent distinct host adapters | File/host integration | Medium–large |
+| TD-05 | Side effects of importing public contracts, merged | P2 | Public API/node bootstrap | Small–medium |
 | TD-06 | Ignored LLM integration arguments | P2 | Model/node API | Small, with a compatibility window |
 | TD-07 | Optional capability dependencies | P2 | Packaging/document extraction | Medium |
 | TD-08 | Offline execution and diagnostic example | P2 | Examples/developer experience | Small |
@@ -162,7 +155,8 @@ relative change size, not a delivery estimate.
 
 ## TD-01 — Dependency direction and runtime queue ownership
 
-**Implementation update (2026-09-09):** runtime owns the existing queue protocol,
+**Merged:** [PR #287](https://github.com/langgenius/graphon/pull/287), 2026-09-09.
+Runtime owns the existing queue protocol,
 ready task values, and in-memory implementation under
 [runtime/ready_queue](../src/graphon/runtime/ready_queue/). Engine queue paths
 retain compatibility exports with the same object identities. Default runtime
@@ -187,13 +181,9 @@ defines the checked boundaries and legitimate schema dependencies;
 
 ## TD-02 — Graph construction and structural validation
 
-**Implementation update (2026-09-08):** implemented locally by the current
-Graph/DSL development task on `laipz8200/graph-validation`; independent reviews and
-checks are complete. The [graph validation plan](plans/graph-validation.md) records decisions,
-checks, and tracking. [Implementation issue #277](https://github.com/langgenius/graphon/issues/277)
-tracks this fix and its pull request;
-[issue #131](https://github.com/langgenius/graphon/issues/131) remains related
-authoring work.
+**Merged:** [PR #278](https://github.com/langgenius/graphon/pull/278), 2026-09-09.
+The [graph validation plan](plans/graph-validation.md) records decisions and
+checks for [issue #277](https://github.com/langgenius/graphon/issues/277).
 
 **Original evidence:** direct `Graph.init()` silently overwrote duplicate node IDs
 and discarded malformed edges. Default validators accepted execution cycles, so
@@ -214,18 +204,13 @@ see the [construction invariants](../ARCHITECTURE.md#state-and-execution-invaria
 **Evidence of remediation:** [scoping tests](../tests/graph/test_graph_scoping.py),
 [builder tests](../tests/graph/test_graph.py), and
 [public loading tests](../tests/dsl/test_importer.py) cover the defects and valid
-controls. The focused graph/DSL command passes 136 tests; `just test` passes 815,
-and `just check` passes on Python 3.12.13. The plan records the initial failures,
-full-suite caveat, and remaining validation limits. This is local implementation
-evidence, not a merged fix or a release claim.
+controls. The plan preserves the implementation test results and their limits.
 
 ## TD-03 — Snapshot consistency at the public boundary
 
-**Implementation update (2026-09-08):** implemented locally for
-[issue #279](https://github.com/langgenius/graphon/issues/279), with independent test,
-knowledge, and naming reviews complete. The
-[snapshot eligibility plan](plans/snapshot-eligibility.md) records scope, decisions,
-and checks.
+**Merged:** [PR #280](https://github.com/langgenius/graphon/pull/280), 2026-09-09.
+The [snapshot eligibility plan](plans/snapshot-eligibility.md) records scope,
+decisions, and checks for [issue #279](https://github.com/langgenius/graphon/issues/279).
 
 **Original evidence:** public runtime and layer snapshots could read graph state,
 variables, execution state, and shared queues during execution. Queue serialization
@@ -244,18 +229,15 @@ records persistence timing and host responsibilities.
 **Evidence of remediation:** six new
 [serialization cases](../tests/engine/test_runtime_state_serialization.py) reproduce
 and prevent active callback snapshots, paused child-frame snapshots, snapshots
-while threads outlive shutdown, and concurrent startup/writer overlap. Focused
-compatibility and full-suite results are recorded in the plan. This is local
-implementation evidence, not a merge or release claim.
+while threads outlive shutdown, and concurrent startup/writer overlap. Historical
+compatibility and full-suite results are recorded in the plan.
 
 ## TD-04 — Execution-scoped file integration
 
-**Implementation update (2026-09-09):** the explicit state ownership follow-up
-for [issue #282](https://github.com/langgenius/graphon/issues/282) removes process
-defaults. Implementation, checks, independent reviews, and the final naming
-pass are complete locally. The
-[execution file runtime plan](plans/execution-file-runtime.md) records
-decisions and validation evidence. This work is not merged or released.
+**Merged:** [PR #283](https://github.com/langgenius/graphon/pull/283), 2026-09-09,
+including removal of process defaults. The
+[execution file runtime plan](plans/execution-file-runtime.md) records decisions
+and validation for [issue #282](https://github.com/langgenius/graphon/issues/282).
 
 **Original evidence:** the mutable process registry let the same
 [File](../src/graphon/file/models.py) switch from `host-a/file-a` to `host-b/file-a`
@@ -281,12 +263,11 @@ paused child restoration, filter rendering and template callbacks, and caller
 restoration at yield, close, and failure.
 [File runtime tests](../tests/file/test_runtime.py) cover nested
 scopes and explicit unconfigured bindings. The plan records focused and full-suite
-results and their limits. This is local implementation evidence, not a merge or
-release claim.
+results and their limits.
 
 ## TD-05 — Side effects of importing public contracts
 
-**Implementation update (2026-09-09):**
+**Merged:** [PR #287](https://github.com/langgenius/graphon/pull/287), 2026-09-09.
 [CodeExecutorProtocol](../src/graphon/nodes/code/protocols.py) now lives outside
 its node implementation. Its old implementation-module and public facade exports
 retain identity. Code and LLM package class exports load implementations only
@@ -442,21 +423,22 @@ review permanent policy. Review debt alongside related changes and releases.
 the index and maintenance guidance agree with the merged policy; selected debt
 has a concrete tracking link; completed items record the check that establishes
 closure. A scheduled cleanup agent, numeric quality score, and new documentation
-generator are not prerequisites. No recurring automation was configured here.
+generator are not prerequisites. The original review configured no recurring
+automation.
 
 ## Suggested order and limits
 
-1. TD-02 was selected first for its reproduced false-success outcome. Its local
-   implementation and completed reviews are tracked in the
+1. TD-02 was selected first for its reproduced false-success outcome. Its
+   implementation and reviews are recorded in the
    [graph validation plan](plans/graph-validation.md).
-2. TD-03's local implementation enforces quiescent snapshots; live checkpoints
+2. TD-03's implementation enforces quiescent snapshots; live checkpoints
    remain outside its scope. TD-04 now retains file adapters per engine; its
    completed reviews and checks are recorded in the
    [execution file runtime plan](plans/execution-file-runtime.md).
    Hosts must bind delivered file rendering and rebind restored
    engines as described in the
    [file adapter invariant](../ARCHITECTURE.md#state-and-execution-invariants).
-3. TD-01 and TD-05 are completed locally; validation and independent reviews are
+3. TD-01 and TD-05 are merged; validation and independent reviews are
    recorded in the [shared plan](plans/runtime-import-boundaries.md).
    Handle TD-06 next in a separately documented API transition.
 4. Add TD-08's offline example; use it in TD-07's minimal-install check. Continue
@@ -503,7 +485,7 @@ GraphRunSucceededEvent
 That result is historical evidence. The permanent
 [DSL loading regression](../tests/dsl/test_importer.py) now requires the same
 cycle to fail during loading and its acyclic control to execute every node.
-See the [TD-02 plan](plans/graph-validation.md#validation-and-outcome) for current
+See the [TD-02 plan](plans/graph-validation.md#validation-and-outcome) for the
 implementation checks.
 
 The original documentation review did not run the full suite, Python 3.13 matrix,

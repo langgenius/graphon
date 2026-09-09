@@ -1,12 +1,11 @@
 <!-- knowledge
-last_checked: "2026-09-08T00:00:00Z"
+last_checked: "2026-09-09T21:00:17Z"
 -->
 # TD-02: Reject invalid graphs before execution
 
-**Status:** completed locally; implementation, independent reviews, and checks complete.
-**Last update:** 2026-09-08.
+**Status:** completed; merged in [PR #278](https://github.com/langgenius/graphon/pull/278)
+on 2026-09-09.
 **Priority:** P1; selected as the first debt remediation.
-**Owner:** current Graph/DSL development task on `laipz8200/graph-validation`.
 **Tracking:** [TD-02 in the debt register](../technical-debt.md#td-02--graph-construction-and-structural-validation).
 [Implementation issue #277](https://github.com/langgenius/graphon/issues/277)
 tracks this fix and its pull request. Related
@@ -58,9 +57,6 @@ required by [Contributing](../../CONTRIBUTING.md#issues).
 
 ## Decision log
 
-- **2026-09-08 — Implementation authorized:** the user requested committing the
-  prior documentation and proceeding with TD-02. That documentation is committed
-  as `cc674fa`; this plan records the subsequent local implementation.
 - **2026-09-08 — Construction boundary:** use stdlib
   `graphlib.TopologicalSorter.prepare()` after endpoint checks. Cross-scope edges
   are already rejected, so one topology check covers the retained scopes without
@@ -70,17 +66,19 @@ required by [Contributing](../../CONTRIBUTING.md#issues).
   node's execution/type information, preserving custom factory aliases for
   built-in container entries. `skip_validation=True` bypasses endpoint existence,
   root type, and cycles while mandatory input/ownership checks remain. Raw
-  `Graph(...)` stays a trusted assembly surface. Local implementation is not a
-  release or an accepted repository-wide design decision.
+  `Graph(...)` stays a trusted assembly surface.
 
 ## Validation and outcome
+
+The results below record the 2026-09-08 implementation checks, not the current
+suite size.
 
 On Python 3.12.13, the initial regressions produced **32 failures and 66 passing
 controls** for the missing behavior. A later compatibility run produced **3
 failures and 1 passing control** before its fixes. Fresh context-free test reviews
 covered both sets.
 
-The current focused command passes **136 tests**:
+The focused command passed **136 tests**:
 
 ```bash
 uv run pytest -n 0 \
@@ -91,18 +89,10 @@ uv run pytest -n 0 \
   tests/dsl/test_node_factory.py
 ```
 
-`just test` passes **815 tests**; `just check` and `git diff --check` also pass.
+`just test` passed **815 tests**; `just check` and `git diff --check` also passed.
 An earlier full run had one gevent subprocess timeout; its isolated rerun and the
-current full run passed. Python 3.13 and live external integrations have not been
+final full run passed. Python 3.13 and live external integrations were not
 run locally. After the independent knowledge review's documentation edits,
-`uv run pytest -n 0 tests/test_repository_docs.py` passes **1 test**.
+`uv run pytest -n 0 tests/test_repository_docs.py` passed **1 test**.
 The final naming pass applied mechanical renames, and the focused checks,
 `just check`, and full 815-test suite passed again afterward.
-
-The preimplementation tracking search covered open and closed graph-validation
-issues/PRs and found no dedicated or overlapping fix. Related
-[issue #131](https://github.com/langgenius/graphon/issues/131) covers authoring,
-[PR #271](https://github.com/langgenius/graphon/pull/271) filter performance, and
-[PR #200](https://github.com/langgenius/graphon/pull/200) decision records. The
-draft-PR preparation search also found no overlapping fix; #277 now provides
-dedicated implementation tracking.

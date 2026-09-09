@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-09-08T17:06:45Z"
+last_checked: "2026-09-09T21:00:17Z"
 -->
 # Maintaining repository knowledge
 
@@ -47,11 +47,11 @@ links in root Markdown files and every Markdown file under `docs/`, `src/`, and
 uv run pytest -n 0 tests/test_repository_docs.py
 ```
 
-The check catches missing local paths and knowledge pages unreachable from
-`AGENTS.md`, and enforces the review metadata below. It does not validate heading
-anchors, external URLs, reference-style links, or prose accuracy. When it fails,
-repair the link, add a route from an indexed page, or review the overdue document;
-do not weaken the check to hide obsolete knowledge.
+The check catches missing local paths and enforces reachability from `AGENTS.md`
+for `ARCHITECTURE.md` and pages under `docs/`, plus the review metadata below.
+It does not validate heading anchors, external URLs, reference-style links, or
+prose accuracy. When it fails, repair the link, add a route from an indexed page,
+or review the overdue document; do not weaken the check to hide obsolete knowledge.
 
 ## Document metadata and review deadline
 
@@ -89,9 +89,9 @@ The failure identifies the oldest file and its timestamp.
 
 The check runs in the normal pytest suite, including the existing CI jobs for
 pull requests targeting `main` and release tags, and with the focused command
-above. It scans the full scope without changed-file filters. Date-only review
-evidence imported during the initial rollout uses midnight UTC on that date as
-a conservative lower bound, rather than claiming a new review at migration time.
+above. It scans the full scope without changed-file filters. Historical validation
+results in completed plans retain their original dates and counts; a later page
+review does not turn them into a new test run.
 
 ## Plans for work that needs durable context
 

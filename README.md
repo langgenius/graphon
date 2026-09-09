@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-09-08T17:06:16Z"
+last_checked: "2026-09-09T20:55:58Z"
 -->
 # Graphon
 
@@ -48,9 +48,9 @@ just test
 ```
 
 `just dev` installs the project, syncs development dependencies, and sets up
-[`prek`](https://prek.j178.dev/) Git hooks. `just test` is the progressive
-local validation entrypoint: it formats, applies lint fixes, runs `ty check`,
-and then runs [`pytest`](https://docs.pytest.org/).
+[`prek`](https://prek.j178.dev/) Git hooks. `just test` runs the
+[local validation sequence](CONTRIBUTING.md#testing-and-validation), including
+formatting, lint fixes, import contracts, types, and tests.
 
 ## Run the Example Workflows
 
