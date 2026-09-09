@@ -25,8 +25,8 @@ separate snapshot and file adapter work.
 The implementation changes graph construction, default validation, and DSL error
 translation. It preserves scheduler behavior, container execution, snapshot
 formats, supported editor/legacy inputs, and edge IDs for valid graphs. Current
-behavior and upgrade guidance live in [Architecture](../../ARCHITECTURE.md#state-and-execution-invariants)
-and [Migration](../../MIGRATION.md#graph-validation).
+construction invariants live in
+[Architecture](../../ARCHITECTURE.md#state-and-execution-invariants).
 
 ## Implementation and evidence
 
@@ -48,8 +48,8 @@ and [Migration](../../MIGRATION.md#graph-validation).
   structured DSL errors.
 - [x] Preserve resolved factory root types and explicit validation bypasses, with
   independently reviewed compatibility regressions.
-- [x] Run focused and full checks; update affected guides, migration notes,
-  changelog, and debt evidence through the independent knowledge review.
+- [x] Run focused and full checks; update affected guides and debt evidence
+  through the independent knowledge review.
 - [x] Complete the final naming pass and affected checks before handoff.
 
 The duplicate search was repeated before preparing the draft PR, and
@@ -70,9 +70,8 @@ required by [Contributing](../../CONTRIBUTING.md#issues).
   node's execution/type information, preserving custom factory aliases for
   built-in container entries. `skip_validation=True` bypasses endpoint existence,
   root type, and cycles while mandatory input/ownership checks remain. Raw
-  `Graph(...)` stays a trusted assembly surface. The unreleased 0.8.0 migration
-  notes describe these changes; local implementation is not a release or an
-  accepted repository-wide design decision.
+  `Graph(...)` stays a trusted assembly surface. Local implementation is not a
+  release or an accepted repository-wide design decision.
 
 ## Validation and outcome
 

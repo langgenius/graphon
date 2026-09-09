@@ -68,9 +68,8 @@ re-export the same objects for compatibility; new runtime consumers use
 Importing `graphon.protocols` registers no nodes. Code/LLM package class exports
 load their implementations only when explicitly requested; bare package or
 contract-submodule imports do not register them. See
-[runtime isolation](tests/runtime/test_runtime_imports.py),
-[public-contract isolation](tests/test_protocols_exports.py), and
-[bootstrap migration](MIGRATION.md#runtime-queues-and-node-imports).
+[runtime isolation](tests/runtime/test_runtime_imports.py) and
+[public-contract isolation](tests/test_protocols_exports.py).
 
 ## Execution flow
 
@@ -140,9 +139,8 @@ scope is restored before each event yield and after closing or failing the run.
 `ResponseStreamFilter`. Host rendering and custom filters can bind it explicitly
 with `use_workflow_file_runtime(engine.file_runtime)`; scoped `None` disables
 resolution. File values and snapshots contain no adapter, so hosts supply one
-again when rebuilding an engine. See [file runtime](src/graphon/file/runtime.py),
-[execution isolation tests](tests/engine/test_file_runtime.py), and the
-[migration guidance](MIGRATION.md#file-runtime-isolation).
+again when rebuilding an engine. See [file runtime](src/graphon/file/runtime.py)
+and [execution isolation tests](tests/engine/test_file_runtime.py).
 
 **Container scopes are explicit.** `data.container_id` is the canonical direct
 owner; [scoping](src/graphon/graph/scoping.py) resolves supported legacy/editor
@@ -205,8 +203,6 @@ and threads that outlive shutdown timeouts. A transient guard on the shared
 [GraphExecution](src/graphon/runtime/execution.py) covers all frames and excludes
 execution startup and other snapshot writers throughout serialization. Internal
 frame snapshots remain engine operations. See
-[snapshot eligibility](MIGRATION.md#snapshot-eligibility) for persistence timing
-and host responsibilities, and
 [serialization tests](tests/engine/test_runtime_state_serialization.py) for evidence.
 
 ## Extension seams

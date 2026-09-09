@@ -209,7 +209,7 @@ throughout the retained subtree before node construction and through the Python
 builder. [DSL loading](../src/graphon/dsl/importer.py) preserves structured
 validation issues. Scheduler behavior is unchanged. Supported ownership forms,
 resolved factory root types, edge identities, and trusted bypasses are retained;
-see the [migration guidance](../MIGRATION.md#graph-validation).
+see the [construction invariants](../ARCHITECTURE.md#state-and-execution-invariants).
 
 **Evidence of remediation:** [scoping tests](../tests/graph/test_graph_scoping.py),
 [builder tests](../tests/graph/test_graph.py), and
@@ -238,8 +238,8 @@ reproducing concurrent corruption.
 enforces [quiescent snapshots](../ARCHITECTURE.md#state-and-execution-invariants) across
 all frames, including threads that outlive shutdown. Internal frame snapshots and
 persisted formats are unchanged. The
-[migration guidance](../MIGRATION.md#snapshot-eligibility) defines the public
-contract and host responsibilities.
+[snapshot eligibility plan](plans/snapshot-eligibility.md#context-and-decisions)
+records persistence timing and host responsibilities.
 
 **Evidence of remediation:** six new
 [serialization cases](../tests/engine/test_runtime_state_serialization.py) reproduce
@@ -272,7 +272,7 @@ the dispatcher, layer hooks, and response filters bind that adapter through
 can enter the same scope when rendering delivered values; yielded events do not
 change their caller's binding. File metadata and persisted formats are unchanged.
 Rebuilt engines need host adapters supplied again. See
-[migration guidance](../MIGRATION.md#file-runtime-isolation) for the public API and
+[file adapter ownership](../ARCHITECTURE.md#state-and-execution-invariants) for
 the distinction between engine selection and exact scoped `None` binding.
 
 **Evidence of remediation:** [execution file tests](../tests/engine/test_file_runtime.py)
@@ -303,7 +303,7 @@ identities. The [Import Linter layers contract](../pyproject.toml) places the
 public facade below the engine and above the execution model it exposes.
 The subprocess check protects node registration; the layers permit facade
 imports of concrete node implementations. See
-[bootstrap migration](../MIGRATION.md#runtime-queues-and-node-imports) and
+[import boundaries](../ARCHITECTURE.md#import-boundaries) and
 [the shared plan](plans/runtime-import-boundaries.md).
 
 ## TD-06 — Ignored LLM integration arguments
@@ -318,9 +318,7 @@ and [ParameterExtractorNode](../src/graphon/nodes/parameter_extractor/parameter_
 accept and discard `credentials_provider` and `model_factory`; the first two
 also discard `http_client`. Yet [ModelFactory and CredentialsProvider](../src/graphon/nodes/llm/protocols.py)
 remain publicly exported with active-sounding descriptions. Architecture notes
-the LLM compatibility case, but [MIGRATION.md](../MIGRATION.md) does not explain
-this transition across the three nodes. Callers can supply configuration that
-has no effect.
+the LLM compatibility case. Callers can supply configuration that has no effect.
 
 **Proposed change:** document actual replacements for each argument and choose a
 compatibility window. Deprecate or reject supplied non-`None` ignored arguments
@@ -456,7 +454,8 @@ generator are not prerequisites. No recurring automation was configured here.
    completed reviews and checks are recorded in the
    [execution file runtime plan](plans/execution-file-runtime.md).
    Hosts must bind delivered file rendering and rebind restored
-   engines as described in the migration guide.
+   engines as described in the
+   [file adapter invariant](../ARCHITECTURE.md#state-and-execution-invariants).
 3. TD-01 and TD-05 are completed locally; validation and independent reviews are
    recorded in the [shared plan](plans/runtime-import-boundaries.md).
    Handle TD-06 next in a separately documented API transition.

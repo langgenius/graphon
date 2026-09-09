@@ -18,7 +18,6 @@ independent test review, knowledge review, and final naming pass.
 - [Repository knowledge](docs/README.md): index of focused guides and evidence.
 - [Development guide](docs/development.md): find the source and tests for a task.
 - [Knowledge maintenance](docs/maintenance.md): keep docs, plans, and decisions useful.
-- [MIGRATION.md](MIGRATION.md): public API changes and snapshot compatibility.
 
 ## Working with repository knowledge
 

@@ -43,7 +43,7 @@ define their behavior; it does not replace those rules.
 3. Import the node class during host bootstrap. Subclasses register when their
    implementation modules load; registry lookup does not discover or import
    packages. Bare Code/LLM package imports do not load their classes; see
-   [bootstrap migration](../MIGRATION.md#runtime-queues-and-node-imports).
+   [import boundaries](../ARCHITECTURE.md#import-boundaries).
    Registration alone does not add support to the default DSL importer:
    [SlimDslNodeFactory.NODE_BUILDERS](../src/graphon/dsl/node_factory.py) explicitly
    controls that surface and wires its dependencies.
@@ -74,8 +74,7 @@ public surface.
   covers storage, URLs, downloads, and preview signatures. Pass it to
   `Engine(file_runtime=adapter)`, or enter an explicit file scope before
   constructing the engine. For DSL construction and host rendering, use
-  [use_workflow_file_runtime](../src/graphon/file/runtime.py); the
-  [migration example](../MIGRATION.md#file-runtime-isolation) shows both boundaries.
+  [use_workflow_file_runtime](../src/graphon/file/runtime.py).
   Use `EngineEventFilterContext.from_engine()` when wiring response filters.
   Node-specific download, file-reference, and tool-file ports live
   in [nodes/protocols.py](../src/graphon/nodes/protocols.py); generated LLM files use
@@ -121,7 +120,7 @@ revision. Once all other development steps are complete, finish with the
 - Once execution starts, `RuntimeState.dumps()` requires teardown and all
   execution threads to stop. Start, node, and event callbacks cannot take runtime
   snapshots; quiescent `on_graph_end` hooks can. See the
-  [snapshot eligibility guidance](../MIGRATION.md#snapshot-eligibility).
+  [execution invariants](../ARCHITECTURE.md#state-and-execution-invariants).
 - A direct `Node.run()` call requires `bind_execution_id()` first. The engine
   normally handles this; [the binding test](../tests/nodes/base/test_node_execution_binding.py)
   captures the failure when it is missing.
@@ -147,9 +146,8 @@ revision. Once all other development steps are complete, finish with the
   subtree before constructing nodes; root type is checked on the resolved node.
   Use acyclic edges inside each container; invalid fields or duplicate IDs
   are rejected instead of being silently discarded. See the
-  [graph validation migration notes](../MIGRATION.md#graph-validation) for the
+  [graph implementation](../src/graphon/graph/graph.py) for the
   supported defaults and trusted validation bypasses.
 
 When a change alters these workflows, update this page and the linked source or
-tests in the same change. Put user-visible compatibility changes in
-[MIGRATION.md](../MIGRATION.md) and [CHANGELOG.md](../CHANGELOG.md) as appropriate.
+tests in the same change.
