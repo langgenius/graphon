@@ -18,6 +18,68 @@ until its state has been restored and serialized by 0.8.0.
 The package version remains `0.7.0` on this development branch. The release PR
 will bump it to `0.8.0` separately.
 
+### File runtime isolation
+
+`graphon.file.runtime.WorkflowFileRuntimeRegistry`,
+`configure_workflow_file_runtime()`, and `set_workflow_file_runtime()` were removed.
+There is no process default. Use engine injection or the scope below to supply
+adapters. `get_workflow_file_runtime()` requires an active adapter;
+`peek_workflow_file_runtime()` returns `None` when unconfigured.
+
+Pass `Engine(..., file_runtime=adapter)` to select an execution's
+`WorkflowFileRuntimeProtocol`. Omitting it or passing `None` captures the current
+scoped adapter **at engine construction**, including an unconfigured state.
+Later scopes do not change existing engines' file operations.
+
+The engine binds its adapter in workers, the dispatcher, and layer hooks,
+including child and resumed execution. `EngineEventFilterContext.from_engine()`
+carries it to `ResponseStreamFilter`, including a restored filter. Custom filters
+can use `context.file_runtime` with the context manager below. The built-in filter
+binds it during `initialize()`, `on_event()`, `flush()`, and `loads()`, including
+streaming-template callbacks, and restores the caller's scope on return or failure.
+Constructing a filter context directly captures its current scoped adapter when
+`file_runtime` is omitted; prefer `from_engine()` to retain the engine's selection.
+
+For DSL construction and host-side rendering of delivered files, use
+`use_workflow_file_runtime` from `graphon.file.runtime`:
+
+```python
+from graphon.dsl import loads
+from graphon.file.runtime import use_workflow_file_runtime
+
+with use_workflow_file_runtime(adapter):
+    engine = loads(dsl)
+
+for event in engine.run():
+    with use_workflow_file_runtime(engine.file_runtime):
+        consume(event)  # File.to_dict(), markdown, or plugin parameter rendering
+```
+
+Engine iteration restores the caller's binding before yielding each event and
+after close or failure. Scoped `None` disables resolution even inside another
+adapter scope. Direct file helpers outside a scope have no configured adapter.
+Explicitly injected HTTP clients and node-specific file ports remain independent.
+
+Adapters are transient: pass them again when rebuilding an engine from
+`RuntimeState.from_snapshot()`. File metadata, references, and snapshot formats
+are unchanged. Use `File.model_dump(mode="json")` for metadata without URL
+resolution; `to_dict()`, Markdown, and plugin parameters still resolve URLs.
+
+### HTTP client ownership
+
+`graphon.http.runtime` and the `get_http_client()`, `get_default_http_client()`,
+and `set_http_client()` helpers were removed. Pass `http_client=...` to
+`HttpRequestNode`, `DocumentExtractorNode`, or `FileSaverImpl` for a custom client.
+Without injection, each consumer creates its own `HttpxHttpClient`. A host can
+share a client by explicitly passing the same instance to its consumers.
+
+### Tokenizer ownership
+
+`GPT2Tokenizer.get_encoder()` and `get_num_tokens()` are now instance methods;
+construct `GPT2Tokenizer()` before calling them. Each `SlimLLM` owns a lazy
+tokenizer cache and initialization lock. Tiktoken remains preferred, with
+Transformers as fallback; dependency-internal caches are unchanged.
+
 ### Public names and imports
 
 | 0.7.x | 0.8.0 |
@@ -200,6 +262,18 @@ Import `ROOT_FRAME_ID` from `graphon.runtime.execution`, not the ready-queue
 package.
 
 ### Layers, filters, and commands
+
+`RuntimeState(execution_context=...)`, its `execution_context` property, and the
+matching `Worker`/`WorkerPool` arguments were removed. Move host node-task context
+activation into `Layer.node_run_context(node, parent_execution_id=...)` and
+register the layer with `engine.add_layer(layer)`. Return a fresh context manager
+for each task, including container resumes; see [layer scopes](src/graphon/engine/layer/README.md).
+
+This changes failure handling: the former runtime manager used ordinary `with`
+semantics. Layer context entry/exit exceptions are logged and isolated, and the
+manager cannot suppress node execution errors. Move setup that must prevent
+execution on failure before running the engine or into the node's execution path. These
+task scopes do not replace file-runtime scopes or response-filter metadata.
 
 - `Layer` lifecycle hooks have no-op defaults. `DebugLoggingLayer` and
   `GraphEngineLayerNotInitializedError` were removed. `LimitType` and the old

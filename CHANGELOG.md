@@ -9,6 +9,14 @@ before upgrading an integration.
 
 ### Changed
 
+- Engines now retain their file adapter at construction and use it across
+  execution threads, child/resumed runs, and response-stream rendering.
+  `Engine(file_runtime=...)` and `use_workflow_file_runtime(...)` support distinct
+  host adapters in one process. Inject an adapter or bind a file scope before construction;
+  rebind adapters when restoring engines. File values and snapshot formats are
+  unchanged. See [file runtime isolation](MIGRATION.md#file-runtime-isolation).
+- HTTP consumers now own their default clients and preserve injected clients,
+  including falsey ones. Each `SlimLLM` owns its lazy tokenizer cache and lock.
 - Public runtime snapshots now reject active engine runs and execution threads,
   including threads still running after shutdown times out. Persist paused state
   after fully consuming the run iterator, or from a quiescent `on_graph_end` hook.
@@ -42,6 +50,14 @@ before upgrading an integration.
 
 ### Removed
 
+- Removed `WorkflowFileRuntimeRegistry`, `configure_workflow_file_runtime()`,
+  `set_workflow_file_runtime()`, and the file process default; use
+  [explicit adapters or scopes](MIGRATION.md#file-runtime-isolation).
+- Removed `graphon.http.runtime` and its process-default get/set helpers; use
+  [HTTP client injection](MIGRATION.md#http-client-ownership).
+- Removed `RuntimeState.execution_context` and its constructor/worker arguments;
+  use `Layer.node_run_context()` for host node-task scopes. See the
+  [migration notes](MIGRATION.md#layers-filters-and-commands) for failure handling.
 - Removed `GraphEngineConfig`, dynamic worker scaling, `GraphEngineManager`,
   `DebugLoggingLayer`, `ResumableGraphEventFilter`, and the old read/write lock.
 - Removed the `graphon.graph_engine`, `graphon.graph_events`, and `graphon.filters`

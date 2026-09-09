@@ -3,8 +3,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, ClassVar, cast
 
+import httpx
 import pytest
 import yaml
+from pytest_mock import MockerFixture
 
 import graphon.dsl.node_factory as node_factory_module
 import graphon.nodes.http_request.node as http_request_node_module
@@ -25,7 +27,6 @@ from graphon.engine_events.node import (
 from graphon.entities.graph_config import NodeConfigDict
 from graphon.file.enums import FileTransferMethod, FileType
 from graphon.file.models import File
-from graphon.http import HttpResponse
 from graphon.model_runtime.entities.common_entities import I18nObject
 from graphon.model_runtime.entities.llm_entities import LLMResult, LLMUsage
 from graphon.model_runtime.entities.message_entities import (
@@ -849,66 +850,19 @@ def test_assigner_node_from_dsl_emits_variable_update() -> None:
     assert update.variable.value == "after"
 
 
-class _FakeRequestError(Exception):
-    pass
-
-
-class _FakeMaxRetriesExceededError(Exception):
-    pass
-
-
-class _FakeHttpClient:
-    def __init__(
-        self,
-        *,
-        headers: Mapping[str, str] | None = None,
-        content: bytes = b"ok",
-    ) -> None:
-        self.calls: list[dict[str, Any]] = []
-        self.headers = dict(headers or {"content-type": "text/plain"})
-        self.content = content
-
-    @property
-    def max_retries_exceeded_error(self) -> type[Exception]:
-        return _FakeMaxRetriesExceededError
-
-    @property
-    def request_error(self) -> type[Exception]:
-        return _FakeRequestError
-
-    def get(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
-        self.calls.append({"url": url, "max_retries": max_retries, **kwargs})
-        return HttpResponse(
-            status_code=200,
-            headers=self.headers,
-            content=self.content,
-            url=url,
-        )
-
-    def head(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
-        return self.get(url, max_retries=max_retries, **kwargs)
-
-    def post(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
-        return self.get(url, max_retries=max_retries, **kwargs)
-
-    def put(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
-        return self.get(url, max_retries=max_retries, **kwargs)
-
-    def delete(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
-        return self.get(url, max_retries=max_retries, **kwargs)
-
-    def patch(self, url: str, max_retries: int = 0, **kwargs: Any) -> HttpResponse:
-        return self.get(url, max_retries=max_retries, **kwargs)
-
-
 def test_http_request_node_from_dsl_runs_text_request(
-    monkeypatch: pytest.MonkeyPatch,
+    mocker: MockerFixture,
 ) -> None:
-    http_client = _FakeHttpClient()
-    monkeypatch.setitem(
-        http_request_node_module.__dict__,
-        "get_http_client",
-        lambda: http_client,
+    request = httpx.Request("GET", "https://example.com/api")
+    request_mock = mocker.patch.object(
+        httpx,
+        "request",
+        return_value=httpx.Response(
+            200,
+            request=request,
+            headers={"content-type": "text/plain"},
+            content=b"ok",
+        ),
     )
     engine = loads(_graph_dsl_for_node(_http_request_data()))
     node = engine.graph.nodes["node"]
@@ -916,19 +870,24 @@ def test_http_request_node_from_dsl_runs_text_request(
 
     success = _succeeded_event(list(node.run()))
 
-    assert http_client.calls[0]["url"] == "https://example.com/api"
+    assert request_mock.call_args.args[:2] == ("GET", "https://example.com/api")
     assert success.node_run_result.outputs["status_code"] == 200
     assert success.node_run_result.outputs["body"] == "ok"
 
 
 def test_http_request_node_from_dsl_fails_file_response_cleanly(
-    monkeypatch: pytest.MonkeyPatch,
+    mocker: MockerFixture,
 ) -> None:
-    http_client = _FakeHttpClient(headers={"content-type": "image/png"}, content=b"png")
-    monkeypatch.setitem(
-        http_request_node_module.__dict__,
-        "get_http_client",
-        lambda: http_client,
+    request = httpx.Request("GET", "https://example.com/api")
+    mocker.patch.object(
+        httpx,
+        "request",
+        return_value=httpx.Response(
+            200,
+            request=request,
+            headers={"content-type": "image/png"},
+            content=b"png",
+        ),
     )
     engine = loads(_graph_dsl_for_node(_http_request_data()))
     node = engine.graph.nodes["node"]

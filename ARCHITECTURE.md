@@ -54,7 +54,8 @@ flowchart LR
    traversal events.
 3. [Scheduler](src/graphon/engine/scheduler.py) queues frame-qualified `StartTask`
    values. [Workers](src/graphon/engine/worker/worker.py) bind execution IDs,
-   execute node generators inside runtime/layer contexts, and queue results.
+   execute node generators inside [layer task contexts](src/graphon/engine/layer/README.md),
+   and queue results.
 4. [Node.run](src/graphon/nodes/base/node.py) wraps `_run()`, emits the start event,
    converts node payloads into engine events, and converts execution exceptions
    into failed-node events. Node implementations live in [nodes](src/graphon/nodes/).
@@ -81,6 +82,20 @@ deferred queues and workflow-wide `GraphExecution`. Fixed configuration belongs
 in `InitParams`. See [frame construction](src/graphon/engine/frame.py),
 [runtime state](src/graphon/runtime/runtime_state/state.py), and
 [dispatch tests](tests/engine/test_dispatch_patterns.py).
+
+**File adapters belong to the engine.** `Engine(file_runtime=adapter)` retains
+that adapter; omitting it or passing `None` captures the current scope
+at construction, including an unconfigured state. There is no process default.
+Workers, the dispatcher, and
+layer hooks bind it across root, child, and resumed execution. The caller's file
+scope is restored before each event yield and after closing or failing the run.
+`EngineEventFilterContext.from_engine()` carries the same adapter to
+`ResponseStreamFilter`. Host rendering and custom filters can bind it explicitly
+with `use_workflow_file_runtime(engine.file_runtime)`; scoped `None` disables
+resolution. File values and snapshots contain no adapter, so hosts supply one
+again when rebuilding an engine. See [file runtime](src/graphon/file/runtime.py),
+[execution isolation tests](tests/engine/test_file_runtime.py), and the
+[migration guidance](MIGRATION.md#file-runtime-isolation).
 
 **Container scopes are explicit.** `data.container_id` is the canonical direct
 owner; [scoping](src/graphon/graph/scoping.py) resolves supported legacy/editor

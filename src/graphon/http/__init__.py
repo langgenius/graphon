@@ -1,11 +1,6 @@
 from .client import HttpClientMaxRetriesExceededError, HttpxHttpClient
 from .protocols import HttpClientProtocol, HttpResponseProtocol
 from .response import HttpHeaders, HttpResponse, HttpStatusError
-from .runtime import (
-    get_default_http_client,
-    get_http_client,
-    set_http_client,
-)
 
 __all__ = [
     "HttpClientMaxRetriesExceededError",
@@ -15,7 +10,4 @@ __all__ = [
     "HttpResponseProtocol",
     "HttpStatusError",
     "HttpxHttpClient",
-    "get_default_http_client",
-    "get_http_client",
-    "set_http_client",
 ]

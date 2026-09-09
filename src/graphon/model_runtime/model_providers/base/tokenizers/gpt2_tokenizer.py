@@ -13,10 +13,6 @@ class _TokenizerProtocol(Protocol):
     def encode(self, text: str) -> Sequence[int]: ...
 
 
-_tokenizer: _TokenizerProtocol | None = None
-_lock = Lock()
-
-
 def _try_load_tiktoken_encoder() -> _TokenizerProtocol | None:
     try:
         import tiktoken  # ruff:ignore[import-outside-top-level]
@@ -31,35 +27,29 @@ def _try_load_tiktoken_encoder() -> _TokenizerProtocol | None:
 
 
 class GPT2Tokenizer:
-    @staticmethod
-    def _get_num_tokens_by_gpt2(text: str) -> int:
-        """Use gpt2 tokenizer to get num tokens"""
-        tokenizer = GPT2Tokenizer.get_encoder()
-        tokens = tokenizer.encode(text)
-        return len(tokens)
+    def __init__(self) -> None:
+        self._encoder: _TokenizerProtocol | None = None
+        self._lock = Lock()
 
-    @staticmethod
-    def get_num_tokens(text: str) -> int:
-        return GPT2Tokenizer._get_num_tokens_by_gpt2(text)
+    def get_num_tokens(self, text: str) -> int:
+        return len(self.get_encoder().encode(text))
 
-    @staticmethod
-    def get_encoder() -> _TokenizerProtocol:
-        global _tokenizer  # ruff:ignore[global-statement]
-        if _tokenizer is not None:
-            return _tokenizer
-        with _lock:
-            if _tokenizer is None:
+    def get_encoder(self) -> _TokenizerProtocol:
+        if self._encoder is not None:
+            return self._encoder
+        with self._lock:
+            if self._encoder is None:
                 # Try to use tiktoken to get the tokenizer because it is faster
-                _tokenizer = _try_load_tiktoken_encoder()
-                if _tokenizer is None:
+                self._encoder = _try_load_tiktoken_encoder()
+                if self._encoder is None:
                     import transformers  # ruff:ignore[import-outside-top-level]
 
                     gpt2_tokenizer_path = Path(__file__).resolve().parent / "gpt2"
-                    _tokenizer = transformers.GPT2Tokenizer.from_pretrained(
+                    self._encoder = transformers.GPT2Tokenizer.from_pretrained(
                         str(gpt2_tokenizer_path),
                     )
                     logger.info(
                         "Fallback to Transformers' GPT-2 tokenizer from tiktoken",
                     )
 
-            return _tokenizer
+            return self._encoder

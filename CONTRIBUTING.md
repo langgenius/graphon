@@ -48,6 +48,19 @@ labels that hide the actual action or data.
 Prefer concrete names such as `load_graph`, `Graph`, `node_ids`, and `graph.py`.
 Keep names concise without obscure abbreviations or loss of meaning.
 
+### Explicit state ownership
+
+Avoid mutable global variables. Keep runtime data, integration adapters, and
+caches on the engine, node, or host object that owns their lifetime, and pass
+dependencies explicitly. Do not hide shared mutable state in a singleton,
+registry, class variable, or closure: that still makes behavior depend on
+unrelated calls and complicates debugging.
+
+Module constants and fixed `ContextVar` keys are fine. Context-local values must
+be bound explicitly and restored on exit, including failure; they must not fall
+back to a mutable process default. Prefer constructor arguments when the caller
+can pass the dependency directly.
+
 ### Context-free reviews
 
 Delegate test review, knowledge review, and the final naming pass to separate,

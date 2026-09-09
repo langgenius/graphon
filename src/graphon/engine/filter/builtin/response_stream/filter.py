@@ -18,6 +18,8 @@ from graphon.engine_events.node import (
 )
 from graphon.engine_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTakenEvent
 from graphon.enums import NodeExecutionType, NodeState
+from graphon.file.protocols import WorkflowFileRuntimeProtocol
+from graphon.file.runtime import use_workflow_file_runtime
 from graphon.nodes.base.template import Template, TextSegment, VariableSegment
 from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.runtime_state import GraphProtocol, NodeProtocol
@@ -183,6 +185,7 @@ class ResponseStreamFilter:
         self._pass_unmatched_chunks = pass_unmatched_chunks
         self._graph: GraphProtocol | None = None
         self._runtime_state: ReadOnlyRuntimeState | None = None
+        self._file_runtime: WorkflowFileRuntimeProtocol | None = None
         self._pending_state: ResponseStreamFilterSnapshot | None = None
         self._reset_run_state()
 
@@ -197,27 +200,33 @@ class ResponseStreamFilter:
         self._referenced_selectors: set[_Selector] = set()
 
     def initialize(self, context: EngineEventFilterContext) -> None:
-        pending_state = self._pending_state
-        self._graph = cast(GraphProtocol, context.graph)
-        self._runtime_state = context.runtime_state
+        with use_workflow_file_runtime(context.file_runtime):
+            pending_state = self._pending_state
+            self._graph = cast(GraphProtocol, context.graph)
+            self._runtime_state = context.runtime_state
+            self._file_runtime = context.file_runtime
 
-        try:
-            if pending_state is not None:
-                self._apply_state(pending_state)
-                return
+            try:
+                if pending_state is not None:
+                    self._apply_state(pending_state)
+                    return
 
-            self._reset_run_state()
-            for node in context.graph.nodes.values():
-                if node.execution_type == NodeExecutionType.RESPONSE:
-                    self._register(node.id)
-        except Exception:
-            self._graph = None
-            self._runtime_state = None
-            if pending_state is None:
                 self._reset_run_state()
-            raise
+                for node in context.graph.nodes.values():
+                    if node.execution_type == NodeExecutionType.RESPONSE:
+                        self._register(node.id)
+            except Exception:
+                self._graph = None
+                self._runtime_state = None
+                if pending_state is None:
+                    self._reset_run_state()
+                raise
 
     def on_event(self, event: EngineEvent) -> Iterable[EngineEvent]:
+        with use_workflow_file_runtime(self._file_runtime):
+            return self._process_event(event)
+
+    def _process_event(self, event: EngineEvent) -> Iterable[EngineEvent]:
         self._ensure_initialized()
         match event:
             case GraphRunStartedEvent():
@@ -248,7 +257,8 @@ class ResponseStreamFilter:
 
     def flush(self) -> Iterable[EngineEvent]:
         self._ensure_initialized()
-        return self._try_flush()
+        with use_workflow_file_runtime(self._file_runtime):
+            return self._try_flush()
 
     def dumps(self) -> str:
         if self._pending_state is not None:
@@ -280,12 +290,13 @@ class ResponseStreamFilter:
         return snapshot.dumps(state)
 
     def loads(self, data: str) -> None:
-        state = snapshot.loads(data)
-        if self._graph is None or self._pending_state is not None:
-            self._pending_state = state
-            return
+        with use_workflow_file_runtime(self._file_runtime):
+            state = snapshot.loads(data)
+            if self._graph is None or self._pending_state is not None:
+                self._pending_state = state
+                return
 
-        self._apply_state(state)
+            self._apply_state(state)
 
     def _apply_state(self, state: ResponseStreamFilterSnapshot) -> None:
         state = snapshot.for_graph(state, self._bound_graph)
