@@ -17,7 +17,7 @@ from graphon.model_runtime.protocols.text_embedding_runtime import (
     TextEmbeddingModelRuntime,
 )
 from graphon.model_runtime.protocols.tts_runtime import TTSModelRuntime
-from graphon.nodes.code.code_node import CodeExecutorProtocol
+from graphon.nodes.code.protocols import CodeExecutorProtocol
 from graphon.nodes.llm.protocols import CredentialsProvider, ModelFactory
 from graphon.nodes.llm.runtime_protocols import (
     LLMPollingCapableProtocol,

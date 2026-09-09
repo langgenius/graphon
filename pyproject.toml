@@ -46,6 +46,7 @@ dev = [
     'prek',
     'ty',
     'gevent>=26.8.0',
+    "import-linter>=2.15",
 ]
 
 [build-system]
@@ -94,6 +95,34 @@ ignore-one-line-docstrings = true
 
 [tool.ty.environment]
 python-platform = 'linux'
+
+[tool.importlinter]
+root_package = 'graphon'
+exclude_type_checking_imports = false
+
+[[tool.importlinter.contracts]]
+id = 'runtime-ownership'
+name = 'Runtime owns state and queues without importing engine'
+type = 'forbidden'
+source_modules = ['graphon.runtime']
+forbidden_modules = ['graphon.engine']
+broken_contract_guidance = 'Use graphon.runtime.ready_queue for queue contracts, tasks, and the default queue; runtime must not depend on graphon.engine.'
+
+[[tool.importlinter.contracts]]
+id = 'execution-adapters'
+name = 'Execution core does not import DSL adapters'
+type = 'forbidden'
+source_modules = ['graphon.engine', 'graphon.graph', 'graphon.runtime', 'graphon.nodes', 'graphon.protocols']
+forbidden_modules = ['graphon.dsl']
+broken_contract_guidance = 'Inject consumer-owned protocols; assemble concrete adapters in graphon.dsl or the host application.'
+
+[[tool.importlinter.contracts]]
+id = 'node-contracts'
+name = 'Public contracts do not import Code or LLM implementations'
+type = 'forbidden'
+source_modules = ['graphon.protocols', 'graphon.nodes.code.protocols', 'graphon.nodes.llm.protocols', 'graphon.nodes.llm.runtime_protocols', 'graphon.nodes.protocols', 'graphon.nodes.runtime']
+forbidden_modules = ['graphon.engine', 'graphon.nodes.code.code_node', 'graphon.nodes.llm.node']
+broken_contract_guidance = 'Import code contracts from graphon.nodes.code.protocols and LLM contracts from graphon.nodes.llm.protocols or runtime_protocols; import node classes explicitly during bootstrap.'
 
 [tool.pytest]
 minversion = '9.0'

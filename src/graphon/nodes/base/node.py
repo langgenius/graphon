@@ -161,8 +161,8 @@ class _NodeRegistryMixin[NodeDataT: BaseNodeData]:
         """Return a read-only view of the currently registered node classes.
 
         This accessor intentionally performs no imports. The embedding layer that
-        owns bootstrap (for example `core.workflow.node_factory`) must import any
-        extension node packages before calling it so their subclasses register via
+        owns bootstrap (for example `core.workflow.node_factory`) must import the
+        extension node classes before calling it so their subclasses register via
         `__init_subclass__`.
 
         Returns:

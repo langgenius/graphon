@@ -31,12 +31,12 @@ from graphon.runtime.container_state import (
     LoopRunState,
 )
 from graphon.runtime.execution import ROOT_FRAME_ID
+from graphon.runtime.ready_queue import ResumeTask
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.utils.condition.processor import ConditionProcessor
 from graphon.variables.segments import SerializableSegment
 
 from ...frame import ExecutionFrame, FrameRegistry
-from ...ready_queue import ResumeTask
 
 
 @final

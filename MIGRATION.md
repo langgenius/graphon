@@ -5,7 +5,8 @@ last_checked: "2026-09-08T17:06:16Z"
 
 ## 0.7.x to 0.8.0 (Unreleased)
 
-Graphon 0.8.0 intentionally removes the old names instead of carrying aliases.
+Graphon 0.8.0 removes the renamed execution APIs listed below. Queue import
+paths retain the compatibility aliases described in this guide.
 Upgrade Graphon and its importing application together. If paused executions or
 response-filter state are persisted, retain the graph definition used by each run
 until its state has been restored and serialized by 0.8.0.
@@ -20,6 +21,30 @@ until its state has been restored and serialized by 0.8.0.
 
 The package version remains `0.7.0` on this development branch. The release PR
 will bump it to `0.8.0` separately.
+
+### Runtime queues and node imports
+
+Queue contracts, task values, and the default queue now live in
+`graphon.runtime.ready_queue`. Existing imports from `graphon.engine.ready_queue`,
+its `entities` module, and its `in_memory` module retain the same public objects.
+Use the runtime path when constructing or restoring runtime state without loading
+the engine. Custom queue injection and serialized queue/runtime formats are
+unchanged.
+
+`CodeExecutorProtocol` now lives in `graphon.nodes.code.protocols`; its public
+`graphon.protocols` export and old `code_node` import retain object identity.
+Importing public contracts no longer registers concrete nodes. Bare
+`import graphon.nodes.code` and `import graphon.nodes.llm` also stop registering
+their implementations. Bootstrap by importing the classes explicitly:
+
+```python
+from graphon.nodes.code import CodeNode
+from graphon.nodes.llm import LLMNode
+```
+
+Direct implementation imports (`code.code_node.CodeNode` and `llm.node.LLMNode`)
+continue to work and register the same classes. The default DSL factory already
+uses explicit imports.
 
 ### File runtime isolation
 

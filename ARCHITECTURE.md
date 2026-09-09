@@ -28,6 +28,35 @@ the variable pool, runtime state, node factory, graph, and engine. Built-in node
 availability and default DSL support are separate concerns: inspect the
 [DSL factory](src/graphon/dsl/node_factory.py) for its supported node types.
 
+## Import boundaries
+
+[Import Linter contracts](pyproject.toml) enforce these dependency directions,
+including indirect imports and imports guarded by `TYPE_CHECKING`. Run
+`just imports`; the same checks run through `just tc`, `just test`, and CI's
+`just check`.
+
+| Consumer | Boundary | Dependency home |
+| --- | --- | --- |
+| Runtime | Does not import `graphon.engine` | [Runtime queue package](src/graphon/runtime/ready_queue/) owns the queue protocol, tasks, and in-memory implementation |
+| Engine, graph, runtime, nodes, public protocols | Do not import `graphon.dsl`, including Slim adapters | Inject consumer-owned contracts; compose adapters in DSL or the host |
+| `graphon.protocols` and selected node contracts | Do not import the engine or concrete Code/LLM implementations | [Code](src/graphon/nodes/code/protocols.py), [LLM](src/graphon/nodes/llm/protocols.py), [LLM runtime](src/graphon/nodes/llm/runtime_protocols.py), [file](src/graphon/nodes/protocols.py), and [tool](src/graphon/nodes/runtime.py) contracts |
+
+Shared schemas remain valid dependencies: runtime uses
+[container effects](src/graphon/nodes/container_effects.py) and model usage values;
+contracts use node data and graph factory interfaces. The engine's Loop handler
+still uses `LoopNode`. These rules do not impose a universal layer ordering.
+
+Default runtime construction and current snapshot restoration work without
+loading the engine or registering built-in nodes. The old engine queue paths
+re-export the same objects for compatibility; new runtime consumers use
+`graphon.runtime.ready_queue`.
+Importing `graphon.protocols` registers no nodes. Code/LLM package class exports
+load their implementations only when explicitly requested; bare package or
+contract-submodule imports do not register them. See
+[runtime isolation](tests/runtime/test_runtime_imports.py),
+[public-contract isolation](tests/test_protocols_exports.py), and
+[bootstrap migration](MIGRATION.md#runtime-queues-and-node-imports).
+
 ## Execution flow
 
 ```mermaid

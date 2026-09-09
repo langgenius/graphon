@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from abc import abstractmethod
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from textwrap import dedent
-from typing import Any, Protocol, TypeGuard, assert_never, override
+from typing import Any, TypeGuard, assert_never, override
 
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.node import Node
 from graphon.nodes.code.entities import CodeLanguage, CodeNodeData
 from graphon.nodes.code.limits import CodeNodeLimits
+from graphon.nodes.code.protocols import CodeExecutorProtocol
 from graphon.runtime.init_params import InitParams
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.variables.segments import ArrayFileSegment
@@ -21,20 +21,6 @@ from .exc import (
     DepthLimitError,
     OutputValidationError,
 )
-
-
-class CodeExecutorProtocol(Protocol):
-    @abstractmethod
-    def execute(
-        self,
-        *,
-        language: CodeLanguage,
-        code: str,
-        inputs: Mapping[str, Any],
-    ) -> Mapping[str, Any]: ...
-
-    @abstractmethod
-    def is_execution_error(self, error: Exception) -> bool: ...
 
 
 def _build_default_config(

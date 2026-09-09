@@ -6,8 +6,8 @@ import threading
 from typing import final
 
 from graphon.engine.frame import FrameRegistry
-from graphon.engine.ready_queue import ReadyQueue, ReadyTask
 from graphon.file.protocols import WorkflowFileRuntimeProtocol
+from graphon.runtime.ready_queue import ReadyQueue, ReadyTask
 
 from ..layer import Layer
 from .worker import DispatchTask, Worker

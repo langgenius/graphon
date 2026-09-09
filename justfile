@@ -11,7 +11,10 @@ format:
 lint: format
     uv run ruff check --fix
 
-tc: lint
+imports:
+    uv run lint-imports --cache-dir .cache/import-linter
+
+tc: lint imports
     uv run ty check
 
 test: tc
@@ -22,6 +25,7 @@ check:
     uv run ruff format --check
     uv run ruff check
     uv run ty check
+    just imports
 
 build: check
     uv build --no-create-gitignore --no-sources

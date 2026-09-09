@@ -45,10 +45,10 @@ from graphon.nodes.container_effects import (
     ContainerNodeRunResult,
 )
 from graphon.runtime.execution import ROOT_FRAME_ID, GraphExecution
+from graphon.runtime.ready_queue import ResumeTask, StartTask
 
 from ..container_handler import ContainerHandler
 from ..frame import ExecutionFrame, FrameRegistry
-from ..ready_queue import ResumeTask, StartTask
 from ..worker import ContainerAwaitTask, NodeEventTask
 from .stream import EventStream
 

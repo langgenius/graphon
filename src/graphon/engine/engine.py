@@ -27,6 +27,7 @@ from graphon.file.runtime import (
 from graphon.graph.graph import Graph
 from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
+from graphon.runtime.ready_queue import ResumeTask, StartTask
 from graphon.runtime.runtime_state import RuntimeState
 
 from .command.builtin.in_memory import InMemoryChannel
@@ -43,7 +44,6 @@ from .event.processor import NodeEventProcessor
 from .event.stream import EventStream
 from .frame import FrameRegistry
 from .layer import Layer
-from .ready_queue import ResumeTask, StartTask
 from .worker import DispatchTask, WorkerPool
 
 logger = logging.getLogger(__name__)

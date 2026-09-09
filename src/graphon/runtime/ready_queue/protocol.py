@@ -6,7 +6,7 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from graphon.engine.ready_queue.entities import ReadyTask
+    from .tasks import ReadyTask
 
 
 class ReadyQueue(Protocol):
