@@ -1,3 +1,6 @@
+<!-- knowledge
+last_checked: "2026-09-08T00:00:00Z"
+-->
 # Snapshot eligibility (TD-03)
 
 **Status:** implementation and reviews complete locally, 2026-09-08.

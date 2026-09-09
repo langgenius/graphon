@@ -1,3 +1,6 @@
+<!-- knowledge
+last_checked: "2026-09-08T17:06:16Z"
+-->
 # Graphon
 
 Graphon is a Python graph execution engine for agentic AI workflows.
@@ -88,9 +91,9 @@ For the exact credential shape and runtime notes, see
 
 At a high level, direct Graphon usage looks like this:
 
-1. Build or load a graph and instantiate nodes into a `Graph`.
-2. Prepare `RuntimeState` with the workflow ID and seed the `VariablePool`.
-3. Configure model, file, HTTP, tool, or human-input adapters as needed.
+1. Prepare `RuntimeState` with the workflow ID and seed the `VariablePool`.
+2. Configure model, file, HTTP, tool, or human-input adapters as needed.
+3. Instantiate nodes with that state and build them into a `Graph`.
 4. Run `Engine` and consume emitted engine events; a local command channel is
    created automatically unless an external channel is supplied.
 5. Read final outputs from runtime state.

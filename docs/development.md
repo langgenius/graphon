@@ -1,3 +1,6 @@
+<!-- knowledge
+last_checked: "2026-09-08T00:00:00Z"
+-->
 # Development navigation
 
 At the start of every development workflow, read and follow

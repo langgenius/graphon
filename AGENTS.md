@@ -1,3 +1,6 @@
+<!-- knowledge
+last_checked: "2026-09-08T17:06:45Z"
+-->
 # AGENTS
 
 All agents working in this repository must follow the guidance in

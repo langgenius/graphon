@@ -1,3 +1,6 @@
+<!-- knowledge
+last_checked: "2026-09-08T17:06:45Z"
+-->
 # Repository knowledge
 
 Start with the question you need to answer, then follow the links to code and
@@ -38,14 +41,16 @@ Keep detailed component knowledge next to its implementation and link it here.
 
 ## Evidence and review
 
-The architecture and development guides were checked against source and test
-definitions on **2026-09-08**. This is a review date, not a claim that all behavior
-or external integrations have been exercised. Their linked tests show where to
-verify a change; [Contributing](../CONTRIBUTING.md) defines the validation workflow.
+Each page records its review timestamp using the shared
+[document metadata format](maintenance.md#document-metadata-and-review-deadline).
+This is not a claim that all behavior or external integrations have been
+exercised. Linked tests show where to verify a change;
+[Contributing](../CONTRIBUTING.md) defines the validation workflow.
 
 The [documentation test](../tests/test_repository_docs.py) checks local file
-links and whether this knowledge base is reachable from
-[AGENTS.md](../AGENTS.md). It runs in the existing pytest CI job. It does not
+links, whether this knowledge base is reachable from [AGENTS.md](../AGENTS.md),
+and whether every maintained page has been checked within seven days. It runs
+as part of the normal pytest suite in CI. Recorded timestamps do not
 prove that prose matches behavior; review source and tests when updating a page.
 
 ## Related work

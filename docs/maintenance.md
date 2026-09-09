@@ -1,3 +1,6 @@
+<!-- knowledge
+last_checked: "2026-09-08T17:06:45Z"
+-->
 # Maintaining repository knowledge
 
 The [knowledge index](README.md) is the entry point for durable context.
@@ -39,16 +42,58 @@ before starting overlapping work.
 
 Use relative inline Markdown links for repository files, including evidence in
 tables. Keep examples inside fenced code blocks. The existing test suite checks
-links in root Markdown files, this directory, and component/example READMEs:
+links in root Markdown files and every Markdown file under `docs/`, `src/`, and
+`examples/`:
 
 ```bash
 uv run pytest -n 0 tests/test_repository_docs.py
 ```
 
 The check catches missing local paths and knowledge pages unreachable from
-`AGENTS.md`. It does not validate heading anchors, external URLs, reference-style
-links, prose accuracy, or review dates. When it fails, repair the link or add a
-route from an indexed page; do not weaken the check to hide obsolete knowledge.
+`AGENTS.md`, and enforces the review metadata below. It does not validate heading
+anchors, external URLs, reference-style links, or prose accuracy. When it fails,
+repair the link, add a route from an indexed page, or review the overdue document;
+do not weaken the check to hide obsolete knowledge.
+
+## Document metadata and review deadline
+
+Every maintained knowledge document starts with this YAML metadata in an HTML
+comment, before its title. The comment stays hidden in rendered Markdown,
+including the package README:
+
+```markdown
+<!-- knowledge
+last_checked: "2026-09-08T00:00:00Z"
+-->
+# Document title
+```
+
+`last_checked` is required: a UTC timestamp in `YYYY-MM-DDTHH:MM:SSZ` format,
+stored as a YAML string. Use quotes as shown above to prevent YAML from converting
+it to a timestamp value. It records when the page's claims were last checked
+against their source and evidence, not the file modification time or proof that
+every linked test was executed. Advance it only after reviewing the page,
+correcting stale claims, and checking its links. A partial edit does not renew
+an entire page's review. Other descriptive YAML fields may be added when needed;
+CI requires only `last_checked`.
+
+The same format applies to all root Markdown files except `CLA.md` (the legal
+agreement) and `CHANGELOG.md` (the release ledger), and every Markdown file under
+`docs/`, `src/`, and `examples/`. New nested knowledge bases and non-README guides
+are included automatically. Completed plans remain in scope: review their
+historical accuracy and links without rewriting them as current API guidance.
+Templates under `.github/` are outside the knowledge scope.
+
+The documentation check rejects missing, malformed, or future timestamps. It
+compares the earliest `last_checked` across the entire scope with the current UTC
+time and fails when its age exceeds seven 24-hour days; exactly seven days passes.
+The failure identifies the oldest file and its timestamp.
+
+The check runs in the normal pytest suite, including the existing CI jobs for
+pull requests targeting `main` and release tags, and with the focused command
+above. It scans the full scope without changed-file filters. Date-only review
+evidence imported during the initial rollout uses midnight UTC on that date as
+a conservative lower bound, rather than claiming a new review at migration time.
 
 ## Plans for work that needs durable context
 
@@ -94,6 +139,3 @@ produce a cleanup diff.
 After editing, repair affected links and run the documentation check above.
 Report the changes made, or that no relevant cleanup was needed. Keep review
 dates limited to claims actually checked. Broader audits remain outside this step.
-
-This is an ordinary contribution workflow. There is no scheduled maintenance
-agent or semantic freshness checker configured by these documents.

@@ -1,3 +1,6 @@
+<!-- knowledge
+last_checked: "2026-09-08T17:06:45Z"
+-->
 # Contributing to Graphon
 
 This guide reflects the repository's current local tooling and GitHub Actions
@@ -218,14 +221,17 @@ and the tests relevant to a change. Keep affected documentation and source/test
 links current in the same change. See [Knowledge maintenance](docs/maintenance.md)
 for document placement, review, and plans for work that spans sessions.
 
-The normal pytest suite includes a local documentation link and reachability
-check. To run it alone:
+The normal pytest suite checks local documentation links, reachability, and
+review metadata, failing if the oldest review is more than seven days old.
+To run these checks alone:
 
 ```bash
 uv run pytest -n 0 tests/test_repository_docs.py
 ```
 
-This check verifies navigation, not whether prose still describes the code.
+These checks verify navigation and recorded review age. Review the page's claims
+before updating its `last_checked` timestamp; see the
+[metadata format and scope](docs/maintenance.md#document-metadata-and-review-deadline).
 
 ## Git Commits
 
