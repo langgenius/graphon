@@ -17,13 +17,13 @@ Internal frame snapshots remain part of engine execution.
 
 ## Context and decisions
 
-- [Engine.run](../../src/graphon/engine/engine.py) invokes start hooks before
+- [Engine.run](../../../src/graphon/engine/engine.py) invokes start hooks before
   starting workers and yields terminal events before teardown. Snapshot callers
   must finish consuming or close the iterator and wait for execution to stop.
 - Persisted `started`, `paused`, and `completed` flags do not prove quiescence.
   Pause drains active workers; abort and failure can leave workers running beyond
   the bounded shutdown joins.
-- Use the shared [GraphExecution](../../src/graphon/runtime/execution.py) to
+- Use the shared [GraphExecution](../../../src/graphon/runtime/execution.py) to
   account for live run, dispatcher, and worker activity. Child frames already
   share this object. Keep the guard transient, outside snapshot schemas.
 - Exclude execution startup and other snapshot writers for the entire public
@@ -54,9 +54,9 @@ serialize; concurrent startup and snapshot writers overlapped a held snapshot.
 Fresh independent test review completed before implementation; all six cases passed
 with the guard in place.
 
-Existing [serialization tests](../../tests/engine/test_runtime_state_serialization.py),
-[runtime tests](../../tests/runtime/test_runtime_state.py), and
-[version isolation](../../tests/test_snapshot_version_isolation.py) cover paused
+Existing [serialization tests](../../../tests/engine/test_runtime_state_serialization.py),
+[runtime tests](../../../tests/runtime/test_runtime_state.py), and
+[version isolation](../../../tests/test_snapshot_version_isolation.py) cover paused
 containers, task preservation, historical snapshots, and current formats.
 
 The focused serialization/runtime/isolation/dispatch/container/layer-context set

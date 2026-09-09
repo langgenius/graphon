@@ -25,17 +25,17 @@ The implementation changes graph construction, default validation, and DSL error
 translation. It preserves scheduler behavior, container execution, snapshot
 formats, supported editor/legacy inputs, and edge IDs for valid graphs. Current
 construction invariants live in
-[Architecture](../../ARCHITECTURE.md#state-and-execution-invariants).
+[Architecture](../../../ARCHITECTURE.md#state-and-execution-invariants).
 
 ## Implementation and evidence
 
 | Boundary | Change | Evidence |
 | --- | --- | --- |
-| [Graph configuration](../../src/graphon/graph/graph.py) | Reject invalid/duplicate executable node IDs and malformed edge fields before indexing or filtering; enforce edge ID uniqueness within each owning scope. | [Scoping tests](../../tests/graph/test_graph_scoping.py) cover rejection before construction, unchanged inputs, legacy ownership, scoped edge IDs, and valid custom containers. |
-| [Default validation](../../src/graphon/graph/validation.py) | Share endpoint and cycle checks between retained-subtree preflight and materialized graph validation. | [Scoping tests](../../tests/graph/test_graph_scoping.py) cover self-cycles, nested/inactive cycles, unknown endpoints, sibling-scope exclusion, and trusted bypasses; [validator tests](../../tests/graph/test_graph_validation.py) retain root/endpoint coverage. |
-| [Python builder](../../src/graphon/graph/graph.py) | Reject non-string/empty IDs at registration and invalid handles/cycles by `build()`. Nodes are already constructed by the caller. | [Builder tests](../../tests/graph/test_graph.py) exercise both edge creation methods and preserve valid DAGs. |
-| [DSL loading](../../src/graphon/dsl/importer.py) | Serialize slotted validation issues with `dataclasses.asdict()` into the existing `graph.validation_failed` envelope. | [Importer tests](../../tests/dsl/test_importer.py) reject the false-success cycle before execution, run its acyclic control, and inspect structured root/cycle errors. |
-| [Child frame construction](../../src/graphon/engine/frame.py) | Fresh/restored frames use the same `Graph.init()` boundary; no frame changes were needed. | Existing [container execution](../../tests/engine/test_cooperative_container_execution.py), [serialization](../../tests/engine/test_runtime_state_serialization.py), and [snapshot isolation](../../tests/test_snapshot_version_isolation.py) checks pass in the full suite. |
+| [Graph configuration](../../../src/graphon/graph/graph.py) | Reject invalid/duplicate executable node IDs and malformed edge fields before indexing or filtering; enforce edge ID uniqueness within each owning scope. | [Scoping tests](../../../tests/graph/test_graph_scoping.py) cover rejection before construction, unchanged inputs, legacy ownership, scoped edge IDs, and valid custom containers. |
+| [Default validation](../../../src/graphon/graph/validation.py) | Share endpoint and cycle checks between retained-subtree preflight and materialized graph validation. | [Scoping tests](../../../tests/graph/test_graph_scoping.py) cover self-cycles, nested/inactive cycles, unknown endpoints, sibling-scope exclusion, and trusted bypasses; [validator tests](../../../tests/graph/test_graph_validation.py) retain root/endpoint coverage. |
+| [Python builder](../../../src/graphon/graph/graph.py) | Reject non-string/empty IDs at registration and invalid handles/cycles by `build()`. Nodes are already constructed by the caller. | [Builder tests](../../../tests/graph/test_graph.py) exercise both edge creation methods and preserve valid DAGs. |
+| [DSL loading](../../../src/graphon/dsl/importer.py) | Serialize slotted validation issues with `dataclasses.asdict()` into the existing `graph.validation_failed` envelope. | [Importer tests](../../../tests/dsl/test_importer.py) reject the false-success cycle before execution, run its acyclic control, and inspect structured root/cycle errors. |
+| [Child frame construction](../../../src/graphon/engine/frame.py) | Fresh/restored frames use the same `Graph.init()` boundary; no frame changes were needed. | Existing [container execution](../../../tests/engine/test_cooperative_container_execution.py), [serialization](../../../tests/engine/test_runtime_state_serialization.py), and [snapshot isolation](../../../tests/test_snapshot_version_isolation.py) checks pass in the full suite. |
 
 ## Delivery steps
 
@@ -53,7 +53,7 @@ construction invariants live in
 
 The duplicate search was repeated before preparing the draft PR, and
 [issue #277](https://github.com/langgenius/graphon/issues/277) was created as
-required by [Contributing](../../CONTRIBUTING.md#issues).
+required by [Contributing](../../../CONTRIBUTING.md#issues).
 
 ## Decision log
 

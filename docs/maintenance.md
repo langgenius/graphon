@@ -17,7 +17,7 @@ the claims against the linked implementation and evidence.
 | How to locate code, extend it, and exercise it | [Development guide](development.md) |
 | Component-specific details | The component's existing README, linked from the index |
 | A complex task's progress and unresolved decisions | A linked plan under `docs/plans/`, created when needed |
-| Completed plans retained as history | [Archive](archive/), excluded from routine knowledge checks |
+| Completed plans retained as history | [Archived plans](archive/plans/), excluded from routine knowledge checks |
 
 Prefer a link to a maintained definition over another copied command, API list,
 or code example. Record only context that helps someone make a change: purpose,
@@ -124,8 +124,9 @@ Keep active knowledge focused on current behavior and unfinished work.
    for contributor rules. Reuse existing explanations and link source/tests;
    do not copy task history into general guidance or promote an unaccepted proposal
    into policy.
-2. Move completed plans from `docs/plans/` to `docs/archive/`. Retain useful
-   decisions, completion evidence, and original review timestamps as history.
+2. Move completed plans from `docs/plans/` to `docs/archive/plans/`, preserving
+   their original directory under the archive. Retain useful decisions, completion
+   evidence, and original review timestamps as history.
    Repair links affected by the move and remove links to deleted debt sections.
    Record any unfinished follow-up in an active issue or separate plan.
 3. Remove completed task entries, resolved debt sections, obsolete status reports,

@@ -82,7 +82,7 @@ Python 3.13 and live external integrations were not exercised locally.
 
 **Requirement:** replace case-specific import rules with general architectural
 layering. The six ordered layers are maintained in
-[architecture](../../ARCHITECTURE.md#import-boundaries); their package groups
+[architecture](../../../ARCHITECTURE.md#import-boundaries); their package groups
 reflect existing schema and runtime dependencies. The exhaustive contract covers
 all top-level modules, including future additions, and rejects upward imports
 through descendants and type-checking guards. The existing import-side-effect
