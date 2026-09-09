@@ -2,13 +2,16 @@
 
 This file records user-facing changes from Graphon 0.8.0 onward.
 
-## 0.8.0 (Unreleased)
+## 0.8.0
 
 This is a breaking release. See the [0.7.x to 0.8.0 migration guide](MIGRATION.md)
 before upgrading an integration.
 
 ### Changed
 
+- Text-to-speech runtimes and model wrappers now return `TTSChunk` values with
+  audio bytes and an optional MIME type instead of bare bytes. See
+  [TTS migration](MIGRATION.md#text-to-speech-output).
 - Runtime now owns ready queues and task values; existing engine queue imports
   remain aliases. Runtime construction and current snapshot restoration avoid
   loading the engine. Public contract and bare Code/LLM package imports no longer
@@ -52,6 +55,17 @@ before upgrading an integration.
   the run iterator.
 - Kept loop write-backs explicit and parent-owned while iteration frame state
   remains isolated; external variable-update commands stay authoritative.
+
+### Fixed
+
+- LLM structured output now checks model capabilities and validates schemas and
+  results, including empty objects, with remote schema retrieval disabled.
+- LLM retries no longer reuse file outputs from failed attempts, and invalid or
+  incomplete invocation event streams fail explicitly.
+- Local EPUB extraction follows spine order, and local EPUB/ODT extraction no
+  longer requires Pandoc.
+- Engine execution honors gevent monkey-patching and resolves legacy nested
+  container ownership.
 
 ### Removed
 

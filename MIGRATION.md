@@ -3,7 +3,7 @@ last_checked: "2026-09-08T17:06:16Z"
 -->
 # Migration guide
 
-## 0.7.x to 0.8.0 (Unreleased)
+## 0.7.x to 0.8.0
 
 Graphon 0.8.0 removes the renamed execution APIs listed below. Queue import
 paths retain the compatibility aliases described in this guide.
@@ -19,8 +19,17 @@ until its state has been restored and serialized by 0.8.0.
    persist it again to write the current format.
 4. Remove downstream handling of the old Python names and owner fields.
 
-The package version remains `0.7.0` on this development branch. The release PR
-will bump it to `0.8.0` separately.
+### Text-to-speech output
+
+`TTSModel.invoke()` and `TTSModelRuntime.invoke_tts()` now return
+`Iterable[TTSChunk]` instead of `Iterable[bytes]`. Import `TTSChunk` from
+`graphon.model_runtime.protocols.tts_runtime`. Runtime adapters must yield
+`TTSChunk(data=audio_bytes, mime_type="audio/wav")`, using the actual output MIME
+type or `None` when unknown. Both fields are required. Consumers must read
+`chunk.data` for audio bytes and `chunk.mime_type` for the content type.
+
+See the [runtime contract](src/graphon/model_runtime/protocols/tts_runtime.py)
+and [model dispatch tests](tests/model_runtime/test_model_dispatch.py).
 
 ### Runtime queues and node imports
 
