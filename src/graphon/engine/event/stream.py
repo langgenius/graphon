@@ -1,83 +1,92 @@
 """Thread-safe collection and delivery of engine events."""
 
 import logging
-import queue
-from collections.abc import Generator
-from typing import cast, final
+import threading
+from collections import deque
+from collections.abc import Callable, Generator
+from datetime import UTC, datetime
+from itertools import count
+from typing import final
 
 from graphon.engine_events.base import EngineEvent
 
 from ..layer import Layer
 
 _logger = logging.getLogger(__name__)
-_COMPLETE = object()
 
 
 @final
 class EventStream:
-    """Collect, buffer, and stream engine events.
+    """Collect, buffer, and stream engine events."""
 
-    The stream is the single event boundary between the engine and external
-    consumers. It also notifies the engine's layers as events arrive.
-    """
-
-    def __init__(self, layers: list[Layer]) -> None:
-        """Initialize an event stream bound to the engine's live layer list.
-
-        The list is retained by reference so layers registered after engine
-        construction are visible to the stream without a second configuration
-        phase. Collected events are buffered until :meth:`emit_events` yields
-        them, while lifecycle events can notify the same layers without being
-        added to that buffer.
-
-        Args:
-            layers: Mutable list of layers owned by the engine.
-
-        """
-        self._events: queue.SimpleQueue[object] = queue.SimpleQueue()
+    def __init__(
+        self,
+        layers: list[Layer],
+        graph_id: str = "",
+        execution_id: str = "",
+        next_sequence: Callable[[], int] | None = None,
+    ) -> None:
+        self._graph_id = graph_id
+        self._execution_id = execution_id
+        self._events: deque[EngineEvent] = deque()
+        self._condition = threading.Condition()
         self._layers = layers
+        self._execution_complete = False
+        if next_sequence is None:
+            next_sequence = count(1).__next__
+        self._next_sequence = next_sequence
 
     def notify_layers(self, event: EngineEvent) -> None:
-        """Notify all layers about an event without buffering it.
+        """Set event fields and notify layers without adding it to the buffer."""
+        with self._condition:
+            self._set_event_fields(event)
+            self._notify_layers(event)
 
-        Layer exceptions are caught and logged so one extension cannot disrupt
-        event delivery to the remaining layers or the engine itself.
+    def collect(self, event: EngineEvent) -> None:
+        """Buffer one event and wake its consumer."""
+        with self._condition:
+            if self._execution_complete:
+                msg = "Cannot collect events after execution is complete"
+                raise RuntimeError(msg)
+            self._set_event_fields(event)
+            self._events.append(event)
+            # Layers observe stream order before the consumer can wake.
+            self._notify_layers(event)
+            self._condition.notify()
 
-        Args:
-            event: Event to send to every registered layer.
+    def mark_complete(self) -> None:
+        """Mark execution complete and wake all waiting consumers."""
+        with self._condition:
+            self._execution_complete = True
+            self._condition.notify_all()
 
-        """
+    def reset(self) -> None:
+        """Discard buffered events and completion state from the previous run."""
+        with self._condition:
+            self._events.clear()
+            self._execution_complete = False
+
+    def emit_events(self) -> Generator[EngineEvent, None, None]:
+        """Yield events in collection order, releasing each after consumption."""
+        while True:
+            with self._condition:
+                self._condition.wait_for(
+                    lambda: self._events or self._execution_complete
+                )
+                if not self._events:
+                    return
+                event = self._events.popleft()
+            yield event  # ruff:ignore[unnecessary-assign-before-yield]
+
+    def _set_event_fields(self, event: EngineEvent) -> None:
+        event.graph_id = self._graph_id
+        event.execution_id = self._execution_id
+        event.sequence = self._next_sequence()
+        event.emitted_at = datetime.now(UTC)
+
+    def _notify_layers(self, event: EngineEvent) -> None:
         for layer in self._layers:
             try:
                 layer.on_event(event)
             except Exception:
                 _logger.exception("Error in layer on_event, layer_type=%s", type(layer))
-
-    def collect(self, event: EngineEvent) -> None:
-        """Thread-safe method to collect an event.
-
-        Args:
-            event: The event to collect
-
-        """
-        self._events.put(event)
-        self.notify_layers(event)
-
-    def mark_complete(self) -> None:
-        """Mark execution as complete to stop the event emission generator."""
-        self._events.put(_COMPLETE)
-
-    def reset(self) -> None:
-        """Discard events and completion state from the previous engine run."""
-        self._events = queue.SimpleQueue()
-
-    def emit_events(self) -> Generator[EngineEvent, None, None]:
-        """Generator that yields events as they're collected.
-
-        Yields:
-            EngineEvent instances as they're processed
-
-        """
-        events = self._events
-        while (event := events.get()) is not _COMPLETE:
-            yield cast(EngineEvent, event)

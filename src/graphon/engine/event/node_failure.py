@@ -118,7 +118,7 @@ class NodeFailureHandler:
 
         time.sleep(node.retry_config.retry_interval_seconds)
         return NodeRunRetryEvent(
-            id=event.id,
+            node_execution_id=event.node_execution_id,
             node_title=node.title,
             node_id=event.node_id,
             node_type=event.node_type,
@@ -147,7 +147,7 @@ class NodeFailureHandler:
         }
 
         return NodeRunExceptionEvent(
-            id=event.id,
+            node_execution_id=event.node_execution_id,
             node_id=event.node_id,
             node_type=event.node_type,
             start_at=event.start_at,
@@ -189,7 +189,7 @@ class NodeFailureHandler:
         }
 
         return NodeRunExceptionEvent(
-            id=event.id,
+            node_execution_id=event.node_execution_id,
             node_id=event.node_id,
             node_type=event.node_type,
             start_at=event.start_at,

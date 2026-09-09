@@ -5,7 +5,6 @@ from collections.abc import Iterator, Mapping
 from functools import singledispatchmethod
 from typing import final
 
-from graphon.engine_events.agent import NodeRunAgentLogEvent
 from graphon.engine_events.base import NodeEvent
 from graphon.engine_events.iteration import (
     NodeRunIterationFailedEvent,
@@ -180,7 +179,6 @@ class NodeEventProcessor:
             | NodeRunLoopNextEvent
             | NodeRunLoopSucceededEvent
             | NodeRunLoopFailedEvent
-            | NodeRunAgentLogEvent
             | NodeRunModelPollingProgressEvent
             | NodeRunRetrieverResourceEvent
             | NodeRunReasoningChunkEvent

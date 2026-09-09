@@ -109,15 +109,19 @@ flowchart LR
    external commands, and completion detection. Its
    [event processor](src/graphon/engine/event/processor.py) stores outputs,
    applies failure/retry policies, updates scheduling, and publishes events.
-6. [EventStream](src/graphon/engine/event/stream.py) buffers events for the caller
-   and notifies layers. `Engine.run()` emits terminal status and stops execution
-   resources. A failed graph emits `GraphRunFailedEvent` and raises its error.
+6. [EventStream](src/graphon/engine/event/stream.py) sets graph/run IDs and raw
+   sequence numbers before notifying layers. Collection and layer callbacks share
+   one condition lock, so layers see events before the consumer in collection
+   order. Consumed events leave the buffer. `Engine.run()` emits terminal status
+   and stops execution resources. A failed graph emits `GraphRunFailedEvent` and
+   raises its error. See [event stream tests](tests/engine/test_event_stream.py).
 
 Response presentation is a consumer concern. `Engine.run()` yields raw engine
 events; [filter_engine_events](src/graphon/engine/filter/chain.py) and
 [ResponseStreamFilter](src/graphon/engine/filter/builtin/response_stream/filter.py)
 can transform that stream separately. See [raw-event tests](tests/engine/test_raw_engine_events.py)
-and [filter tests](tests/engine/test_event_filters.py).
+and [filter tests](tests/engine/test_event_filters.py). For restoring response
+filters, follow the [restore tests](tests/engine/test_response_stream_filter.py).
 
 ## State and execution invariants
 
@@ -141,6 +145,16 @@ with `use_workflow_file_runtime(engine.file_runtime)`; scoped `None` disables
 resolution. File values and snapshots contain no adapter, so hosts supply one
 again when rebuilding an engine. See [file runtime](src/graphon/file/runtime.py)
 and [execution isolation tests](tests/engine/test_file_runtime.py).
+
+**Event counters belong to the workflow execution.**
+[GraphExecution](src/graphon/runtime/execution.py) saves the run ID and separate
+raw and filtered event counters across pause and snapshot restore. The
+[filter chain](src/graphon/engine/filter/chain.py) assigns numbers after filtering
+and copies events when changing their numbers, leaving raw events unchanged.
+Use [EngineEventFilterContext.from_engine](src/graphon/engine/filter/protocol.py)
+to use the saved filtered counter; a manual context without `next_sequence`
+counts only within one `filter_engine_events()` call. See
+[filter tests](tests/engine/test_event_filters.py).
 
 **Container scopes are explicit.** `data.container_id` is the canonical direct
 owner; [scoping](src/graphon/graph/scoping.py) resolves supported legacy/editor

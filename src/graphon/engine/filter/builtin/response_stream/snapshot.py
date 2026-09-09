@@ -5,7 +5,7 @@ from importlib import import_module
 from types import ModuleType
 from typing import Literal, cast
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from graphon.engine_events.node import NodeRunStreamChunkEvent
 from graphon.runtime.runtime_state import GraphProtocol
@@ -26,6 +26,27 @@ class StreamBufferState(BaseModel):
     selector: Selector
     events: list[NodeRunStreamChunkEvent] = Field(default_factory=list)
 
+    @field_validator("events", mode="before")
+    @classmethod
+    def _update_old_event_ids(cls, events: object) -> object:
+        """Move node execution IDs from the old id field to node_execution_id."""
+        if not isinstance(events, list):
+            return events
+        updated_events = []
+        for event in events:
+            if (
+                isinstance(event, dict)
+                and "node_execution_id" not in event
+                and "schema_version" not in event
+                and "id" in event
+            ):
+                updated_event = event.copy()
+                updated_event["node_execution_id"] = updated_event.pop("id")
+                updated_events.append(updated_event)
+            else:
+                updated_events.append(event)
+        return updated_events
+
 
 class StreamPositionState(BaseModel):
     """Serializable read position for one buffered stream."""
@@ -40,6 +61,8 @@ class ResponseStreamFilterSnapshot(BaseModel):
     type: Literal["ResponseStreamFilter"] = "ResponseStreamFilter"
     version: str
     response_nodes: list[str] = Field(default_factory=list)
+    graph_id: str = ""
+    execution_id: str = ""
     active_session: ResponseSessionState | None = None
     waiting_sessions: list[ResponseSessionState] = Field(default_factory=list)
     pending_sessions: list[ResponseSessionState] = Field(default_factory=list)
