@@ -9,8 +9,9 @@ last_checked: "2026-09-08T00:00:00Z"
 locally. TD-03 implementation and independent reviews are complete locally.
 TD-04's 2026-09-09 explicit state ownership follow-up has passed checks,
 independent reviews, and its final naming pass.
-TD-01 and TD-05 are completed locally; validation and independent reviews are
-recorded in the [import boundaries plan](plans/runtime-import-boundaries.md).
+TD-01 and TD-05's initial implementation and architectural layering follow-up
+are complete locally. Validation and independent reviews are recorded in
+the [import boundaries plan](plans/runtime-import-boundaries.md).
 Other remediation remains proposed, not accepted architecture policy. Priorities
 express the original review's judgment.
 **Scope:** repository structure, execution and integration boundaries, developer
@@ -176,9 +177,11 @@ imports delayed that coupling without removing it.
 exercise a fresh-process current snapshot round-trip without loading the engine
 or registering nodes, then verify old queue export identities.
 [Existing runtime tests](../tests/runtime/test_runtime_state.py) cover custom
-queues and historical snapshots. [Import Linter contracts](../pyproject.toml)
-forbid runtime/engine and execution/DSL dependencies, including indirect and
-type-checking imports. [Architecture](../ARCHITECTURE.md#import-boundaries)
+queues and historical snapshots. The [Import Linter layers contract](../pyproject.toml)
+enforces dependency direction across every top-level package and module,
+including indirect and type-checking imports.
+[Layer tests](../tests/test_import_layers.py) cover upward dependencies and
+mandatory classification of new modules. [Architecture](../ARCHITECTURE.md#import-boundaries)
 defines the checked boundaries and legitimate schema dependencies;
 [the plan](plans/runtime-import-boundaries.md) records verification and reviews.
 
@@ -296,9 +299,10 @@ identity tests imported implementations first and could not detect this effect.
 
 **Current evidence:** [public protocol tests](../tests/test_protocols_exports.py)
 check registration in a fresh process, explicit class imports, and existing export
-identities. [Import Linter](../pyproject.toml) prevents selected consumer contracts
-from importing the engine or Code/LLM implementations. The subprocess check also
-covers initializer effects beyond the static graph. See
+identities. The [Import Linter layers contract](../pyproject.toml) places the
+public facade below the engine and above the execution model it exposes.
+The subprocess check protects node registration; the layers permit facade
+imports of concrete node implementations. See
 [bootstrap migration](../MIGRATION.md#runtime-queues-and-node-imports) and
 [the shared plan](plans/runtime-import-boundaries.md).
 

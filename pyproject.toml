@@ -101,28 +101,20 @@ root_package = 'graphon'
 exclude_type_checking_imports = false
 
 [[tool.importlinter.contracts]]
-id = 'runtime-ownership'
-name = 'Runtime owns state and queues without importing engine'
-type = 'forbidden'
-source_modules = ['graphon.runtime']
-forbidden_modules = ['graphon.engine']
-broken_contract_guidance = 'Use graphon.runtime.ready_queue for queue contracts, tasks, and the default queue; runtime must not depend on graphon.engine.'
-
-[[tool.importlinter.contracts]]
-id = 'execution-adapters'
-name = 'Execution core does not import DSL adapters'
-type = 'forbidden'
-source_modules = ['graphon.engine', 'graphon.graph', 'graphon.runtime', 'graphon.nodes', 'graphon.protocols']
-forbidden_modules = ['graphon.dsl']
-broken_contract_guidance = 'Inject consumer-owned protocols; assemble concrete adapters in graphon.dsl or the host application.'
-
-[[tool.importlinter.contracts]]
-id = 'node-contracts'
-name = 'Public contracts do not import Code or LLM implementations'
-type = 'forbidden'
-source_modules = ['graphon.protocols', 'graphon.nodes.code.protocols', 'graphon.nodes.llm.protocols', 'graphon.nodes.llm.runtime_protocols', 'graphon.nodes.protocols', 'graphon.nodes.runtime']
-forbidden_modules = ['graphon.engine', 'graphon.nodes.code.code_node', 'graphon.nodes.llm.node']
-broken_contract_guidance = 'Import code contracts from graphon.nodes.code.protocols and LLM contracts from graphon.nodes.llm.protocols or runtime_protocols; import node classes explicitly during bootstrap.'
+id = 'architecture-layers'
+name = 'Packages import within their layer or below'
+type = 'layers'
+containers = ['graphon']
+exhaustive = true
+layers = [
+    'dsl',
+    'engine',
+    'protocols : errors',
+    'graph : nodes : runtime : utils : variable_loader',
+    'engine_events : node_events',
+    'entities : variables : file : http : model_runtime : enums : prompt_entities : template_rendering : workflow_type_encoder',
+]
+broken_contract_guidance = 'Depend on the same or a lower architectural layer. Inject dependencies from the composition layer, and classify every new top-level module in this contract. See ARCHITECTURE.md#import-boundaries.'
 
 [tool.pytest]
 minversion = '9.0'

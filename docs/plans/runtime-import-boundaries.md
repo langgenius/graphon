@@ -3,12 +3,14 @@ last_checked: "2026-09-08T20:47:59Z"
 -->
 # Runtime and public contract imports
 
-**Status:** completed locally, 2026-09-09.
+**Status:** initial implementation and architectural layering follow-up completed
+locally, 2026-09-09.
 **Owner:** current development task on `laipz8200/runtime-import-boundaries`.
 **Tracking:** [implementation issue #286](https://github.com/langgenius/graphon/issues/286),
 [TD-01 and TD-05](../technical-debt.md), originating in
 [architecture review #275](https://github.com/langgenius/graphon/issues/275).
-The change is stacked on [PR #285](https://github.com/langgenius/graphon/pull/285).
+The change is published in [PR #287](https://github.com/langgenius/graphon/pull/287),
+stacked on [PR #285](https://github.com/langgenius/graphon/pull/285).
 
 ## Objective and scope
 
@@ -19,7 +21,7 @@ engine paths, custom queue injection, historical snapshots, and explicit Code/LL
 class imports. Use Import Linter to enforce the dependency boundaries in ordinary
 local and CI checks.
 
-## Steps
+## Initial implementation steps
 
 - [x] Read architecture, source, callers, and existing tests; search open and
   closed issues and PRs for overlapping work. No matching remediation found.
@@ -37,11 +39,12 @@ local and CI checks.
 - Keep the code executor contract with its consumer. Load Code and LLM classes
   only when explicitly requested from their package exports or implementation
   modules. Bare package imports cease to register these nodes.
-- Use built-in forbidden contracts, including type-checking and indirect imports.
-  Shared schemas remain legitimate dependencies. Fresh-process tests cover Python
-  package initializer effects that static dependency checks do not represent.
+- Initially use targeted forbidden contracts. The requested layering follow-up
+  below replaces them with one exhaustive architectural contract. Shared schemas
+  remain legitimate dependencies. Fresh-process tests cover Python package
+  initializer effects that static dependency checks do not represent.
 
-## Validation and outcome
+## Initial implementation validation and outcome
 
 Before implementation, the two fresh-process tests failed at the intended engine
 import and registry assertions; existing public export checks passed. Import
@@ -73,3 +76,29 @@ documentation checks passed together: 29 tests. `just check` and
 `git diff --check` passed after the naming edits.
 
 Python 3.13 and live external integrations were not exercised locally.
+
+## Architectural layering follow-up
+
+**Requirement:** replace case-specific import rules with general architectural
+layering. The six ordered layers are maintained in
+[architecture](../../ARCHITECTURE.md#import-boundaries); their package groups
+reflect existing schema and runtime dependencies. The exhaustive contract covers
+all top-level modules, including future additions, and rejects upward imports
+through descendants and type-checking guards. The existing import-side-effect
+checks retain responsibility for runtime isolation and node registration.
+
+- [x] Map source dependencies and confirm the proposed layers accept the checkout.
+- [x] Add behavior checks; observe the old rules wrongly accept a file/runtime
+  dependency and an unclassified module, while still rejecting runtime/engine.
+- [x] Complete fresh independent test review and replace the three forbidden rules.
+- [x] Complete ordinary checks.
+- [x] Complete independent knowledge review.
+- [x] Complete final naming and verification.
+
+On Python 3.12.13, the layer, runtime import, and public protocol checks passed
+together (7 tests). `just test` passed all 864 tests, and `just check` passed with
+one architectural layers contract. Knowledge review clarified the static
+contract's registration limit and distinguished initial completion from this
+follow-up. Final naming made test directory paths, package names, and synthetic
+modules explicit and clarified the contract's display name. The 3 layer tests
+and `just check` passed after these mechanical renames.

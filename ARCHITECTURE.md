@@ -30,21 +30,36 @@ availability and default DSL support are separate concerns: inspect the
 
 ## Import boundaries
 
-[Import Linter contracts](pyproject.toml) enforce these dependency directions,
-including indirect imports and imports guarded by `TYPE_CHECKING`. Run
-`just imports`; the same checks run through `just tc`, `just test`, and CI's
-`just check`.
+The [Import Linter layers contract](pyproject.toml) orders every top-level
+`graphon` package and module from higher to lower responsibility:
 
-| Consumer | Boundary | Dependency home |
-| --- | --- | --- |
-| Runtime | Does not import `graphon.engine` | [Runtime queue package](src/graphon/runtime/ready_queue/) owns the queue protocol, tasks, and in-memory implementation |
-| Engine, graph, runtime, nodes, public protocols | Do not import `graphon.dsl`, including Slim adapters | Inject consumer-owned contracts; compose adapters in DSL or the host |
-| `graphon.protocols` and selected node contracts | Do not import the engine or concrete Code/LLM implementations | [Code](src/graphon/nodes/code/protocols.py), [LLM](src/graphon/nodes/llm/protocols.py), [LLM runtime](src/graphon/nodes/llm/runtime_protocols.py), [file](src/graphon/nodes/protocols.py), and [tool](src/graphon/nodes/runtime.py) contracts |
+| Layer, highest first | Packages and modules |
+| --- | --- |
+| Composition and adapters | `dsl` |
+| Execution coordination | `engine` |
+| Host-facing facade | `protocols`, `errors` |
+| Workflow execution model | `graph`, `nodes`, `runtime`, `utils`, `variable_loader` |
+| Event values | `engine_events`, `node_events` |
+| Shared values and services | `entities`, `variables`, `file`, `http`, `model_runtime`, `enums`, `prompt_entities`, `template_rendering`, `workflow_type_encoder` |
 
-Shared schemas remain valid dependencies: runtime uses
-[container effects](src/graphon/nodes/container_effects.py) and model usage values;
-contracts use node data and graph factory interfaces. The engine's Loop handler
-still uses `LoopNode`. These rules do not impose a universal layer ordering.
+Imports may stay within a layer or point downward. The colon-separated groups in
+configuration allow their members to depend on each other. The rule includes
+indirect imports and imports guarded by `TYPE_CHECKING`. Descendants inherit
+their package's layer; the exhaustive contract requires every new top-level
+package or module to be assigned explicitly.
+
+The execution model shares graph/node schemas and
+[container state](src/graphon/runtime/container_state.py);
+[legacy snapshot migration](src/graphon/runtime/runtime_state/v2.py) uses graph
+scoping, and [condition utilities](src/graphon/utils/condition/processor.py)
+consume runtime interfaces. The public facade sits above this layer because it
+re-exports `NodeFactory` and consumer contracts. These layers permit imports of
+concrete node implementations from the facade; fresh-process tests below enforce
+its node-registration guarantee.
+
+Run `just imports`; the same contract runs through `just tc`, `just test`, and
+CI's `just check`. [Layer regression tests](tests/test_import_layers.py) exercise
+the real configuration against new upward imports and an unclassified module.
 
 Default runtime construction and current snapshot restoration work without
 loading the engine or registering built-in nodes. The old engine queue paths
