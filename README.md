@@ -152,8 +152,6 @@ planned as a separate follow-up.
   component references, and maintenance
 - [Architecture](ARCHITECTURE.md): execution flow, boundaries, and invariants
 - [Contributing](CONTRIBUTING.md): contributor workflow, CI, commit/PR rules
-- [Migration guide](MIGRATION.md) and [changelog](CHANGELOG.md): upgrade
-  instructions and versioned user-facing changes
 
 ## Development
 

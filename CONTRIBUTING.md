@@ -339,7 +339,7 @@ uv version --no-sync --bump major
 Those commands update the package version in `pyproject.toml`. If the lock file
 also needs to reflect the new root package version, refresh and commit
 `uv.lock` as part of the version bump change. The version update step does not
-create tags, releases, or changelog entries.
+create tags or releases.
 
 Release tags use the `v` prefix and are intended to be created from `main`
 after the version bump pull request has been merged. The pushed tag must match

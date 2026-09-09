@@ -27,7 +27,6 @@ def check_document_reviews(root: Path, now: datetime) -> None:
     """Require valid metadata and no review older than seven days."""
     documents = find_repository_documents(root) - {
         root / "CLA.md",
-        root / "CHANGELOG.md",
     }
     reviews: list[tuple[datetime, Path]] = []
     for document in sorted(documents):
@@ -109,7 +108,6 @@ def test_document_review_deadline(tmp_path: Path, age: timedelta) -> None:
         "GUIDE.md",
         "docs/nested/guide.md",
         "docs/plans/done.md",
-        "docs/CHANGELOG.md",
         "src/component/guide.md",
         "examples/demo/README.md",
         "examples/demo/guide.md",
@@ -155,14 +153,14 @@ def test_review_metadata_must_start_document(tmp_path: Path) -> None:
         check_document_reviews(tmp_path, datetime(2026, 9, 9, tzinfo=UTC))
 
 
-def test_legal_release_and_template_files_do_not_require_reviews(
+def test_legal_and_template_files_do_not_require_reviews(
     tmp_path: Path,
 ) -> None:
     (tmp_path / "README.md").write_text(
         '<!-- knowledge\nlast_checked: "2026-09-09T00:00:00Z"\n-->\n# Index\n',
         encoding="utf-8",
     )
-    for path in ("CLA.md", "CHANGELOG.md", ".github/pull_request_template.md"):
+    for path in ("CLA.md", ".github/pull_request_template.md"):
         document = tmp_path / path
         document.parent.mkdir(parents=True, exist_ok=True)
         document.write_text("# Historical or template content\n", encoding="utf-8")

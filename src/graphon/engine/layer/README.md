@@ -62,5 +62,5 @@ class MetricsLayer(Layer):
 callbacks (including terminal events) raise `RuntimeError` if they try to take
 a runtime snapshot. Persist in `on_graph_end` after execution threads have stopped,
 or after fully consuming the run iterator. See the
-[snapshot migration guidance](../../../../MIGRATION.md#snapshot-eligibility) for
-resumable pauses and shutdown timeouts.
+[serialization tests](../../../../tests/engine/test_runtime_state_serialization.py)
+for resumable pauses and shutdown timeouts.

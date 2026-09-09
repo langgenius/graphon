@@ -45,10 +45,8 @@ and Slim LLMs ownership of their clients and tokenizer caches.
   delivery. Do not attach adapters to shared File objects or persist credentials.
 - Existing injected HTTP clients and node-specific file ports keep their roles.
 
-The current API and host integration steps live in the
-[migration guide](../../MIGRATION.md#file-runtime-isolation); the
-[architecture invariant](../../ARCHITECTURE.md#state-and-execution-invariants)
-describes execution ownership.
+The [architecture invariant](../../ARCHITECTURE.md#state-and-execution-invariants)
+describes execution ownership and host file scopes.
 
 ## Validation and outcome
 
@@ -98,9 +96,8 @@ The documentation check passed after the completion records were updated.
 Removed the redundant file runtime registry and configuration alias while
 retaining the set/get/peek/use helpers and process fallback. Removed
 `RuntimeState.execution_context` and its worker plumbing; host node-task scopes
-use `Layer.node_run_context`. File scopes and filter metadata remain separate.
-The [migration guide](../../MIGRATION.md#layers-filters-and-commands) covers the
-removed APIs and their differing return and failure behavior.
+use [`Layer.node_run_context`](../../src/graphon/engine/layer/README.md).
+File scopes and filter metadata remain separate.
 
 All 79 relevant tests passed before and after the cleanup. `just test` passed all
 830 tests in 7.82 seconds, and `just check` passed. Independent test, code, and
@@ -119,8 +116,7 @@ Removed the file setter and process fallback; file resolution now requires an
 explicit adapter or scope. Removed the HTTP runtime helpers; each consumer owns
 its default client and preserves injected clients, including falsey ones. Each
 `SlimLLM` owns a lazy tokenizer cache and initialization lock; dependency-internal
-caches are unchanged. The [migration guide](../../MIGRATION.md#file-runtime-isolation)
-records the affected APIs.
+caches are unchanged.
 
 Independent test reviews cover scope restoration, HTTP ownership and injection,
 and lazy and concurrent tokenizer initialization. Focused file, HTTP, and Slim LLM

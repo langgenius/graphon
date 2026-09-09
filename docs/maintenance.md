@@ -16,8 +16,6 @@ the claims against the linked implementation and evidence.
 | Package boundaries and execution flow | [ARCHITECTURE.md](../ARCHITECTURE.md) |
 | How to locate code, extend it, and exercise it | [Development guide](development.md) |
 | Component-specific details | The component's existing README, linked from the index |
-| Upgrade steps and compatibility windows | [MIGRATION.md](../MIGRATION.md) |
-| User-visible release changes | [CHANGELOG.md](../CHANGELOG.md) |
 | A complex task's progress and unresolved decisions | A linked plan under `docs/plans/`, created when needed |
 
 Prefer a link to a maintained definition over another copied command, API list,
@@ -78,7 +76,7 @@ an entire page's review. Other descriptive YAML fields may be added when needed;
 CI requires only `last_checked`.
 
 The same format applies to all root Markdown files except `CLA.md` (the legal
-agreement) and `CHANGELOG.md` (the release ledger), and every Markdown file under
+agreement), and every Markdown file under
 `docs/`, `src/`, and `examples/`. New nested knowledge bases and non-README guides
 are included automatically. Completed plans remain in scope: review their
 historical accuracy and links without rewriting them as current API guidance.
