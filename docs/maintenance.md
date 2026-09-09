@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-09-09T21:00:17Z"
+last_checked: "2026-09-09T21:14:48Z"
 -->
 # Maintaining repository knowledge
 
@@ -17,6 +17,7 @@ the claims against the linked implementation and evidence.
 | How to locate code, extend it, and exercise it | [Development guide](development.md) |
 | Component-specific details | The component's existing README, linked from the index |
 | A complex task's progress and unresolved decisions | A linked plan under `docs/plans/`, created when needed |
+| Completed plans retained as history | [Archive](archive/), excluded from routine knowledge checks |
 
 Prefer a link to a maintained definition over another copied command, API list,
 or code example. Record only context that helps someone make a change: purpose,
@@ -40,15 +41,15 @@ before starting overlapping work.
 
 Use relative inline Markdown links for repository files, including evidence in
 tables. Keep examples inside fenced code blocks. The existing test suite checks
-links in root Markdown files and every Markdown file under `docs/`, `src/`, and
-`examples/`:
+links in root Markdown files and Markdown files under `docs/`, `src/`, and
+`examples/`, excluding `docs/archive/`:
 
 ```bash
 uv run pytest -n 0 tests/test_repository_docs.py
 ```
 
 The check catches missing local paths and enforces reachability from `AGENTS.md`
-for `ARCHITECTURE.md` and pages under `docs/`, plus the review metadata below.
+for `ARCHITECTURE.md` and active pages under `docs/`, plus the review metadata below.
 It does not validate heading anchors, external URLs, reference-style links, or
 prose accuracy. When it fails, repair the link, add a route from an indexed page,
 or review the overdue document; do not weaken the check to hide obsolete knowledge.
@@ -76,11 +77,10 @@ an entire page's review. Other descriptive YAML fields may be added when needed;
 CI requires only `last_checked`.
 
 The same format applies to all root Markdown files except `CLA.md` (the legal
-agreement), and every Markdown file under
-`docs/`, `src/`, and `examples/`. New nested knowledge bases and non-README guides
-are included automatically. Completed plans remain in scope: review their
-historical accuracy and links without rewriting them as current API guidance.
-Templates under `.github/` are outside the knowledge scope.
+agreement), and Markdown files under `docs/`, `src/`, and `examples/`, except
+`docs/archive/`. New active nested knowledge bases and non-README guides are
+included automatically. Archived plans and templates under `.github/` are outside
+the maintained knowledge scope.
 
 The documentation check rejects missing, malformed, or future timestamps. It
 compares the earliest `last_checked` across the entire scope with the current UTC
@@ -89,9 +89,10 @@ The failure identifies the oldest file and its timestamp.
 
 The check runs in the normal pytest suite, including the existing CI jobs for
 pull requests targeting `main` and release tags, and with the focused command
-above. It scans the full scope without changed-file filters. Historical validation
-results in completed plans retain their original dates and counts; a later page
-review does not turn them into a new test run.
+above. It scans the full maintained scope without changed-file filters. Archives
+are excluded from review metadata, freshness, outgoing-link, and reachability
+checks. Links from active documents must still point to existing paths, including
+links into the archive.
 
 ## Plans for work that needs durable context
 
@@ -110,10 +111,32 @@ Include these fields and enough detail for a new contributor to resume:
 - **Validation and outcome:** commands, observed results, remaining risks, and
   follow-ups with links.
 
-Update the plan as work progresses. On completion, retain useful decision history,
-move lasting behavior explanations into the relevant guide, and link unresolved
-work to an issue or a subsequent plan. A completed plan is history, not current
-API documentation. Never record credentials or private operational data in it.
+Update the plan as work progresses. Never record credentials or private
+operational data in it. On completion, follow the archive rules below.
+
+## Archive completed work
+
+Keep active knowledge focused on current behavior and unfinished work.
+
+1. Before removing a completed task or resolved debt item, extract reusable
+   guidance into its stable home: architecture for invariants, the development
+   guide for workflows, a component README for local behavior, or CONTRIBUTING.md
+   for contributor rules. Reuse existing explanations and link source/tests;
+   do not copy task history into general guidance or promote an unaccepted proposal
+   into policy.
+2. Move completed plans from `docs/plans/` to `docs/archive/`. Retain useful
+   decisions, completion evidence, and original review timestamps as history.
+   Repair links affected by the move and remove links to deleted debt sections.
+   Record any unfinished follow-up in an active issue or separate plan.
+3. Remove completed task entries, resolved debt sections, obsolete status reports,
+   and their individual links from the active knowledge index and guides. Keep
+   `technical-debt.md` limited to unresolved items; do not renumber surviving IDs.
+   Use archived plans and Git history when completion details are needed.
+4. Exclude `docs/archive/` from scheduled reviews and routine knowledge update
+   checks. Do not refresh archive timestamps or rewrite historical results to
+   match current APIs. If archived work becomes active again, move it back under
+   `docs/plans/`, review the whole page, restore its index link, and record a fresh
+   timestamp before continuing.
 
 ## Review for drift
 

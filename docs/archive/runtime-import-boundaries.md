@@ -3,10 +3,10 @@ last_checked: "2026-09-09T20:55:58Z"
 -->
 # Runtime and public contract imports
 
-**Status:** completed, including the architectural layering follow-up; merged
+**Status:** archived; completed, including the architectural layering follow-up; merged
 in [PR #287](https://github.com/langgenius/graphon/pull/287) on 2026-09-09.
 **Tracking:** [implementation issue #286](https://github.com/langgenius/graphon/issues/286),
-[TD-01 and TD-05](../technical-debt.md), originating in
+TD-01 and TD-05, originating in
 [architecture review #275](https://github.com/langgenius/graphon/issues/275).
 Built on knowledge metadata checks in
 [PR #285](https://github.com/langgenius/graphon/pull/285).

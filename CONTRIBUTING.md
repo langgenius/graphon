@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-09-09T20:55:58Z"
+last_checked: "2026-09-09T21:14:48Z"
 -->
 # Contributing to Graphon
 
@@ -224,7 +224,9 @@ links current in the same change. See [Knowledge maintenance](docs/maintenance.m
 for document placement, review, and plans for work that spans sessions.
 
 The normal pytest suite checks local documentation links, reachability, and
-review metadata, failing if the oldest review is more than seven days old.
+review metadata for maintained knowledge, failing if the oldest review is more
+than seven days old. Completed plans under `docs/archive/` are excluded; follow
+the [archive rules](docs/maintenance.md#archive-completed-work).
 To run these checks alone:
 
 ```bash

@@ -3,10 +3,10 @@ last_checked: "2026-09-09T20:55:58Z"
 -->
 # Execution-scoped file runtime
 
-**Status:** completed, including the explicit state ownership follow-up; merged
+**Status:** archived; completed, including the explicit state ownership follow-up; merged
 in [PR #283](https://github.com/langgenius/graphon/pull/283) on 2026-09-09.
 
-**Tracking:** [TD-04](../technical-debt.md#td-04--execution-scoped-file-integration),
+**Tracking:** TD-04,
 [issue #282](https://github.com/langgenius/graphon/issues/282).
 Built on snapshot eligibility in
 [PR #280](https://github.com/langgenius/graphon/pull/280).

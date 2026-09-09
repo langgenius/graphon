@@ -3,10 +3,10 @@ last_checked: "2026-09-09T21:00:17Z"
 -->
 # TD-02: Reject invalid graphs before execution
 
-**Status:** completed; merged in [PR #278](https://github.com/langgenius/graphon/pull/278)
+**Status:** archived; completed; merged in [PR #278](https://github.com/langgenius/graphon/pull/278)
 on 2026-09-09.
 **Priority:** P1; selected as the first debt remediation.
-**Tracking:** [TD-02 in the debt register](../technical-debt.md#td-02--graph-construction-and-structural-validation).
+**Tracking:** TD-02.
 [Implementation issue #277](https://github.com/langgenius/graphon/issues/277)
 tracks this fix and its pull request. Related
 [authoring issue #131](https://github.com/langgenius/graphon/issues/131) is not this

@@ -1,4 +1,6 @@
-"""Check knowledge links, discoverability, and recorded review age.
+"""Check active knowledge links, discoverability, and recorded review age.
+
+Historical documents under docs/archive are excluded.
 
 Fenced code, external URLs, and fragments are ignored. Reference links, HTML,
 link titles, and paths containing spaces or parentheses are outside this check;
@@ -20,7 +22,7 @@ def find_repository_documents(root: Path) -> set[Path]:
         | set(root.glob("docs/**/*.md"))
         | set(root.glob("src/**/*.md"))
         | set(root.glob("examples/**/*.md"))
-    )
+    ) - set(root.glob("docs/archive/**/*.md"))
 
 
 def check_document_reviews(root: Path, now: datetime) -> None:
@@ -167,10 +169,11 @@ def test_legal_and_template_files_do_not_require_reviews(
     check_document_reviews(tmp_path, datetime(2026, 9, 9, tzinfo=UTC))
 
 
-def test_repository_documentation_links() -> None:
-    root = Path(__file__).resolve().parents[1]
-    knowledge = set(root.glob("docs/**/*.md")) | {root / "ARCHITECTURE.md"}
+def check_document_links(root: Path) -> None:
     documents = find_repository_documents(root)
+    knowledge = {
+        document for document in documents if document.is_relative_to(root / "docs")
+    } | {root / "ARCHITECTURE.md"}
     links: dict[Path, set[Path]] = {document: set() for document in documents}
 
     for document in sorted(documents):
@@ -208,3 +211,39 @@ def test_repository_documentation_links() -> None:
     assert not orphans, "Link from AGENTS.md or a reachable document:\n" + "\n".join(
         orphans
     )
+
+
+def test_repository_documentation_links() -> None:
+    check_document_links(Path(__file__).resolve().parents[1])
+
+
+@pytest.mark.parametrize("archived", [False, True])
+def test_archived_plans_are_excluded_from_knowledge_checks(
+    tmp_path: Path, archived: bool
+) -> None:
+    metadata = '<!-- knowledge\nlast_checked: "2026-09-09T00:00:00Z"\n-->\n'
+    (tmp_path / "AGENTS.md").write_text(
+        metadata + "# Index\n[Architecture](ARCHITECTURE.md)\n", encoding="utf-8"
+    )
+    (tmp_path / "ARCHITECTURE.md").write_text(
+        metadata + "# Architecture\n", encoding="utf-8"
+    )
+    directory = tmp_path / ("docs/archive/plans" if archived else "docs/plans")
+    directory.mkdir(parents=True)
+    (directory / "completed.md").write_text(
+        "# Completed plan\n[Old source](missing.py)\n", encoding="utf-8"
+    )
+    now = datetime(2026, 9, 9, tzinfo=UTC)
+
+    if archived:
+        check_document_reviews(tmp_path, now)
+        check_document_links(tmp_path)
+    else:
+        with pytest.raises(
+            AssertionError, match=r"docs/plans/completed.md.*last_checked"
+        ):
+            check_document_reviews(tmp_path, now)
+        with pytest.raises(
+            AssertionError, match=r"Broken link: docs/plans/completed.md"
+        ):
+            check_document_links(tmp_path)

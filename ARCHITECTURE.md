@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-09-09T20:55:58Z"
+last_checked: "2026-09-09T21:14:48Z"
 -->
 # Architecture
 
@@ -202,7 +202,8 @@ wrapper reject active engine runs and execution threads, including pause drainin
 and threads that outlive shutdown timeouts. A transient guard on the shared
 [GraphExecution](src/graphon/runtime/execution.py) covers all frames and excludes
 execution startup and other snapshot writers throughout serialization. Internal
-frame snapshots remain engine operations. See
+frame snapshots remain engine operations. Hosts must also prevent concurrent
+direct mutation of exposed runtime objects; the guard tracks engine activity. See
 [serialization tests](tests/engine/test_runtime_state_serialization.py) for evidence.
 
 ## Extension seams

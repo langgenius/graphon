@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-09-09T20:55:58Z"
+last_checked: "2026-09-09T21:14:48Z"
 -->
 # Development navigation
 
@@ -11,6 +11,10 @@ and contribution rules. This page connects changes to the code and tests that
 define their behavior; it does not replace those rules.
 
 ## Find the change surface
+
+Choose boundaries around state ownership and callers. Extract a responsibility
+when it has independent ownership or repeated churn; file length alone does not
+justify splitting a module.
 
 | Task | Start in source | Relevant checks |
 | --- | --- | --- |
@@ -80,6 +84,9 @@ public surface.
   in [nodes/protocols.py](../src/graphon/nodes/protocols.py); generated LLM files use
   [LLMFileSaver](../src/graphon/nodes/llm/file_saver.py). Each HTTP consumer accepts
   an injected client or constructs its own [HTTPX client](../src/graphon/http/client.py).
+  Preserve explicitly supplied clients even when they are falsey; only `None`
+  requests a default. Keep mutable caches on the adapter instance that owns them,
+  as [SlimLLM](../src/graphon/dsl/slim/llm.py) does for tokenizer initialization.
 - **Tools and code:** implement [ToolNodeRuntimeProtocol](../src/graphon/nodes/runtime.py)
   or [CodeExecutorProtocol](../src/graphon/nodes/code/protocols.py). Default DSL
   adapters live in [tool_runtime.py](../src/graphon/dsl/tool_runtime.py) and

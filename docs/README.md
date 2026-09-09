@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-09-09T20:55:58Z"
+last_checked: "2026-09-09T21:14:48Z"
 -->
 # Repository knowledge
 
@@ -21,11 +21,7 @@ independent test and knowledge reviews, and the final naming pass.
 | Which files and tests should I change? | [Development guide](development.md) |
 | How do I set up, check, and contribute changes? | [Contributing](../CONTRIBUTING.md) |
 | How do I keep knowledge current or record a longer task? | [Knowledge maintenance](maintenance.md) |
-| What structural debt has been identified, and what should improve next? | [Architecture review and technical debt](technical-debt.md) |
-| What is the progress and evidence for TD-02? | [Graph validation plan](plans/graph-validation.md) |
-| What is the progress and evidence for TD-03? | [Snapshot eligibility plan](plans/snapshot-eligibility.md) |
-| What is the progress and evidence for TD-04? | [Execution file runtime plan](plans/execution-file-runtime.md) |
-| What is the progress and evidence for TD-01 and TD-05? | [Runtime import boundaries plan](plans/runtime-import-boundaries.md) |
+| What unresolved debt should improve next? | [Technical debt](technical-debt.md) |
 
 ## Component references
 
@@ -41,7 +37,7 @@ Keep detailed component knowledge next to its implementation and link it here.
 
 ## Evidence and review
 
-Each page records its review timestamp using the shared
+Each maintained page records its review timestamp using the shared
 [document metadata format](maintenance.md#document-metadata-and-review-deadline).
 This is not a claim that all behavior or external integrations have been
 exercised. Linked tests show where to verify a change;
@@ -50,7 +46,9 @@ exercised. Linked tests show where to verify a change;
 The [documentation test](../tests/test_repository_docs.py) checks local file
 links, whether this knowledge base is reachable from [AGENTS.md](../AGENTS.md),
 and whether every maintained page has been checked within seven days. Reachability
-is enforced for `ARCHITECTURE.md` and pages under `docs/`. It runs
+is enforced for `ARCHITECTURE.md` and active pages under `docs/`. Archived plans
+under `docs/archive/` are excluded from these checks and routine reviews; see
+[archiving completed work](maintenance.md#archive-completed-work). The checks run
 as part of the normal pytest suite in CI. Recorded timestamps do not
 prove that prose matches behavior; review source and tests when updating a page.
 

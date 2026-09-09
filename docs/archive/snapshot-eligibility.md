@@ -3,10 +3,9 @@ last_checked: "2026-09-09T21:00:17Z"
 -->
 # Snapshot eligibility (TD-03)
 
-**Status:** completed; merged in [PR #280](https://github.com/langgenius/graphon/pull/280)
+**Status:** archived; completed; merged in [PR #280](https://github.com/langgenius/graphon/pull/280)
 on 2026-09-09.
-**Tracking:** [issue #279](https://github.com/langgenius/graphon/issues/279),
-[TD-03](../technical-debt.md#td-03--snapshot-consistency-at-the-public-boundary).
+**Tracking:** TD-03, [issue #279](https://github.com/langgenius/graphon/issues/279).
 Built on graph validation in [PR #278](https://github.com/langgenius/graphon/pull/278).
 
 ## Objective and scope
