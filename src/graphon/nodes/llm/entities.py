@@ -22,6 +22,23 @@ class ModelConfig(BaseModel):
     completion_params: dict[str, Any] = Field(default_factory=dict)
 
 
+class InvocationConfig(BaseModel):
+    """Per-node policy for how a model is called, as opposed to what is asked of it.
+
+    Kept out of `ModelConfig.completion_params`, which is forwarded to the provider
+    verbatim. graphon carries these settings; the host applies them.
+    """
+
+    first_token_timeout_ms: int | None = Field(default=None, gt=0)
+
+    @property
+    def first_token_timeout(self) -> float | None:
+        """The first-token timeout in seconds, the unit every host hop works in."""
+        if self.first_token_timeout_ms is None:
+            return None
+        return self.first_token_timeout_ms / 1000
+
+
 class ContextConfig(BaseModel):
     enabled: bool
     variable_selector: list[str] | None = None
@@ -67,6 +84,7 @@ class LLMNodeCompletionModelPromptTemplate(CompletionModelPromptTemplate):
 class LLMNodeData(BaseNodeData):
     type: NodeType = BuiltinNodeTypes.LLM
     model: ModelConfig
+    invocation: InvocationConfig = Field(default_factory=InvocationConfig)
     prompt_template: (
         Sequence[LLMNodeChatModelMessage] | LLMNodeCompletionModelPromptTemplate
     )

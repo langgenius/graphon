@@ -66,6 +66,31 @@ def test_question_classifier_node_data_defaults_label_to_empty_string() -> None:
     assert not node_data.classes[0].label
 
 
+@pytest.mark.parametrize(
+    ("overrides", "expected_timeout"),
+    [({"invocation": {"first_token_timeout_ms": 2500}}, 2.5), ({}, None)],
+    ids=["with-timeout", "no-invocation"],
+)
+def test_question_classifier_node_data_reads_first_token_timeout_in_seconds(
+    overrides: dict[str, Any],
+    expected_timeout: float | None,
+) -> None:
+    node_data = QuestionClassifierNodeData.model_validate({
+        "title": "Classifier",
+        "query_variable_selector": ["start", "sys.query"],
+        "model": {
+            "provider": "openai",
+            "name": "gpt-4o",
+            "mode": "chat",
+            "completion_params": {},
+        },
+        "classes": [{"id": "billing", "name": "Questions about invoices and charges"}],
+        **overrides,
+    })
+
+    assert node_data.invocation.first_token_timeout == pytest.approx(expected_timeout)
+
+
 def _build_question_classifier_node(
     node_data: QuestionClassifierNodeData,
     *,

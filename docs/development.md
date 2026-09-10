@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-09-10T01:03:07Z"
+last_checked: "2026-09-10T11:15:55Z"
 -->
 # Development navigation
 
@@ -60,6 +60,13 @@ public surface.
   and capability wrappers have separate protocols; see the
   [model runtime guide](../src/graphon/model_runtime/README.md) and
   [dispatch tests](../tests/model_runtime/test_model_dispatch.py).
+  Per-node policy for how a model is called, rather than what is asked of it,
+  lives in the [`invocation` block](../src/graphon/nodes/llm/entities.py) of LLM
+  and question-classifier node data. Graphon carries it and enforces nothing, so
+  read it from `Node.node_data`. It stays out of `ModelConfig.completion_params`,
+  which reaches the provider verbatim, and out of `LLMProtocol`, which would
+  otherwise gain an argument adapters cannot honour
+  ([TD-06](technical-debt.md#td-06--ignored-llm-integration-arguments)).
 - **Files and HTTP:** use the [file binding guidance](../ARCHITECTURE.md#state-and-execution-invariants)
   when wiring engines, filters, or host rendering. Node-specific ports live in
   [nodes/protocols.py](../src/graphon/nodes/protocols.py); generated LLM files use

@@ -230,6 +230,8 @@ class WorkflowNodeExecutionMetadataKey(StrEnum):
     DATASOURCE_INFO = "datasource_info"
     TRIGGER_INFO = "trigger_info"
     COMPLETED_REASON = "completed_reason"  # completed reason for loop node
+    # streamed LLM first-token latency
+    TIME_TO_FIRST_TOKEN = "time_to_first_token"  # ruff: ignore[hardcoded-password-string]
 
 
 class WorkflowNodeExecutionStatus(StrEnum):

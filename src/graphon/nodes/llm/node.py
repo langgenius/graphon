@@ -429,17 +429,21 @@ class LLMNode(Node[LLMNodeData]):
             chunk="",
             is_final=True,
         )
+        metadata: dict[WorkflowNodeExecutionMetadataKey, Any] = {
+            WorkflowNodeExecutionMetadataKey.TOTAL_TOKENS: usage.total_tokens,
+            WorkflowNodeExecutionMetadataKey.TOTAL_PRICE: usage.total_price,
+            WorkflowNodeExecutionMetadataKey.CURRENCY: usage.currency,
+        }
+        if usage.time_to_first_token is not None:
+            first_token_key = WorkflowNodeExecutionMetadataKey.TIME_TO_FIRST_TOKEN
+            metadata[first_token_key] = usage.time_to_first_token
         yield StreamCompletedEvent(
             node_run_result=NodeRunResult(
                 status=WorkflowNodeExecutionStatus.SUCCEEDED,
                 inputs=node_inputs,
                 process_data=process_data,
                 outputs=outputs,
-                metadata={
-                    WorkflowNodeExecutionMetadataKey.TOTAL_TOKENS: usage.total_tokens,
-                    WorkflowNodeExecutionMetadataKey.TOTAL_PRICE: usage.total_price,
-                    WorkflowNodeExecutionMetadataKey.CURRENCY: usage.currency,
-                },
+                metadata=metadata,
                 llm_usage=usage,
             ),
         )
