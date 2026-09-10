@@ -26,6 +26,7 @@ class VariableEntityType(StrEnum):
     FILE = "file"
     FILE_LIST = "file-list"
     CHECKBOX = "checkbox"
+    MULTI_SELECT = "multi-select"
     JSON_OBJECT = "json_object"
 
 
