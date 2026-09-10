@@ -1,15 +1,14 @@
 <!-- knowledge
-last_checked: "2026-09-08T00:00:00Z"
+last_checked: "2026-09-09T20:55:58Z"
 -->
 # Execution-scoped file runtime
 
-**Status:** implementation, independent reviews, final naming pass, and checks
-for the explicit state ownership follow-up are complete locally. Not merged or
-released. Updated 2026-09-09.
+**Status:** archived; completed, including the explicit state ownership follow-up; merged
+in [PR #283](https://github.com/langgenius/graphon/pull/283) on 2026-09-09.
 
-**Tracking:** [TD-04](../technical-debt.md#td-04--execution-scoped-file-integration),
+**Tracking:** TD-04,
 [issue #282](https://github.com/langgenius/graphon/issues/282).
-This branch builds on snapshot eligibility in
+Built on snapshot eligibility in
 [PR #280](https://github.com/langgenius/graphon/pull/280).
 
 ## Objective and scope
@@ -45,7 +44,7 @@ and Slim LLMs ownership of their clients and tokenizer caches.
   delivery. Do not attach adapters to shared File objects or persist credentials.
 - Existing injected HTTP clients and node-specific file ports keep their roles.
 
-The [architecture invariant](../../ARCHITECTURE.md#state-and-execution-invariants)
+The [architecture invariant](../../../ARCHITECTURE.md#state-and-execution-invariants)
 describes execution ownership and host file scopes.
 
 ## Validation and outcome
@@ -67,10 +66,10 @@ outputs, child callbacks, lifecycle callbacks, and response filters used the
 caller's adapter; an unconfigured engine adopted a later default, and the scoped
 runtime API was absent. The independent test review approved these scenarios.
 The new
-[engine regressions](../../tests/engine/test_file_runtime.py) exercise the shared
+[engine regressions](../../../tests/engine/test_file_runtime.py) exercise the shared
 file helpers through execution and rendering. Existing
-[file model tests](../../tests/file/test_models.py) and
-[snapshot tests](../../tests/engine/test_runtime_state_serialization.py) retain
+[file model tests](../../../tests/file/test_models.py) and
+[snapshot tests](../../../tests/engine/test_runtime_state_serialization.py) retain
 historical compatibility coverage.
 
 The initial implementation passed all 14 focused tests. Review then identified
@@ -96,7 +95,7 @@ The documentation check passed after the completion records were updated.
 Removed the redundant file runtime registry and configuration alias while
 retaining the set/get/peek/use helpers and process fallback. Removed
 `RuntimeState.execution_context` and its worker plumbing; host node-task scopes
-use [`Layer.node_run_context`](../../src/graphon/engine/layer/README.md).
+use [`Layer.node_run_context`](../../../src/graphon/engine/layer/README.md).
 File scopes and filter metadata remain separate.
 
 All 79 relevant tests passed before and after the cleanup. `just test` passed all
@@ -107,8 +106,8 @@ the original implementation.
 
 ### Explicit state ownership follow-up (2026-09-09)
 
-At the user's request, contributor guidance now requires
-[explicit state ownership](../../CONTRIBUTING.md#explicit-state-ownership) to
+Contributor guidance requires
+[explicit state ownership](../../../CONTRIBUTING.md#explicit-state-ownership) to
 avoid hidden mutable dependencies that complicate debugging. This supersedes
 the earlier decision to retain process defaults.
 

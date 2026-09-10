@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-09-08T17:06:45Z"
+last_checked: "2026-09-10T01:03:07Z"
 -->
 # AGENTS
 
@@ -8,8 +8,7 @@ All agents working in this repository must follow the guidance in
 `CONTRIBUTING.md` as the source of truth.
 
 At the start of every development workflow, read and follow
-[Development Style](CONTRIBUTING.md#development-style), including the required
-independent test review, knowledge review, and final naming pass.
+[Development Style](CONTRIBUTING.md#development-style).
 
 ## Where to start
 
@@ -25,12 +24,5 @@ Before changing behavior, read the relevant architecture section and follow its
 links to the implementation and tests. Inspect callers and integration boundaries
 before choosing where to make a change.
 
-Treat architecture descriptions as a map of the current implementation. Do not
-turn observed behavior or an open proposal into an accepted design decision.
-When code and docs disagree, investigate and update the stale material in the
-same change; contributor policy remains governed by `CONTRIBUTING.md`.
-
-Keep this file short. Put durable knowledge in a focused document, link it from
-the index, and update affected source/test links when files move. For work that
-spans sessions or needs a decision log, follow the plan guidance in
-[Knowledge maintenance](docs/maintenance.md).
+Apply the [knowledge maintenance principles](docs/maintenance.md#repository-knowledge-maintenance)
+when reading or changing documentation.
