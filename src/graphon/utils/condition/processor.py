@@ -499,7 +499,7 @@ def _assert_not_null(*, value: Any) -> bool:
 
 
 def _assert_in(*, value: Any, expected: Any) -> bool:
-    if not value:
+    if value is None:
         return False
 
     match expected:
@@ -512,7 +512,7 @@ def _assert_in(*, value: Any, expected: Any) -> bool:
 
 
 def _assert_not_in(*, value: Any, expected: Any) -> bool:
-    if not value:
+    if value is None:
         return True
 
     match expected:
