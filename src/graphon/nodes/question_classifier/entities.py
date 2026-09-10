@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.enums import BuiltinNodeTypes, NodeType
 from graphon.nodes.llm.entities import (
+    InvocationConfig,
     ModelConfig,
     VisionConfig,
 )
@@ -33,6 +34,7 @@ class QuestionClassifierNodeData(BaseNodeData):
     type: NodeType = BuiltinNodeTypes.QUESTION_CLASSIFIER
     query_variable_selector: list[str]
     model: ModelConfig
+    invocation: InvocationConfig = Field(default_factory=InvocationConfig)
     classes: list[ClassConfig]
     instruction: str | None = None
     memory: MemoryConfig | None = None

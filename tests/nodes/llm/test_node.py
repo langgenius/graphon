@@ -7,13 +7,17 @@ from typing import Any, Literal, Never, cast
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from graphon.engine_events.node import (
     NodeRunModelPollingProgressEvent,
     NodeRunReasoningChunkEvent,
 )
 from graphon.entities.base_node_data import BaseNodeData
-from graphon.enums import WorkflowNodeExecutionStatus
+from graphon.enums import (
+    WorkflowNodeExecutionMetadataKey,
+    WorkflowNodeExecutionStatus,
+)
 from graphon.file import helpers as file_helpers
 from graphon.file.enums import FileTransferMethod, FileType
 from graphon.file.models import File
@@ -122,6 +126,22 @@ def _stream_results(
     yield from results
 
 
+def _llm_node_payload(**overrides: Any) -> dict[str, Any]:
+    return {
+        "type": "llm",
+        "title": "LLM",
+        "model": {
+            "provider": "openai",
+            "name": "gpt-4o",
+            "mode": "chat",
+            "completion_params": {},
+        },
+        "prompt_template": [{"role": "user", "text": "Hello"}],
+        "context": {"enabled": False},
+        **overrides,
+    }
+
+
 def _build_llm_node(
     *,
     model_instance: object | None = None,
@@ -146,22 +166,11 @@ def _build_llm_node(
 
     node = LLMNode(
         node_id="llm",
-        data=LLMNodeData.model_validate({
-            "title": "LLM",
-            "model": {
-                "provider": "openai",
-                "name": "gpt-4o",
-                "mode": "chat",
-                "completion_params": {},
-            },
-            "prompt_template": [
-                {
-                    "role": "user",
-                    "text": prompt_text,
-                }
-            ],
-            "context": {"enabled": False},
-        }),
+        data=LLMNodeData.model_validate(
+            _llm_node_payload(
+                prompt_template=[{"role": "user", "text": prompt_text}],
+            ),
+        ),
         init_params=build_init_params(
             graph_config={"nodes": [], "edges": []},
             run_context=run_context,
@@ -229,6 +238,52 @@ def test_structured_output_switch_survives_node_data_round_trip(
     assert dumped["structured_output_switch_on"] is True
     assert "structured_output_enabled" not in dumped
     assert restored_from_dump.structured_output_switch_on is True
+
+
+def test_llm_node_data_converts_first_token_timeout_ms_to_seconds() -> None:
+    node_data = LLMNodeData.model_validate(
+        _llm_node_payload(invocation={"first_token_timeout_ms": 1500}),
+    )
+
+    assert node_data.invocation.first_token_timeout == pytest.approx(1.5)
+    assert node_data.model.completion_params == {}
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{}, {"invocation": {}}],
+    ids=["no-invocation", "empty-invocation"],
+)
+def test_llm_node_data_without_first_token_timeout_ms_has_no_timeout(
+    overrides: dict[str, Any],
+) -> None:
+    node_data = LLMNodeData.model_validate(_llm_node_payload(**overrides))
+
+    assert node_data.invocation.first_token_timeout is None
+
+
+@pytest.mark.parametrize("timeout_ms", [0, -1], ids=["zero", "negative"])
+def test_llm_node_data_rejects_non_positive_first_token_timeout_ms(
+    timeout_ms: int,
+) -> None:
+    with pytest.raises(ValidationError):
+        LLMNodeData.model_validate(
+            _llm_node_payload(invocation={"first_token_timeout_ms": timeout_ms}),
+        )
+
+
+def test_llm_node_data_exports_first_token_timeout_ms_under_invocation() -> None:
+    payload = _llm_node_payload(invocation={"first_token_timeout_ms": 1500})
+
+    node_data = LLMNode.validate_node_data(BaseNodeData.model_validate(payload))
+    revalidated = LLMNode.validate_node_data(node_data)
+    dumped = revalidated.model_dump(mode="python", by_alias=True)
+    restored = LLMNode.validate_node_data(dumped)
+
+    assert revalidated.invocation.first_token_timeout == pytest.approx(1.5)
+    assert dumped["invocation"] == {"first_token_timeout_ms": 1500}
+    assert dumped["model"]["completion_params"] == {}
+    assert restored.invocation.first_token_timeout == pytest.approx(1.5)
 
 
 def test_fetch_structured_output_schema_checks_draft7_schema() -> None:
@@ -438,6 +493,67 @@ def test_run_emits_model_identity_in_node_result_inputs(
 
     assert completed_event.node_run_result.inputs["model_provider"] == "openai"
     assert completed_event.node_run_result.inputs["model_name"] == "gpt-4o"
+
+
+@pytest.mark.parametrize("time_to_first_token", [0.25, 0.0], ids=["positive", "zero"])
+def test_run_emits_time_to_first_token_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    time_to_first_token: float,
+) -> None:
+    node = _build_llm_node()
+
+    _stub_simple_prompt(monkeypatch, node)
+    monkeypatch.setattr(
+        "graphon.nodes.llm.node.LLMNode.invoke_llm",
+        lambda **_: iter([
+            ModelInvokeCompletedEvent(
+                text="Hello back",
+                usage=LLMUsage.empty_usage().model_copy(
+                    update={"time_to_first_token": time_to_first_token},
+                ),
+                finish_reason="stop",
+            ),
+        ]),
+    )
+
+    completed_event = next(
+        event for event in node._run() if isinstance(event, StreamCompletedEvent)
+    )
+
+    metadata = completed_event.node_run_result.metadata
+    assert (
+        metadata[WorkflowNodeExecutionMetadataKey.TIME_TO_FIRST_TOKEN]
+        == time_to_first_token
+    )
+
+
+def test_run_omits_time_to_first_token_metadata_when_usage_has_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    node = _build_llm_node()
+
+    _stub_simple_prompt(monkeypatch, node)
+    monkeypatch.setattr(
+        "graphon.nodes.llm.node.LLMNode.invoke_llm",
+        lambda **_: iter([
+            ModelInvokeCompletedEvent(
+                text="Hello back",
+                usage=LLMUsage.empty_usage(),
+                finish_reason="stop",
+            ),
+        ]),
+    )
+
+    completed_event = next(
+        event for event in node._run() if isinstance(event, StreamCompletedEvent)
+    )
+
+    node_run_result = completed_event.node_run_result
+    assert node_run_result.status == WorkflowNodeExecutionStatus.SUCCEEDED
+    assert (
+        WorkflowNodeExecutionMetadataKey.TIME_TO_FIRST_TOKEN
+        not in node_run_result.metadata
+    )
 
 
 def test_run_records_resolved_prompt_inputs(

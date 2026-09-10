@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-09-10T01:03:07Z"
+last_checked: "2026-09-10T11:15:55Z"
 -->
 # Technical debt
 
@@ -37,7 +37,10 @@ remain publicly exported. Supplied configuration can therefore have no effect.
 Document the effective replacements and choose a compatibility window before
 rejecting or removing arguments. Prepared `model_instance` injection is the
 current graph-facing model seam; do not build an unused factory just to justify
-an existing parameter. See the [host integration guide](development.md#integrate-host-services).
+an existing parameter. Configuration the host reads off node data, such as the
+[`invocation` block](../src/graphon/nodes/llm/entities.py), is carried
+deliberately and is not part of this debt. See the
+[host integration guide](development.md#integrate-host-services).
 
 **Completion:** tests cover supplied ignored arguments on all three nodes, the
 transition is documented, and examples use effective dependencies. Preserve
