@@ -278,7 +278,29 @@ class ListOperatorNode(Node[ListOperatorNodeData]):
         return variable
 
     def _apply_slice(self, variable: _SUPPORTED_TYPES_ALIAS) -> _SUPPORTED_TYPES_ALIAS:
-        result = variable.value[: self.node_data.limit.size]
+        """Apply slice limiting to the input array.
+
+        A size of -1 indicates no limit (preserves the full array).
+        Non-negative values slice from the start up to size.
+        Negative values other than -1 raise a ValueError.
+
+        Args:
+            variable: The input array variable segment to slice.
+
+        Returns:
+            The sliced array variable segment, or the original variable if unlimited.
+
+        Raises:
+            ValueError: If limit size is negative and not -1.
+
+        """
+        size = self.node_data.limit.size
+        if size == -1:
+            return variable
+        if size < 0:
+            msg = f"Invalid limit size: must be >= 0, got {size}"
+            raise ValueError(msg)
+        result = variable.value[:size]
         return variable.model_copy(update={"value": result})
 
     def _extract_slice(

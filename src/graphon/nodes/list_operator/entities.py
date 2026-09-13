@@ -53,6 +53,12 @@ class OrderByConfig(BaseModel):
 
 
 class Limit(BaseModel):
+    """Limit configuration for list operations.
+
+    A size of -1 means no limit (unlimited), while non-negative values
+    specify the maximum number of items to retain.
+    """
+
     enabled: bool = False
     size: int = -1
 
