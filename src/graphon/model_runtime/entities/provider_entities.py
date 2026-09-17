@@ -52,6 +52,7 @@ class CredentialFormSchema(BaseModel):
     variable: str
     label: I18nObject
     type: FormType
+    help: I18nObject | None = None
     required: bool = True
     default: str | None = None
     options: list[FormOption] | None = None
