@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-09-10T01:03:07Z"
+last_checked: "2026-09-17T01:26:49Z"
 -->
 # Contributing to Graphon
 
