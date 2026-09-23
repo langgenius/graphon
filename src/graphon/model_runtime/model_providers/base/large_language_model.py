@@ -143,9 +143,17 @@ class _LLMChunkAccumulator:
 
     def _consume_content(self, chunk: LLMResultChunk) -> None:
         content = chunk.delta.message.content
+        if not content:
+            return
         if isinstance(content, str):
-            self.content += content
+            if self.content_list:
+                self.content_list.append(TextPromptMessageContent(data=content))
+            else:
+                self.content += content
         elif isinstance(content, list):
+            if self.content:
+                self.content_list.append(TextPromptMessageContent(data=self.content))
+                self.content = ""
             self.content_list.extend(content)
 
     def to_result(

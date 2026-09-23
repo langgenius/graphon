@@ -53,7 +53,7 @@ def test_streaming_invoke_accumulator_opaque_body_defaults_to_none() -> None:
     assert result.message.opaque_body is None
 
 
-def test_streaming_invoke_accumulator_none_chunk_does_not_clobber_snapshot() -> None:
+def test_streaming_invoke_accumulator_preserves_opaque_body_after_none() -> None:
     accumulator = _StreamingInvokeAccumulator(real_model="test-model")
     opaque_body = {
         "assistant_blocks": [{"type": "redacted_thinking", "data": "enc-1"}],

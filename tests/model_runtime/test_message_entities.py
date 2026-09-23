@@ -1,3 +1,6 @@
+import pytest
+from pydantic import JsonValue
+
 from graphon.model_runtime.entities.llm_entities import (
     LLMResultChunk,
     LLMResultChunkDelta,
@@ -108,3 +111,14 @@ def test_llm_result_chunk_json_round_trip_preserves_opaque_body() -> None:
     restored = LLMResultChunk.model_validate_json(chunk.model_dump_json())
 
     assert restored.delta.message.opaque_body == opaque_body
+
+
+@pytest.mark.parametrize("opaque_body", [{}, [], "", 0, False, {"signature": "s"}])
+def test_assistant_with_opaque_body_is_not_empty(opaque_body: JsonValue) -> None:
+    message = AssistantPromptMessage(opaque_body=opaque_body)
+    restored = AssistantPromptMessage.model_validate_json(message.model_dump_json())
+
+    assert restored.opaque_body == opaque_body
+    assert type(restored.opaque_body) is type(opaque_body)
+    assert not restored.is_empty()
+    assert AssistantPromptMessage().is_empty()

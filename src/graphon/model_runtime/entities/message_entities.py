@@ -262,8 +262,8 @@ class AssistantPromptMessage(PromptMessage):
     opaque_body: JsonValue | None = None
 
     def is_empty(self) -> bool:
-        """Check whether the assistant message has no content or tool calls."""
-        return super().is_empty() and not self.tool_calls
+        """Check whether the assistant message has no content, calls, or state."""
+        return super().is_empty() and not self.tool_calls and self.opaque_body is None
 
 
 class SystemPromptMessage(PromptMessage):
