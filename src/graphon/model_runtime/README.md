@@ -64,6 +64,16 @@ Model Runtime is divided into protocol and implementation layers:
   only on their matching capability protocol. Instantiate those wrappers
   directly when you need invocation behavior.
 
+## Opaque Provider Payloads
+
+`AssistantPromptMessage` and content blocks accept an optional `opaque_body` JSON value, defaulting to `None`.
+Their JSON serialization and validation preserve `opaque_body`.
+An assistant message with a non-`None` payload is nonempty, including payloads such as `{}`, `[]`, `""`, `0`, and `false`.
+
+When `LargeLanguageModel` aggregates chunks into a blocking result or a streaming `on_after_invoke` callback result, it retains the last non-`None` assistant payload for that invocation.
+Each supplied snapshot replaces the previous payload; `None` leaves it unchanged.
+Both aggregation paths retain content block payloads and the order of mixed strings and content blocks.
+
 ## Documentation
 
 For detailed documentation on how to add new providers or models, please refer to the [Dify documentation](https://docs.dify.ai/).
