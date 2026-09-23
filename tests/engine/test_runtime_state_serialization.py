@@ -30,6 +30,7 @@ from graphon.engine.worker import DispatchTask, NodeEventTask, Worker
 from graphon.engine_events.base import EngineEvent, NodeEvent
 from graphon.engine_events.graph import (
     GraphRunAbortedEvent,
+    GraphRunPartialSucceededEvent,
     GraphRunPausedEvent,
     GraphRunStartedEvent,
     GraphRunSucceededEvent,
@@ -1013,6 +1014,71 @@ class _HostContainerHandler:
         assert not frame.scheduler.is_execution_complete()
 
 
+@pytest.mark.parametrize("resumed", [False, True])
+@pytest.mark.parametrize("status", ["succeeded", "failed"])
+def test_custom_container_counts_its_own_model_usage(
+    monkeypatch: pytest.MonkeyPatch, resumed: bool, status: str
+) -> None:
+    result = ContainerNodeRunResult(
+        status=WorkflowNodeExecutionStatus(status),
+        error="model unavailable" if status == "failed" else "",
+        llm_usage=LLMUsage.from_metadata({"total_tokens": 70}),
+    )
+
+    def return_result(
+        handler: _HostContainerHandler,
+        *,
+        invocation_id: str,
+        request: ContainerAwaitRequest,
+    ) -> None:
+        assert isinstance(request, CustomContainerRequest)
+        handler.state.enqueue_ready_task(
+            ResumeTask(
+                invocation_id=invocation_id,
+                result=ContainerExecutionResult(
+                    metadata={}, steps=0, node_run_result=result
+                ),
+            )
+        )
+
+    if resumed:
+        monkeypatch.setattr(_HostContainerHandler, "handle_request", return_result)
+    else:
+        monkeypatch.setattr(_HostContainerNode, "_run", lambda _: result)
+    state = _new_runtime_state({})
+    node = _HostContainerNode(
+        node_id="host",
+        data=BaseNodeData(
+            type=_HostContainerNode.node_type,
+            title="Host container",
+            error_strategy="default-value",
+        ),
+        init_params=InitParams(
+            workflow_id="workflow", graph_config={}, run_context={}, call_depth=0
+        ),
+        runtime_state=state,
+    )
+    start = StartNode(
+        node_id="start",
+        data=StartNodeData(title="Start", variables=[]),
+        init_params=node.init_params,
+        runtime_state=state,
+    )
+    events = list(
+        Engine(
+            graph=Graph.new().add_root(start).add_node(node).build(),
+            runtime_state=state,
+            workers=1,
+            container_handler_factories=(_HostContainerHandler,),
+        ).run()
+    )
+    expected_event = (
+        GraphRunPartialSucceededEvent if status == "failed" else GraphRunSucceededEvent
+    )
+    assert isinstance(events[-1], expected_event)
+    assert (state.node_run_steps, state.total_tokens) == (2, 70)
+
+
 def test_root_statistics_include_loop_inside_host_created_frame(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1050,6 +1116,51 @@ def test_root_statistics_include_loop_inside_host_created_frame(
     )
     assert isinstance(events[-1], GraphRunPausedEvent)
     assert (state.node_run_steps, state.total_tokens) == (6, 100)
+
+
+def test_container_counts_own_usage_alongside_child_totals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    child_results: list[NodeRunResult] = []
+
+    def run_with_usage(_node: LoopStartNode) -> NodeRunResult:
+        result = NodeRunResult(
+            status="succeeded",
+            llm_usage=LLMUsage.from_metadata({"total_tokens": 100}),
+        )
+        child_results.append(result)
+        return result
+
+    complete_loop = LoopContainerHandler._complete_loop
+
+    def complete_with_own_usage(
+        handler: LoopContainerHandler, *, run_state: LoopRunState, steps: int
+    ) -> ContainerExecutionResult:
+        result = complete_loop(handler, run_state=run_state, steps=steps)
+        own_usage = LLMUsage.from_metadata({"total_tokens": 70})
+        result.node_run_result.llm_usage = result.node_run_result.llm_usage.plus(
+            own_usage
+        )
+        result.node_run_result.own_llm_usage = own_usage
+        return result
+
+    monkeypatch.setattr(LoopStartNode, "_run", run_with_usage)
+    monkeypatch.setattr(LoopContainerHandler, "_complete_loop", complete_with_own_usage)
+    engine = _hitl_engine(
+        _loop_dsl(),
+        runtime_state=_new_runtime_state({}),
+        callback=_complete_loop_hitl,
+    )
+    events = list(engine.run())
+
+    assert engine.runtime_state.total_tokens == 370
+    completed = next(
+        event
+        for event in events
+        if isinstance(event, NodeRunSucceededEvent) and event.node_id == "loop"
+    )
+    assert completed.node_run_result.llm_usage.total_tokens == 370
+    assert [result.llm_usage.total_tokens for result in child_results] == [100] * 3
 
 
 @pytest.mark.parametrize("deferred", [False, True])
@@ -1090,9 +1201,9 @@ def test_legacy_custom_result_usage_survives_until_parent_resumes(
     legacy["version"] = "3.0"
     restored = RuntimeState.from_snapshot(json.dumps(legacy))
 
-    assert (restored.node_run_steps, restored.total_tokens) == (5, 80)
+    assert (restored.node_run_steps, restored.total_tokens) == (2, 80)
     restored = RuntimeState.from_snapshot(restored.dumps())
-    assert (restored.node_run_steps, restored.total_tokens) == (5, 80)
+    assert (restored.node_run_steps, restored.total_tokens) == (2, 80)
     node = _HostContainerNode(
         node_id="tool",
         data=BaseNodeData(type=_HostContainerNode.node_type, title="Host container"),
@@ -1115,7 +1226,7 @@ def test_legacy_custom_result_usage_survives_until_parent_resumes(
         ).run()
     )
     assert isinstance(events[-1], GraphRunSucceededEvent)
-    assert (restored.node_run_steps, restored.total_tokens) == (5, 80)
+    assert (restored.node_run_steps, restored.total_tokens) == (2, 80)
     completed = next(
         event for event in events if isinstance(event, NodeRunSucceededEvent)
     )

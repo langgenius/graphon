@@ -28,6 +28,9 @@ class NodeRunResult(BaseModel):
         default_factory=_default_metadata,
     )
     llm_usage: LLMUsage = Field(default_factory=LLMUsage.empty_usage)
+    # When llm_usage includes child totals, report only this node's share here.
+    # None means all reported usage belongs to this node.
+    own_llm_usage: LLMUsage | None = None
 
     edge_source_handle: str = (
         "source"  # source handle id of node with multiple branches

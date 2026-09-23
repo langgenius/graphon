@@ -326,18 +326,12 @@ class NodeEventProcessor:
         frame.scheduler.enqueue_node(event.node_id)
 
     def _add_node_usage(self, *, frame: ExecutionFrame, event: NodeEvent) -> None:
-        # Container results retain child usage for observers, but the root has
-        # already counted those child events, including unfinished child work.
-        is_container = (
-            frame.graph.nodes[event.node_id].execution_type
-            == NodeExecutionType.CONTAINER
+        result = event.node_run_result
+        if frame.frame_id != ROOT_FRAME_ID:
+            frame.state.add_llm_usage(result.llm_usage)
+        self._frame_registry[ROOT_FRAME_ID].state.add_llm_usage(
+            result.llm_usage if result.own_llm_usage is None else result.own_llm_usage
         )
-        if frame.frame_id != ROOT_FRAME_ID or not is_container:
-            frame.state.add_llm_usage(event.node_run_result.llm_usage)
-        if frame.frame_id != ROOT_FRAME_ID and not is_container:
-            self._frame_registry[ROOT_FRAME_ID].state.add_llm_usage(
-                event.node_run_result.llm_usage
-            )
 
     def _complete_node(
         self,

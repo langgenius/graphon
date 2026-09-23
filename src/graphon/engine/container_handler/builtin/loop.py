@@ -17,6 +17,7 @@ from graphon.enums import (
     WorkflowNodeExecutionMetadataKey,
     WorkflowNodeExecutionStatus,
 )
+from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.nodes.container_effects import (
     ContainerAwaitRequest,
     ContainerExecutionResult,
@@ -424,6 +425,7 @@ class LoopContainerHandler:
                 outputs=run_state.outputs,
                 inputs=run_state.inputs,
                 llm_usage=run_state.usage,
+                own_llm_usage=LLMUsage.empty_usage(),
             ),
         )
 
@@ -445,6 +447,7 @@ class LoopContainerHandler:
                 metadata=metadata,
                 inputs=run_state.inputs,
                 llm_usage=run_state.usage,
+                own_llm_usage=LLMUsage.empty_usage(),
             ),
         )
 

@@ -34,6 +34,9 @@ from graphon.engine_events.node import (
     NodeRunSucceededEvent,
     NodeRunVariableUpdatedEvent,
 )
+from graphon.model_runtime.entities.llm_entities import LLMUsage
+from graphon.node_events import NodeRunResult
+from graphon.nodes.loop.loop_start_node import LoopStartNode
 from graphon.variables.factory import build_segment, segment_to_variable
 from graphon.variables.segments import Segment
 from tests.helpers.workflow_events import (
@@ -611,7 +614,9 @@ def test_full_loop_graph_persists_variable_assignments_between_rounds() -> None:
     assert engine.runtime_state.variable_pool.get(["local", "output"]) is None
 
 
-def test_nested_containers_preserve_external_updates_and_iteration_isolation() -> None:
+def test_nested_containers_preserve_external_updates_and_iteration_isolation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Keep external updates through nested Loops but isolate Iteration writes.
 
     The inner Loop first increments its counter from zero to one. An external
@@ -619,6 +624,14 @@ def test_nested_containers_preserve_external_updates_and_iteration_isolation() -
     live outer frame and increment it to eleven. The following Iteration emits
     twelve inside its private pool, but must not write it back through the Loops.
     """
+    monkeypatch.setattr(
+        LoopStartNode,
+        "_run",
+        lambda _: NodeRunResult(
+            status="succeeded",
+            llm_usage=LLMUsage.from_metadata({"total_tokens": 100}),
+        ),
+    )
     dsl = _graph_dsl(
         nodes=[
             _start_node(),
@@ -775,6 +788,7 @@ def test_nested_containers_preserve_external_updates_and_iteration_isolation() -
         and tuple(event.variable.selector) == ("inner-loop", "counter")
     ] == [1, 11, 12]
     assert final_outputs(events) == {"counter": 11}
+    assert engine.runtime_state.total_tokens == 300
 
 
 def test_full_loop_graph_stops_at_loop_end_node() -> None:

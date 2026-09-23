@@ -41,6 +41,7 @@ class ContainerNodeRunResult(NodeRunResult):
             outputs={key: value.to_object() for key, value in self.outputs.items()},
             metadata=self.metadata,
             llm_usage=self.llm_usage,
+            own_llm_usage=self.own_llm_usage,
             error=self.error,
             error_type=self.error_type,
         )
@@ -87,8 +88,10 @@ ContainerAwaitRequest = (
 class ContainerExecutionResult(BaseModel):
     """Return child outputs and statistics to a suspended container node.
 
-    Hosts must not add ``steps`` or ``node_run_result.llm_usage`` to the root
-    runtime counters, which already include processed child events.
+    For usage aggregated from child events, set ``node_run_result.own_llm_usage``
+    to the container's own usage (empty when all usage came from children).
+    The engine counts that share once and preserves ``llm_usage`` for observers.
+    ``steps`` is container-specific, such as rounds or items, not node starts.
     """
 
     model_config = ConfigDict(frozen=True)

@@ -103,9 +103,14 @@ boundaries let the host rebuild an execution with its own integrations.
 The root runtime counts node starts and model usage across all frames as events
 are processed, including work in paused or stopped children. Child frames retain
 local statistics for [container results](src/graphon/nodes/container_effects.py),
-whose usage remains available to observers. [Version 4 snapshots](src/graphon/runtime/runtime_state/v4.py)
-preserve workflow-wide root totals; [legacy readers](src/graphon/runtime/runtime_state/snapshot.py)
-recover only the child statistics still recorded in older snapshots.
+which separate observer-facing aggregate usage from the container's own
+contribution through `own_llm_usage`.
+
+[Version 4 snapshots](src/graphon/runtime/runtime_state/v4.py) preserve workflow-wide
+root totals. [Legacy readers](src/graphon/runtime/runtime_state/snapshot.py) recover
+usage still saved in child frames, container runs, or queued custom results.
+Only retained child frames supply missing node-start counts; container result
+`steps` use container-specific units and cannot reconstruct discarded node starts.
 
 The executable contracts below are authoritative for validation, lifecycle, and
 compatibility details:

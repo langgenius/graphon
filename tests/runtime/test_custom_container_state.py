@@ -131,4 +131,4 @@ def test_legacy_pending_result_does_not_recount_its_saved_child() -> None:
 
     restored = RuntimeState.from_snapshot(json.dumps(legacy))
 
-    assert (restored.node_run_steps, restored.total_tokens) == (3, 70)
+    assert (restored.node_run_steps, restored.total_tokens) == (2, 70)

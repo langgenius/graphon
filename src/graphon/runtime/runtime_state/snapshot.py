@@ -162,29 +162,29 @@ def restore_frame_snapshot(
 def _merge_child_statistics(state: RuntimeState) -> None:
     """Merge available legacy child statistics into workflow-wide root totals.
 
-    Final custom results supersede saved child frames. Completed built-in frames
-    did not retain step counts, so only recorded counts can be recovered. Version
-    4 preserves the merged totals without repeating this recovery on load.
+    Final custom results supersede saved child usage. Only saved frames retain
+    node-start counts; result.steps measures container-specific work. Version 4
+    preserves the merged totals without repeating this recovery on load.
     """
     runs = {run.invocation_id: run for run in state.container_runs()}
     completed_custom_invocation_ids: set[str] = set()
     for ready_queue in (state.ready_queue, state.deferred_ready_queue):
         tasks = ready_queue.take_all()
         for task in tasks:
-            if (
-                isinstance(task, ResumeTask)
-                and isinstance(task.result, ContainerExecutionResult)
-                and isinstance(runs.get(task.invocation_id), CustomContainerRunState)
+            if isinstance(task, ResumeTask) and isinstance(
+                task.result, ContainerExecutionResult
             ):
-                completed_custom_invocation_ids.add(task.invocation_id)
-                state._node_run_steps += task.result.steps
-                state.add_llm_usage(task.result.node_run_result.llm_usage)
+                if isinstance(runs.get(task.invocation_id), CustomContainerRunState):
+                    completed_custom_invocation_ids.add(task.invocation_id)
+                    state.add_llm_usage(task.result.node_run_result.llm_usage)
+                # Queued results are recovered here or from built-in run.usage.
+                task.result.node_run_result.own_llm_usage = LLMUsage.empty_usage()
             ready_queue.put(task)
     for frame in state.container_frames():
+        state._node_run_steps += frame.runtime_data.node_run_steps
         # A legacy host may retain a stale frame after queuing its final result.
         if frame.parent_invocation_id in completed_custom_invocation_ids:
             continue
-        state._node_run_steps += frame.runtime_data.node_run_steps
         state.add_llm_usage(frame.runtime_data.llm_usage)
     for run in runs.values():
         if isinstance(run, LoopRunState | IterationRunState):
