@@ -35,3 +35,6 @@ cover/
 # IDE configs
 .idea/
 .vscode/
+
+# Local example configuration
+/examples/slim_llm/credentials.json

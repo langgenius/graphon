@@ -27,7 +27,7 @@ class VariableAggregatorNode(Node[VariableAggregatorNodeData]):
             or not self.node_data.advanced_settings.group_enabled
         ):
             for selector in self.node_data.variables:
-                variable = self.graph_runtime_state.variable_pool.get(selector)
+                variable = self.runtime_state.variable_pool.get(selector)
                 if variable is not None:
                     outputs = {"output": variable}
 
@@ -36,7 +36,7 @@ class VariableAggregatorNode(Node[VariableAggregatorNodeData]):
         else:
             for group in self.node_data.advanced_settings.groups:
                 for selector in group.variables:
-                    variable = self.graph_runtime_state.variable_pool.get(selector)
+                    variable = self.runtime_state.variable_pool.get(selector)
 
                     if variable is not None:
                         outputs[group.group_name] = {"output": variable}

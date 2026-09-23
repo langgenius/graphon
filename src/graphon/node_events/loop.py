@@ -3,22 +3,22 @@ from datetime import datetime
 
 from pydantic import Field
 
-from .base import NodeEventBase
+from .base import NodeEventPayload
 
 
-class LoopStartedEvent(NodeEventBase):
+class LoopStartedEvent(NodeEventPayload):
     start_at: datetime = Field(..., description="start at")
     inputs: Mapping[str, object] = Field(default_factory=dict)
     metadata: Mapping[str, object] = Field(default_factory=dict)
     predecessor_node_id: str | None = None
 
 
-class LoopNextEvent(NodeEventBase):
+class LoopNextEvent(NodeEventPayload):
     index: int = Field(..., description="index")
     pre_loop_output: object = None
 
 
-class LoopSucceededEvent(NodeEventBase):
+class LoopSucceededEvent(NodeEventPayload):
     start_at: datetime = Field(..., description="start at")
     inputs: Mapping[str, object] = Field(default_factory=dict)
     outputs: Mapping[str, object] = Field(default_factory=dict)
@@ -26,7 +26,7 @@ class LoopSucceededEvent(NodeEventBase):
     steps: int = 0
 
 
-class LoopFailedEvent(NodeEventBase):
+class LoopFailedEvent(NodeEventPayload):
     start_at: datetime = Field(..., description="start at")
     inputs: Mapping[str, object] = Field(default_factory=dict)
     outputs: Mapping[str, object] = Field(default_factory=dict)

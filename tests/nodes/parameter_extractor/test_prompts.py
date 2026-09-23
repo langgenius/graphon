@@ -25,11 +25,11 @@ from graphon.nodes.parameter_extractor.prompts import (
     FUNCTION_CALLING_EXTRACTOR_SYSTEM_PROMPT,
     FUNCTION_CALLING_EXTRACTOR_USER_TEMPLATE,
 )
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.types import SegmentType
 
-from ...helpers import build_graph_init_params, build_variable_pool
+from ...helpers import build_init_params, build_variable_pool
 
 
 def _call_parameter_extractor_constructor(**kwargs: object) -> Any:
@@ -44,11 +44,12 @@ def _build_dependencies(**kwargs: object) -> object:
 
 def _build_parameter_extractor_node() -> tuple[ParameterExtractorNode, VariablePool]:
     variable_pool = build_variable_pool(variables=[(("start", "rule"), "strictly")])
-    runtime_state = GraphRuntimeState(
+    runtime_state = RuntimeState(
+        workflow_id="workflow",
         variable_pool=variable_pool,
         start_at=time.perf_counter(),
     )
-    init_params = build_graph_init_params(graph_config={"nodes": [], "edges": []})
+    init_params = build_init_params(graph_config={"nodes": [], "edges": []})
     model_instance = Mock(
         provider="test",
         model_name="test-model",
@@ -79,8 +80,8 @@ def _build_parameter_extractor_node() -> tuple[ParameterExtractorNode, VariableP
                 instruction="Follow {{#start.rule#}} instructions.",
                 reasoning_mode="function_call",
             ),
-            graph_init_params=init_params,
-            graph_runtime_state=runtime_state,
+            init_params=init_params,
+            runtime_state=runtime_state,
             dependencies=_build_dependencies(
                 model_instance=model_instance,
                 prompt_message_serializer=prompt_message_serializer,
@@ -219,11 +220,12 @@ def test_parameter_extractor_run_emits_model_identity_in_inputs(
 
 def test_parameter_extractor_accepts_dependency_bundle() -> None:
     variable_pool = build_variable_pool(variables=[])
-    runtime_state = GraphRuntimeState(
+    runtime_state = RuntimeState(
+        workflow_id="workflow",
         variable_pool=variable_pool,
         start_at=time.perf_counter(),
     )
-    init_params = build_graph_init_params(graph_config={"nodes": [], "edges": []})
+    init_params = build_init_params(graph_config={"nodes": [], "edges": []})
     model_instance = Mock()
     prompt_message_serializer = Mock()
     memory = Mock()
@@ -243,8 +245,8 @@ def test_parameter_extractor_accepts_dependency_bundle() -> None:
                 parameters=[],
                 reasoning_mode="function_call",
             ),
-            graph_init_params=init_params,
-            graph_runtime_state=runtime_state,
+            init_params=init_params,
+            runtime_state=runtime_state,
             dependencies=_build_dependencies(
                 model_instance=model_instance,
                 prompt_message_serializer=prompt_message_serializer,
@@ -271,10 +273,9 @@ def test_parameter_extractor_rejects_mixed_dependency_styles() -> None:
                 parameters=[],
                 reasoning_mode="function_call",
             ),
-            graph_init_params=build_graph_init_params(
-                graph_config={"nodes": [], "edges": []}
-            ),
-            graph_runtime_state=GraphRuntimeState(
+            init_params=build_init_params(graph_config={"nodes": [], "edges": []}),
+            runtime_state=RuntimeState(
+                workflow_id="workflow",
                 variable_pool=build_variable_pool(variables=[]),
                 start_at=time.perf_counter(),
             ),
@@ -289,11 +290,12 @@ def test_parameter_extractor_rejects_mixed_dependency_styles() -> None:
 
 def test_parameter_extractor_legacy_dependency_keywords_still_work() -> None:
     variable_pool = build_variable_pool(variables=[])
-    runtime_state = GraphRuntimeState(
+    runtime_state = RuntimeState(
+        workflow_id="workflow",
         variable_pool=variable_pool,
         start_at=time.perf_counter(),
     )
-    init_params = build_graph_init_params(graph_config={"nodes": [], "edges": []})
+    init_params = build_init_params(graph_config={"nodes": [], "edges": []})
     model_instance = Mock()
     prompt_message_serializer = Mock()
     memory = Mock()
@@ -311,8 +313,8 @@ def test_parameter_extractor_legacy_dependency_keywords_still_work() -> None:
             parameters=[],
             reasoning_mode="function_call",
         ),
-        graph_init_params=init_params,
-        graph_runtime_state=runtime_state,
+        init_params=init_params,
+        runtime_state=runtime_state,
         model_instance=model_instance,
         prompt_message_serializer=prompt_message_serializer,
         memory=memory,

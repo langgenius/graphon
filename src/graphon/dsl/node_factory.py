@@ -10,7 +10,7 @@ from typing import Any, ClassVar
 
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.entities.graph_config import NodeConfigDict
-from graphon.enums import BuiltinNodeTypes
+from graphon.enums import BuiltinNodeTypes, NodeExecutionType
 from graphon.file.enums import FileType
 from graphon.file.models import File
 from graphon.model_runtime.entities.llm_entities import LLMMode
@@ -66,7 +66,8 @@ from graphon.nodes.variable_assigner.v2.entities import VariableAssignerNodeData
 from graphon.nodes.variable_assigner.v2.node import (
     VariableAssignerNode as VariableAssignerNodeV2,
 )
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.init_params import InitParams
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.template_rendering import Jinja2TemplateRenderer, TemplateRenderError
 
 from .code_runtime import SandboxCodeExecutor
@@ -75,6 +76,7 @@ from .entities import (
     DslCredentials,
     DslDependency,
     DslModelCredential,
+    DslToolCredential,
 )
 from .errors import DslError
 from .slim import SlimClientConfig, SlimLLM
@@ -417,8 +419,8 @@ type _NodeBuilder = Callable[[Any, _NodeBuildRequest], Node]
 @dataclass(slots=True)
 class SlimDslNodeFactory:
     graph_config: Mapping[str, Any]
-    graph_init_params: Any
-    graph_runtime_state: GraphRuntimeState
+    init_params: InitParams
+    runtime_state: RuntimeState
     credentials: DslCredentials
     dependencies: list[DslDependency]
     slim_client_config: SlimClientConfig = field(init=False)
@@ -442,9 +444,117 @@ class SlimDslNodeFactory:
 
     def with_runtime_state(
         self,
-        graph_runtime_state: GraphRuntimeState,
+        runtime_state: RuntimeState,
     ) -> SlimDslNodeFactory:
-        return replace(self, graph_runtime_state=graph_runtime_state)
+        """Return a copied factory bound to one execution frame's state.
+
+        Args:
+            runtime_state: State that every node created by the copy must use.
+
+        Returns:
+            An independent factory preserving the current graph and dependencies.
+
+        """
+        return replace(self, runtime_state=runtime_state)
+
+    def with_graph_config(
+        self,
+        graph_config: Mapping[str, Any],
+    ) -> SlimDslNodeFactory:
+        """Return an independent factory bound to one materialized graph scope.
+
+        ``Node.__init__`` invokes ``post_init()`` immediately, so both legacy
+        ``factory.graph_config`` access and the canonical
+        ``node.init_params.graph_config`` path must already point at the
+        scoped config before ``create_node()`` runs. Copying the Pydantic model
+        also keeps parent and sibling factories isolated.
+
+        Args:
+            graph_config: Container-subtree configuration visible to new nodes.
+
+        Returns:
+            A copied factory carrying copied, scope-correct initialization params.
+
+        """
+        return replace(
+            self,
+            graph_config=graph_config,
+            init_params=self.init_params.model_copy(
+                update={"graph_config": graph_config},
+            ),
+        )
+
+    def validate_node(
+        self,
+        node_config: NodeConfigDict,
+    ) -> NodeExecutionType:
+        """Validate a DSL node without constructing runtime collaborators.
+
+        This method follows the same type and legacy Variable Assigner version
+        dispatch as :meth:`create_node`, validates the concrete Pydantic schema,
+        and resolves static plugin and credential settings. It deliberately avoids
+        builders because builders construct Nodes, invoke ``post_init()``, and may
+        initialize Slim or sandbox runtimes. Graph can therefore validate nested
+        nodes before any executable node is created.
+
+        Args:
+            node_config: Base-validated node configuration from the graph loader.
+
+        Returns:
+            The execution type of the concrete node implementation selected by
+            the same type and version dispatch used for construction.
+
+        Raises:
+            DslError: If the node type, payload, plugin dependency, or required
+                credentials cannot be resolved.
+
+        """
+        request = self._node_request(node_config)
+        model_node_labels = {
+            BuiltinNodeTypes.LLM: "LLM",
+            BuiltinNodeTypes.QUESTION_CLASSIFIER: "Question classifier",
+            BuiltinNodeTypes.PARAMETER_EXTRACTOR: "Parameter extractor",
+        }
+        if node_type_label := model_node_labels.get(request.node_type):
+            model = request.data_payload.get("model")
+            provider = model.get("provider") if isinstance(model, Mapping) else None
+            if not provider:
+                msg = f"{node_type_label} node is missing model provider."
+                raise DslError(
+                    msg,
+                    code="node.llm_missing_provider",
+                    path=f"/nodes/{request.node_id}/data/model/provider",
+                    details={"node_id": request.node_id},
+                )
+        if request.node_type == BuiltinNodeTypes.VARIABLE_ASSIGNER:
+            data = self._validate_variable_assigner_data(request)
+            node_cls = (
+                VariableAssignerNodeV2
+                if isinstance(data, VariableAssignerNodeData)
+                else VariableAssignerNodeV1
+            )
+            return node_cls.execution_type
+
+        if request.node_type not in self.NODE_BUILDERS:
+            raise self._unsupported_node_error(request)
+        node_mapping = Node.get_node_type_classes_mapping()
+        node_classes = node_mapping.get(request.node_type)
+        node_version = str(request.data_payload.get("version") or "1")
+        node_cls = node_classes.get(node_version) if node_classes is not None else None
+        if node_cls is None:
+            raise self._unsupported_node_error(request)
+        node_cls.validate_node_data(request.data)
+        if request.node_type in model_node_labels:
+            self._resolve_slim_llm_settings(
+                node_id=request.node_id,
+                data=request.data_payload,
+                node_type_label=model_node_labels[request.node_type],
+            )
+        elif request.node_type == BuiltinNodeTypes.TOOL:
+            self._resolve_tool_runtime_settings(
+                ToolNodeData.model_validate(request.data_payload),
+            )
+        return node_cls.execution_type
 
     def create_node(self, node_config: NodeConfigDict) -> Node:
         request = self._node_request(node_config)
@@ -471,40 +581,40 @@ class SlimDslNodeFactory:
         return StartNode(
             node_id=request.node_id,
             data=StartNode.validate_node_data(request.data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_end_node(self, request: _NodeBuildRequest) -> EndNode:
         return EndNode(
             node_id=request.node_id,
             data=EndNode.validate_node_data(request.data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_answer_node(self, request: _NodeBuildRequest) -> AnswerNode:
         return AnswerNode(
             node_id=request.node_id,
             data=AnswerNode.validate_node_data(request.data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_if_else_node(self, request: _NodeBuildRequest) -> IfElseNode:
         return IfElseNode(
             node_id=request.node_id,
             data=IfElseNode.validate_node_data(request.data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_iteration_node(self, request: _NodeBuildRequest) -> IterationNode:
         return IterationNode(
             node_id=request.node_id,
             data=IterationNode.validate_node_data(request.data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_iteration_start_node(
@@ -514,32 +624,32 @@ class SlimDslNodeFactory:
         return IterationStartNode(
             node_id=request.node_id,
             data=IterationStartNode.validate_node_data(request.data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_loop_node(self, request: _NodeBuildRequest) -> LoopNode:
         return LoopNode(
             node_id=request.node_id,
             data=LoopNode.validate_node_data(request.data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_loop_start_node(self, request: _NodeBuildRequest) -> LoopStartNode:
         return LoopStartNode(
             node_id=request.node_id,
             data=LoopStartNode.validate_node_data(request.data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_loop_end_node(self, request: _NodeBuildRequest) -> LoopEndNode:
         return LoopEndNode(
             node_id=request.node_id,
             data=LoopEndNode.validate_node_data(request.data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_template_transform_node(
@@ -549,8 +659,8 @@ class SlimDslNodeFactory:
         return TemplateTransformNode(
             node_id=request.node_id,
             data=TemplateTransformNodeData.model_validate(request.data_payload),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
             jinja2_template_renderer=_DefaultJinja2TemplateRenderer(),
         )
 
@@ -558,8 +668,8 @@ class SlimDslNodeFactory:
         return CodeNode(
             node_id=request.node_id,
             data=CodeNodeData.model_validate(request.data_payload),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
             code_executor=SandboxCodeExecutor(self.credentials.code),
             code_limits=_code_limits(self.credentials.code),
         )
@@ -583,8 +693,8 @@ class SlimDslNodeFactory:
         return ToolNode(
             node_id=request.node_id,
             data=tool_data,
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
             tool_file_manager=_UnsupportedToolFileManager(),
             runtime=runtime,
         )
@@ -596,8 +706,8 @@ class SlimDslNodeFactory:
         return HttpRequestNode(
             node_id=request.node_id,
             data=HttpRequestNodeData.model_validate(request.data_payload),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
             http_request_config=build_http_request_config(),
             dependencies=HttpRequestNodeDependencies(
                 tool_file_manager_factory=_TextOnlyHttpResponseFileManager,
@@ -613,8 +723,8 @@ class SlimDslNodeFactory:
         return VariableAggregatorNode(
             node_id=request.node_id,
             data=VariableAggregatorNodeData.model_validate(request.data_payload),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_list_operator_node(
@@ -624,8 +734,8 @@ class SlimDslNodeFactory:
         return ListOperatorNode(
             node_id=request.node_id,
             data=ListOperatorNodeData.model_validate(request.data_payload),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _unsupported_node_error(self, request: _NodeBuildRequest) -> DslError:
@@ -637,40 +747,63 @@ class SlimDslNodeFactory:
             details={"node_id": request.node_id, "node_type": request.node_type},
         )
 
+    def _validate_variable_assigner_data(
+        self,
+        request: _NodeBuildRequest,
+    ) -> VariableAssignerData | VariableAssignerNodeData:
+        """Resolve and validate one legacy or current Variable Assigner payload.
+
+        Variable Assigner versions use different payload shapes and older DSLs
+        are not always explicitly versioned. Keeping shape detection and concrete
+        Pydantic validation here gives preflight validation and node construction
+        exactly one dispatch rule without creating a Node or runtime dependency.
+
+        Args:
+            request: Normalized node ID and data prepared by this factory.
+
+        Returns:
+            Concrete version 1 or version 2 node data ready for construction.
+
+        Raises:
+            DslError: If the payload matches neither supported version.
+
+        """
+        data = request.data_payload
+        version = str(data.get("version") or "")
+        if "items" in data or version == VariableAssignerNodeV2.version():
+            return VariableAssignerNodeData.model_validate(data)
+        if {
+            "assigned_variable_selector",
+            "write_mode",
+            "input_variable_selector",
+        }.issubset(data):
+            return VariableAssignerData.model_validate(data)
+
+        msg = "Variable assigner DSL node data is not recognized."
+        raise DslError(
+            msg,
+            code="node.assigner_invalid_payload",
+            path=f"/nodes/{request.node_id}/data",
+            details={"node_id": request.node_id},
+        )
+
     def _create_variable_assigner_node(
         self,
         request: _NodeBuildRequest,
     ) -> VariableAssignerNodeV1 | VariableAssignerNodeV2:
-        node_id = request.node_id
-        data = request.data_payload
-        version = str(data.get("version") or "")
-        if "items" in data or version == VariableAssignerNodeV2.version():
+        data = self._validate_variable_assigner_data(request)
+        if isinstance(data, VariableAssignerNodeData):
             return VariableAssignerNodeV2(
-                node_id=node_id,
-                data=VariableAssignerNodeData.model_validate(data),
-                graph_init_params=self.graph_init_params,
-                graph_runtime_state=self.graph_runtime_state,
+                node_id=request.node_id,
+                data=data,
+                init_params=self.init_params,
+                runtime_state=self.runtime_state,
             )
-
-        v1_fields = {
-            "assigned_variable_selector",
-            "write_mode",
-            "input_variable_selector",
-        }
-        if v1_fields.issubset(data):
-            return VariableAssignerNodeV1(
-                node_id=node_id,
-                data=VariableAssignerData.model_validate(data),
-                graph_init_params=self.graph_init_params,
-                graph_runtime_state=self.graph_runtime_state,
-            )
-
-        msg = "Variable assigner DSL node data is not recognized."
-        raise _dsl_error(
-            msg,
-            code="node.assigner_invalid_payload",
-            path=f"/nodes/{node_id}/data",
-            details={"node_id": node_id},
+        return VariableAssignerNodeV1(
+            node_id=request.node_id,
+            data=data,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
         )
 
     def _create_question_classifier_node(
@@ -685,8 +818,8 @@ class SlimDslNodeFactory:
         return QuestionClassifierNode(
             node_id=request.node_id,
             data=QuestionClassifierNodeData.model_validate(normalized_data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
             dependencies=QuestionClassifierNodeDependencies(
                 model_instance=model_instance,
                 template_renderer=_DefaultJinja2TemplateRenderer(),
@@ -707,8 +840,8 @@ class SlimDslNodeFactory:
         return ParameterExtractorNode(
             node_id=request.node_id,
             data=ParameterExtractorNodeData.model_validate(normalized_data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
             model_instance=model_instance,
             prompt_message_serializer=_PassthroughPromptMessageSerializer(),
         )
@@ -722,8 +855,8 @@ class SlimDslNodeFactory:
         return LLMNode(
             node_id=request.node_id,
             data=LLMNodeData.model_validate(normalized_data),
-            graph_init_params=self.graph_init_params,
-            graph_runtime_state=self.graph_runtime_state,
+            init_params=self.init_params,
+            runtime_state=self.runtime_state,
             model_instance=model_instance,
             llm_file_saver=_TextOnlyFileSaver(),
             prompt_message_serializer=_PassthroughPromptMessageSerializer(),
@@ -737,40 +870,14 @@ class SlimDslNodeFactory:
         data: Mapping[str, Any],
         node_type_label: str,
     ) -> tuple[dict[str, Any], SlimLLM]:
-        normalized_data = dict(data)
-        model = dict(normalized_data.get("model") or {})
-        raw_provider = str(model.get("provider") or "")
-        vendor = _canonical_vendor(raw_provider)
-        if not vendor:
-            msg = f"{node_type_label} node is missing model provider."
-            raise _dsl_error(
-                msg,
-                code="node.llm_missing_provider",
-                path=f"/nodes/{node_id}/data/model/provider",
-                details={"node_id": node_id},
+        normalized_data, vendor, plugin_id, credentials = (
+            self._resolve_slim_llm_settings(
+                node_id=node_id,
+                data=data,
+                node_type_label=node_type_label,
             )
-        model["provider"] = vendor
-        normalized_data["model"] = model
-
-        plugin_id = _find_plugin_id(
-            provider=raw_provider,
-            dependencies=self.dependencies,
         )
-        if plugin_id is None:
-            msg = f"{node_type_label} node dependency could not be resolved."
-            raise _dsl_error(
-                msg,
-                code="dependency.missing_plugin",
-                path=f"/nodes/{node_id}/data/model/provider",
-                details={"node_id": node_id, "provider": raw_provider},
-            )
-
-        credentials = _resolve_credentials(
-            credentials=self.credentials,
-            provider=raw_provider,
-            vendor=vendor,
-            plugin_id=plugin_id,
-        )
+        model = normalized_data["model"]
         try:
             model_instance = SlimLLM(
                 config=self.slim_client_config,
@@ -789,7 +896,106 @@ class SlimDslNodeFactory:
             ) from error
         return normalized_data, model_instance
 
+    def _resolve_slim_llm_settings(
+        self,
+        *,
+        node_id: str,
+        data: Mapping[str, Any],
+        node_type_label: str,
+    ) -> tuple[dict[str, Any], str, str, dict[str, Any]]:
+        """Resolve model identity and credentials without creating a runtime.
+
+        Both graph preflight and node construction use this path so descendant
+        nodes fail on missing providers, plugin dependencies, or required model
+        credentials before any root node is constructed. The returned values are
+        plain configuration data; this method does not create a ``SlimClient``,
+        initialize a Node, invoke ``post_init()``, or mutate runtime state.
+
+        Args:
+            node_id: Persisted node ID used in actionable DSL error paths.
+            data: Concrete-schema-compatible model node payload.
+            node_type_label: Human-readable node kind for error messages.
+
+        Returns:
+            Normalized node data, provider vendor, resolved plugin ID, and the
+            credential values to pass to the eventual Slim runtime.
+
+        Raises:
+            DslError: If provider, dependency, or required credentials cannot be
+                resolved from the imported DSL and supplied credentials.
+
+        """
+        normalized_data = dict(data)
+        model = dict(normalized_data.get("model") or {})
+        raw_provider = str(model.get("provider") or "")
+        vendor = _canonical_vendor(raw_provider)
+        if not vendor:
+            msg = f"{node_type_label} node is missing model provider."
+            raise DslError(
+                msg,
+                code="node.llm_missing_provider",
+                path=f"/nodes/{node_id}/data/model/provider",
+                details={"node_id": node_id},
+            )
+        model["provider"] = vendor
+        normalized_data["model"] = model
+
+        plugin_id = _find_plugin_id(
+            provider=raw_provider,
+            dependencies=self.dependencies,
+        )
+        if plugin_id is None:
+            msg = f"{node_type_label} node dependency could not be resolved."
+            raise DslError(
+                msg,
+                code="dependency.missing_plugin",
+                path=f"/nodes/{node_id}/data/model/provider",
+                details={"node_id": node_id, "provider": raw_provider},
+            )
+
+        credentials = _resolve_credentials(
+            credentials=self.credentials,
+            provider=raw_provider,
+            vendor=vendor,
+            plugin_id=plugin_id,
+        )
+        return normalized_data, vendor, plugin_id, credentials
+
     def _create_tool_runtime(self, node_data: ToolNodeData) -> SlimToolNodeRuntime:
+        plugin_id, provider, tool_credential = self._resolve_tool_runtime_settings(
+            node_data,
+        )
+        return SlimToolNodeRuntime(
+            config=self.slim_client_config,
+            plugin_id=plugin_id,
+            provider=provider,
+            provider_id=node_data.provider_id,
+            tool_name=node_data.tool_name,
+            credentials=tool_credential.values,
+            credential_type=tool_credential.credential_type,
+        )
+
+    def _resolve_tool_runtime_settings(
+        self,
+        node_data: ToolNodeData,
+    ) -> tuple[str, str, DslToolCredential]:
+        """Resolve a tool plugin and credential without creating its runtime.
+
+        This pure resolver is shared by descendant preflight and direct-node
+        construction. It checks the imported dependency list and applies the
+        same credential selectors used at runtime, while deliberately avoiding
+        ``SlimToolNodeRuntime`` and its client initialization.
+
+        Args:
+            node_data: Concrete, Pydantic-validated tool configuration.
+
+        Returns:
+            Resolved plugin ID, canonical provider name, and selected credential.
+
+        Raises:
+            DslError: If the tool's plugin dependency or provider is missing.
+
+        """
         plugin_dependencies = [
             dependency
             for dependency in self.dependencies
@@ -801,7 +1007,7 @@ class SlimDslNodeFactory:
         )
         if plugin_id is None:
             msg = "Tool node dependency could not be resolved."
-            raise _dsl_error(
+            raise DslError(
                 msg,
                 code="dependency.missing_plugin",
                 details={"node_type": BuiltinNodeTypes.TOOL},
@@ -811,7 +1017,7 @@ class SlimDslNodeFactory:
         )
         if provider is None:
             msg = "Tool node is missing provider."
-            raise _dsl_error(
+            raise DslError(
                 msg,
                 code="node.tool_missing_provider",
                 details={"node_type": BuiltinNodeTypes.TOOL},
@@ -823,16 +1029,7 @@ class SlimDslNodeFactory:
             provider=provider,
             tool_name=node_data.tool_name,
         )
-
-        return SlimToolNodeRuntime(
-            config=self.slim_client_config,
-            plugin_id=plugin_id,
-            provider=provider,
-            provider_id=node_data.provider_id,
-            tool_name=node_data.tool_name,
-            credentials=tool_credential.values,
-            credential_type=tool_credential.credential_type,
-        )
+        return plugin_id, provider, tool_credential
 
     NODE_BUILDERS: ClassVar[Mapping[Any, _NodeBuilder]] = {
         BuiltinNodeTypes.START: _create_start_node,

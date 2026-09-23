@@ -20,12 +20,10 @@ from examples.slim_llm.settings import (
     use_local_slim_binary,
 )
 from graphon.dsl.slim import SlimLLM
-from graphon.entities.graph_init_params import GraphInitParams
+from graphon.engine import Engine
 from graphon.file.enums import FileType
 from graphon.file.models import File
 from graphon.graph.graph import Graph
-from graphon.graph_engine.command_channels import InMemoryChannel
-from graphon.graph_engine.graph_engine import GraphEngine
 from graphon.model_runtime.entities.llm_entities import LLMMode
 from graphon.model_runtime.entities.message_entities import (
     PromptMessage,
@@ -42,7 +40,8 @@ from graphon.nodes.llm import (
 from graphon.nodes.llm.entities import ContextConfig
 from graphon.nodes.start import StartNode
 from graphon.nodes.start.entities import StartNodeData
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.init_params import InitParams
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 
 
@@ -79,9 +78,13 @@ def run(query: str) -> str:
     use_local_slim_binary()
     credentials = load_credentials()
     workflow_id = "slim-llm-code-example"
-    graph_state = GraphRuntimeState(variable_pool=VariablePool(), start_at=time.time())
-    graph_state.variable_pool.add(("start", "query"), query)
-    graph_init = GraphInitParams(
+    runtime_state = RuntimeState(
+        workflow_id=workflow_id,
+        variable_pool=VariablePool(),
+        start_at=time.time(),
+    )
+    runtime_state.variable_pool.add(("start", "query"), query)
+    init_params = InitParams(
         workflow_id=workflow_id,
         graph_config={"nodes": [], "edges": []},
         run_context={},
@@ -89,8 +92,8 @@ def run(query: str) -> str:
     )
 
     graph = build_graph(
-        graph_init=graph_init,
-        graph_state=graph_state,
+        init_params=init_params,
+        runtime_state=runtime_state,
         llm=SlimLLM(
             config=slim_client_config(credentials),
             plugin_id=OPENAI_PLUGIN_ID,
@@ -100,15 +103,13 @@ def run(query: str) -> str:
             parameters={},
         ),
     )
-    engine = GraphEngine(
-        workflow_id=workflow_id,
+    engine = Engine(
         graph=graph,
-        graph_runtime_state=graph_state,
-        command_channel=InMemoryChannel(),
+        runtime_state=runtime_state,
     )
 
     list(engine.run())
-    answer = graph_state.get_output("answer")
+    answer = runtime_state.get_output("answer")
     if not isinstance(answer, str):
         msg = "Workflow finished without a string answer."
         raise TypeError(msg)
@@ -117,15 +118,15 @@ def run(query: str) -> str:
 
 def build_graph(
     *,
-    graph_init: GraphInitParams,
-    graph_state: GraphRuntimeState,
+    init_params: InitParams,
+    runtime_state: RuntimeState,
     llm: SlimLLM,
 ) -> Graph:
     start = StartNode(
         node_id="start",
         data=StartNodeData(title="Start"),
-        graph_init_params=graph_init,
-        graph_runtime_state=graph_state,
+        init_params=init_params,
+        runtime_state=runtime_state,
     )
     llm_node = LLMNode(
         node_id="llm",
@@ -144,8 +145,8 @@ def build_graph(
             ],
             context=ContextConfig(enabled=False),
         ),
-        graph_init_params=graph_init,
-        graph_runtime_state=graph_state,
+        init_params=init_params,
+        runtime_state=runtime_state,
         model_instance=llm,
         llm_file_saver=TextOnlyFileSaver(),
         prompt_message_serializer=PromptSerializer(),
@@ -153,8 +154,8 @@ def build_graph(
     answer = AnswerNode(
         node_id="answer",
         data=AnswerNodeData(title="Answer", answer="{{#llm.text#}}"),
-        graph_init_params=graph_init,
-        graph_runtime_state=graph_state,
+        init_params=init_params,
+        runtime_state=runtime_state,
     )
 
     return Graph.new().add_root(start).add_node(llm_node).add_node(answer).build()

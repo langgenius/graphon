@@ -41,7 +41,7 @@ def test_app_dsl_loads_environment_and_conversation_variables() -> None:
     )
 
     engine = loads(dsl)
-    variable_pool = engine.graph_runtime_state.variable_pool
+    variable_pool = engine.runtime_state.variable_pool
     env_var = variable_pool.get(["env", "var1"])
     conversation_var = variable_pool.get(["conversation", "topic"])
 
@@ -85,7 +85,7 @@ def test_app_dsl_keeps_runtime_variables_out_of_graph_config() -> None:
     )
 
     engine = loads(dsl)
-    variable_pool = engine.graph_runtime_state.variable_pool
+    variable_pool = engine.runtime_state.variable_pool
     config_var = variable_pool.get(["env", "config"])
     topics_var = variable_pool.get(["conversation", "recent_topics"])
 

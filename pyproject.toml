@@ -1,6 +1,6 @@
 [project]
 name = 'graphon'
-version = '0.7.0'
+version = '0.8.0'
 description = 'Graph execution engine for agentic AI workflows.'
 readme = 'README.md'
 license = 'Apache-2.0'
@@ -38,12 +38,15 @@ issues = 'https://github.com/langgenius/graphon/issues'
 [dependency-groups]
 dev = [
     'pytest',
+    'pytest-benchmark',
     'pytest-cov',
     'pytest-mock',
     'pytest-xdist',
     'ruff',
     'prek',
     'ty',
+    'gevent>=26.8.0',
+    "import-linter>=2.15",
 ]
 
 [build-system]
@@ -93,7 +96,27 @@ ignore-one-line-docstrings = true
 [tool.ty.environment]
 python-platform = 'linux'
 
+[tool.importlinter]
+root_package = 'graphon'
+exclude_type_checking_imports = false
+
+[[tool.importlinter.contracts]]
+id = 'architecture-layers'
+name = 'Packages import within their layer or below'
+type = 'layers'
+containers = ['graphon']
+exhaustive = true
+layers = [
+    'dsl',
+    'engine',
+    'protocols : errors',
+    'graph : nodes : runtime : utils : variable_loader',
+    'engine_events : node_events',
+    'entities : variables : file : http : model_runtime : enums : prompt_entities : template_rendering : workflow_type_encoder',
+]
+broken_contract_guidance = 'Depend on the same or a lower architectural layer. Inject dependencies from the composition layer, and classify every new top-level module in this contract. See ARCHITECTURE.md#import-boundaries.'
+
 [tool.pytest]
 minversion = '9.0'
-addopts = ['-n', 'auto']
+addopts = ['--benchmark-disable', '-n', 'auto']
 testpaths = ['tests']

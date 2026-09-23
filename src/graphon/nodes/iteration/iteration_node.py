@@ -8,7 +8,8 @@ from graphon.enums import (
     NodeExecutionType,
     WorkflowNodeExecutionStatus,
 )
-from graphon.node_events.base import NodeEventBase, NodeRunResult
+from graphon.graph.scoping import resolve_container_id
+from graphon.node_events.base import NodeEventPayload, NodeRunResult
 from graphon.node_events.iteration import (
     IterationFailedEvent,
     IterationNextEvent,
@@ -30,7 +31,7 @@ from graphon.variables.segments import ArrayAnySegment, ArraySegment, NoneSegmen
 class IterationNode(Node[IterationNodeData]):
     """Iteration node definition.
 
-    Iteration execution is interpreted by GraphEngine. The node keeps only its
+    Iteration execution is interpreted by Engine. The node keeps only its
     configuration and static variable-mapping behavior.
     """
 
@@ -62,8 +63,8 @@ class IterationNode(Node[IterationNodeData]):
     @override
     def _run(
         self,
-    ) -> Generator[NodeEventBase | IterationFrameRequest, None, None]:
-        variable = self.graph_runtime_state.variable_pool.get(
+    ) -> Generator[NodeEventPayload | IterationFrameRequest, None, None]:
+        variable = self.runtime_state.variable_pool.get(
             self.node_data.iterator_selector,
         )
         if variable is None:
@@ -108,7 +109,7 @@ class IterationNode(Node[IterationNodeData]):
         self,
         *,
         result: ContainerRunResult,
-    ) -> Generator[NodeEventBase | IterationFrameRequest, None, None]:
+    ) -> Generator[NodeEventPayload | IterationFrameRequest, None, None]:
         if isinstance(result, IterationFrameRequest):
             for index in result.indexes:
                 yield IterationNextEvent(index=index)
@@ -158,7 +159,7 @@ class IterationNode(Node[IterationNodeData]):
         *,
         variable: NoneSegment | ArraySegment,
         started_at: datetime,
-    ) -> Generator[NodeEventBase, None, None]:
+    ) -> Generator[NodeEventPayload, None, None]:
         outputs = {"output": ArrayAnySegment(value=[])}
         if isinstance(variable, ArraySegment):
             outputs = {"output": variable.model_copy(update={"value": []})}
@@ -195,21 +196,17 @@ class IterationNode(Node[IterationNodeData]):
         variable_mapping: dict[str, Sequence[str]] = {
             f"{node_id}.input_selector": node_data.iterator_selector,
         }
-        iteration_node_ids = set()
-
-        nodes = graph_config.get("nodes", [])
-        for node in nodes:
-            node_config_data = node.get("data", {})
-            if node_config_data.get("iteration_id") == node_id:
-                in_iteration_node_id = node.get("id")
-                if in_iteration_node_id:
-                    iteration_node_ids.add(in_iteration_node_id)
-
         node_configs = {
             node["id"]: node for node in graph_config.get("nodes", []) if "id" in node
         }
+        iteration_node_ids = {
+            sub_node_id
+            for sub_node_id, sub_node_config in node_configs.items()
+            if resolve_container_id(sub_node_config, nodes_by_id=node_configs)
+            == node_id
+        }
         for sub_node_id, sub_node_config in node_configs.items():
-            if sub_node_config.get("data", {}).get("iteration_id") != node_id:
+            if sub_node_id not in iteration_node_ids:
                 continue
 
             sub_node_variable_mapping = cls._extract_mapping_from_node_config(

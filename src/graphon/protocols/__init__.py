@@ -17,7 +17,7 @@ from graphon.model_runtime.protocols.text_embedding_runtime import (
     TextEmbeddingModelRuntime,
 )
 from graphon.model_runtime.protocols.tts_runtime import TTSModelRuntime
-from graphon.nodes.code.code_node import CodeExecutorProtocol
+from graphon.nodes.code.protocols import CodeExecutorProtocol
 from graphon.nodes.llm.protocols import CredentialsProvider, ModelFactory
 from graphon.nodes.llm.runtime_protocols import (
     LLMPollingCapableProtocol,
@@ -32,8 +32,8 @@ from graphon.nodes.protocols import (
     ToolFileManagerProtocol,
 )
 from graphon.nodes.runtime import ToolNodeRuntimeProtocol
-from graphon.runtime.graph_runtime_state_protocol import (
-    ReadOnlyGraphRuntimeState,
+from graphon.runtime.runtime_state_protocol import (
+    ReadOnlyRuntimeState,
     ReadOnlyVariablePool,
 )
 from graphon.variable_loader import VariableLoader
@@ -57,7 +57,7 @@ __all__ = [
     "PreparedLLMProtocol",
     "PromptMessageMemory",
     "PromptMessageSerializerProtocol",
-    "ReadOnlyGraphRuntimeState",
+    "ReadOnlyRuntimeState",
     "ReadOnlyVariablePool",
     "RerankModelRuntime",
     "RetrieverAttachmentLoaderProtocol",

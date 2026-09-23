@@ -1,0 +1,39 @@
+{
+  "container_frames": [],
+  "container_runs": [],
+  "deferred_ready_tasks": "{\"version\":\"2.0\",\"items\":[]}",
+  "graph_edge_states": {
+    "edge_0": "taken"
+  },
+  "graph_execution": "{\"version\":\"2.0\",\"workflow_id\":\"legacy-builder-workflow\",\"started\":false,\"completed\":false,\"aborted\":false,\"paused\":false,\"pause_reasons\":[],\"error\":null,\"exceptions_count\":0,\"node_executions\":[]}",
+  "graph_node_states": {
+    "end": "unknown",
+    "start": "taken"
+  },
+  "llm_usage": {
+    "completion_price": "0.0",
+    "completion_price_unit": "0.0",
+    "completion_tokens": 0,
+    "completion_unit_price": "0.0",
+    "currency": "USD",
+    "latency": 0.0,
+    "prompt_price": "0.0",
+    "prompt_price_unit": "0.0",
+    "prompt_tokens": 0,
+    "prompt_unit_price": "0.0",
+    "time_to_first_token": null,
+    "time_to_generate": null,
+    "total_price": "0.0",
+    "total_tokens": 0
+  },
+  "node_run_steps": 3,
+  "outputs": {
+    "answer": "builder"
+  },
+  "ready_queue": "{\"version\":\"2.0\",\"items\":[]}",
+  "start_at": 43.5,
+  "variable_pool": {
+    "variable_dictionary": {}
+  },
+  "version": "2.0"
+}

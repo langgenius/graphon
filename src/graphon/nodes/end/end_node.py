@@ -35,7 +35,7 @@ class EndNode(Node[EndNodeData]):
 
         outputs = {}
         for variable_selector in output_variables:
-            variable = self.graph_runtime_state.variable_pool.get(
+            variable = self.runtime_state.variable_pool.get(
                 variable_selector.value_selector,
             )
             value = variable.to_object() if variable is not None else None

@@ -99,7 +99,7 @@ class ListOperatorNode(Node[ListOperatorNodeData]):
 
     @override
     def _run(self) -> NodeRunResult:
-        variable = self.graph_runtime_state.variable_pool.get(self.node_data.variable)
+        variable = self.runtime_state.variable_pool.get(self.node_data.variable)
         if variable is None:
             return self._failed_result(
                 f"Variable not found for selector: {self.node_data.variable}",
@@ -198,7 +198,7 @@ class ListOperatorNode(Node[ListOperatorNodeData]):
                     msg = f"Invalid filter value: {condition.value}"
                     raise InvalidFilterValueError(msg)
                 value = convert_template(
-                    self.graph_runtime_state.variable_pool,
+                    self.runtime_state.variable_pool,
                     condition.value,
                 ).text
                 filter_func = _get_string_filter_func(
@@ -212,7 +212,7 @@ class ListOperatorNode(Node[ListOperatorNodeData]):
                     msg = f"Invalid filter value: {condition.value}"
                     raise InvalidFilterValueError(msg)
                 value = convert_template(
-                    self.graph_runtime_state.variable_pool,
+                    self.runtime_state.variable_pool,
                     condition.value,
                 ).text
                 filter_func = _get_number_filter_func(
@@ -224,7 +224,7 @@ class ListOperatorNode(Node[ListOperatorNodeData]):
             elif isinstance(variable, ArrayFileSegment):
                 if isinstance(condition.value, str):
                     value = convert_template(
-                        self.graph_runtime_state.variable_pool,
+                        self.runtime_state.variable_pool,
                         condition.value,
                     ).text
                 elif isinstance(condition.value, bool):
@@ -287,7 +287,7 @@ class ListOperatorNode(Node[ListOperatorNodeData]):
     ) -> _SUPPORTED_TYPES_ALIAS:
         value = int(
             convert_template(
-                self.graph_runtime_state.variable_pool,
+                self.runtime_state.variable_pool,
                 self.node_data.extract_by.serial,
             ).text,
         )

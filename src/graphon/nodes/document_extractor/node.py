@@ -29,15 +29,15 @@ from docx.table import Table
 from docx.text.paragraph import Paragraph
 from odfdo import Document as OdfDocument
 
-from graphon.entities.graph_init_params import GraphInitParams
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.file import file_manager
 from graphon.file.enums import FileTransferMethod
 from graphon.file.models import File
-from graphon.http import HttpClientProtocol, get_http_client
+from graphon.http import HttpClientProtocol, HttpxHttpClient
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.node import Node
-from graphon.runtime.graph_runtime_state import GraphRuntimeState
+from graphon.runtime.init_params import InitParams
+from graphon.runtime.runtime_state import RuntimeState
 from graphon.variables.segments import ArrayFileSegment, ArrayStringSegment, FileSegment
 
 from .entities import DocumentExtractorNodeData, UnstructuredApiConfig
@@ -288,21 +288,23 @@ class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
         node_id: str,
         data: DocumentExtractorNodeData,
         *,
-        graph_init_params: GraphInitParams,
-        graph_runtime_state: GraphRuntimeState,
+        init_params: InitParams,
+        runtime_state: RuntimeState,
         unstructured_api_config: UnstructuredApiConfig | None = None,
         http_client: HttpClientProtocol | None = None,
     ) -> None:
         super().__init__(
             node_id=node_id,
             data=data,
-            graph_init_params=graph_init_params,
-            graph_runtime_state=graph_runtime_state,
+            init_params=init_params,
+            runtime_state=runtime_state,
         )
         self._unstructured_api_config = (
             unstructured_api_config or UnstructuredApiConfig()
         )
-        self._http_client = http_client or get_http_client()
+        self._http_client = (
+            http_client if http_client is not None else HttpxHttpClient()
+        )
 
     @property
     def http_client(self) -> HttpClientProtocol:
@@ -312,7 +314,7 @@ class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
     @override
     def _run(self) -> NodeRunResult:
         variable_selector = self.node_data.variable_selector
-        variable = self.graph_runtime_state.variable_pool.get(variable_selector)
+        variable = self.runtime_state.variable_pool.get(variable_selector)
 
         error_message = None
         if variable is None:

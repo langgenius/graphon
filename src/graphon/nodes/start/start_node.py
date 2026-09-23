@@ -25,11 +25,11 @@ class StartNode(Node[StartNodeData]):
     @override
     def _run(self) -> NodeRunResult:
         node_inputs = dict(
-            self.graph_runtime_state.variable_pool.get_by_prefix(self.id),
+            self.runtime_state.variable_pool.get_by_prefix(self.id),
         )
         self._validate_and_normalize_json_object_inputs(node_inputs)
         outputs = dict(
-            self.graph_runtime_state.variable_pool.flatten(unprefixed_node_id=self.id),
+            self.runtime_state.variable_pool.flatten(unprefixed_node_id=self.id),
         )
         outputs.update(node_inputs)
 

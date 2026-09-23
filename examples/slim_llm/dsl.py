@@ -15,13 +15,13 @@ from examples.slim_llm.settings import (
     use_local_slim_binary,
 )
 from graphon.dsl import loads
-from graphon.filters import (
-    GraphEventFilterContext,
+from graphon.engine.filter import (
+    EngineEventFilterContext,
     ResponseStreamFilter,
-    filter_graph_events,
+    filter_engine_events,
 )
-from graphon.graph_events.graph import GraphRunSucceededEvent
-from graphon.graph_events.node import NodeRunStreamChunkEvent
+from graphon.engine_events.graph import GraphRunSucceededEvent
+from graphon.engine_events.node import NodeRunStreamChunkEvent
 
 
 def run(
@@ -37,9 +37,9 @@ def run(
         start_inputs={"query": query},
     )
 
-    events = filter_graph_events(
+    events = filter_engine_events(
         engine.run(),
-        context=GraphEventFilterContext.from_engine(engine),
+        context=EngineEventFilterContext.from_engine(engine),
         filters=[ResponseStreamFilter()],
     )
     final_event: GraphRunSucceededEvent | None = None

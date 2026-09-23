@@ -72,7 +72,16 @@ class IterationFrameRequest(BaseModel):
     parallel_nums: int
 
 
-ContainerAwaitRequest = LoopFrameRequest | IterationFrameRequest
+class CustomContainerRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["custom"] = "custom"
+    payload: str
+
+
+ContainerAwaitRequest = (
+    LoopFrameRequest | IterationFrameRequest | CustomContainerRequest
+)
 
 
 class ContainerExecutionResult(BaseModel):

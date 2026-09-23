@@ -11,6 +11,7 @@ from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.nodes.container_effects import (
     ContainerAwaitRequest,
     ContainerValue,
+    CustomContainerRequest,
     IterationFrameRequest,
     LoopFrameRequest,
 )
@@ -81,8 +82,21 @@ class IterationRunState(BaseModel):
     errors: tuple[str, ...] = ()
 
 
+class CustomContainerRunState(BaseModel):
+    """Serializable state for one custom container invocation."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["custom"] = "custom"
+    invocation_id: str
+    frame_id: str
+    node_id: str
+    started_at: datetime
+    payload: str
+
+
 ContainerRunState = Annotated[
-    LoopRunState | IterationRunState,
+    LoopRunState | IterationRunState | CustomContainerRunState,
     Field(discriminator="kind"),
 ]
 
@@ -122,6 +136,14 @@ def create_container_run_state(
                 flatten_output=request.flatten_output,
                 parallel_nums=request.parallel_nums,
             )
+        case CustomContainerRequest():
+            return CustomContainerRunState(
+                invocation_id=invocation_id,
+                frame_id=frame_id,
+                node_id=node_id,
+                started_at=started_at,
+                payload=request.payload,
+            )
         case _:
             assert_never(request)
 
@@ -157,7 +179,18 @@ class IterationFrameState(BaseModel):
     runtime_data: FrameRuntimeData
 
 
+class CustomContainerFrameState(BaseModel):
+    """Serializable state for one custom container child frame."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["custom"] = "custom"
+    frame_id: str
+    parent_invocation_id: str
+    runtime_data: FrameRuntimeData
+
+
 ContainerFrameState = Annotated[
-    LoopFrameState | IterationFrameState,
+    LoopFrameState | IterationFrameState | CustomContainerFrameState,
     Field(discriminator="kind"),
 ]
