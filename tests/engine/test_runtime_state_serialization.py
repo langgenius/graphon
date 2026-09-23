@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import queue
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Generator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from threading import Event, Lock, Thread, current_thread
 from time import monotonic, sleep
@@ -18,6 +19,7 @@ from graphon.dsl import inspect
 from graphon.dsl.entities import DslCredentials
 from graphon.dsl.node_factory import SlimDslNodeFactory
 from graphon.engine import Engine
+from graphon.engine.command import AbortCommand, InMemoryChannel
 from graphon.engine.container_handler import LoopContainerHandler
 from graphon.engine.frame import ExecutionFrame, FrameRegistry
 from graphon.engine.layer import Layer
@@ -25,8 +27,9 @@ from graphon.engine.ready_queue.entities import ResumeTask, StartTask
 from graphon.engine.ready_queue.in_memory import InMemoryReadyQueue
 from graphon.engine.scheduler import Scheduler
 from graphon.engine.worker import DispatchTask, NodeEventTask, Worker
-from graphon.engine_events.base import EngineEvent
+from graphon.engine_events.base import EngineEvent, NodeEvent
 from graphon.engine_events.graph import (
+    GraphRunAbortedEvent,
     GraphRunPausedEvent,
     GraphRunStartedEvent,
     GraphRunSucceededEvent,
@@ -40,10 +43,12 @@ from graphon.engine_events.loop import (
     NodeRunLoopSucceededEvent,
 )
 from graphon.engine_events.node import (
+    NodeRunFailedEvent,
     NodeRunPauseRequestedEvent,
     NodeRunStartedEvent,
     NodeRunSucceededEvent,
 )
+from graphon.entities.base_node_data import BaseNodeData
 from graphon.entities.graph_config import NodeConfigDict
 from graphon.entities.pause_reason import HitlRequired
 from graphon.entities.workflow_start_reason import WorkflowStartReason
@@ -52,10 +57,18 @@ from graphon.enums import (
     NodeExecutionType,
     NodeState,
     WorkflowNodeExecutionMetadataKey,
+    WorkflowNodeExecutionStatus,
 )
 from graphon.graph.graph import Graph
+from graphon.model_runtime.entities.llm_entities import LLMUsage
+from graphon.node_events import NodeRunResult, StreamCompletedEvent
 from graphon.nodes.base.node import Node
 from graphon.nodes.container_effects import (
+    ContainerAwaitRequest,
+    ContainerExecutionResult,
+    ContainerNodeRunResult,
+    ContainerRunResult,
+    CustomContainerRequest,
     IterationFrameRequest,
     LoopFrameRequest,
     build_container_value,
@@ -68,7 +81,13 @@ from graphon.nodes.human_input.entities import (
 )
 from graphon.nodes.human_input.human_input_node import HumanInputNode
 from graphon.nodes.loop.loop_node import LoopNode
+from graphon.nodes.loop.loop_start_node import LoopStartNode
+from graphon.nodes.start.entities import StartNodeData
+from graphon.nodes.start.start_node import StartNode
 from graphon.runtime.container_state import (
+    ContainerFrameState,
+    CustomContainerFrameState,
+    CustomContainerRunState,
     FrameRuntimeData,
     IterationFrameState,
     IterationRunState,
@@ -267,6 +286,7 @@ def _hitl_engine(
     *,
     runtime_state: RuntimeState,
     callback: HITLCallback,
+    command_channel: InMemoryChannel | None = None,
 ) -> Engine:
     plan = inspect(dsl)
     graph_config = plan.document.graph_config
@@ -298,6 +318,7 @@ def _hitl_engine(
         graph=graph,
         runtime_state=runtime_state,
         workers=2,
+        command_channel=command_channel,
     )
 
 
@@ -835,6 +856,333 @@ def test_loop_frame_restore_copies_parent_variable_pool() -> None:
     parent_seed = restored_state.variable_pool.get(["loop", "seed"])
     assert parent_seed is not None
     assert parent_seed.to_object() == "parent"
+
+
+@pytest.mark.parametrize("outcome", ["paused", "resumed", "aborted", "stopped"])
+def test_root_statistics_include_unfinished_child_work(
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
+) -> None:
+    def run_with_usage(_node: LoopStartNode) -> NodeRunResult:
+        return NodeRunResult(
+            status="succeeded",
+            llm_usage=LLMUsage.from_metadata({
+                "total_tokens": 100,
+                "total_price": "0.01",
+            }),
+        )
+
+    monkeypatch.setattr(LoopStartNode, "_run", run_with_usage)
+    channel = InMemoryChannel()
+    approvals = 0
+
+    def pause_second_round(context: HITLContext) -> Completed | PauseRequested:
+        nonlocal approvals
+        approvals += 1
+        if approvals == 2:
+            if outcome == "stopped":
+                channel.send_command(AbortCommand())
+            return PauseRequested(session_id="pending-approval")
+        return _complete_loop_hitl(context)
+
+    engine = _hitl_engine(
+        _loop_dsl(),
+        runtime_state=_new_runtime_state({}),
+        callback=pause_second_round,
+        command_channel=channel,
+    )
+    events = list(engine.run())
+    state = engine.runtime_state
+    if outcome in {"paused", "stopped"}:
+        expected_event = (
+            GraphRunPausedEvent if outcome == "paused" else GraphRunAbortedEvent
+        )
+        assert isinstance(events[-1], expected_event)
+        assert (state.node_run_steps, state.total_tokens) == (6, 200)
+        assert state.llm_usage.total_price == Decimal("0.02")
+        return
+
+    restored = RuntimeState.from_snapshot(state.dumps())
+    assert (restored.node_run_steps, restored.total_tokens) == (6, 200)
+    resume_channel = InMemoryChannel()
+
+    def resume_approval(context: HITLContext) -> Completed | PauseRequested:
+        if outcome == "aborted":
+            resume_channel.send_command(AbortCommand())
+            return PauseRequested(session_id="pending-approval")
+        return _complete_loop_hitl(context)
+
+    resumed_events = list(
+        _hitl_engine(
+            _loop_dsl(),
+            runtime_state=restored,
+            callback=resume_approval,
+            command_channel=resume_channel,
+        ).run()
+    )
+    if outcome == "aborted":
+        assert isinstance(resumed_events[-1], GraphRunAbortedEvent)
+        assert (restored.node_run_steps, restored.total_tokens) == (7, 200)
+        assert restored.llm_usage.total_price == Decimal("0.02")
+    else:
+        assert isinstance(resumed_events[-1], GraphRunSucceededEvent)
+        assert (restored.node_run_steps, restored.total_tokens) == (10, 300)
+        assert restored.llm_usage.total_price == Decimal("0.03")
+        completed = next(
+            event
+            for event in resumed_events
+            if isinstance(event, NodeRunSucceededEvent) and event.node_id == "loop"
+        )
+        assert completed.node_run_result.llm_usage == restored.llm_usage
+
+
+class _HostContainerNode(Node[BaseNodeData]):
+    node_type = "statistics-host-container"
+    execution_type = NodeExecutionType.CONTAINER
+
+    @classmethod
+    def version(cls) -> str:
+        return "1"
+
+    def _run(self) -> Generator[CustomContainerRequest, None, None]:
+        yield CustomContainerRequest(payload="{}")
+
+    def _resume_container_events(
+        self, *, result: ContainerRunResult
+    ) -> Generator[StreamCompletedEvent, None, None]:
+        assert isinstance(result, ContainerExecutionResult)
+        yield StreamCompletedEvent(
+            node_run_result=result.node_run_result.to_node_run_result()
+        )
+
+
+class _HostContainerHandler:
+    node_type = _HostContainerNode.node_type
+
+    def __init__(self, frame_registry: FrameRegistry) -> None:
+        self.frames = frame_registry
+        self.state = frame_registry["root"].state
+
+    def handle_request(
+        self, *, invocation_id: str, request: ContainerAwaitRequest
+    ) -> None:
+        assert isinstance(request, CustomContainerRequest)
+        child_state = RuntimeState(
+            variable_pool=VariablePool(),
+            start_at=0,
+            graph_execution=self.state.graph_execution,
+            ready_queue=self.state.ready_queue,
+            deferred_ready_queue=self.state.deferred_ready_queue,
+        )
+        child_graph = _hitl_engine(
+            _loop_dsl(),
+            runtime_state=child_state,
+            callback=lambda _: PauseRequested(session_id="host-child-approval"),
+        ).graph
+        child_frame = self.frames.create(
+            frame_id="host-child",
+            container_id="host",
+            graph=child_graph,
+            state=child_state,
+        )
+        self.state.put_container_frame(
+            CustomContainerFrameState(
+                frame_id=child_frame.frame_id,
+                parent_invocation_id=invocation_id,
+                runtime_data=child_state.snapshot_frame(),
+            )
+        )
+        child_frame.scheduler.enqueue_node(child_graph.root_node.id)
+
+    def restore_frame(self, frame_state: ContainerFrameState) -> None:
+        raise AssertionError(frame_state)
+
+    def prepare_frame_event(self, *, frame: ExecutionFrame, event: NodeEvent) -> None:
+        pass
+
+    def should_emit(self, *, event: NodeEvent) -> bool:
+        _ = event
+        return True
+
+    def record_frame_failure(
+        self, *, frame: ExecutionFrame, event: NodeRunFailedEvent
+    ) -> None:
+        raise AssertionError((frame, event))
+
+    def complete_frame_if_ready(self, frame: ExecutionFrame) -> None:
+        assert not frame.scheduler.is_execution_complete()
+
+
+def test_root_statistics_include_loop_inside_host_created_frame(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        LoopStartNode,
+        "_run",
+        lambda _: NodeRunResult(
+            status=WorkflowNodeExecutionStatus.SUCCEEDED,
+            llm_usage=LLMUsage.from_metadata({"total_tokens": 100}),
+        ),
+    )
+    state = _new_runtime_state({})
+
+    node = _HostContainerNode(
+        node_id="host",
+        data=BaseNodeData(type=_HostContainerNode.node_type, title="Host container"),
+        init_params=InitParams(
+            workflow_id="workflow", graph_config={}, run_context={}, call_depth=0
+        ),
+        runtime_state=state,
+    )
+    start = StartNode(
+        node_id="root-start",
+        data=StartNodeData(title="Start", variables=[]),
+        init_params=node.init_params,
+        runtime_state=state,
+    )
+    events = list(
+        Engine(
+            graph=Graph.new().add_root(start).add_node(node).build(),
+            runtime_state=state,
+            workers=1,
+            container_handler_factories=(_HostContainerHandler,),
+        ).run()
+    )
+    assert isinstance(events[-1], GraphRunPausedEvent)
+    assert (state.node_run_steps, state.total_tokens) == (6, 100)
+
+
+@pytest.mark.parametrize("deferred", [False, True])
+def test_legacy_custom_result_usage_survives_until_parent_resumes(
+    deferred: bool,
+) -> None:
+    state = RuntimeState(
+        workflow_id="workflow",
+        variable_pool=VariablePool(),
+        start_at=1,
+        node_run_steps=2,
+        llm_usage=LLMUsage.from_metadata({"total_tokens": 10}),
+    )
+    run = CustomContainerRunState(
+        invocation_id="invocation",
+        frame_id="root",
+        node_id="tool",
+        started_at=datetime.now(UTC).replace(tzinfo=None),
+        payload="{}",
+    )
+    state.graph_execution.start()
+    state.put_container_run(run)
+    pending = ResumeTask(
+        invocation_id=run.invocation_id,
+        result=ContainerExecutionResult(
+            metadata={},
+            steps=3,
+            node_run_result=ContainerNodeRunResult(
+                status="succeeded",
+                llm_usage=LLMUsage.from_metadata({"total_tokens": 70}),
+            ),
+        ),
+    )
+    target_queue = state.deferred_ready_queue if deferred else state.ready_queue
+    target_queue.put(pending)
+    # Version 3 stored this completed child's work only on the pending result.
+    legacy = json.loads(state.dumps())
+    legacy["version"] = "3.0"
+    restored = RuntimeState.from_snapshot(json.dumps(legacy))
+
+    assert (restored.node_run_steps, restored.total_tokens) == (5, 80)
+    restored = RuntimeState.from_snapshot(restored.dumps())
+    assert (restored.node_run_steps, restored.total_tokens) == (5, 80)
+    node = _HostContainerNode(
+        node_id="tool",
+        data=BaseNodeData(type=_HostContainerNode.node_type, title="Host container"),
+        init_params=InitParams(
+            workflow_id="workflow", graph_config={}, run_context={}, call_depth=0
+        ),
+        runtime_state=restored,
+    )
+    start = StartNode(
+        node_id="start",
+        data=StartNodeData(title="Start", variables=[]),
+        init_params=node.init_params,
+        runtime_state=restored,
+    )
+    events = list(
+        Engine(
+            graph=Graph.new().add_root(start).add_node(node).build(),
+            runtime_state=restored,
+            workers=1,
+        ).run()
+    )
+    assert isinstance(events[-1], GraphRunSucceededEvent)
+    assert (restored.node_run_steps, restored.total_tokens) == (5, 80)
+    completed = next(
+        event for event in events if isinstance(event, NodeRunSucceededEvent)
+    )
+    assert completed.node_run_result.llm_usage.total_tokens == 70
+
+
+def test_handled_child_failure_usage_is_counted_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document = yaml.safe_load(_loop_dsl())
+    child = next(
+        node for node in document["graph"]["nodes"] if node["id"] == "loop-start"
+    )
+    child["data"]["error_strategy"] = "default-value"
+    monkeypatch.setattr(
+        LoopStartNode,
+        "_run",
+        lambda _: NodeRunResult(
+            status=WorkflowNodeExecutionStatus.FAILED,
+            error="model unavailable",
+            llm_usage=LLMUsage.from_metadata({"total_tokens": 100}),
+        ),
+    )
+    engine = _hitl_engine(
+        yaml.safe_dump(document),
+        runtime_state=_new_runtime_state({}),
+        callback=_complete_loop_hitl,
+    )
+    events = list(engine.run())
+    assert engine.runtime_state.total_tokens == 300
+    completed = next(
+        event
+        for event in events
+        if isinstance(event, NodeRunSucceededEvent) and event.node_id == "loop"
+    )
+    assert completed.node_run_result.llm_usage.total_tokens == 300
+
+
+def test_legacy_pause_restores_child_usage_without_merging_it_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def run_with_usage(_node: LoopStartNode) -> NodeRunResult:
+        return NodeRunResult(
+            status="succeeded",
+            llm_usage=LLMUsage.from_metadata({
+                "total_tokens": 100,
+                "total_price": "0.01",
+            }),
+        )
+
+    monkeypatch.setattr(LoopStartNode, "_run", run_with_usage)
+    snapshot = (
+        Path(__file__).with_name("fixtures") / "runtime_state_v3_0_8_0_paused_loop.json"
+    ).read_text()
+    restored = RuntimeState.from_snapshot(snapshot)
+    assert (restored.node_run_steps, restored.total_tokens) == (4, 200)
+    restored = RuntimeState.from_snapshot(restored.dumps())
+    assert (restored.node_run_steps, restored.total_tokens) == (4, 200)
+    events = list(
+        _hitl_engine(
+            _loop_dsl(),
+            runtime_state=restored,
+            callback=_complete_loop_hitl,
+        ).run()
+    )
+    assert isinstance(events[-1], GraphRunSucceededEvent)
+    assert (restored.node_run_steps, restored.total_tokens) == (8, 300)
 
 
 def test_loop_hitl_runtime_state_round_trip_preserves_progress() -> None:

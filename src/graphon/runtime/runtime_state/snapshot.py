@@ -10,9 +10,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from graphon.enums import NodeState
 from graphon.model_runtime.entities.llm_entities import LLMUsage
-from graphon.runtime.container_state import ContainerFrameState, ContainerRunState
+from graphon.nodes.container_effects import ContainerExecutionResult
+from graphon.runtime.container_state import (
+    ContainerFrameState,
+    ContainerRunState,
+    CustomContainerRunState,
+    IterationRunState,
+    LoopRunState,
+)
 from graphon.runtime.execution import GraphExecution
-from graphon.runtime.ready_queue import ReadyQueue
+from graphon.runtime.ready_queue import ReadyQueue, ResumeTask
 from graphon.runtime.variable_pool import VariablePool
 
 from .protocol import GraphProtocol
@@ -40,7 +47,7 @@ class BaseSnapshot(BaseModel):
 
 
 class FrameSnapshot(BaseSnapshot):
-    """Frame-aware fields shared without change by snapshot versions 2 and 3."""
+    """Frame-aware fields shared by snapshots from version 2 onward."""
 
     deferred_ready_tasks: str
     container_runs: tuple[ContainerRunState, ...]
@@ -106,8 +113,9 @@ def restore_frame_snapshot(
     state_type: type[RuntimeState],
     ready_queue_factory: ReadyQueueFactory,
     graph_state_migration: GraphStateMigration | None = None,
+    merge_child_statistics: bool = False,
 ) -> RuntimeState:
-    """Restore fields shared by frame-aware snapshot versions 2 and 3.
+    """Restore fields shared by frame-aware snapshots.
 
     Version modules validate their exact version before calling this helper.
     The optional migration is staged only when graph state exists, because an
@@ -120,6 +128,7 @@ def restore_frame_snapshot(
         ready_queue_factory: Factory used to create both restored task queues.
         graph_state_migration: Optional graph-aware conversion owned by the
             selected version module.
+        merge_child_statistics: Include unmerged child work in legacy root counters.
 
     Returns:
         Restored runtime state ready for graph attachment or execution.
@@ -145,7 +154,41 @@ def restore_frame_snapshot(
             edge_states=snapshot.graph_edge_states,
         )
         state._graph_state_migration = graph_state_migration
+    if merge_child_statistics:
+        _merge_child_statistics(state)
     return state
+
+
+def _merge_child_statistics(state: RuntimeState) -> None:
+    """Merge available legacy child statistics into workflow-wide root totals.
+
+    Final custom results supersede saved child frames. Completed built-in frames
+    did not retain step counts, so only recorded counts can be recovered. Version
+    4 preserves the merged totals without repeating this recovery on load.
+    """
+    runs = {run.invocation_id: run for run in state.container_runs()}
+    completed_custom_invocation_ids: set[str] = set()
+    for ready_queue in (state.ready_queue, state.deferred_ready_queue):
+        tasks = ready_queue.take_all()
+        for task in tasks:
+            if (
+                isinstance(task, ResumeTask)
+                and isinstance(task.result, ContainerExecutionResult)
+                and isinstance(runs.get(task.invocation_id), CustomContainerRunState)
+            ):
+                completed_custom_invocation_ids.add(task.invocation_id)
+                state._node_run_steps += task.result.steps
+                state.add_llm_usage(task.result.node_run_result.llm_usage)
+            ready_queue.put(task)
+    for frame in state.container_frames():
+        # A legacy host may retain a stale frame after queuing its final result.
+        if frame.parent_invocation_id in completed_custom_invocation_ids:
+            continue
+        state._node_run_steps += frame.runtime_data.node_run_steps
+        state.add_llm_usage(frame.runtime_data.llm_usage)
+    for run in runs.values():
+        if isinstance(run, LoopRunState | IterationRunState):
+            state.add_llm_usage(run.usage)
 
 
 def load_snapshot(

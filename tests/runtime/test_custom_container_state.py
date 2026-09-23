@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -6,6 +7,8 @@ from pydantic import TypeAdapter, ValidationError
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.nodes.container_effects import (
     ContainerAwaitRequest,
+    ContainerExecutionResult,
+    ContainerNodeRunResult,
     ContainerRunResult,
     CustomContainerRequest,
 )
@@ -15,6 +18,7 @@ from graphon.runtime.container_state import (
     FrameRuntimeData,
     create_container_run_state,
 )
+from graphon.runtime.ready_queue import ResumeTask
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 
@@ -81,3 +85,50 @@ def test_custom_container_request_is_not_a_container_run_result() -> None:
 
     with pytest.raises(ValidationError):
         TypeAdapter(ContainerRunResult).validate_python(request.model_dump())
+
+
+def test_legacy_pending_result_does_not_recount_its_saved_child() -> None:
+    state = RuntimeState(
+        workflow_id="workflow", variable_pool=VariablePool(), start_at=1
+    )
+    run = CustomContainerRunState(
+        invocation_id="invocation",
+        frame_id="root",
+        node_id="tool",
+        started_at=datetime.now(UTC).replace(tzinfo=None),
+        payload="{}",
+    )
+    state.put_container_run(run)
+    state.put_container_frame(
+        CustomContainerFrameState(
+            frame_id="child",
+            parent_invocation_id=run.invocation_id,
+            runtime_data=FrameRuntimeData(
+                variable_pool=VariablePool(),
+                outputs={},
+                llm_usage=LLMUsage.from_metadata({"total_tokens": 50}),
+                node_run_steps=2,
+                graph_node_states={},
+                graph_edge_states={},
+            ),
+        )
+    )
+    state.ready_queue.put(
+        ResumeTask(
+            invocation_id=run.invocation_id,
+            result=ContainerExecutionResult(
+                metadata={},
+                steps=3,
+                node_run_result=ContainerNodeRunResult(
+                    status="succeeded",
+                    llm_usage=LLMUsage.from_metadata({"total_tokens": 70}),
+                ),
+            ),
+        )
+    )
+    legacy = json.loads(state.dumps())
+    legacy["version"] = "3.0"
+
+    restored = RuntimeState.from_snapshot(json.dumps(legacy))
+
+    assert (restored.node_run_steps, restored.total_tokens) == (3, 70)

@@ -56,9 +56,11 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         Args:
             variable_pool: Variables visible to nodes in this frame.
             start_at: Unix timestamp at which execution started.
-            llm_usage: Accumulated language-model usage, copied on input.
+            llm_usage: Accumulated model usage for this frame, or all frames for
+                the root; copied on input.
             outputs: Current workflow outputs, copied on input.
-            node_run_steps: Number of node runs already completed.
+            node_run_steps: Number of node starts already processed. The root
+                includes starts in descendant frames; children retain local counts.
             ready_queue: Queue for runnable tasks, or a local queue by default.
             deferred_ready_queue: Queue for tasks held while execution is paused.
             workflow_id: Identity used to create a new execution aggregate.
@@ -243,7 +245,7 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         self._has_pending_graph_state = False
 
     def dumps(self) -> str:
-        """Serialize runtime state into a version 3 JSON string.
+        """Serialize runtime state into a version 4 JSON string.
 
         Finish consuming or close the engine run iterator and wait for all
         execution threads to stop first. The guard is shared by child frames and
@@ -255,7 +257,7 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         before that point prevents unconverted data from being labeled current.
 
         Returns:
-            The complete version 3 runtime snapshot as JSON.
+            The complete version 4 runtime snapshot as JSON.
 
         Raises:
             RuntimeError: If execution is active or a snapshot migration is
@@ -268,7 +270,7 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
                 "before serialization"
             )
             raise RuntimeError(msg)
-        from .v3 import dumps  # ruff:ignore[import-outside-top-level]
+        from .v4 import dumps  # ruff:ignore[import-outside-top-level]
 
         with self._graph_execution.lock_for_snapshot():
             return dumps(self)

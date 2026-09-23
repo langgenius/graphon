@@ -100,6 +100,13 @@ those frames without requiring nested worker pools. File adapters are host
 resources owned by the engine, while snapshots contain portable state. These
 boundaries let the host rebuild an execution with its own integrations.
 
+The root runtime counts node starts and model usage across all frames as events
+are processed, including work in paused or stopped children. Child frames retain
+local statistics for [container results](src/graphon/nodes/container_effects.py),
+whose usage remains available to observers. [Version 4 snapshots](src/graphon/runtime/runtime_state/v4.py)
+preserve workflow-wide root totals; [legacy readers](src/graphon/runtime/runtime_state/snapshot.py)
+recover only the child statistics still recorded in older snapshots.
+
 The executable contracts below are authoritative for validation, lifecycle, and
 compatibility details:
 

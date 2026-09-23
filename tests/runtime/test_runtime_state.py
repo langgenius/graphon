@@ -260,7 +260,7 @@ class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
     @pytest.mark.parametrize(
         "legacy_snapshot",
         [_VERSION_2_UNATTACHED_SNAPSHOT, None],
-        ids=["version-2", "version-3"],
+        ids=["version-2", "current-version"],
     )
     def test_snapshot_before_graph_attachment_accepts_rebuilt_graph(
         self,
@@ -268,7 +268,7 @@ class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
     ) -> None:
         """Restore an unattached snapshot before binding a nonempty graph.
 
-        Both version 2 and version 3 encode the absence of an attached graph as
+        Both version 2 and current snapshots encode the absence of an attached graph as
         empty node and edge maps. Those maps must not become an exact empty-graph
         constraint when the runtime is deserialized.
         """
@@ -449,11 +449,11 @@ class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
             state.attach_graph(graph)
 
     def test_version_2_state_migrates_only_after_graph_attachment(self) -> None:
-        """Legacy positional IDs are converted without relaxing version 3 reads.
+        """Migrate legacy positional IDs without relaxing frame-state checks.
 
         Root and child scopes intentionally reuse the same public edge ID. The
         version 2 state is a full-graph map keyed by global positional IDs; graph
-        attachment must select only the root entry before writing version 3.
+        attachment must select only the root entry before writing version 4.
         """
         restored = RuntimeState.from_snapshot(_VERSION_2_FULL_GRAPH_SNAPSHOT)
 
@@ -493,7 +493,7 @@ class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
         assert start.state is NodeState.TAKEN
         assert end.state is NodeState.UNKNOWN
         assert root_edge.state is NodeState.TAKEN
-        assert migrated["version"] == "3.0"
+        assert migrated["version"] == "4.0"
         assert migrated["graph_edge_states"] == {"shared-edge": NodeState.TAKEN}
 
     def test_version_2_graph_builder_state_migrates_without_graph_config(self) -> None:
@@ -516,7 +516,7 @@ class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
         restored = RuntimeState.from_snapshot(_VERSION_2_GRAPH_BUILDER_SNAPSHOT)
         restored.attach_graph(graph)
 
-        assert json.loads(restored.dumps())["version"] == "3.0"
+        assert json.loads(restored.dumps())["version"] == "4.0"
         assert root.state is NodeState.TAKEN
         assert end.state is NodeState.UNKNOWN
         assert graph.edges["edge_0"].state is NodeState.TAKEN
@@ -724,7 +724,7 @@ class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
         )
         migrated = json.loads(restored.dumps())
 
-        assert migrated["version"] == "3.0"
+        assert migrated["version"] == "4.0"
         assert json.loads(migrated["ready_queue"])["version"] == "2.0"
         assert json.loads(migrated["deferred_ready_tasks"])["version"] == "2.0"
         assert json.loads(migrated["graph_execution"])["version"] == "2.0"

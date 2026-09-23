@@ -85,6 +85,12 @@ ContainerAwaitRequest = (
 
 
 class ContainerExecutionResult(BaseModel):
+    """Return child outputs and statistics to a suspended container node.
+
+    Hosts must not add ``steps`` or ``node_run_result.llm_usage`` to the root
+    runtime counters, which already include processed child events.
+    """
+
     model_config = ConfigDict(frozen=True)
 
     kind: Literal["result"] = "result"

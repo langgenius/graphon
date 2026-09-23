@@ -7,7 +7,7 @@ def test_current_snapshots_do_not_import_legacy_version_modules() -> None:
     """Verify current public APIs work when legacy snapshot modules are absent.
 
     The subprocess starts with a clean import graph and marks each removable legacy
-    module as unavailable before importing Graphon. A current RuntimeState v3
+    module as unavailable before importing Graphon. A current RuntimeState v4
     round-trip and ResponseStreamFilter v2 round-trip must still succeed. This
     protects the file-level retirement contract without asserting private models or
     migration implementation details.
@@ -19,6 +19,7 @@ def test_current_snapshots_do_not_import_legacy_version_modules() -> None:
 
         sys.modules["graphon.runtime.runtime_state.v1"] = None
         sys.modules["graphon.runtime.runtime_state.v2"] = None
+        sys.modules["graphon.runtime.runtime_state.v3"] = None
         sys.modules["graphon.engine.filter.builtin.response_stream.v1"] = None
 
         from graphon.engine.filter import ResponseStreamFilter
@@ -30,7 +31,7 @@ def test_current_snapshots_do_not_import_legacy_version_modules() -> None:
             workflow_id="workflow",
         )
         restored_runtime = RuntimeState.from_snapshot(runtime.dumps())
-        assert json.loads(restored_runtime.dumps())["version"] == "3.0"
+        assert json.loads(restored_runtime.dumps())["version"] == "4.0"
 
         response_filter = ResponseStreamFilter()
         response_filter.loads(

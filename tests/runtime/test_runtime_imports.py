@@ -21,7 +21,7 @@ def test_runtime_snapshot_round_trip_does_not_load_engine_or_register_nodes() ->
         restored = RuntimeState.from_snapshot(state.dumps())
         assert restored.outputs == {"answer": "saved"}
         assert restored.ready_queue.dumps() == state.ready_queue.dumps()
-        assert json.loads(restored.dumps())["version"] == "3.0"
+        assert json.loads(restored.dumps())["version"] == "4.0"
         loaded_engine_modules = [
             name for name in sys.modules
             if name == "graphon.engine" or name.startswith("graphon.engine.")

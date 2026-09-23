@@ -270,4 +270,5 @@ def loads(
         state_type=state_type,
         ready_queue_factory=ready_queue_factory,
         graph_state_migration=migrate_graph_state,
+        merge_child_statistics=True,
     )

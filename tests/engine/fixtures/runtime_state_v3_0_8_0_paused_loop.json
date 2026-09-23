@@ -1,0 +1,231 @@
+{
+  "container_frames": [
+    {
+      "errors": [],
+      "frame_id": "53e19b40-3fc2-437e-93d7-d5d10a0294b6:loop:1",
+      "index": 1,
+      "kind": "loop",
+      "parent_invocation_id": "53e19b40-3fc2-437e-93d7-d5d10a0294b6",
+      "reached_break": false,
+      "root_node_id": "loop-start",
+      "runtime_data": {
+        "graph_edge_states": {
+          "loop-start-to-human-input": "taken"
+        },
+        "graph_node_states": {
+          "human-input": "unknown",
+          "loop-start": "taken"
+        },
+        "llm_usage": {
+          "completion_price": "0",
+          "completion_price_unit": "0",
+          "completion_tokens": 0,
+          "completion_unit_price": "0",
+          "currency": "USD",
+          "latency": 0.0,
+          "prompt_price": "0",
+          "prompt_price_unit": "0",
+          "prompt_tokens": 0,
+          "prompt_unit_price": "0",
+          "time_to_first_token": null,
+          "time_to_generate": null,
+          "total_price": "0",
+          "total_tokens": 100
+        },
+        "node_run_steps": 2,
+        "outputs": {},
+        "variable_pool": {
+          "variable_dictionary": {
+            "human-input": {},
+            "loop": {
+              "seed": {
+                "description": "",
+                "id": "7d7c26b8-0b2c-40ea-81b4-b2996dac62f9",
+                "name": "seed",
+                "selector": [
+                  "loop",
+                  "seed"
+                ],
+                "value": "fixed",
+                "value_type": "string"
+              }
+            },
+            "loop-start": {},
+            "start": {
+              "sys.workflow_execution_id": {
+                "description": "",
+                "id": "63f98776-5a95-43b3-99ea-9bcb7c077f0a",
+                "name": "sys.workflow_execution_id",
+                "selector": [
+                  "start",
+                  "sys.workflow_execution_id"
+                ],
+                "value": "workflow-execution",
+                "value_type": "string"
+              }
+            },
+            "sys": {
+              "workflow_execution_id": {
+                "description": "",
+                "id": "8d439a4b-e013-4832-b980-2eb94a9cb8da",
+                "name": "workflow_execution_id",
+                "selector": [
+                  "sys",
+                  "workflow_execution_id"
+                ],
+                "value": "workflow-execution",
+                "value_type": "string"
+              }
+            }
+          }
+        }
+      },
+      "started_at": "2026-09-23T13:57:27.601285"
+    }
+  ],
+  "container_runs": [
+    {
+      "completed_count": 1,
+      "duration_map": {
+        "0": 0.00049
+      },
+      "frame_id": "root",
+      "inputs": {
+        "loop_count": {
+          "value": 3,
+          "value_type": "integer"
+        },
+        "seed": {
+          "value": "fixed",
+          "value_type": "string"
+        }
+      },
+      "invocation_id": "53e19b40-3fc2-437e-93d7-d5d10a0294b6",
+      "kind": "loop",
+      "loop_count": 3,
+      "loop_node_ids": [
+        "human-input",
+        "loop-start"
+      ],
+      "loop_variable_selectors": {
+        "seed": [
+          "loop",
+          "seed"
+        ]
+      },
+      "node_id": "loop",
+      "outputs": {
+        "loop_round": {
+          "value": 1,
+          "value_type": "integer"
+        },
+        "seed": {
+          "value": "fixed",
+          "value_type": "string"
+        }
+      },
+      "reached_break": false,
+      "root_node_id": "loop-start",
+      "started_at": "2026-09-23T13:57:27.599119",
+      "usage": {
+        "completion_price": "0",
+        "completion_price_unit": "0",
+        "completion_tokens": 0,
+        "completion_unit_price": "0",
+        "currency": "USD",
+        "latency": 0.0,
+        "prompt_price": "0",
+        "prompt_price_unit": "0",
+        "prompt_tokens": 0,
+        "prompt_unit_price": "0",
+        "time_to_first_token": null,
+        "time_to_generate": null,
+        "total_price": "0",
+        "total_tokens": 100
+      },
+      "variable_map": {
+        "0": {
+          "seed": {
+            "value": "fixed",
+            "value_type": "string"
+          }
+        }
+      }
+    }
+  ],
+  "deferred_ready_tasks": "{\"version\":\"2.0\",\"items\":[{\"kind\":\"start\",\"frame_id\":\"53e19b40-3fc2-437e-93d7-d5d10a0294b6:loop:1\",\"node_id\":\"human-input\"}]}",
+  "graph_edge_states": {
+    "loop-to-end": "unknown",
+    "start-to-loop": "taken"
+  },
+  "graph_execution": "{\"version\":\"2.0\",\"workflow_id\":\"workflow\",\"started\":true,\"completed\":false,\"aborted\":false,\"paused\":true,\"pause_reasons\":[{\"TYPE\":\"hitl_required\",\"session_id\":\"pending-approval\",\"node_id\":\"human-input\",\"node_title\":\"Approve loop round\"}],\"error\":null,\"exceptions_count\":0,\"node_executions\":[{\"frame_id\":\"53e19b40-3fc2-437e-93d7-d5d10a0294b6:loop:0\",\"node_id\":\"human-input\",\"retry_count\":0,\"execution_id\":\"366c06eb-a4d0-486b-b603-de978d5d6e5c\"},{\"frame_id\":\"53e19b40-3fc2-437e-93d7-d5d10a0294b6:loop:0\",\"node_id\":\"loop-start\",\"retry_count\":0,\"execution_id\":\"19311972-1977-4d36-b20c-b9d4595e5342\"},{\"frame_id\":\"53e19b40-3fc2-437e-93d7-d5d10a0294b6:loop:1\",\"node_id\":\"human-input\",\"retry_count\":0,\"execution_id\":\"3e81e106-bdee-40a1-8fcc-5d447d7bd256\"},{\"frame_id\":\"53e19b40-3fc2-437e-93d7-d5d10a0294b6:loop:1\",\"node_id\":\"loop-start\",\"retry_count\":0,\"execution_id\":\"c90ffd8f-3f45-4d3b-a1b2-af38dbbe21cf\"},{\"frame_id\":\"root\",\"node_id\":\"loop\",\"retry_count\":0,\"execution_id\":\"89df287e-5f55-4689-8bc5-20c05055bdea\"},{\"frame_id\":\"root\",\"node_id\":\"start\",\"retry_count\":0,\"execution_id\":\"36044ab3-5378-4644-9f0b-e09a108d5072\"}]}",
+  "graph_node_states": {
+    "end": "unknown",
+    "loop": "taken",
+    "start": "taken"
+  },
+  "llm_usage": {
+    "completion_price": "0.0",
+    "completion_price_unit": "0.0",
+    "completion_tokens": 0,
+    "completion_unit_price": "0.0",
+    "currency": "USD",
+    "latency": 0.0,
+    "prompt_price": "0.0",
+    "prompt_price_unit": "0.0",
+    "prompt_tokens": 0,
+    "prompt_unit_price": "0.0",
+    "time_to_first_token": null,
+    "time_to_generate": null,
+    "total_price": "0.0",
+    "total_tokens": 0
+  },
+  "node_run_steps": 2,
+  "outputs": {},
+  "ready_queue": "{\"version\":\"2.0\",\"items\":[]}",
+  "start_at": 0.0,
+  "variable_pool": {
+    "variable_dictionary": {
+      "loop": {
+        "seed": {
+          "description": "",
+          "id": "7d7c26b8-0b2c-40ea-81b4-b2996dac62f9",
+          "name": "seed",
+          "selector": [
+            "loop",
+            "seed"
+          ],
+          "value": "fixed",
+          "value_type": "string"
+        }
+      },
+      "start": {
+        "sys.workflow_execution_id": {
+          "description": "",
+          "id": "63f98776-5a95-43b3-99ea-9bcb7c077f0a",
+          "name": "sys.workflow_execution_id",
+          "selector": [
+            "start",
+            "sys.workflow_execution_id"
+          ],
+          "value": "workflow-execution",
+          "value_type": "string"
+        }
+      },
+      "sys": {
+        "workflow_execution_id": {
+          "description": "",
+          "id": "8d439a4b-e013-4832-b980-2eb94a9cb8da",
+          "name": "workflow_execution_id",
+          "selector": [
+            "sys",
+            "workflow_execution_id"
+          ],
+          "value": "workflow-execution",
+          "value_type": "string"
+        }
+      }
+    }
+  },
+  "version": "3.0"
+}

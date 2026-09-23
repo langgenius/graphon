@@ -64,6 +64,8 @@ class ContainerHandler(Protocol):
         """Finalize a child frame when its scheduler reports completion.
 
         The hook is called after each child-frame event and must remain a no-op
-        while the frame still has unfinished nodes.
+        while the frame still has unfinished nodes. Once finalized, remove the
+        frame from the registry and root runtime state before returning so it
+        cannot be restored alongside its result or continuing run.
         """
         ...

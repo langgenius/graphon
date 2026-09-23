@@ -212,6 +212,8 @@ class NodeEventProcessor:
         )
         is_initial_attempt = node_execution.retry_count == 0
         frame.state.increment_node_run_steps()
+        if frame.frame_id != ROOT_FRAME_ID:
+            self._frame_registry[ROOT_FRAME_ID].state.increment_node_run_steps()
 
         # Collect the event only for the first attempt; retries remain silent
         if is_initial_attempt:
@@ -264,7 +266,7 @@ class NodeEventProcessor:
         # Update domain model
         self._graph_execution.record_node_failure()
 
-        frame.state.add_llm_usage(event.node_run_result.llm_usage)
+        self._add_node_usage(frame=frame, event=event)
 
         result = frame.failure_handler.handle(
             frame_id=frame.frame_id,
@@ -323,6 +325,20 @@ class NodeEventProcessor:
         # Re-queue node for execution
         frame.scheduler.enqueue_node(event.node_id)
 
+    def _add_node_usage(self, *, frame: ExecutionFrame, event: NodeEvent) -> None:
+        # Container results retain child usage for observers, but the root has
+        # already counted those child events, including unfinished child work.
+        is_container = (
+            frame.graph.nodes[event.node_id].execution_type
+            == NodeExecutionType.CONTAINER
+        )
+        if frame.frame_id != ROOT_FRAME_ID or not is_container:
+            frame.state.add_llm_usage(event.node_run_result.llm_usage)
+        if frame.frame_id != ROOT_FRAME_ID and not is_container:
+            self._frame_registry[ROOT_FRAME_ID].state.add_llm_usage(
+                event.node_run_result.llm_usage
+            )
+
     def _complete_node(
         self,
         *,
@@ -330,7 +346,7 @@ class NodeEventProcessor:
         event: NodeRunSucceededEvent | NodeRunExceptionEvent,
         follow_branch: bool,
     ) -> None:
-        frame.state.add_llm_usage(event.node_run_result.llm_usage)
+        self._add_node_usage(frame=frame, event=event)
         self._store_node_outputs(
             frame=frame,
             node_id=event.node_id,
