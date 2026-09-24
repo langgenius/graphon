@@ -207,23 +207,22 @@ def _filter_prompt_messages(
     filtered_prompt_messages: list[PromptMessage] = []
     for prompt_message in prompt_messages:
         if isinstance(prompt_message.content, list):
-            prompt_message_content: list[PromptMessageContentUnionTypes] = []
-            for content_item in prompt_message.content:
-                if not model_schema.supports_prompt_content_type(content_item.type):
-                    continue
-                prompt_message_content.append(content_item)
-            if not prompt_message_content:
-                continue
+            prompt_message_content = [
+                content_item
+                for content_item in prompt_message.content
+                if model_schema.supports_prompt_content_type(content_item.type)
+            ]
             if (
                 len(prompt_message_content) == 1
                 and prompt_message_content[0].type == PromptMessageContentType.TEXT
+                and prompt_message_content[0].opaque_body is None
             ):
                 prompt_message.content = prompt_message_content[0].data
             else:
                 prompt_message.content = prompt_message_content
-            filtered_prompt_messages.append(prompt_message)
-        elif not prompt_message.is_empty():
-            filtered_prompt_messages.append(prompt_message)
+        if prompt_message.is_empty():
+            continue
+        filtered_prompt_messages.append(prompt_message)
 
     if len(filtered_prompt_messages) == 0:
         msg = (

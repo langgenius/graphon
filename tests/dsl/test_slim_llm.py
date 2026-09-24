@@ -5,11 +5,16 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import JsonValue
 
 import graphon.dsl.slim.llm as slim_llm_module
 from graphon.dsl.slim import SlimClientConfig, SlimClientError, SlimLLM
 from graphon.model_runtime.entities.llm_entities import LLMResult
-from graphon.model_runtime.entities.message_entities import SystemPromptMessage
+from graphon.model_runtime.entities.message_entities import (
+    AssistantPromptMessage,
+    SystemPromptMessage,
+    TextPromptMessageContent,
+)
 
 
 class _RecordingSlimClient:
@@ -177,6 +182,92 @@ def test_slim_llm_counts_tokens_and_collects_blocking_result(
         "temperature": 0.2,
         "max_tokens": 8,
     }
+
+
+@pytest.mark.parametrize("use_structured_output", [False, True])
+@pytest.mark.parametrize("opaque_body", [{"signature": "s"}, {}, [], "", 0, False])
+def test_slim_llm_collects_mixed_content_and_latest_opaque_body(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    use_structured_output: bool,
+    opaque_body: JsonValue,
+) -> None:
+    client = _patch_recording_slim_client(monkeypatch)
+    block = TextPromptMessageContent(data="", opaque_body={"signature": "block"})
+    chunks: list[dict[str, Any]] = [
+        {
+            "delta": {
+                "message": {"content": content, "opaque_body": chunk_opaque_body}
+            },
+            "structured_output": {"ok": True} if index == 1 else None,
+        }
+        for index, (content, chunk_opaque_body) in enumerate([
+            ("before", {"partial": True}),
+            ([block.model_dump()], None),
+            ("after", None),
+            ("", opaque_body),
+            ("", None),
+        ])
+    ]
+    for index, arguments in enumerate(['{"city":', '"Paris"}']):
+        chunks[index]["delta"]["message"]["tool_calls"] = [
+            {
+                "id": "call-1" if index == 0 else "",
+                "type": "function",
+                "function": {
+                    "name": "weather" if index == 0 else "",
+                    "arguments": arguments,
+                },
+            },
+        ]
+    chunks[0]["system_fingerprint"] = "first"
+    chunks[-2]["system_fingerprint"] = ""
+    chunks[-1]["delta"]["usage"] = {"prompt_tokens": 3, "completion_tokens": 2}
+    monkeypatch.setattr(client, "invoke_chunks", lambda **_: iter(chunks))
+    llm = _build_llm(tmp_path)
+
+    if use_structured_output:
+        result = llm.invoke_llm_with_structured_output(
+            prompt_messages=[],
+            json_schema={"type": "object"},
+            model_parameters={},
+            stop=None,
+            stream=False,
+        )
+        assert result.structured_output == {"ok": True}
+    else:
+        result = llm.invoke_llm(
+            prompt_messages=[],
+            model_parameters={},
+            tools=None,
+            stop=None,
+            stream=False,
+        )
+
+    assert result.message == AssistantPromptMessage(
+        content=[
+            TextPromptMessageContent(data="before"),
+            block,
+            TextPromptMessageContent(data="after"),
+        ],
+        tool_calls=[
+            AssistantPromptMessage.ToolCall(
+                id="call-1",
+                type="function",
+                function=AssistantPromptMessage.ToolCall.ToolCallFunction(
+                    name="weather", arguments='{"city":"Paris"}'
+                ),
+            ),
+        ],
+        opaque_body=opaque_body,
+    )
+    assert type(result.message.opaque_body) is type(opaque_body)
+    assert (
+        result.usage.prompt_tokens,
+        result.usage.completion_tokens,
+        result.usage.total_tokens,
+    ) == (3, 2, 5)
+    assert result.system_fingerprint == ""
 
 
 def test_slim_llm_preserves_slim_client_errors(

@@ -74,6 +74,9 @@ When `LargeLanguageModel` aggregates chunks into a blocking result or a streamin
 Each supplied snapshot replaces the previous payload; `None` leaves it unchanged.
 Both aggregation paths retain content block payloads and the order of mixed strings and content blocks.
 
+[SlimLLM](../dsl/slim/llm.py) uses the same aggregation for blocking ordinary and structured output calls; see the [Slim tests](../../../tests/dsl/test_slim_llm.py).
+[Prompt filtering](../nodes/llm/llm_utils.py) preserves state on supported content blocks and keeps assistant messages with non-`None` state even when their content list is empty; see the [prompt tests](../../../tests/nodes/llm/test_llm_utils.py).
+
 ## Documentation
 
 For detailed documentation on how to add new providers or models, please refer to the [Dify documentation](https://docs.dify.ai/).
