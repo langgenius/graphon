@@ -36,3 +36,12 @@ Draft 2020-12 with document-local references. Request schemas describe the joint
 `{input, parameters}` object; output schemas describe native JSON values. The
 declarations check JSON value categories only; schema keywords, validity,
 reference policy, and semantic constraints belong to the plugin boundary.
+
+[Immutable descriptors](domain/descriptors.py) associate each model with explicit
+input/output contracts. Operation tags support discovery; they neither select
+nor authorize an invocation. A model may offer distinct text-to-score and
+audio-to-text contracts without promising other combinations of those formats.
+[Descriptor checks](../../../../tests/model_runtime/v2/test_descriptors.py)
+define contract-ID uniqueness and delivery requirements. Matching the selected
+revision to the effective connection configuration and rejecting stale revisions
+before provider inference are plugin responsibilities, outside these declarations.
