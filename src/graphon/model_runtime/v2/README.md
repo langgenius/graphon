@@ -137,3 +137,13 @@ rules as complete results. Record envelopes are frozen and incoming JSON is copi
 deeply into owned, mutable snapshots. Terminal records retain their result/error
 references. [Event checks](../../../../tests/model_runtime/v2/test_stream_events.py)
 cover the record invariants and illustrate plugin lifecycle responsibilities.
+
+[ModelStreamer](application/streamer.py) returns a context-managed event iterator.
+The implementation releases local resources on completion, exception, or early
+exit; closing the context does not guarantee remote cancellation. Its timeout
+runs from context entry through the terminal event. Expected failures before any
+output may raise `ModelCallError`; after output begins they become `StreamFailed`,
+including timeouts. Transport loss can still interrupt without a terminal event.
+Consumers may ignore previews whose profile they cannot render and wait for the
+complete output. [Streaming example](../../../../tests/model_runtime/v2/test_streamer.py)
+checks a stream-only implementation and resource cleanup across all three exits.
