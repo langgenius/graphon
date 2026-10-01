@@ -65,3 +65,28 @@ Plugins are responsible for checking ownership, expiry, and supported versions;
 hosts retain and return the state unchanged. The record provides no session
 management. [State checks](../../../../tests/model_runtime/v2/test_provider_state.py)
 cover provenance, envelope immutability, and JSON payload ownership and validation.
+
+[ModelError](domain/errors.py) carries an open, nonempty failure code, safe message,
+optional provider code, and optional finite, nonnegative retry delay in seconds.
+Plugins must map failures and remove sensitive provider details; the record cannot
+determine whether a message contains secrets.
+[ModelCallError](application/errors.py) is the Python failure envelope. Retry
+hints are advisory and grant no idempotency guarantee; these declarations never
+retry calls. Treat unknown error codes as generic failures. Plugins should use
+these common meanings without closing the set of representable codes:
+
+| Code | Meaning |
+| --- | --- |
+| `invalid_request`, `invalid_result` | Input or provider output violates the selected contract. |
+| `not_found`, `access_denied` | The target is missing or the caller cannot access it. |
+| `unsupported_delivery` | The requested interface, including cancellation, is unavailable. |
+| `contract_changed` | The effective revision changed; reject before provider inference. |
+| `rate_limited`, `unavailable`, `timeout` | The call exceeded a limit, was unavailable, or timed out. |
+| `cancelled`, `provider_error` | The call was cancelled or failed at the provider. |
+
+[Failure checks](../../../../tests/model_runtime/v2/test_errors.py) cover error
+fields and raw usage. Usage is opaque provider JSON: preserve supplied falsey
+values and nested nulls; only missing or top-level null becomes integer `0`.
+`ModelCallError` owns a deep copy of supplied usage; its nested containers remain
+mutable. There is no token counting, pricing, unit conversion, or accumulation,
+and fallback zero does not imply a free call.
