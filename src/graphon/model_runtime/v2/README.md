@@ -111,3 +111,13 @@ configured models absent from `list_models`. Discovery grants no invocation
 authorization.
 [Catalog example](../../../../tests/model_runtime/v2/test_catalog.py) checks a
 structural implementation that needs no invocation, streaming, or job methods.
+
+[ModelInvoker](application/invoker.py) declares a complete call using the request,
+context, and result records. It is independent of discovery and other delivery
+modes. Plugins check the selected contract and connection, perform the call, and
+return native output or raise `ModelCallError`. The optional context timeout
+bounds this operation, including plugin validation and provider interaction.
+Omission uses the connection/plugin default; a timeout does not guarantee remote
+execution has stopped.
+[Complete-call example](../../../../tests/model_runtime/v2/test_invoker.py) uses a
+score-only implementation with native numeric output and unchanged falsey usage.
