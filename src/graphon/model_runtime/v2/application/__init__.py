@@ -1,6 +1,7 @@
 from graphon.model_runtime.v2.application.catalog import ModelCatalog
 from graphon.model_runtime.v2.application.context import CallContext
 from graphon.model_runtime.v2.application.errors import ModelCallError
+from graphon.model_runtime.v2.application.invoker import ModelInvoker
 from graphon.model_runtime.v2.domain.descriptors import ModelContract, ModelDescriptor
 from graphon.model_runtime.v2.domain.errors import ModelError
 from graphon.model_runtime.v2.domain.exchange import ModelRequest, ModelResult
@@ -20,6 +21,7 @@ __all__ = [
     "ModelContract",
     "ModelDescriptor",
     "ModelError",
+    "ModelInvoker",
     "ModelRef",
     "ModelRequest",
     "ModelResult",
