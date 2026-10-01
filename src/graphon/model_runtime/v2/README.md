@@ -104,3 +104,17 @@ values and nested nulls; only missing or top-level null becomes integer `0`.
 `ModelCallError` owns a deep copy of supplied usage; its nested containers remain
 mutable. There is no token counting, pricing, unit conversion, or accumulation,
 and fallback zero does not imply a free call.
+
+[ModelRequest and ModelResult](domain/exchange.py) carry native JSON exchanges,
+including scalar output such as a relevance score. Their envelopes are frozen;
+incoming JSON containers are copied deeply and remain owned, mutable snapshots.
+Continuation retains the supplied `ProviderState` reference. Parameters, optional
+output schema, and result metadata are JSON objects; metadata carries provider
+information, not permissions or application state.
+
+The plugin matches result model/contract to the request and `request_id` to the
+call context. A requested output schema requires contract support; output must
+satisfy both the declared and requested schemas. These records neither execute
+schemas nor transform provider output.
+[Exchange checks](../../../../tests/model_runtime/v2/test_exchange.py) cover native
+values, continuation, per-record defaults, ownership, and raw usage preservation.

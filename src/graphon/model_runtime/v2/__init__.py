@@ -9,6 +9,8 @@ from graphon.model_runtime.v2.application import (
     ModelDescriptor,
     ModelError,
     ModelRef,
+    ModelRequest,
+    ModelResult,
     ProviderState,
 )
 
@@ -23,5 +25,7 @@ __all__ = [
     "ModelDescriptor",
     "ModelError",
     "ModelRef",
+    "ModelRequest",
+    "ModelResult",
     "ProviderState",
 ]
