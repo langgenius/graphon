@@ -21,3 +21,18 @@ source dependencies, not the absence of ancestor imports from `sys.modules`.
 
 Existing model consumers require explicit future adapters; introducing these
 declarations does not switch any caller to V2.
+
+[DataFormat](domain/formats.py) carries an owned JSON object schema, a tuple of
+kind strings, and an optional profile string. Kind and profile values are open
+metadata; no shared profile is standardized. [JSON values](domain/json_values.py)
+preserve scalar types and require finite numbers, string object keys, and acyclic
+lists and objects. The `schema` property returns a defensive copy; callers cannot
+change a description by mutating the supplied schema or a returned dictionary.
+[Format checks](../../../../tests/model_runtime/v2/test_formats.py) cover these
+ownership and JSON boundaries.
+
+The plugin boundary is responsible for interpreting self-contained JSON Schema
+Draft 2020-12 with document-local references. Request schemas describe the joint
+`{input, parameters}` object; output schemas describe native JSON values. The
+declarations check JSON value categories only; schema keywords, validity,
+reference policy, and semantic constraints belong to the plugin boundary.
