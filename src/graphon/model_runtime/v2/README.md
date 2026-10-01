@@ -147,3 +147,19 @@ including timeouts. Transport loss can still interrupt without a terminal event.
 Consumers may ignore previews whose profile they cannot render and wait for the
 complete output. [Streaming example](../../../../tests/model_runtime/v2/test_streamer.py)
 checks a stream-only implementation and resource cleanup across all three exits.
+
+[JobRef and JobStatus](domain/job_status.py) represent opaque remote handles and
+exclusive queued, running, succeeded, failed, or cancelled outcomes. Success
+requires a result matching the handle's model, contract, and submission request
+ID. Failure requires an error; other states carry neither. Terminal states cannot
+be cancellable. Positive finite scheduling hints are advisory; expiry is an aware
+UTC timestamp for access to the handle/result, not proof that provider work ended.
+Handle tokens are omitted from repr and copied as owned JSON snapshots. Plugins
+retain the submission's validation context in the token or their own state, check
+scope, and pin the original contract revision. Hosts keep the latest returned
+handle unchanged on the same connection. Status usage belongs to that response,
+independently of any nested result usage. Terminal outcomes must stay stable
+across reads; fresh handles and usage can still be returned. These cross-call
+obligations belong to the plugin, not a V2 store or scheduler.
+[Job-record checks](../../../../tests/model_runtime/v2/test_job_status.py) cover
+exclusive outcomes, original submission identity, hints, expiry, and raw JSON.
