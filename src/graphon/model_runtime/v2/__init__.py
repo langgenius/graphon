@@ -7,6 +7,7 @@ from graphon.model_runtime.v2.application import (
     ModelContract,
     ModelDescriptor,
     ModelRef,
+    ProviderState,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "ModelContract",
     "ModelDescriptor",
     "ModelRef",
+    "ProviderState",
 ]
