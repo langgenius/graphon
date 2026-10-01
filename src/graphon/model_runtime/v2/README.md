@@ -121,3 +121,19 @@ Omission uses the connection/plugin default; a timeout does not guarantee remote
 execution has stopped.
 [Complete-call example](../../../../tests/model_runtime/v2/test_invoker.py) uses a
 score-only implementation with native numeric output and unchanged falsey usage.
+
+[Stream events](domain/stream_events.py) distinguish content previews, usage-only
+updates, completed results, and failures. Nonterminal records carry a nonnegative
+integer sequence; plugins number content and usage events together from zero,
+increasing by one. Plugins emit exactly one terminal event and nothing afterward;
+consumers treat iteration ending without one as interruption.
+`StreamCompleted.result` is the authoritative complete `ModelResult` assembled by
+the plugin. After `StreamFailed`, consumers must not treat earlier previews as
+successful output. These records neither assemble output nor enforce stream
+lifecycle.
+
+Usage belongs to each event independently, with the same raw-value and null-zero
+rules as complete results. Record envelopes are frozen and incoming JSON is copied
+deeply into owned, mutable snapshots. Terminal records retain their result/error
+references. [Event checks](../../../../tests/model_runtime/v2/test_stream_events.py)
+cover the record invariants and illustrate plugin lifecycle responsibilities.
