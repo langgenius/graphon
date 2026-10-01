@@ -104,3 +104,10 @@ satisfy both the declared and requested schemas. These records neither execute
 schemas nor transform provider output.
 [Exchange checks](../../../../tests/model_runtime/v2/test_exchange.py) cover native
 values, continuation, per-record defaults, ownership, and raw usage preservation.
+
+[ModelCatalog](application/catalog.py) lists models and describes their effective
+contracts in a supplied `CallContext`. Its `describe` method permits explicitly
+configured models absent from `list_models`. Discovery grants no invocation
+authorization.
+[Catalog example](../../../../tests/model_runtime/v2/test_catalog.py) checks a
+structural implementation that needs no invocation, streaming, or job methods.
