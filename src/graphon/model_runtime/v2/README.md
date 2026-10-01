@@ -163,3 +163,16 @@ across reads; fresh handles and usage can still be returned. These cross-call
 obligations belong to the plugin, not a V2 store or scheduler.
 [Job-record checks](../../../../tests/model_runtime/v2/test_job_status.py) cover
 exclusive outcomes, original submission identity, hints, expiry, and raw JSON.
+
+[ModelJobs](application/jobs.py) declares submission, one status read, and
+best-effort cancellation. Submission may finish immediately. Failed status reads
+or expired handles raise `ModelCallError`, not an invented failed job state.
+Cancelling a terminal job returns that outcome. For active jobs, unsupported
+cancellation raises `ModelCallError` with code `unsupported_delivery`; a response
+may remain running while cancellation is pending or succeed if completion wins.
+Only `cancelled` confirms cancellation. Each method has its own context timeout.
+The host owns subsequent reads and the overall waiting deadline. The interface
+adds no polling, sleep, retry, or persistence. Restart-safe resume requires
+plugin/daemon support.
+[Job-control examples](../../../../tests/model_runtime/v2/test_jobs.py) illustrate
+these outcomes with a job-only implementation and refreshed opaque handles.
