@@ -45,3 +45,11 @@ audio-to-text contracts without promising other combinations of those formats.
 define contract-ID uniqueness and delivery requirements. Matching the selected
 revision to the effective connection configuration and rejecting stale revisions
 before provider inference are plugin responsibilities, outside these declarations.
+
+[CallContext](application/context.py) is an immutable record that identifies an
+already configured connection and correlates one call without carrying
+credentials. An identifier grants neither authorization nor an
+idempotency guarantee. Plugins bind discovery and invocation to the same
+effective connection and interpret the optional timeout at the call boundary.
+[Context checks](../../../../tests/model_runtime/v2/test_context.py) cover its
+identity and timeout invariants.

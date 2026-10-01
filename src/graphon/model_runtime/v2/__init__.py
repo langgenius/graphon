@@ -1,4 +1,5 @@
 from graphon.model_runtime.v2.application import (
+    CallContext,
     ContractRef,
     DataFormat,
     JsonObject,
@@ -9,6 +10,7 @@ from graphon.model_runtime.v2.application import (
 )
 
 __all__ = [
+    "CallContext",
     "ContractRef",
     "DataFormat",
     "JsonObject",
