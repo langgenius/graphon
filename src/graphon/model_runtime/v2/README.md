@@ -67,3 +67,15 @@ idempotency guarantee. Plugins bind discovery and invocation to the same
 effective connection and interpret the optional timeout at the call boundary.
 [Context checks](../../../../tests/model_runtime/v2/test_context.py) cover its
 identity and timeout invariants.
+
+[ProviderState](domain/provider_state.py) carries opaque JSON continuation with its
+model, contract, connection scope, and state version. Scope and version are
+nonempty strings preserved exactly. Its envelope is frozen and incoming JSON is
+copied deeply; nested containers remain owned, mutable snapshots. Unlike discovery
+schemas, reading `value` does not return a defensive copy. The potentially
+sensitive payload is omitted from the record's repr.
+
+Plugins are responsible for checking ownership, expiry, and supported versions;
+hosts retain and return the state unchanged. The record provides no session
+management. [State checks](../../../../tests/model_runtime/v2/test_provider_state.py)
+cover provenance, envelope immutability, and JSON payload ownership and validation.
