@@ -13,6 +13,9 @@ _CONTENT_KINDS = (
     "document",
     "tool_call",
     "tool_result",
+    "json",
+    "reasoning",
+    "refusal",
 )
 
 
@@ -64,6 +67,21 @@ def _build_content_definitions() -> JsonObject:
                 "source": {"$ref": "#/$defs/media_source"},
             },
         },
+        "json_part": {
+            "type": "object",
+            "required": ["type", "value"],
+            "properties": {"type": {"const": "json"}, "value": {}},
+        },
+        "reasoning_part": {
+            "type": "object",
+            "required": ["type", "text"],
+            "properties": {"type": {"const": "reasoning"}, "text": {"type": "string"}},
+        },
+        "refusal_part": {
+            "type": "object",
+            "required": ["type", "text"],
+            "properties": {"type": {"const": "refusal"}, "text": {"type": "string"}},
+        },
         "tool_call_part": {
             "type": "object",
             "required": ["type", "call_id", "name", "arguments"],
@@ -89,6 +107,7 @@ def _build_content_definitions() -> JsonObject:
                                 "oneOf": [
                                     {"$ref": "#/$defs/text_part"},
                                     {"$ref": "#/$defs/media_part"},
+                                    {"$ref": "#/$defs/json_part"},
                                 ]
                             },
                         },
@@ -103,6 +122,9 @@ def _build_content_definitions() -> JsonObject:
                 {"$ref": "#/$defs/media_part"},
                 {"$ref": "#/$defs/tool_call_part"},
                 {"$ref": "#/$defs/tool_result_part"},
+                {"$ref": "#/$defs/json_part"},
+                {"$ref": "#/$defs/reasoning_part"},
+                {"$ref": "#/$defs/refusal_part"},
             ]
         },
     }
@@ -194,6 +216,7 @@ LLM_CONTRACT = ModelContract(
                     "type": "array",
                     "items": {"$ref": "#/$defs/content_part"},
                 },
+                "finish_reason": {"type": "string"},
             },
         },
     ),
@@ -214,7 +237,9 @@ LLM_CONTRACT = ModelContract(
                 {
                     "required": ["type", "index", "text"],
                     "properties": {
-                        "type": {"const": "text_delta"},
+                        "type": {
+                            "enum": ["text_delta", "reasoning_delta", "refusal_delta"]
+                        },
                         "index": {"type": "integer", "minimum": 0},
                         "text": {"type": "string"},
                     },

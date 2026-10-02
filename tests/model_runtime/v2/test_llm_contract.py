@@ -25,6 +25,9 @@ def test_llm_contract_allows_model_local_identity_and_delivery() -> None:
             "document",
             "tool_call",
             "tool_result",
+            "json",
+            "reasoning",
+            "refusal",
         )
         assert data_format.schema["$schema"] == Draft202012Validator.META_SCHEMA["$id"]
         Draft202012Validator.check_schema(data_format.schema)

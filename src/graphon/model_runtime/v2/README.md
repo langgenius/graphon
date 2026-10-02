@@ -182,8 +182,8 @@ these outcomes with a job-only implementation and refreshed opaque handles.
 
 This declaration provides one common content contract for new LLM nodes to adopt.
 Existing nodes remain unchanged; this package supplies no reader or fallback
-runtime. These profiles standardize text, media, and tool calls/results;
-structured output, reasoning, and refusals have no shared representation yet.
+runtime. These profiles standardize text, media, tool calls/results, native JSON,
+provider-visible reasoning, and refusals.
 
 Import `LLM_CONTRACT` from `graphon.model_runtime.v2`. Its
 [schemas](domain/llm.py) define these values:
@@ -205,7 +205,10 @@ Preserve text exactly, including whitespace and empty strings.
 | Media | `{type: "image" or "audio" or "video" or "document", mime_type, source}` |
 | Media source | Exactly one of `{type: "uri", uri}`, `{type: "file", id}`, or `{type: "inline", encoding: "base64", data}` |
 | Tool call | `{type: "tool_call", call_id, name, arguments: object}` |
-| Tool result | `{type: "tool_result", call_id, content, is_error?: boolean}`; content is text or an ordered array of text/media parts |
+| Tool result | `{type: "tool_result", call_id, content, is_error?: boolean}`; content is text or an ordered array of text/media/JSON parts |
+| JSON | `{type: "json", value: any JSON value}`; preserve objects, arrays, scalars, null, and falsey values |
+| Reasoning | `{type: "reasoning", text: string}`; only reasoning or summaries the provider exposes |
+| Refusal | `{type: "refusal", text: string}`; distinct from answer text |
 
 Media URI/file identifiers and MIME labels are nonempty strings. Source objects
 have only the fields belonging to their selected source kind. Plugins check
@@ -235,6 +238,24 @@ different semantics require an explicitly understood custom contract.
 Output content is authoritative when present. An optional `text` convenience
 field must equal the concatenation of its text parts; plugins enforce this
 correspondence. Media-only, tool-only, and empty content do not require invented text.
+Optional `finish_reason` is an open string describing why generation stopped;
+preserve provider-specific values. Refusals and truncation do not become fabricated
+answers or completed JSON. Return available content and the stop reason only when
+they satisfy the selected contract and any requested output schema; otherwise use
+the existing model failure envelope.
+
+Native JSON parts describe returned values; they do not enable schema-directed
+generation automatically. `accepts_output_schema` remains false by default.
+Models supporting it opt in explicitly. `ModelRequest.output_schema` constrains
+the entire `ModelResult.output` object, including its content wrapper, rather
+than only a JSON part's `value`. Plugins enforce both the declared and requested
+schemas. This adds no second response-format parameter or schema interpretation.
+
+Opaque signatures, redacted/encrypted reasoning, and provider replay items belong
+in `ProviderState`, not visible reasoning text. Plugins preserve their association
+with content parts and their replay order; hosts retain and return that state
+unchanged. Visible reasoning text alone is not a substitute for continuation.
+
 The declaration describes representable formats, not capabilities every model
 supports. Plugins narrow schemas and kinds to actual input/output combinations,
 MIME/source kinds, parameters, and limits, rejecting unsupported requests before
@@ -250,10 +271,14 @@ model-local contract revisions.
 Custom contracts remain available; usage and continuation retain their existing
 outer-envelope semantics.
 
-Text and whole-part previews use `{type: "text_delta", index, text}` or
+Text, reasoning, and refusal previews use
+`{type: "text_delta" or "reasoning_delta" or "refusal_delta", index, text}`;
+whole-part previews use
 `{type: "content_part", index, part}`. Their nonnegative `index` identifies the
 position in final output content, independently of the outer event sequence.
-Text deltas append at that position; a whole part replaces its preview there.
+Each text-bearing delta appends to its matching part type at that position;
+a whole part replaces its preview there. JSON previews use complete parts, not
+partially parsed values.
 Plugins preserve part indices throughout a stream. The `{text_delta}`
 shorthand appends only to text-only output and is not mixed with indexed events.
 The completed result is authoritative; these declarations add no assembler.
@@ -267,8 +292,8 @@ objects in the terminal result.
 
 Future consumers read ordered content first, or the `text` shorthand when
 content is absent. A consumer supporting only text must retain the entire output
-when it contains other part types, rather than dropping media through the text
-convenience field. Ignore unreadable previews and wait for completion.
+when it contains non-text parts, instead of selecting only the `text` convenience
+field. Ignore unreadable previews and wait for completion.
 If output interpretation fails,
 pass through the original entire `ModelResult.output` JSON value, including extra
 fields, arrays, scalars, or null. Other nodes can then parse that value. Do not
@@ -290,3 +315,10 @@ exercise provider integration or tool execution.
 The tool/result forms reflect
 [Claude tool exchanges](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)
 and [Gemini function calling](https://ai.google.dev/gemini-api/docs/function-calling).
+[Response checks](../../../../tests/model_runtime/v2/test_llm_responses.py) cover
+native JSON, reasoning/refusal parts, finish reasons, and their previews.
+The distinction between structured output and refusals follows
+[OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
+Continuation obligations reflect
+[OpenAI reasoning](https://developers.openai.com/api/docs/guides/reasoning) and
+[Gemini thought signatures](https://ai.google.dev/gemini-api/docs/thinking#thought-signatures).
