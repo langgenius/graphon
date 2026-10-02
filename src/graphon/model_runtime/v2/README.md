@@ -24,7 +24,8 @@ declarations does not switch any caller to V2.
 
 [DataFormat](domain/formats.py) carries an owned JSON object schema, a tuple of
 kind strings, and an optional profile string. Kind and profile values are open
-metadata; no shared profile is standardized. [JSON values](domain/json_values.py)
+metadata; the [built-in LLM contract](#built-in-llm-contract) defines shared text
+profiles. [JSON values](domain/json_values.py)
 preserve scalar types and require finite numbers, string object keys, and acyclic
 lists and objects. The `schema` property returns a defensive copy; callers cannot
 change a description by mutating the supplied schema or a returned dictionary.
@@ -176,3 +177,51 @@ adds no polling, sleep, retry, or persistence. Restart-safe resume requires
 plugin/daemon support.
 [Job-control examples](../../../../tests/model_runtime/v2/test_jobs.py) illustrate
 these outcomes with a job-only implementation and refreshed opaque handles.
+
+## Built-in LLM contract
+
+This declaration provides one common text contract for new LLM nodes to adopt.
+Existing nodes remain unchanged; this package supplies no reader or fallback
+runtime.
+
+Import `LLM_CONTRACT` from `graphon.model_runtime.v2`. Its
+[schemas](domain/llm.py) define these values:
+
+| Format | Value | Versioned profile |
+| --- | --- | --- |
+| Request projection | `{input: {messages: [{role, content}]}, parameters: {}}` | `graphon.llm.request/1` |
+| `ModelResult.output` | `{text: string}` | `graphon.llm.output/1` |
+| `StreamChunk.value` preview | `{text_delta: string}` | `graphon.llm.stream/1` |
+
+Messages are ordered and carry string `role` and `content` fields. Plugins define
+their supported roles, such as `system`, `user`, and `assistant`, in the effective
+schema. Preserve text exactly, including whitespace and empty strings.
+Input, message, output, and preview objects permit extra fields; the
+outer request projection contains only `input` and `parameters`. Parameters are
+an object with no built-in generation settings. Plugins describe and enforce
+their supported parameters and limits in the effective request schema before
+provider inference. Extra fields have no standardized meaning.
+
+The constant defaults to complete delivery. Its stream format is available for
+models that support streaming; it does not advertise that all LLMs stream.
+Plugins can use `dataclasses.replace(LLM_CONTRACT, ref=..., delivery=...)` to
+declare their model-local identity, effective revision, and actual delivery.
+They may restrict supported parameters and limits while retaining the shared
+profile meanings; they must not add mandatory provider-only fields. Shared
+profile versions are independent of opaque model-local contract revisions.
+Custom contracts remain available; usage and continuation retain their existing
+outer-envelope semantics.
+
+For future consumers, concatenate `text_delta` values only for the live preview;
+the completed result remains authoritative. Ignore unreadable previews and wait
+for completion. Read the `text` key when `ModelResult.output` is an object and
+the value is a string, including an empty string. If output interpretation fails,
+pass through the original entire `ModelResult.output` JSON value, including extra
+fields, arrays, scalars, or null. Other nodes can then parse that value. Do not
+stringify it or substitute the `ModelResult` envelope. This fallback does not turn
+provider errors, contract validation failures, failed streams, or interrupted
+streams into successful output. Implementing these node behaviors belongs to a
+later adoption change.
+
+[Contract checks](../../../../tests/model_runtime/v2/test_llm_contract.py)
+exercise the built-in schemas and reuse with model-local identity and delivery.
