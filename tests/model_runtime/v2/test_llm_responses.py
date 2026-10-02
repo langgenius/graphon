@@ -1,6 +1,72 @@
+from dataclasses import replace
+
 from jsonschema import Draft202012Validator
 
-from graphon.model_runtime.v2 import LLM_CONTRACT
+from graphon.model_runtime.v2 import (
+    LLM_CONTRACT,
+    ModelRef,
+    ModelRequest,
+    ModelResult,
+)
+
+
+def test_llm_structured_output_uses_requested_schema() -> None:
+    contract = replace(LLM_CONTRACT, accepts_output_schema=True)
+    request = ModelRequest(
+        model=ModelRef(plugin_id="plugin", provider="provider", model="deployment"),
+        contract=contract.ref,
+        input={"messages": [{"role": "user", "content": "Has the user confirmed?"}]},
+        output_schema={
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$defs": {
+                "answer": {
+                    "type": "object",
+                    "required": ["ok"],
+                    "properties": {"ok": {"type": "boolean"}},
+                    "additionalProperties": False,
+                }
+            },
+            "type": "object",
+            "required": ["content"],
+            "properties": {
+                "content": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 1,
+                    "items": {
+                        "type": "object",
+                        "required": ["type", "value"],
+                        "properties": {
+                            "type": {"const": "json"},
+                            "value": {"$ref": "#/$defs/answer"},
+                        },
+                    },
+                }
+            },
+        },
+    )
+    assert contract.accepts_output_schema
+    assert request.output_schema is not None
+    Draft202012Validator.check_schema(request.output_schema)
+    requested_output_validator = Draft202012Validator(request.output_schema)
+    contract_output_validator = Draft202012Validator(contract.output.schema)
+    result = ModelResult(
+        request_id="request",
+        model=request.model,
+        contract=request.contract,
+        output={"content": [{"type": "json", "value": {"ok": False}}]},
+    )
+    contract_output_validator.validate(result.output)
+    requested_output_validator.validate(result.output)
+    for output in (
+        {"content": [{"type": "json", "value": {"ok": "false"}}]},
+        {"content": [{"type": "json", "value": {}}]},
+        {"text": '{"ok": false}'},
+        {"content": []},
+        {"content": [{"type": "refusal", "text": "Cannot answer"}]},
+    ):
+        contract_output_validator.validate(output)
+        assert not requested_output_validator.is_valid(output)
 
 
 def test_llm_accepts_json_messages_outputs_and_tool_results() -> None:

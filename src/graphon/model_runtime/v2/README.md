@@ -244,12 +244,8 @@ answers or completed JSON. Return available content and the stop reason only whe
 they satisfy the selected contract and any requested output schema; otherwise use
 the existing model failure envelope.
 
-Native JSON parts describe returned values; they do not enable schema-directed
-generation automatically. `accepts_output_schema` remains false by default.
-Models supporting it opt in explicitly. `ModelRequest.output_schema` constrains
-the entire `ModelResult.output` object, including its content wrapper, rather
-than only a JSON part's `value`. Plugins enforce both the declared and requested
-schemas. This adds no second response-format parameter or schema interpretation.
+Native JSON parts describe returned values. Models advertise schema-directed
+generation separately through the [structured-output capability](#structured-output).
 
 Opaque signatures, redacted/encrypted reasoning, and provider replay items belong
 in `ProviderState`, not visible reasoning text. Plugins preserve their association
@@ -322,3 +318,35 @@ The distinction between structured output and refusals follows
 Continuation obligations reflect
 [OpenAI reasoning](https://developers.openai.com/api/docs/guides/reasoning) and
 [Gemini thought signatures](https://ai.google.dev/gemini-api/docs/thinking#thought-signatures).
+
+### Structured output
+
+Structured output uses the existing `ModelRequest.output_schema` field. A plugin
+advertises support on its effective model contract with
+`dataclasses.replace(LLM_CONTRACT, accepts_output_schema=True)`. The built-in
+default stays false because not every model supports schema-directed generation.
+Callers check the discovered contract before supplying a schema.
+
+The requested schema constrains the entire `ModelResult.output`, including the
+content wrapper. To request one structured answer, require exactly one
+`{type: "json", value: ...}` part and apply the business schema to its `value`.
+Keep `$defs` and local references rooted in the complete requested schema.
+For example, this native JSON output satisfies an answer schema requiring a
+boolean `ok` field:
+
+```json
+{"content": [{"type": "json", "value": {"ok": false}}]}
+```
+
+The runnable [structured-output example](../../../../tests/model_runtime/v2/test_llm_responses.py)
+constructs this request and checks that missing fields, wrong types, JSON encoded
+as text, empty content, and a refusal do not satisfy its requested schema.
+It exercises the contract declarations and schema rules, not a provider call.
+
+Plugins translate supported requests into provider generation settings and reject
+unsupported schemas before inference. Do not silently discard constraints or
+claim support from a prompt instruction alone. Completed output must satisfy both
+the effective contract and requested schemas; a refusal or truncated answer that
+does not conform follows the existing model failure path. Stream previews do not
+establish conformance. This uses one caller-supplied schema; it adds no separate
+response-format parameter, parser, or retry loop.
