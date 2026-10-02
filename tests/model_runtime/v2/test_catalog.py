@@ -22,8 +22,12 @@ class ConfiguredCatalog:
             contracts=(
                 ModelContract(
                     ref=ContractRef(id="text-score", revision="1"),
-                    request=DataFormat(schema={"type": "object"}, kinds=("text",)),
-                    output=DataFormat(schema={"type": "number"}, kinds=("score",)),
+                    request=DataFormat(
+                        schema={"type": "object"}, mime_types=("text/plain",)
+                    ),
+                    output=DataFormat(
+                        schema={"type": "number"}, mime_types=("application/json",)
+                    ),
                     delivery=frozenset({"complete"}),
                     stream=None,
                     accepts_output_schema=False,

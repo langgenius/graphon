@@ -1,12 +1,12 @@
 from copy import deepcopy
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from graphon.model_runtime.v2 import DataFormat, JsonObject, JsonValue
 
 
-def test_data_format_owns_schema_and_preserves_open_metadata() -> None:
+def test_data_format_owns_schema_and_preserves_mime_types() -> None:
     examples: list[JsonValue] = [None, False, 3, 1.25, "text", {"tags": ["initial"]}]
     schema: JsonObject = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -16,7 +16,13 @@ def test_data_format_owns_schema_and_preserves_open_metadata() -> None:
     }
     expected_schema = deepcopy(schema)
     data_format = DataFormat(
-        schema=schema, kinds=("vendor:future", "json"), profile="vendor:profile"
+        schema=schema,
+        mime_types=(
+            "image/png",
+            'application/vnd.example+json;profile="CaseSensitive"',
+            "plugin-validated",
+        ),
+        profile="vendor:profile",
     )
     schema["$ref"] = "#/changed"
     source_items: Any = examples
@@ -28,9 +34,13 @@ def test_data_format_owns_schema_and_preserves_open_metadata() -> None:
     returned_schema["examples"][-1]["tags"].append("read mutation")
     returned_schema["new"] = True
     assert data_format.schema == expected_schema
-    assert data_format.kinds == ("vendor:future", "json")
+    assert data_format.mime_types == (
+        "image/png",
+        'application/vnd.example+json;profile="CaseSensitive"',
+        "plugin-validated",
+    )
     assert data_format.profile == "vendor:profile"
-    for field, value in (("schema", {}), ("kinds", ()), ("profile", None)):
+    for field, value in (("schema", {}), ("mime_types", ()), ("profile", None)):
         with pytest.raises(AttributeError):
             setattr(data_format, field, value)
 
@@ -43,15 +53,21 @@ def test_data_format_accepts_shared_json_without_treating_it_as_a_cycle() -> Non
         "left": shared,
         "right": shared,
     }
-    data_format = DataFormat(schema=schema, kinds=())
+    data_format = DataFormat(schema=schema, mime_types=())
     assert data_format.schema == schema
     assert data_format.profile is None
+
+
+def test_data_format_requires_mime_types_as_a_tuple_of_strings() -> None:
+    for mime_types in (None, "image/png", ["image/png"], (None,), ("image/png", 7)):
+        with pytest.raises((TypeError, ValueError)):
+            DataFormat(schema={}, mime_types=cast("Any", mime_types))
 
 
 @pytest.mark.parametrize("schema", [None, True, 1, 1.0, "object", []])
 def test_data_format_requires_an_object_schema(schema: Any) -> None:
     with pytest.raises((TypeError, ValueError)):
-        DataFormat(schema=schema, kinds=())
+        DataFormat(schema=schema, mime_types=())
 
 
 @pytest.mark.parametrize(
@@ -69,7 +85,7 @@ def test_data_format_requires_an_object_schema(schema: Any) -> None:
 )
 def test_data_format_rejects_non_json_values_without_coercion(value: Any) -> None:
     with pytest.raises((TypeError, ValueError)):
-        DataFormat(schema={"nested": [value]}, kinds=())
+        DataFormat(schema={"nested": [value]}, mime_types=())
 
 
 @pytest.mark.parametrize("container_type", [list, dict])
@@ -80,4 +96,4 @@ def test_data_format_rejects_json_cycles(container_type: Any) -> None:
     else:
         value["self"] = value
     with pytest.raises((TypeError, ValueError)):
-        DataFormat(schema={"nested": value}, kinds=())
+        DataFormat(schema={"nested": value}, mime_types=())

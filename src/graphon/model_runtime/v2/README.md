@@ -22,15 +22,27 @@ source dependencies, not the absence of ancestor imports from `sys.modules`.
 Existing model consumers require explicit future adapters; introducing these
 declarations does not switch any caller to V2.
 
-[DataFormat](domain/formats.py) carries an owned JSON object schema, a tuple of
-kind strings, and an optional profile string. Kind and profile values are open
-metadata; the [built-in LLM contract](#built-in-llm-contract) defines shared content
-profiles. [JSON values](domain/json_values.py)
+[DataFormat](domain/formats.py) carries an owned JSON object schema, a
+`mime_types` tuple, and an optional profile string. MIME types describe supported
+payload formats, such as `text/plain`, `image/png`, or `application/json`;
+profiles define shared semantics. The [built-in LLM contract](#built-in-llm-contract)
+defines shared content profiles. [JSON values](domain/json_values.py)
 preserve scalar types and require finite numbers, string object keys, and acyclic
 lists and objects. The `schema` property returns a defensive copy; callers cannot
 change a description by mutating the supplied schema or a returned dictionary.
 [Format checks](../../../../tests/model_runtime/v2/test_formats.py) cover these
 ownership and JSON boundaries.
+
+Request MIME types summarize input content, excluding `ModelRequest.parameters`
+and the JSON transport envelope; output MIME types summarize returned content,
+and stream MIME types summarize preview content. Plugins advertise concrete media
+types with MIME parameters when needed, not wildcard media ranges. Values are
+preserved unchanged, including parameter case. An empty tuple
+means unspecified, not support for every format. MIME labels do not define tool
+semantics, score meaning, or valid input/output combinations; schemas, profiles,
+and contract pairings do. Declarations check only that MIME metadata is a tuple of
+strings. Plugins validate [media-type syntax and parameter semantics](https://www.rfc-editor.org/rfc/rfc9110.html#section-8.3.1)
+and actual format support.
 
 The plugin boundary is responsible for interpreting self-contained JSON Schema
 Draft 2020-12 with document-local references. Request schemas describe the joint
@@ -202,7 +214,7 @@ Preserve text exactly, including whitespace and empty strings.
 | Content part | Shape and meaning |
 | --- | --- |
 | Text | `{type: "text", text: string}` |
-| Media | `{type: "image" or "audio" or "video" or "document", mime_type, source}` |
+| Media | `{type: "media", mime_type, source}`; the MIME type identifies the format |
 | Media source | Exactly one of `{type: "uri", uri}`, `{type: "file", id}`, or `{type: "inline", encoding: "base64", data}` |
 | Tool call | `{type: "tool_call", call_id, name, arguments: object}` |
 | Tool result | `{type: "tool_result", call_id, content, is_error?: boolean}`; content is text or an ordered array of text/media/JSON parts |
@@ -210,6 +222,9 @@ Preserve text exactly, including whitespace and empty strings.
 | Reasoning | `{type: "reasoning", text: string}`; only reasoning or summaries the provider exposes |
 | Refusal | `{type: "refusal", text: string}`; distinct from answer text |
 
+The `media` tag identifies the payload shape; MIME types identify PNG, PDF, audio,
+video, or any other media format without a separate modality classification.
+Text, JSON, tool, reasoning, and refusal tags describe protocol semantics.
 Media URI/file identifiers and MIME labels are nonempty strings. Source objects
 have only the fields belonging to their selected source kind. Plugins check
 actual MIME types, base64 decoding, size limits, reference access and lifetime;
@@ -252,10 +267,14 @@ in `ProviderState`, not visible reasoning text. Plugins preserve their associati
 with content parts and their replay order; hosts retain and return that state
 unchanged. Visible reasoning text alone is not a substitute for continuation.
 
-The declaration describes representable formats, not capabilities every model
-supports. Plugins narrow schemas and kinds to actual input/output combinations,
-MIME/source kinds, parameters, and limits, rejecting unsupported requests before
-provider inference.
+`LLM_CONTRACT` is a template with empty `mime_types` tuples; it does not advertise
+a model's format support. Effective plugin contracts supply actual input/output
+MIME lists and narrow schemas to supported combinations, sources, parameters,
+and limits. For example, a model can advertise request types
+`("text/plain", "image/png", "application/pdf")` and output types
+`("text/plain", "application/json")`. Plugins reject unsupported requests before
+provider inference; the schema still determines whether tools or other protocol
+parts are supported.
 
 The constant defaults to complete delivery. Its stream format is available for
 models that support streaming; it does not advertise that all LLMs stream.

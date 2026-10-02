@@ -7,27 +7,28 @@ from graphon.model_runtime.v2.domain.json_values import JsonObject, copy_json_ob
 @dataclass(frozen=True, init=False)
 class DataFormat:
     _schema: JsonObject = field(repr=False)
-    kinds: tuple[str, ...]
+    mime_types: tuple[str, ...]
     profile: str | None
 
     def __init__(
         self,
         *,
         schema: JsonObject,
-        kinds: tuple[str, ...],
+        mime_types: tuple[str, ...],
         profile: str | None = None,
     ) -> None:
         if (
-            not isinstance(kinds, tuple)
-            or not all(isinstance(kind, str) for kind in kinds)
+            not isinstance(mime_types, tuple)
+            or not all(isinstance(mime_type, str) for mime_type in mime_types)
             or (profile is not None and not isinstance(profile, str))
         ):
             message = (
-                "Kinds must be a tuple of strings; profile must be a string or None"
+                "MIME types must be a tuple of strings; "
+                "profile must be a string or None"
             )
             raise ValueError(message)
         object.__setattr__(self, "_schema", copy_json_object(schema))
-        object.__setattr__(self, "kinds", kinds)
+        object.__setattr__(self, "mime_types", mime_types)
         object.__setattr__(self, "profile", profile)
 
     @property

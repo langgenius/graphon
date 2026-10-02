@@ -11,11 +11,13 @@ from graphon.model_runtime.v2 import (
 )
 
 
-def make_contract(contract_id: str, input_kind: str, output_kind: str) -> ModelContract:
+def make_contract(
+    contract_id: str, input_mime_type: str, output_mime_type: str
+) -> ModelContract:
     return ModelContract(
         ref=ContractRef(id=contract_id, revision="1"),
-        request=DataFormat(schema={}, kinds=(input_kind,)),
-        output=DataFormat(schema={}, kinds=(output_kind,)),
+        request=DataFormat(schema={}, mime_types=(input_mime_type,)),
+        output=DataFormat(schema={}, mime_types=(output_mime_type,)),
         delivery=frozenset({"complete"}),
         stream=None,
         accepts_output_schema=False,
@@ -25,8 +27,8 @@ def make_contract(contract_id: str, input_kind: str, output_kind: str) -> ModelC
 def test_descriptor_keeps_pairings_independent_of_operation_tags() -> None:
     model_ref = ModelRef(plugin_id="plugin", provider="provider", model="deployment")
     contracts = (
-        make_contract("text-score", "text", "score"),
-        make_contract("audio-text", "audio", "text"),
+        make_contract("text-score", "text/plain", "application/json"),
+        make_contract("audio-text", "audio/L16;rate=16000", "text/plain"),
     )
     descriptor = ModelDescriptor(
         ref=model_ref,
@@ -48,11 +50,11 @@ def test_descriptor_keeps_pairings_independent_of_operation_tags() -> None:
     assert untagged_descriptor.label is None
     assert untagged_descriptor.description is None
     assert [
-        (contract.request.kinds, contract.output.kinds)
+        (contract.request.mime_types, contract.output.mime_types)
         for contract in descriptor.contracts
     ] == [
-        (("text",), ("score",)),
-        (("audio",), ("text",)),
+        (("text/plain",), ("application/json",)),
+        (("audio/L16;rate=16000",), ("text/plain",)),
     ]
     for record, field_name in (
         (descriptor, "contracts"),
@@ -65,7 +67,7 @@ def test_descriptor_keeps_pairings_independent_of_operation_tags() -> None:
 
 def test_descriptor_requires_contracts_with_distinct_ids() -> None:
     model_ref = ModelRef(plugin_id="plugin", provider="provider", model="deployment")
-    original_contract = make_contract("score", "text", "score")
+    original_contract = make_contract("score", "text/plain", "application/json")
     revised_contract = ModelContract(
         ref=ContractRef(id="score", revision="2"),
         request=original_contract.request,
@@ -80,7 +82,7 @@ def test_descriptor_requires_contracts_with_distinct_ids() -> None:
 
 
 def test_contract_requires_delivery_and_a_format_for_streaming() -> None:
-    text_format = DataFormat(schema={}, kinds=("text",))
+    text_format = DataFormat(schema={}, mime_types=("text/plain",))
     for delivery in (
         frozenset(),
         frozenset({"stream"}),

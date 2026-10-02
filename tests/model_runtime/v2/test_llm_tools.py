@@ -73,12 +73,12 @@ def test_llm_tool_turns_allow_argument_objects_and_multimodal_results() -> None:
             "content": [
                 {"type": "text", "text": "Record found"},
                 {
-                    "type": "image",
+                    "type": "media",
                     "mime_type": "image/png",
                     "source": {"type": "uri", "uri": "https://example.com/record.png"},
                 },
                 {
-                    "type": "document",
+                    "type": "media",
                     "mime_type": "application/pdf",
                     "source": {"type": "file", "id": "record-1"},
                 },

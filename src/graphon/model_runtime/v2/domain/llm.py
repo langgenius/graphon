@@ -5,19 +5,6 @@ from graphon.model_runtime.v2.domain.formats import DataFormat
 from graphon.model_runtime.v2.domain.identity import ContractRef
 from graphon.model_runtime.v2.domain.json_values import JsonObject
 
-_CONTENT_KINDS = (
-    "text",
-    "image",
-    "audio",
-    "video",
-    "document",
-    "tool_call",
-    "tool_result",
-    "json",
-    "reasoning",
-    "refusal",
-)
-
 
 def _build_content_definitions() -> JsonObject:
     return {
@@ -62,7 +49,7 @@ def _build_content_definitions() -> JsonObject:
             "type": "object",
             "required": ["type", "mime_type", "source"],
             "properties": {
-                "type": {"enum": ["image", "audio", "video", "document"]},
+                "type": {"const": "media"},
                 "mime_type": {"type": "string", "minLength": 1},
                 "source": {"$ref": "#/$defs/media_source"},
             },
@@ -134,7 +121,7 @@ LLM_CONTRACT = ModelContract(
     ref=ContractRef(id="llm", revision="1"),
     request=DataFormat(
         profile="graphon.llm.request/1",
-        kinds=_CONTENT_KINDS,
+        mime_types=(),
         schema={
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "$defs": _build_content_definitions(),
@@ -204,7 +191,7 @@ LLM_CONTRACT = ModelContract(
     ),
     output=DataFormat(
         profile="graphon.llm.output/1",
-        kinds=_CONTENT_KINDS,
+        mime_types=(),
         schema={
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "$defs": _build_content_definitions(),
@@ -223,7 +210,7 @@ LLM_CONTRACT = ModelContract(
     delivery=frozenset({"complete"}),
     stream=DataFormat(
         profile="graphon.llm.stream/1",
-        kinds=_CONTENT_KINDS,
+        mime_types=(),
         schema={
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "$defs": _build_content_definitions(),
