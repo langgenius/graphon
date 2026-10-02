@@ -4,8 +4,10 @@ from graphon.model_runtime.v2.application import (
     DataFormat,
     JsonObject,
     JsonValue,
+    ModelCallError,
     ModelContract,
     ModelDescriptor,
+    ModelError,
     ModelRef,
     ProviderState,
 )
@@ -16,8 +18,10 @@ __all__ = [
     "DataFormat",
     "JsonObject",
     "JsonValue",
+    "ModelCallError",
     "ModelContract",
     "ModelDescriptor",
+    "ModelError",
     "ModelRef",
     "ProviderState",
 ]
