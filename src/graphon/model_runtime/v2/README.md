@@ -24,7 +24,7 @@ declarations does not switch any caller to V2.
 
 [DataFormat](domain/formats.py) carries an owned JSON object schema, a tuple of
 kind strings, and an optional profile string. Kind and profile values are open
-metadata; the [built-in LLM contract](#built-in-llm-contract) defines shared text
+metadata; the [built-in LLM contract](#built-in-llm-contract) defines shared content
 profiles. [JSON values](domain/json_values.py)
 preserve scalar types and require finite numbers, string object keys, and acyclic
 lists and objects. The `schema` property returns a defensive copy; callers cannot
@@ -180,9 +180,10 @@ these outcomes with a job-only implementation and refreshed opaque handles.
 
 ## Built-in LLM contract
 
-This declaration provides one common text contract for new LLM nodes to adopt.
+This declaration provides one common content contract for new LLM nodes to adopt.
 Existing nodes remain unchanged; this package supplies no reader or fallback
-runtime.
+runtime. These profiles standardize text and media; tool calls and results,
+structured output, reasoning, and refusals have no shared representation yet.
 
 Import `LLM_CONTRACT` from `graphon.model_runtime.v2`. Its
 [schemas](domain/llm.py) define these values:
@@ -190,32 +191,59 @@ Import `LLM_CONTRACT` from `graphon.model_runtime.v2`. Its
 | Format | Value | Versioned profile |
 | --- | --- | --- |
 | Request projection | `{input: {messages: [{role, content}]}, parameters: {}}` | `graphon.llm.request/1` |
-| `ModelResult.output` | `{text: string}` | `graphon.llm.output/1` |
-| `StreamChunk.value` preview | `{text_delta: string}` | `graphon.llm.stream/1` |
+| `ModelResult.output` | `{content: ContentPart[]}` or `{text: string}` shorthand | `graphon.llm.output/1` |
+| `StreamChunk.value` preview | Indexed text deltas or whole content parts; `{text_delta: string}` shorthand for text-only output | `graphon.llm.stream/1` |
 
-Messages are ordered and carry string `role` and `content` fields. Plugins define
-their supported roles, such as `system`, `user`, and `assistant`, in the effective
-schema. Preserve text exactly, including whitespace and empty strings.
-Input, message, output, and preview objects permit extra fields; the
-outer request projection contains only `input` and `parameters`. Parameters are
-an object with no built-in generation settings. Plugins describe and enforce
-their supported parameters and limits in the effective request schema before
-provider inference. Extra fields have no standardized meaning.
+Messages preserve their order and carry a string `role`; `content` is a string
+shorthand or an ordered array of typed parts. Plugins define their supported
+roles, such as `system`, `user`, and `assistant`, in the effective schema.
+Preserve text exactly, including whitespace and empty strings.
+
+| Content part | Shape and meaning |
+| --- | --- |
+| Text | `{type: "text", text: string}` |
+| Media | `{type: "image" or "audio" or "video" or "document", mime_type, source}` |
+| Media source | Exactly one of `{type: "uri", uri}`, `{type: "file", id}`, or `{type: "inline", encoding: "base64", data}` |
+
+Media URI/file identifiers and MIME labels are nonempty strings. Source objects
+have only the fields belonging to their selected source kind. Plugins check
+actual MIME types, base64 decoding, size limits, reference access and lifetime;
+the declarations do not fetch, decode, or store media. Input, message, part,
+output, and preview objects permit extra fields with no standardized meaning.
+The outer request projection contains only `input` and `parameters`; parameters
+are an object with no built-in generation settings.
+
+Output content is authoritative when present. An optional `text` convenience
+field must equal the concatenation of its text parts; plugins enforce this
+correspondence. Media-only and empty content do not require invented text.
+The declaration describes representable formats, not capabilities every model
+supports. Plugins narrow schemas and kinds to actual input/output combinations,
+MIME/source kinds, parameters, and limits, rejecting unsupported requests before
+provider inference.
 
 The constant defaults to complete delivery. Its stream format is available for
 models that support streaming; it does not advertise that all LLMs stream.
 Plugins can use `dataclasses.replace(LLM_CONTRACT, ref=..., delivery=...)` to
 declare their model-local identity, effective revision, and actual delivery.
-They may restrict supported parameters and limits while retaining the shared
-profile meanings; they must not add mandatory provider-only fields. Shared
-profile versions are independent of opaque model-local contract revisions.
+Keep the shared profile meanings when narrowing schemas, and do not add mandatory
+provider-only fields. Shared profile versions are independent of opaque
+model-local contract revisions.
 Custom contracts remain available; usage and continuation retain their existing
 outer-envelope semantics.
 
-For future consumers, concatenate `text_delta` values only for the live preview;
-the completed result remains authoritative. Ignore unreadable previews and wait
-for completion. Read the `text` key when `ModelResult.output` is an object and
-the value is a string, including an empty string. If output interpretation fails,
+An indexed preview is `{type: "text_delta", index, text}` or
+`{type: "content_part", index, part}`. Its nonnegative `index` identifies the
+position in final output content, independently of the outer event sequence.
+Text deltas append at that position; a whole part replaces its preview there.
+Plugins preserve part indices throughout a stream. The `{text_delta}`
+shorthand appends only to text-only output and is not mixed with indexed events.
+The completed result is authoritative; these declarations add no assembler.
+
+Future consumers read ordered content first, or the `text` shorthand when
+content is absent. A consumer supporting only text must retain the entire output
+when it contains other part types, rather than dropping media through the text
+convenience field. Ignore unreadable previews and wait for completion.
+If output interpretation fails,
 pass through the original entire `ModelResult.output` JSON value, including extra
 fields, arrays, scalars, or null. Other nodes can then parse that value. Do not
 stringify it or substitute the `ModelResult` envelope. This fallback does not turn
@@ -225,3 +253,8 @@ later adoption change.
 
 [Contract checks](../../../../tests/model_runtime/v2/test_llm_contract.py)
 exercise the built-in schemas and reuse with model-local identity and delivery.
+The source choices reflect
+[OpenAI's image inputs](https://developers.openai.com/api/docs/guides/images-vision),
+and ordered parts follow the message structure described by
+[Gemini Content](https://ai.google.dev/api/generate-content#Content). Plugins own
+conversion to provider formats and their support limits.

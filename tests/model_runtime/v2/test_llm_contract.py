@@ -17,7 +17,7 @@ def test_llm_contract_allows_model_local_identity_and_delivery() -> None:
         LLM_CONTRACT.output,
         LLM_CONTRACT.stream,
     ):
-        assert data_format.kinds == ("text",)
+        assert data_format.kinds == ("text", "image", "audio", "video", "document")
         assert data_format.schema["$schema"] == Draft202012Validator.META_SCHEMA["$id"]
         Draft202012Validator.check_schema(data_format.schema)
 
@@ -71,7 +71,7 @@ def test_llm_request_accepts_text_conversations_and_plugin_parameters() -> None:
     })
 
 
-def test_llm_output_and_previews_require_text_and_allow_extra_fields() -> None:
+def test_llm_output_and_previews_accept_text_shorthand_and_extra_fields() -> None:
     assert LLM_CONTRACT.stream is not None
     for data_format, text_field in (
         (LLM_CONTRACT.output, "text"),
@@ -100,3 +100,91 @@ def test_llm_output_and_previews_require_text_and_allow_extra_fields() -> None:
     assert not Draft202012Validator(LLM_CONTRACT.stream.schema).is_valid({
         "text": "complete"
     })
+
+
+def test_llm_messages_and_outputs_accept_ordered_multimodal_content() -> None:
+    content = [
+        {"type": "text", "text": "Compare these inputs", "vendor_note": "retained"},
+        {
+            "type": "image",
+            "mime_type": "image/png",
+            "detail": "high",
+            "source": {"type": "uri", "uri": "https://example.com/image.png"},
+        },
+        {
+            "type": "audio",
+            "mime_type": "audio/wav",
+            "source": {"type": "inline", "encoding": "base64", "data": "YQ=="},
+        },
+        {
+            "type": "video",
+            "mime_type": "video/mp4",
+            "source": {"type": "file", "id": "video-1"},
+        },
+        {
+            "type": "document",
+            "mime_type": "application/pdf",
+            "source": {"type": "file", "id": "document-1"},
+        },
+    ]
+    assert Draft202012Validator(LLM_CONTRACT.request.schema).is_valid({
+        "input": {"messages": [{"role": "user", "content": content}]},
+        "parameters": {},
+    })
+    assert not Draft202012Validator(LLM_CONTRACT.request.schema).is_valid({
+        "input": {"messages": [{"role": "user", "content": [{"type": "image"}]}]},
+        "parameters": {},
+    })
+    output_validator = Draft202012Validator(LLM_CONTRACT.output.schema)
+    assert output_validator.is_valid({"content": content, "provider_field": False})
+    assert output_validator.is_valid({"content": [content[2]]})
+    assert output_validator.is_valid({"content": []})
+    assert output_validator.is_valid({
+        "text": "Hello",
+        "content": [{"type": "text", "text": "Hello"}],
+    })
+    assert not output_validator.is_valid({"text": "Hello", "content": "invalid"})
+
+
+def test_llm_media_requires_one_declared_source() -> None:
+    validator = Draft202012Validator(LLM_CONTRACT.output.schema)
+    for source in (
+        {},
+        {"type": "uri", "uri": "https://example.com/image.png", "id": "ambiguous"},
+        {"type": "file", "id": 7},
+        {"type": "file", "uri": "https://example.com/image.png"},
+        {"type": "inline", "encoding": "utf-8", "data": "raw bytes"},
+    ):
+        assert not validator.is_valid({
+            "content": [{"type": "image", "mime_type": "image/png", "source": source}]
+        })
+    assert not validator.is_valid({
+        "content": [{"type": "image", "source": {"type": "file", "id": "image-1"}}]
+    })
+    assert not validator.is_valid({"content": [{"type": "text", "text": 7}]})
+    assert not validator.is_valid({"content": [{"type": "unknown", "text": "Hi"}]})
+
+
+def test_llm_stream_previews_identify_content_parts() -> None:
+    assert LLM_CONTRACT.stream is not None
+    validator = Draft202012Validator(LLM_CONTRACT.stream.schema)
+    assert validator.is_valid({"text_delta": "Legacy text shorthand"})
+    assert validator.is_valid({"type": "text_delta", "index": 0, "text": "Hello"})
+    assert validator.is_valid({
+        "type": "content_part",
+        "index": 1,
+        "part": {
+            "type": "audio",
+            "mime_type": "audio/wav",
+            "source": {"type": "file", "id": "audio-1"},
+        },
+    })
+    for invalid_preview in (
+        {"type": "text_delta", "text": "missing index"},
+        {"type": "text_delta", "text_delta": "fallback", "text": "missing index"},
+        {"type": "text_delta", "index": -1, "text": "negative"},
+        {"type": "text_delta", "index": False, "text": "boolean"},
+        {"type": "content_part", "index": 0, "part": {"type": "image"}},
+        {"type": "unknown", "text_delta": "cannot bypass typed preview schema"},
+    ):
+        assert not validator.is_valid(invalid_preview)
