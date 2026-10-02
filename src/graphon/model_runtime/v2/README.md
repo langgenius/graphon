@@ -25,8 +25,9 @@ declarations does not switch any caller to V2.
 [DataFormat](domain/formats.py) carries an owned JSON object schema, a
 `mime_types` tuple of strings, and an optional profile string. MIME types describe
 supported payload formats, such as `text/plain`, `image/png`, or `application/json`;
-profiles identify separately defined semantics. No shared profile is standardized
-here. [JSON values](domain/json_values.py)
+profiles identify separately defined semantics. The
+[built-in LLM contract](#built-in-llm-contract) defines shared content profiles.
+[JSON values](domain/json_values.py)
 preserve scalar types and require finite numbers, string object keys, and acyclic
 lists and objects. The `schema` property returns a defensive copy; callers cannot
 change a description by mutating the supplied schema or a returned dictionary.
@@ -190,3 +191,183 @@ adds no polling, sleep, retry, or persistence. Restart-safe resume requires
 plugin/daemon support.
 [Job-control examples](../../../../tests/model_runtime/v2/test_jobs.py) illustrate
 these outcomes with a job-only implementation and refreshed opaque handles.
+
+## Built-in LLM contract
+
+This declaration provides one common content contract for new LLM nodes to adopt.
+Existing nodes remain unchanged; this package supplies no reader or fallback
+runtime. These profiles standardize text, media, tool calls/results, native JSON,
+provider-visible reasoning, and refusals.
+
+Import `LLM_CONTRACT` from `graphon.model_runtime.v2`. Its
+[schemas](domain/llm.py) define these values:
+
+| Format | Value | Versioned profile |
+| --- | --- | --- |
+| Request projection | `{input: {messages: [{role, content}]}, parameters: {}}` | `graphon.llm.request/1` |
+| `ModelResult.output` | `{content: ContentPart[]}` or `{text: string}` shorthand | `graphon.llm.output/1` |
+| `StreamChunk.value` preview | Indexed content previews; `{text_delta: string}` shorthand for text-only output | `graphon.llm.stream/1` |
+
+Messages preserve their order and carry a string `role`; `content` is a string
+shorthand or an ordered array of typed parts. Plugins define their supported
+roles, such as `system`, `user`, and `assistant`, in the effective schema.
+Preserve text exactly, including whitespace and empty strings.
+
+| Content part | Shape and meaning |
+| --- | --- |
+| Text | `{type: "text", text: string}` |
+| Media | `{type: "media", mime_type, source}`; the MIME type identifies the format |
+| Media source | Exactly one of `{type: "uri", uri}`, `{type: "file", id}`, or `{type: "inline", encoding: "base64", data}` |
+| Tool call | `{type: "tool_call", call_id, name, arguments: object}` |
+| Tool result | `{type: "tool_result", call_id, content, is_error?: boolean}`; content is text or an ordered array of text/media/JSON parts |
+| JSON | `{type: "json", value: any JSON value}`; preserve objects, arrays, scalars, null, and falsey values |
+| Reasoning | `{type: "reasoning", text: string}`; only reasoning or summaries the provider exposes |
+| Refusal | `{type: "refusal", text: string}`; distinct from answer text |
+
+The `media` tag identifies the payload shape; MIME types identify PNG, PDF, audio,
+video, or any other media format without a separate modality classification.
+Text, JSON, tool, reasoning, and refusal tags describe protocol semantics.
+Media URI/file identifiers and MIME labels are nonempty strings. Source objects
+have only the fields belonging to their selected source kind. Plugins check
+actual MIME types, base64 decoding, size limits, reference access and lifetime;
+the declarations do not fetch, decode, or store media. Input, message, part,
+output, and preview objects permit extra fields with no standardized meaning.
+The outer request projection contains only `input` and `parameters`.
+
+`input.tools` optionally declares tools as `{name, description?, input_schema}`,
+where `input_schema` is a JSON Schema object describing the final argument object.
+Tool names and call IDs are nonempty strings.
+`parameters.tool_choice` is `auto` (model may call tools),
+`none` (no calls), `required` (at least one call), or `{name}` (only that named
+tool must be called). `parameters.parallel_tool_calls: false` permits at most one
+call per reply; `true` permits multiple calls. Omitted options use the
+plugin/provider default. Other generation settings remain model-specific.
+
+Plugins check unique tool names and call IDs, selected tool membership, argument
+schema validity and conformance, and result correspondence to prior calls. The
+declarations check only that `input_schema` is an object. Calls and results
+keep their IDs and order across turns, including multimodal results; a result's
+`is_error` describes tool execution, not a model invocation failure. A call is a
+request for host execution, not execution authority. The host authorizes and runs
+tools; this package adds no tool loop or dispatcher. Provider-hosted tools with
+different semantics require an explicitly understood custom contract.
+
+Output content is authoritative when present. An optional `text` convenience
+field must equal the concatenation of its text parts; plugins enforce this
+correspondence. Media-only, tool-only, and empty content do not require invented text.
+Optional `finish_reason` is an open string describing why generation stopped;
+preserve provider-specific values. Refusals and truncation do not become fabricated
+answers or completed JSON. Return available content and the stop reason only when
+they satisfy the selected contract and any requested output schema; otherwise use
+the existing model failure envelope.
+
+Native JSON parts describe returned values. Models advertise schema-directed
+generation separately through the [structured-output capability](#structured-output).
+
+Opaque signatures, redacted/encrypted reasoning, and provider replay items belong
+in `ProviderState`, not visible reasoning text. Plugins preserve their association
+with content parts and their replay order; hosts retain and return that state
+unchanged. Visible reasoning text alone is not a substitute for continuation.
+
+`LLM_CONTRACT` is a template with empty `mime_types` tuples; it does not advertise
+a model's format support. Effective plugin contracts supply actual input/output
+MIME lists and narrow schemas to supported combinations, sources, parameters,
+and limits. For example, a model can advertise request types
+`("text/plain", "image/png", "application/pdf")` and output types
+`("text/plain", "application/json")`. Plugins reject unsupported requests before
+provider inference; the schema still determines whether tools or other protocol
+parts are supported.
+
+The constant defaults to complete delivery. Its stream format is available for
+models that support streaming; it does not advertise that all LLMs stream.
+Plugins can use `dataclasses.replace(LLM_CONTRACT, ref=..., delivery=...)` to
+declare their model-local identity, effective revision, and actual delivery.
+Keep the shared profile meanings when narrowing schemas, and do not add mandatory
+provider-only fields. Shared profile versions are independent of opaque
+model-local contract revisions.
+Custom contracts remain available; usage and continuation retain their existing
+outer-envelope semantics.
+
+Text, reasoning, and refusal previews use
+`{type: "text_delta" or "reasoning_delta" or "refusal_delta", index, text}`;
+whole-part previews use
+`{type: "content_part", index, part}`. Their nonnegative `index` identifies the
+position in final output content, independently of the outer event sequence.
+Each text-bearing delta appends to its matching part type at that position;
+a whole part replaces its preview there. JSON previews use complete parts, not
+partially parsed values.
+Plugins preserve part indices throughout a stream. The `{text_delta}`
+shorthand appends only to text-only output and is not mixed with indexed events.
+The completed result is authoritative; these declarations add no assembler.
+
+Tool argument previews use
+`{type: "tool_call_delta", index, call_id, name, arguments_delta: string}`.
+Fragments append in event order at that index; they can be incomplete JSON and
+are neither final arguments nor executable calls. Plugins preserve each call's
+ID/name at its index, parse and check final arguments, and put complete call
+objects in the terminal result.
+
+Future consumers read ordered content first, or the `text` shorthand when
+content is absent. A consumer supporting only text must retain the entire output
+when it contains non-text parts, instead of selecting only the `text` convenience
+field. Ignore unreadable previews and wait for completion.
+If output interpretation fails,
+pass through the original entire `ModelResult.output` JSON value, including extra
+fields, arrays, scalars, or null. Other nodes can then parse that value. Do not
+stringify it or substitute the `ModelResult` envelope. This fallback does not turn
+provider errors, contract validation failures, failed streams, or interrupted
+streams into successful output. Implementing these node behaviors belongs to a
+later adoption change.
+
+[Contract checks](../../../../tests/model_runtime/v2/test_llm_contract.py)
+exercise the built-in schemas and reuse with model-local identity and delivery.
+The source choices reflect
+[OpenAI's image inputs](https://developers.openai.com/api/docs/guides/images-vision),
+and ordered parts follow the message structure described by
+[Gemini Content](https://ai.google.dev/api/generate-content#Content). Plugins own
+conversion to provider formats and their support limits.
+[Tool checks](../../../../tests/model_runtime/v2/test_llm_tools.py) cover
+tool declarations, payload shapes, and incomplete argument previews; they do not
+exercise provider integration or tool execution.
+The tool/result forms reflect
+[Claude tool exchanges](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)
+and [Gemini function calling](https://ai.google.dev/gemini-api/docs/function-calling).
+[Response checks](../../../../tests/model_runtime/v2/test_llm_responses.py) cover
+native JSON, reasoning/refusal parts, finish reasons, and their previews.
+The distinction between structured output and refusals follows
+[OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
+Continuation obligations reflect
+[OpenAI reasoning](https://developers.openai.com/api/docs/guides/reasoning) and
+[Gemini thought signatures](https://ai.google.dev/gemini-api/docs/thinking#thought-signatures).
+
+### Structured output
+
+Structured output uses the existing `ModelRequest.output_schema` field. A plugin
+advertises support on its effective model contract with
+`dataclasses.replace(LLM_CONTRACT, accepts_output_schema=True)`. The built-in
+default stays false because not every model supports schema-directed generation.
+Callers check the discovered contract before supplying a schema.
+
+The requested schema constrains the entire `ModelResult.output`, including the
+content wrapper. To request one structured answer, require exactly one
+`{type: "json", value: ...}` part and apply the business schema to its `value`.
+Keep `$defs` and local references rooted in the complete requested schema.
+For example, this native JSON output satisfies an answer schema requiring a
+boolean `ok` field:
+
+```json
+{"content": [{"type": "json", "value": {"ok": false}}]}
+```
+
+The runnable [structured-output example](../../../../tests/model_runtime/v2/test_llm_responses.py)
+constructs this request and checks that missing fields, wrong types, JSON encoded
+as text, empty content, and a refusal do not satisfy its requested schema.
+It exercises the contract declarations and schema rules, not a provider call.
+
+Plugins translate supported requests into provider generation settings and reject
+unsupported schemas before inference. Do not silently discard constraints or
+claim support from a prompt instruction alone. Completed output must satisfy both
+the effective contract and requested schemas; a refusal or truncated answer that
+does not conform follows the existing model failure path. Stream previews do not
+establish conformance. This uses one caller-supplied schema; it adds no separate
+response-format parameter, parser, or retry loop.
