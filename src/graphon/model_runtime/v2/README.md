@@ -182,7 +182,7 @@ these outcomes with a job-only implementation and refreshed opaque handles.
 
 This declaration provides one common content contract for new LLM nodes to adopt.
 Existing nodes remain unchanged; this package supplies no reader or fallback
-runtime. These profiles standardize text and media; tool calls and results,
+runtime. These profiles standardize text, media, and tool calls/results;
 structured output, reasoning, and refusals have no shared representation yet.
 
 Import `LLM_CONTRACT` from `graphon.model_runtime.v2`. Its
@@ -192,7 +192,7 @@ Import `LLM_CONTRACT` from `graphon.model_runtime.v2`. Its
 | --- | --- | --- |
 | Request projection | `{input: {messages: [{role, content}]}, parameters: {}}` | `graphon.llm.request/1` |
 | `ModelResult.output` | `{content: ContentPart[]}` or `{text: string}` shorthand | `graphon.llm.output/1` |
-| `StreamChunk.value` preview | Indexed text deltas or whole content parts; `{text_delta: string}` shorthand for text-only output | `graphon.llm.stream/1` |
+| `StreamChunk.value` preview | Indexed content previews; `{text_delta: string}` shorthand for text-only output | `graphon.llm.stream/1` |
 
 Messages preserve their order and carry a string `role`; `content` is a string
 shorthand or an ordered array of typed parts. Plugins define their supported
@@ -204,18 +204,37 @@ Preserve text exactly, including whitespace and empty strings.
 | Text | `{type: "text", text: string}` |
 | Media | `{type: "image" or "audio" or "video" or "document", mime_type, source}` |
 | Media source | Exactly one of `{type: "uri", uri}`, `{type: "file", id}`, or `{type: "inline", encoding: "base64", data}` |
+| Tool call | `{type: "tool_call", call_id, name, arguments: object}` |
+| Tool result | `{type: "tool_result", call_id, content, is_error?: boolean}`; content is text or an ordered array of text/media parts |
 
 Media URI/file identifiers and MIME labels are nonempty strings. Source objects
 have only the fields belonging to their selected source kind. Plugins check
 actual MIME types, base64 decoding, size limits, reference access and lifetime;
 the declarations do not fetch, decode, or store media. Input, message, part,
 output, and preview objects permit extra fields with no standardized meaning.
-The outer request projection contains only `input` and `parameters`; parameters
-are an object with no built-in generation settings.
+The outer request projection contains only `input` and `parameters`.
+
+`input.tools` optionally declares tools as `{name, description?, input_schema}`,
+where `input_schema` is a JSON Schema object describing the final argument object.
+Tool names and call IDs are nonempty strings.
+`parameters.tool_choice` is `auto` (model may call tools),
+`none` (no calls), `required` (at least one call), or `{name}` (only that named
+tool must be called). `parameters.parallel_tool_calls: false` permits at most one
+call per reply; `true` permits multiple calls. Omitted options use the
+plugin/provider default. Other generation settings remain model-specific.
+
+Plugins check unique tool names and call IDs, selected tool membership, argument
+schema validity and conformance, and result correspondence to prior calls. The
+declarations check only that `input_schema` is an object. Calls and results
+keep their IDs and order across turns, including multimodal results; a result's
+`is_error` describes tool execution, not a model invocation failure. A call is a
+request for host execution, not execution authority. The host authorizes and runs
+tools; this package adds no tool loop or dispatcher. Provider-hosted tools with
+different semantics require an explicitly understood custom contract.
 
 Output content is authoritative when present. An optional `text` convenience
 field must equal the concatenation of its text parts; plugins enforce this
-correspondence. Media-only and empty content do not require invented text.
+correspondence. Media-only, tool-only, and empty content do not require invented text.
 The declaration describes representable formats, not capabilities every model
 supports. Plugins narrow schemas and kinds to actual input/output combinations,
 MIME/source kinds, parameters, and limits, rejecting unsupported requests before
@@ -231,13 +250,20 @@ model-local contract revisions.
 Custom contracts remain available; usage and continuation retain their existing
 outer-envelope semantics.
 
-An indexed preview is `{type: "text_delta", index, text}` or
-`{type: "content_part", index, part}`. Its nonnegative `index` identifies the
+Text and whole-part previews use `{type: "text_delta", index, text}` or
+`{type: "content_part", index, part}`. Their nonnegative `index` identifies the
 position in final output content, independently of the outer event sequence.
 Text deltas append at that position; a whole part replaces its preview there.
 Plugins preserve part indices throughout a stream. The `{text_delta}`
 shorthand appends only to text-only output and is not mixed with indexed events.
 The completed result is authoritative; these declarations add no assembler.
+
+Tool argument previews use
+`{type: "tool_call_delta", index, call_id, name, arguments_delta: string}`.
+Fragments append in event order at that index; they can be incomplete JSON and
+are neither final arguments nor executable calls. Plugins preserve each call's
+ID/name at its index, parse and check final arguments, and put complete call
+objects in the terminal result.
 
 Future consumers read ordered content first, or the `text` shorthand when
 content is absent. A consumer supporting only text must retain the entire output
@@ -258,3 +284,9 @@ The source choices reflect
 and ordered parts follow the message structure described by
 [Gemini Content](https://ai.google.dev/api/generate-content#Content). Plugins own
 conversion to provider formats and their support limits.
+[Tool checks](../../../../tests/model_runtime/v2/test_llm_tools.py) cover
+tool declarations, payload shapes, and incomplete argument previews; they do not
+exercise provider integration or tool execution.
+The tool/result forms reflect
+[Claude tool exchanges](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)
+and [Gemini function calling](https://ai.google.dev/gemini-api/docs/function-calling).
