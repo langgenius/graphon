@@ -1,5 +1,6 @@
 from graphon.runtime.read_only_wrappers import ReadOnlyVariablePoolWrapper
 from graphon.runtime.variable_pool import VariablePool
+from graphon.variables.segments import ArrayObjectSegment
 from graphon.variables.template_resolution import convert_template
 
 
@@ -29,3 +30,31 @@ class TestConvertTemplate:
         )
 
         assert "The start" not in pool.variable_dictionary
+
+    def test_inserts_array_object_as_json(self) -> None:
+        pool = VariablePool.empty()
+        pool.add(
+            ("code", "items"),
+            [
+                {"sku": "A1", "gift": True, "note": None},
+                {"sku": "B2", "gift": False, "note": "Tom's"},
+            ],
+        )
+
+        rendered = convert_template(
+            ReadOnlyVariablePoolWrapper(pool),
+            '{"items": {{#code.items#}}}',
+        )
+
+        assert rendered.text == (
+            '{"items": [{"sku": "A1", "gift": true, "note": null}, '
+            '{"sku": "B2", "gift": false, "note": "Tom\'s"}]}'
+        )
+
+        pool.add(("code", "nullable"), [{"a": None}])
+        nullable = convert_template(
+            ReadOnlyVariablePoolWrapper(pool),
+            "{{#code.nullable#}}",
+        )
+        assert nullable.text == '[{"a": null}]'
+        assert ArrayObjectSegment(value=[]).text == ""

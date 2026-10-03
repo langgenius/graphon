@@ -186,6 +186,13 @@ class ArrayObjectSegment(ArraySegment):
     value_type: SegmentType = SegmentType.ARRAY_OBJECT
     value: Sequence[Mapping[str, Any]]
 
+    @property
+    def text(self) -> str:
+        # Return empty string for empty arrays instead of "[]"
+        if not self.value:
+            return ""
+        return json.dumps(self.value, ensure_ascii=False)
+
 
 class ArrayFileSegment(ArraySegment):
     value_type: SegmentType = SegmentType.ARRAY_FILE
