@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-09-24T01:04:56Z"
+last_checked: "2026-10-08T17:57:51Z"
 -->
 # Maintaining repository knowledge
 
