@@ -215,6 +215,7 @@ def _filter_prompt_messages(
             if (
                 len(prompt_message_content) == 1
                 and prompt_message_content[0].type == PromptMessageContentType.TEXT
+                and prompt_message_content[0].opaque_body is None
             ):
                 prompt_message.content = prompt_message_content[0].data
             else:
