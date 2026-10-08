@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Annotated, Final, Literal
@@ -121,7 +121,7 @@ class GraphExecution:
     )
 
     @contextmanager
-    def track_execution(self) -> Iterator[None]:
+    def track_execution(self) -> Generator[None]:
         """Keep snapshots disabled for one engine run or execution thread.
 
         Each participant remains active until it exits, even if a shutdown join
@@ -136,7 +136,7 @@ class GraphExecution:
                 self._active_executions -= 1
 
     @contextmanager
-    def lock_for_snapshot(self) -> Iterator[None]:
+    def lock_for_snapshot(self) -> Generator[None]:
         """Exclude execution startup and other snapshots during serialization.
 
         Raises:

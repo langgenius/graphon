@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Final
@@ -20,7 +20,7 @@ _FILE_RUNTIME: Final[ContextVar[WorkflowFileRuntimeProtocol | None]] = ContextVa
 @contextmanager
 def use_workflow_file_runtime(
     runtime: WorkflowFileRuntimeProtocol | None,
-) -> Iterator[None]:
+) -> Generator[None]:
     """Bind file helpers in this context; None explicitly disables resolution.
 
     Hosts can use this when constructing an engine or rendering its file values.

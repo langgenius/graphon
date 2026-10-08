@@ -67,7 +67,6 @@ class CodeNode(Node[CodeNodeData]):
     node_type = BuiltinNodeTypes.CODE
     _limits: CodeNodeLimits
 
-    @override
     def __init__(
         self,
         node_id: str,

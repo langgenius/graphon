@@ -50,7 +50,7 @@ def test_http_request_node_extracts_variable_selectors_from_form_data() -> None:
         graph_config={},
         config={
             "id": "node-1",
-            "data": node_data.model_dump(mode="json"),
+            "data": node_data,
         },
     )
 

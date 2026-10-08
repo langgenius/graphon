@@ -33,7 +33,6 @@ class TemplateTransformNode(Node[TemplateTransformNodeData]):
     _jinja2_template_renderer: Jinja2TemplateRenderer
     _max_output_length: int
 
-    @override
     def __init__(
         self,
         node_id: str,

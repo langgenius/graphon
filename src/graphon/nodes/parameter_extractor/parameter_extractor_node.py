@@ -171,7 +171,6 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         prompt_message_serializer: PromptMessageSerializerProtocol,
     ) -> None: ...
 
-    @override
     def __init__(
         self,
         node_id: str,
