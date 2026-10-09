@@ -28,6 +28,7 @@ Keep detailed component knowledge next to its implementation and link it here.
 | Engine lifecycle extensions | [Layers](../src/graphon/engine/layer/README.md) |
 | Pause, abort, variable updates | [Commands](../src/graphon/engine/command/README.md) |
 | Execution and host file rendering | [State ownership](../ARCHITECTURE.md#state-and-execution-invariants) |
+| Model Runtime V2 contracts | [V2 declarations](../src/graphon/model_runtime/v2/README.md) |
 | Model capabilities and providers | [Model runtime](../src/graphon/model_runtime/README.md) |
 | DSL and direct Python construction | [Slim example setup](../examples/slim_llm/README.md) |
 
