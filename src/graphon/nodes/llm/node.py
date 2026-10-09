@@ -148,7 +148,6 @@ class LLMNode(Node[LLMNodeData]):
     _memory: PromptMessageMemory | None
     _default_query_selector: tuple[str, ...] | None
 
-    @override
     def __init__(
         self,
         node_id: str,

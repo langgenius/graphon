@@ -94,7 +94,6 @@ class SlimLLM(LLMProtocol):
     ``(plugin_id, provider)``.
     """
 
-    @override
     def __init__(
         self,
         *,

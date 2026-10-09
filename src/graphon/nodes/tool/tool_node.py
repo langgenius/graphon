@@ -73,7 +73,6 @@ class ToolNode(Node[ToolNodeData]):
 
     node_type = BuiltinNodeTypes.TOOL
 
-    @override
     def __init__(
         self,
         node_id: str,

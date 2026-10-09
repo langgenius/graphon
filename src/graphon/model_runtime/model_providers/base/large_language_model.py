@@ -124,7 +124,7 @@ class _LLMChunkAccumulator:
     usage: LLMUsage = field(default_factory=LLMUsage.empty_usage)
     system_fingerprint: str | None = None
     tool_calls: list[AssistantPromptMessage.ToolCall] = field(default_factory=list)
-    opaque_body: JsonValue | None = None
+    opaque_body: JsonValue = None
 
     def consume_all(self, chunks: Iterator[LLMResultChunk]) -> None:
         for chunk in chunks:
@@ -181,7 +181,7 @@ class _StreamingInvokeAccumulator:
     message_content: list[PromptMessageContentUnionTypes] = field(default_factory=list)
     usage: LLMUsage | None = None
     system_fingerprint: str | None = None
-    opaque_body: JsonValue | None = None
+    opaque_body: JsonValue = None
 
     def consume(self, chunk: LLMResultChunk) -> None:
         self._consume_content(chunk.delta.message.content)

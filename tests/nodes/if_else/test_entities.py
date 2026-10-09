@@ -21,7 +21,7 @@ def _extract_variable_mapping(
             graph_config={},
             config={
                 "id": "if-node",
-                "data": node_data.model_dump(mode="json"),
+                "data": node_data,
             },
         )
     )

@@ -1,5 +1,5 @@
 import json
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 
@@ -23,7 +23,7 @@ def test_nested_parallel_containers_pass_the_direct_parent_execution() -> None:
             node: Node,
             *,
             parent_execution_id: str | None = None,
-        ) -> Iterator[None]:
+        ) -> Generator[None]:
             parents[node.execution_id] = (node.id, parent_execution_id)
             activations[node.execution_id] = activations.get(node.execution_id, 0) + 1
             token = active.set(node.execution_id)
@@ -133,7 +133,7 @@ def test_layer_context_failure_does_not_fail_node_or_skip_other_layers(
             node: Node,
             *,
             parent_execution_id: str | None = None,
-        ) -> Iterator[None]:
+        ) -> Generator[None]:
             _ = node
             _ = parent_execution_id
             if failure == "enter":
@@ -150,7 +150,7 @@ def test_layer_context_failure_does_not_fail_node_or_skip_other_layers(
             node: Node,
             *,
             parent_execution_id: str | None = None,
-        ) -> Iterator[None]:
+        ) -> Generator[None]:
             _ = node
             _ = parent_execution_id
             steps.append("enter")
