@@ -37,3 +37,7 @@ def copy_json_object(value: JsonObject) -> JsonObject:
         message = "Expected a JSON object"
         raise TypeError(message)
     return copied_value
+
+
+def copy_usage(usage: JsonValue) -> JsonValue:
+    return 0 if usage is None else copy_json(usage)
