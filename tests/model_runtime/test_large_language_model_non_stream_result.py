@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from typing import Any
 
 from graphon.model_runtime.entities.llm_entities import (
     LLMResult,
@@ -24,8 +25,13 @@ def _make_chunk(
     tool_calls: list[AssistantPromptMessage.ToolCall] | None = None,
     usage: LLMUsage | None = None,
     system_fingerprint: str | None = None,
+    opaque_body: Any | None = None,
 ) -> LLMResultChunk:
-    message = AssistantPromptMessage(content=content, tool_calls=tool_calls or [])
+    message = AssistantPromptMessage(
+        content=content,
+        tool_calls=tool_calls or [],
+        opaque_body=opaque_body,
+    )
     delta = LLMResultChunkDelta(index=0, message=message, usage=usage)
     return LLMResultChunk(
         model=model,
@@ -149,6 +155,63 @@ def test__normalize_non_stream_runtime_result__empty_iterator_defaults() -> None
     assert result.message.tool_calls == []
     assert result.usage == LLMUsage.empty_usage()
     assert result.system_fingerprint is None
+
+
+def test_non_stream_result_preserves_opaque_body() -> None:
+    prompt_messages = [UserPromptMessage(content="hi")]
+    opaque_body = {
+        "assistant_blocks": [{"type": "thinking", "signature": "sig-1"}],
+    }
+    chunk = _make_chunk(
+        content="hello",
+        usage=LLMUsage.empty_usage(),
+        opaque_body=opaque_body,
+    )
+
+    result = normalize_non_stream_runtime_result(
+        model="test-model",
+        prompt_messages=prompt_messages,
+        result=iter([chunk]),
+    )
+
+    assert result.message.opaque_body == opaque_body
+
+
+def test_non_stream_result_opaque_body_last_non_none_wins() -> None:
+    prompt_messages = [UserPromptMessage(content="hi")]
+    chunks = iter([
+        _make_chunk(
+            content="a",
+            usage=LLMUsage.empty_usage(),
+            opaque_body={"snapshot": 1},
+        ),
+        _make_chunk(content="b", usage=LLMUsage.empty_usage()),
+        _make_chunk(
+            content="c",
+            usage=LLMUsage.empty_usage(),
+            opaque_body={"snapshot": 2},
+        ),
+    ])
+
+    result = normalize_non_stream_runtime_result(
+        model="test-model",
+        prompt_messages=prompt_messages,
+        result=chunks,
+    )
+
+    assert result.message.opaque_body == {"snapshot": 2}
+
+
+def test_non_stream_result_opaque_body_defaults_to_none() -> None:
+    prompt_messages = [UserPromptMessage(content="hi")]
+
+    result = normalize_non_stream_runtime_result(
+        model="test-model",
+        prompt_messages=prompt_messages,
+        result=iter([_make_chunk(content="hello", usage=LLMUsage.empty_usage())]),
+    )
+
+    assert result.message.opaque_body is None
 
 
 def test__normalize_non_stream_runtime_result__accumulates_all_chunks() -> None:

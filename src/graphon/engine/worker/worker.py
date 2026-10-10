@@ -8,7 +8,7 @@ import logging
 import queue
 import sys
 import threading
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Iterator, Sequence
 from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -274,7 +274,7 @@ class Worker(threading.Thread):
         layer: Layer,
         node: Node,
         parent_execution_id: str | None,
-    ) -> Iterator[None]:
+    ) -> Generator[None]:
         try:
             context = layer.node_run_context(
                 node, parent_execution_id=parent_execution_id

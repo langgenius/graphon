@@ -35,25 +35,6 @@ class _TestNode(Node[_TestNodeData]):
     def version(cls) -> str:
         return "1"
 
-    def __init__(
-        self,
-        *,
-        node_id: str,
-        data: _TestNodeData,
-        init_params: InitParams,
-        runtime_state: RuntimeState,
-    ) -> None:
-        super().__init__(
-            node_id=node_id,
-            data=data,
-            init_params=init_params,
-            runtime_state=runtime_state,
-        )
-
-        node_type_value = self.data.get("type")
-        if isinstance(node_type_value, str):
-            self.node_type = node_type_value
-
     def _run(self) -> NodeRunResult | Generator[NodeEventPayload, None, None]:
         raise NotImplementedError
 
@@ -61,7 +42,6 @@ class _TestNode(Node[_TestNodeData]):
         super().post_init()
         self.post_init_graph_config = self.init_params.graph_config
         self._maybe_override_execution_type()
-        self.data = dict(self.node_data.model_dump())
 
     def _maybe_override_execution_type(self) -> None:
         execution_type_value = self.node_data.execution_type

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from itertools import zip_longest
 from unittest.mock import MagicMock
@@ -130,7 +130,7 @@ class _FileLayer(Layer):
     @contextmanager
     def node_run_context(
         self, node: Node, *, parent_execution_id: str | None = None
-    ) -> Iterator[None]:
+    ) -> Generator[None]:
         _ = parent_execution_id
         self.reads.append((f"enter:{node.id}", self.file.generate_url()))
         try:

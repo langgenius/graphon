@@ -5,6 +5,7 @@ from io import BytesIO
 from typing import IO, Any, cast
 
 import pytest
+from pydantic import JsonValue
 
 from graphon.model_runtime.callbacks.base_callback import Callback
 from graphon.model_runtime.entities.common_entities import I18nObject
@@ -739,6 +740,95 @@ def test_large_language_model_stream_after_invoke_preserves_chunk_state() -> Non
     ]
     assert after_result.usage == usage
     assert after_result.system_fingerprint == "fp-2"
+
+
+@pytest.mark.parametrize("stream", [True, False])
+@pytest.mark.parametrize("mixed_content", [True, False])
+@pytest.mark.parametrize("opaque_body", [{"signature": "s"}, {}, [], "", 0, False])
+def test_large_language_model_uses_last_opaque_body_per_invocation(
+    stream: bool,
+    mixed_content: bool,
+    opaque_body: JsonValue,
+) -> None:
+    provider = ProviderEntity(
+        provider="test-provider",
+        label=I18nObject(en_US="Test Provider"),
+        supported_model_types=[ModelType.LLM],
+        configurate_methods=[],
+    )
+    runtime = _StreamingLLMRuntimeStub([])
+    model = LargeLanguageModel(
+        provider_schema=provider,
+        model_runtime=cast("LLMModelRuntime", runtime),
+    )
+    callback = _RecordingCallback()
+    for snapshot in (opaque_body, None):
+        content_block = TextPromptMessageContent(data="", opaque_body=snapshot)
+        chunk_contents: list[str | list[PromptMessageContentUnionTypes]] = (
+            ["answer", [content_block], "tail", ""]
+            if mixed_content
+            else ["answer", "", "", ""]
+        )
+        runtime._chunks = tuple(
+            LLMResultChunk.model_validate({
+                "model": "test-model",
+                "delta": {
+                    "index": index,
+                    "message": {
+                        "content": chunk_contents[index],
+                        "opaque_body": chunk_snapshot,
+                    },
+                },
+            })
+            for index, chunk_snapshot in enumerate(
+                [{"partial": True}, snapshot, None, None]
+                if snapshot is not None
+                else [None],
+            )
+        )
+        result = model.invoke(
+            model="test-model",
+            credentials={},
+            prompt_messages=[UserPromptMessage(content="hello")],
+            stream=stream,
+            callbacks=[callback],
+        )
+        if isinstance(result, LLMResult):
+            assert result.message.opaque_body == snapshot
+            assert type(result.message.opaque_body) is type(snapshot)
+            if mixed_content and snapshot is not None:
+                assert result.message.content == [
+                    TextPromptMessageContent(data="answer"),
+                    content_block,
+                    TextPromptMessageContent(data="tail"),
+                ]
+                assert isinstance(result.message.content, list)
+                assert result.message.content[1].opaque_body == snapshot
+                assert type(result.message.content[1].opaque_body) is type(snapshot)
+        else:
+            chunks = list(result)
+            assert chunks[-1].delta.message.opaque_body is None
+            if mixed_content and snapshot is not None:
+                assert [
+                    chunk.delta.message.content for chunk in chunks
+                ] == chunk_contents
+                blocks = chunks[1].delta.message.content
+                assert isinstance(blocks, list)
+                assert blocks[0].opaque_body == snapshot
+                assert type(blocks[0].opaque_body) is type(snapshot)
+
+        assert callback.after_results[-1].message.opaque_body == snapshot
+        assert type(callback.after_results[-1].message.opaque_body) is type(snapshot)
+        if mixed_content and snapshot is not None:
+            blocks = callback.after_results[-1].message.content
+            assert blocks == [
+                TextPromptMessageContent(data="answer"),
+                content_block,
+                TextPromptMessageContent(data="tail"),
+            ]
+            assert isinstance(blocks, list)
+            assert blocks[1].opaque_body == snapshot
+            assert type(blocks[1].opaque_body) is type(snapshot)
 
 
 def test_large_language_model_stream_errors_are_transformed() -> None:

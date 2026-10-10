@@ -51,7 +51,6 @@ class HttpRequestNodeDependencies:
 class HttpRequestNode(Node[HttpRequestNodeData]):
     node_type = BuiltinNodeTypes.HTTP_REQUEST
 
-    @override
     def __init__(
         self,
         node_id: str,

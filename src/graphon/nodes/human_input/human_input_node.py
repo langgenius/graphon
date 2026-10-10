@@ -36,7 +36,6 @@ class HumanInputNode(Node[HumanInputNodeData]):
     node_type = BuiltinNodeTypes.HUMAN_INPUT
     execution_type = NodeExecutionType.BRANCH
 
-    @override
     def __init__(
         self,
         node_id: str,

@@ -1,5 +1,5 @@
 import queue
-from collections.abc import Generator, Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -95,7 +95,7 @@ class _RecordingLayer(Layer):
         node: Node,
         *,
         parent_execution_id: str | None = None,
-    ) -> Iterator[None]:
+    ) -> Generator[None]:
         assert self.active_execution.get() is None
         token = self.active_execution.set(node.execution_id)
         self.context_events.append((
