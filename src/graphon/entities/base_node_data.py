@@ -29,9 +29,11 @@ class RetryConfig(BaseModel):
 class DefaultValueType(StrEnum):
     STRING = "string"
     NUMBER = "number"
+    BOOLEAN = "boolean"
     OBJECT = "object"
     ARRAY_NUMBER = "array[number]"
     ARRAY_STRING = "array[string]"
+    ARRAY_BOOLEAN = "array[boolean]"
     ARRAY_OBJECT = "array[object]"
     ARRAY_FILES = "array[file]"
 
@@ -78,6 +80,10 @@ class DefaultValue(BaseModel):
                 "type": _NumberType,
                 "converter": self._convert_number,
             },
+            DefaultValueType.BOOLEAN: {
+                "type": bool,
+                "converter": self._parse_json,
+            },
             DefaultValueType.OBJECT: {
                 "type": dict,
                 "converter": self._parse_json,
@@ -90,6 +96,11 @@ class DefaultValue(BaseModel):
             DefaultValueType.ARRAY_STRING: {
                 "type": list,
                 "element_type": str,
+                "converter": self._parse_json,
+            },
+            DefaultValueType.ARRAY_BOOLEAN: {
+                "type": list,
+                "element_type": bool,
                 "converter": self._parse_json,
             },
             DefaultValueType.ARRAY_OBJECT: {
