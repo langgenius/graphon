@@ -1,4 +1,5 @@
 from graphon.model_runtime.v2.application import (
+    LLM_CONTRACT,
     CallContext,
     ContractRef,
     DataFormat,
@@ -26,6 +27,7 @@ from graphon.model_runtime.v2.application import (
 )
 
 __all__ = [
+    "LLM_CONTRACT",
     "CallContext",
     "ContractRef",
     "DataFormat",
