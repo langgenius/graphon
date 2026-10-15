@@ -118,11 +118,15 @@ class IterationNode(Node[IterationNodeData]):
 
         if isinstance(result, ContainerExecutionResult):
             node_run_result = result.node_run_result.to_node_run_result()
+            outputs = {
+                key: value.to_object()
+                for key, value in result.node_run_result.outputs.items()
+            }
             if node_run_result.status == WorkflowNodeExecutionStatus.SUCCEEDED:
                 yield IterationSucceededEvent(
                     start_at=self._start_at,
                     inputs=node_run_result.inputs,
-                    outputs=node_run_result.outputs,
+                    outputs=outputs,
                     metadata=result.metadata,
                     steps=result.steps,
                 )
@@ -130,7 +134,7 @@ class IterationNode(Node[IterationNodeData]):
                 yield IterationFailedEvent(
                     start_at=self._start_at,
                     inputs=node_run_result.inputs,
-                    outputs=node_run_result.outputs,
+                    outputs=outputs,
                     metadata=result.metadata,
                     steps=result.steps,
                     error=node_run_result.error,
