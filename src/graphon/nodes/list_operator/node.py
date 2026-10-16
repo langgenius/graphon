@@ -278,7 +278,14 @@ class ListOperatorNode(Node[ListOperatorNodeData]):
         return variable
 
     def _apply_slice(self, variable: _SUPPORTED_TYPES_ALIAS) -> _SUPPORTED_TYPES_ALIAS:
-        result = variable.value[: self.node_data.limit.size]
+        size = self.node_data.limit.size
+        if size < 0:
+            # ``Limit.size`` defaults to -1 to mean "unset". Python reads a negative
+            # slice stop as an offset from the end, so ``value[:-1]`` kept everything
+            # but the last element instead of keeping every element. See #295.
+            result = variable.value
+        else:
+            result = variable.value[:size]
         return variable.model_copy(update={"value": result})
 
     def _extract_slice(
