@@ -34,5 +34,8 @@ When consuming chunks, [LargeLanguageModel](model_providers/base/large_language_
 Adapters should emit complete snapshots because each replaces the previous value, including empty collections, empty strings, zero, and `False`.
 Aggregation preserves the order of mixed strings and content blocks, including each block's state; see the [model dispatch tests](../../../tests/model_runtime/test_model_dispatch.py).
 
+Hosts can display chunks while calling `consume(chunk)` on one [LLMResultAccumulator](model_providers/base/large_language_model.py) per invocation.
+After consuming the stream, call its `to_result(model=..., prompt_messages=...)` and use the returned `message` for replay or [JSON persistence](../../../tests/model_runtime/test_llm_result_accumulator.py).
+
 [SlimLLM](../dsl/slim/llm.py) uses the same aggregation for blocking ordinary and structured output calls; see the [Slim tests](../../../tests/dsl/test_slim_llm.py).
 [Prompt filtering](../nodes/llm/llm_utils.py) preserves state on supported content blocks and keeps assistant messages with non-`None` state even when their content list is empty; see the [prompt tests](../../../tests/nodes/llm/test_llm_utils.py).
