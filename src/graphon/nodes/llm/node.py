@@ -1569,7 +1569,6 @@ class LLMNode(Node[LLMNodeData]):
         ):
             buffer.write(text_part)
 
-        # Extract reasoning content from <think> tags in the main text
         full_text = buffer.getvalue()
 
         if reasoning_format == "tagged":
@@ -1577,11 +1576,12 @@ class LLMNode(Node[LLMNodeData]):
             clean_text = full_text
             reasoning_content = ""
         else:
-            # Extract clean text and reasoning from <think> tags
-            clean_text, reasoning_content = split_reasoning(
+            # Prefer explicit provider reasoning; fall back to <think> tags in the text.
+            clean_text, tagged_reasoning = split_reasoning(
                 full_text,
                 reasoning_format,
             )
+            reasoning_content = invoke_result.reasoning_content or tagged_reasoning
 
         event = ModelInvokeCompletedEvent(
             # Use clean_text for separated mode, full_text for tagged mode

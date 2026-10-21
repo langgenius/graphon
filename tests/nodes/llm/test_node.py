@@ -361,6 +361,25 @@ def test_blocking_structured_output_is_validated_against_schema() -> None:
         )
 
 
+def test_blocking_result_preserves_explicit_reasoning_content() -> None:
+    result = LLMResult(
+        model="gpt-4o",
+        message=AssistantPromptMessage(content="final answer"),
+        usage=LLMUsage.empty_usage(),
+        reasoning_content="private reasoning",
+    )
+
+    event = LLMNode.handle_blocking_result(
+        invoke_result=result,
+        saver=MagicMock(),
+        file_outputs=[],
+        reasoning_format="separated",
+    )
+
+    assert event.text == "final answer"
+    assert event.reasoning_content == "private reasoning"
+
+
 @pytest.mark.parametrize(
     ("features", "should_invoke"),
     [

@@ -30,6 +30,8 @@ The field accepts `JsonValue` and defaults to `None`; the adapter owns its meani
 An assistant message with any non-`None` state is nonempty even without visible content or tool calls.
 See the [message entity tests](../../../tests/model_runtime/test_message_entities.py) for serialization and empty-message behavior.
 
+For non-streaming results, providers can return displayable reasoning in `LLMResult.reasoning_content`; the LLM node exposes it in separated mode and prefers it over reasoning parsed from `<think>` tags.
+
 When consuming chunks, [LargeLanguageModel](model_providers/base/large_language_model.py) retains the last non-`None` assistant `opaque_body` snapshot within each invocation for both the non-stream result and the result passed to `on_after_invoke`.
 Adapters should emit complete snapshots because each replaces the previous value, including empty collections, empty strings, zero, and `False`.
 Aggregation preserves the order of mixed strings and content blocks, including each block's state; see the [model dispatch tests](../../../tests/model_runtime/test_model_dispatch.py).
