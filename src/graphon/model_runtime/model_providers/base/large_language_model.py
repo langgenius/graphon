@@ -118,7 +118,9 @@ def _merge_tool_call_delta(
 
 
 @dataclass(slots=True)
-class _LLMChunkAccumulator:
+class LLMResultAccumulator:
+    """Retain a complete result while a caller consumes and displays each chunk."""
+
     content: str = ""
     content_list: list[PromptMessageContentUnionTypes] = field(default_factory=list)
     usage: LLMUsage = field(default_factory=LLMUsage.empty_usage)
@@ -242,7 +244,7 @@ def _build_llm_result_from_chunks(
         A normalized `LLMResult` assembled from the consumed chunks.
 
     """
-    accumulator = _LLMChunkAccumulator()
+    accumulator = LLMResultAccumulator()
     try:
         accumulator.consume_all(chunks)
     except Exception:
