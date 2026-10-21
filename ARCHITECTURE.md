@@ -109,9 +109,17 @@ compatibility details:
 | File adapter binding and isolation | [File runtime](src/graphon/file/runtime.py), [engine](src/graphon/engine/engine.py) | [Execution file isolation](tests/engine/test_file_runtime.py), [file scopes](tests/file/test_runtime.py) |
 | Container ownership and factory preflight | [Graph and NodeFactory](src/graphon/graph/graph.py), [scoping](src/graphon/graph/scoping.py), [validation](src/graphon/graph/validation.py) | [Graph scoping and validation](tests/graph/test_graph_scoping.py) |
 | Branch joins and readiness | [Scheduler](src/graphon/engine/scheduler.py) | [Scheduling](tests/engine/test_scheduler.py) |
-| Container suspension and variable propagation | [Container effects](src/graphon/nodes/container_effects.py), [handlers](src/graphon/engine/container_handler/builtin/) | [Cooperative execution](tests/engine/test_cooperative_container_execution.py), [nested workflow isolation](tests/workflows/test_full_engine_events.py) |
+| Container suspension and variable propagation | [Container effects](src/graphon/nodes/container_effects.py), [handlers](src/graphon/engine/container_handler/builtin/) | [Container values](tests/nodes/test_container_effects.py), [cooperative execution](tests/engine/test_cooperative_container_execution.py), [workflow events and variables](tests/workflows/test_full_engine_events.py) |
 | Pause, resume, and snapshot quiescence | [Dispatcher](src/graphon/engine/dispatcher.py), [execution guard](src/graphon/runtime/execution.py) | [Serialization](tests/engine/test_runtime_state_serialization.py) |
 | Snapshot versions and migrations | [Snapshot loading](src/graphon/runtime/runtime_state/snapshot.py) | [Runtime snapshots](tests/runtime/test_runtime_state.py), [version isolation](tests/test_snapshot_version_isolation.py) |
+
+Container values preserve serializable segments' declared types across construction
+and snapshots, including empty typed arrays. Conversion discards source variable
+identity so completion binds outputs to the container's selectors in the parent
+pool. `ContainerNodeRunResult.to_node_run_result()` retains typed outputs for
+storage while unwrapping inputs; resumed Loop/Iteration presentation events unwrap
+outputs separately. Raw Python values still use type inference, and secrets still
+normalize to strings.
 
 For host rendering, bind the engine's adapter with
 [use_workflow_file_runtime](src/graphon/file/runtime.py); use
