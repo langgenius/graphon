@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-10-15T00:58:08Z"
+last_checked: "2026-10-22T01:04:05Z"
 -->
 # Layers
 
@@ -15,6 +15,10 @@ suspension without carrying context tokens between workers. The
 nested context binding and failure isolation.
 
 ## Usage
+
+Register a layer with [Engine.add_layer](../engine.py) before consuming
+`engine.run()`. Registration binds read-only runtime access and a command channel
+for execution controls.
 
 ```python
 from graphon.engine.layer import Layer

@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-10-15T00:58:08Z"
+last_checked: "2026-10-22T01:04:05Z"
 -->
 # Commands
 
@@ -14,11 +14,16 @@ workflow control behavior.
 
 ## Usage
 
+Pass the channel to [Engine](../engine.py) through `command_channel`; each
+channel belongs to one workflow execution.
+
 ```python
+from graphon.engine import Engine
 from graphon.engine.command import AbortCommand, InMemoryChannel, RedisChannel
 
 # Local execution
 channel = InMemoryChannel()
+engine = Engine(graph=graph, runtime_state=runtime_state, command_channel=channel)
 channel.send_command(AbortCommand(reason="stop"))
 
 # Distributed execution

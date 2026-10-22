@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-10-15T00:58:38Z"
+last_checked: "2026-10-22T01:04:00Z"
 -->
 # Technical debt
 
