@@ -36,6 +36,7 @@ from graphon.engine_events.node import (
 )
 from graphon.variables.factory import build_segment, segment_to_variable
 from graphon.variables.segments import Segment
+from graphon.variables.variables import ArrayStringVariable, StringVariable
 from tests.helpers.workflow_events import (
     event_path,
     fake_slim_llm,
@@ -195,6 +196,98 @@ def _failing_assigner(*, container_field: str, container_id: str) -> dict[str, A
                     "input_type": "constant",
                     "operation": "over-write",
                     "value": "unused",
+                }
+            ],
+        },
+    }
+
+
+def _iteration_nodes(
+    node_id: str,
+    *,
+    container_id: str = "",
+    is_parallel: bool = False,
+    parallel_nums: int = 1,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": node_id,
+            "data": {
+                "type": "iteration",
+                "container_id": container_id,
+                "iterator_selector": ["start", "items"],
+                "output_selector": [node_id, "item"],
+                "start_node_id": f"{node_id}-start",
+                "is_parallel": is_parallel,
+                "parallel_nums": parallel_nums,
+                "error_handle_mode": "terminated",
+                "flatten_output": False,
+            },
+        },
+        {
+            "id": f"{node_id}-start",
+            "data": {"type": "iteration-start", "container_id": node_id},
+        },
+    ]
+
+
+def _loop_nodes(node_id: str, *, container_id: str = "") -> list[dict[str, Any]]:
+    return [
+        {
+            "id": node_id,
+            "data": {
+                "type": "loop",
+                "container_id": container_id,
+                "loop_count": 1,
+                "start_node_id": f"{node_id}-start",
+                "break_conditions": [],
+                "logical_operator": "and",
+            },
+        },
+        {
+            "id": f"{node_id}-start",
+            "data": {"type": "loop-start", "container_id": node_id},
+        },
+    ]
+
+
+def _append_item_node(
+    *,
+    container_id: str,
+    namespace: str = "conversation",
+) -> dict[str, Any]:
+    """Append the item of the Iteration with ID ``iteration`` to ``history``."""
+    return {
+        "id": "append-item",
+        "data": {
+            "type": "assigner",
+            "version": "2",
+            "container_id": container_id,
+            "items": [
+                {
+                    "variable_selector": [namespace, "history"],
+                    "input_type": "variable",
+                    "operation": "append",
+                    "value": ["iteration", "item"],
+                }
+            ],
+        },
+    }
+
+
+def _write_item_node(node_id: str, *, variable_name: str) -> dict[str, Any]:
+    return {
+        "id": node_id,
+        "data": {
+            "type": "assigner",
+            "version": "2",
+            "container_id": "iteration",
+            "items": [
+                {
+                    "variable_selector": ["conversation", variable_name],
+                    "input_type": "variable",
+                    "operation": "over-write",
+                    "value": ["iteration", "item"],
                 }
             ],
         },
@@ -618,6 +711,8 @@ def test_nested_containers_preserve_external_updates_and_iteration_isolation() -
     command then changes it to ten; the second round must copy that value from the
     live outer frame and increment it to eleven. The following Iteration emits
     twelve inside its private pool, but must not write it back through the Loops.
+    Its increment of the root Start node's counter must stay private as well,
+    even though the Start node is outside the outer Loop.
     """
     dsl = _graph_dsl(
         nodes=[
@@ -708,7 +803,13 @@ def test_nested_containers_preserve_external_updates_and_iteration_isolation() -
                             "input_type": "constant",
                             "operation": "+=",
                             "value": 1,
-                        }
+                        },
+                        {
+                            "variable_selector": ["start", "counter"],
+                            "input_type": "constant",
+                            "operation": "+=",
+                            "value": 1,
+                        },
                     ],
                 },
             },
@@ -716,6 +817,10 @@ def test_nested_containers_preserve_external_updates_and_iteration_isolation() -
                 {
                     "variable": "counter",
                     "value_selector": ["inner-loop", "counter"],
+                },
+                {
+                    "variable": "start_counter",
+                    "value_selector": ["start", "counter"],
                 },
             ]),
         ],
@@ -729,7 +834,7 @@ def test_nested_containers_preserve_external_updates_and_iteration_isolation() -
         ],
     )
 
-    engine = loads(dsl, start_inputs={"items": ["only"]})
+    engine = loads(dsl, start_inputs={"items": ["only"], "counter": 0})
     update_sent = False
 
     class UpdateAfterFirstInnerRound(Layer):
@@ -774,7 +879,194 @@ def test_nested_containers_preserve_external_updates_and_iteration_isolation() -
         if isinstance(event, NodeRunVariableUpdatedEvent)
         and tuple(event.variable.selector) == ("inner-loop", "counter")
     ] == [1, 11, 12]
-    assert final_outputs(events) == {"counter": 11}
+    assert final_outputs(events) == {"counter": 11, "start_counter": 0}
+
+
+def _run_append_item_workflow(
+    *,
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, str]],
+    namespace: str = "conversation",
+) -> dict[str, object]:
+    """Run a graph that appends Iteration items to the host variable ``history``.
+
+    The host adds ``<namespace>.history`` to the root pool before the run, as it
+    does for conversation variables, and the End node reads it after the graph's
+    outer container. Every Iteration iterates over ``start.items``.
+
+    Returns:
+        The outputs of the successful run.
+
+    """
+    dsl = _graph_dsl(
+        nodes=[
+            _start_node(),
+            *nodes,
+            _end_node([
+                {
+                    "variable": "history",
+                    "value_selector": [namespace, "history"],
+                },
+            ]),
+        ],
+        edges=edges,
+    )
+    engine = loads(dsl, start_inputs={"items": ["a", "b", "c"]})
+    engine.runtime_state.variable_pool.add(
+        (namespace, "history"),
+        ArrayStringVariable(name="history", value=[], selector=[namespace, "history"]),
+    )
+    return final_outputs(list(engine.run()))
+
+
+@pytest.mark.parametrize("namespace", ["conversation", "session"])
+def test_serial_iteration_rounds_share_host_variable_writes(namespace: str) -> None:
+    """Pass host variable writes between Iteration rounds and to the parent.
+
+    A host variable lives in a namespace that no workflow node owns. Each round
+    appends its item, so the next round must start from the parent's updated
+    value, and the End node after the Iteration must read every item.
+    ``conversation`` is not special: another host namespace behaves the same.
+    """
+    outputs = _run_append_item_workflow(
+        nodes=[
+            *_iteration_nodes("iteration"),
+            _append_item_node(container_id="iteration", namespace=namespace),
+        ],
+        edges=[
+            _edge("start", "iteration"),
+            _edge("iteration-start", "append-item"),
+            _edge("iteration", "end"),
+        ],
+        namespace=namespace,
+    )
+
+    assert outputs == {"history": ["a", "b", "c"]}
+
+
+@pytest.mark.parametrize(
+    ("nodes", "edges", "expected_history"),
+    [
+        pytest.param(
+            [
+                *_loop_nodes("loop"),
+                *_iteration_nodes("iteration", container_id="loop"),
+                _append_item_node(container_id="iteration"),
+            ],
+            [
+                _edge("start", "loop"),
+                _edge("loop-start", "iteration"),
+                _edge("iteration-start", "append-item"),
+                _edge("loop", "end"),
+            ],
+            ["a", "b", "c"],
+            id="iteration-in-loop",
+        ),
+        pytest.param(
+            [
+                *_iteration_nodes("iteration"),
+                *_loop_nodes("loop", container_id="iteration"),
+                _append_item_node(container_id="loop"),
+            ],
+            [
+                _edge("start", "iteration"),
+                _edge("iteration-start", "loop"),
+                _edge("loop-start", "append-item"),
+                _edge("iteration", "end"),
+            ],
+            ["a", "b", "c"],
+            id="loop-in-iteration",
+        ),
+        pytest.param(
+            [
+                *_iteration_nodes("outer-iteration"),
+                *_iteration_nodes("iteration", container_id="outer-iteration"),
+                _append_item_node(container_id="iteration"),
+            ],
+            [
+                _edge("start", "outer-iteration"),
+                _edge("outer-iteration-start", "iteration"),
+                _edge("iteration-start", "append-item"),
+                _edge("outer-iteration", "end"),
+            ],
+            ["a", "b", "c"] * 3,
+            id="iteration-in-iteration",
+        ),
+    ],
+)
+def test_nested_containers_pass_host_variable_writes_to_root(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, str]],
+    expected_history: list[str],
+) -> None:
+    """Pass host variable writes from nested containers up to the root.
+
+    The innermost container's round appends the Iteration item. Each round's
+    parent frame must keep the write so the next round starts from it, and every
+    enclosing container must pass the write on until the End node after the
+    outer container reads every append.
+    """
+    outputs = _run_append_item_workflow(nodes=nodes, edges=edges)
+
+    assert outputs == {"history": expected_history}
+
+
+def test_parallel_iteration_rounds_keep_each_host_variable_write() -> None:
+    """Keep the host variable writes of Iteration rounds that run together.
+
+    Both rounds copy the parent pool before either writes. Round ``a`` writes
+    ``conversation.first`` and round ``b`` writes ``conversation.second``; each
+    write must reach the parent without the other round's stale copy undoing it.
+    """
+    dsl = _graph_dsl(
+        nodes=[
+            _start_node(),
+            *_iteration_nodes("iteration", is_parallel=True, parallel_nums=2),
+            {
+                "id": "route",
+                "data": {
+                    "type": "if-else",
+                    "container_id": "iteration",
+                    "cases": [
+                        {
+                            "case_id": "true",
+                            "logical_operator": "and",
+                            "conditions": [
+                                {
+                                    "variable_selector": ["iteration", "item"],
+                                    "comparison_operator": "is",
+                                    "value": "a",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            },
+            _write_item_node("write-first", variable_name="first"),
+            _write_item_node("write-second", variable_name="second"),
+            _end_node([
+                {"variable": "first", "value_selector": ["conversation", "first"]},
+                {"variable": "second", "value_selector": ["conversation", "second"]},
+            ]),
+        ],
+        edges=[
+            _edge("start", "iteration"),
+            _edge("iteration-start", "route"),
+            {"source": "route", "target": "write-first", "sourceHandle": "true"},
+            {"source": "route", "target": "write-second", "sourceHandle": "false"},
+            _edge("iteration", "end"),
+        ],
+    )
+    engine = loads(dsl, start_inputs={"items": ["a", "b"]})
+    for name in ("first", "second"):
+        engine.runtime_state.variable_pool.add(
+            ("conversation", name),
+            StringVariable(name=name, value="", selector=["conversation", name]),
+        )
+
+    events = list(engine.run())
+
+    assert final_outputs(events) == {"first": "a", "second": "b"}
 
 
 def test_full_loop_graph_stops_at_loop_end_node() -> None:
