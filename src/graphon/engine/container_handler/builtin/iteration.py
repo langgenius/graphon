@@ -430,7 +430,7 @@ class IterationContainerHandler:
 
         Rounds keep node-owned values, such as node outputs and Loop variables,
         private. A namespace that is not a node ID, such as ``conversation``,
-        holds host variables shared by the whole execution, so the parent pool
+        holds host variables shared beyond the round, so the parent pool
         stores the same object when it already holds the variable. Frame
         creation deep-copies variables, so the identity check also confirms that
         inner containers passed the write on. For the same reason, parallel
@@ -447,17 +447,23 @@ class IterationContainerHandler:
         parent_pool.add(selector, variable)
 
     def _node_ids(self) -> set[str]:
-        """Return the IDs of every node in the workflow graph.
+        """Return the IDs of nodes in every graph the engine is running.
 
-        Only the root graph config holds every node; a child frame's config
-        holds just its container's subtree.
+        A child frame's graph config holds only its container's subtree, and a
+        downstream container may run a separate workflow graph in its own frame.
+        Enclosing frames stay registered while their child frames run, so the
+        graphs whose nodes own a round's outer values are always included.
 
         Returns:
-            The node IDs listed in the root frame's graph config.
+            The node IDs listed in the graph configs of all registered frames.
 
         """
-        graph_config = self._frame_registry[ROOT_FRAME_ID].graph.graph_config or {}
-        return {node["id"] for node in graph_config.get("nodes", []) if "id" in node}
+        return {
+            node["id"]
+            for frame in self._frame_registry.frames()
+            for node in (frame.graph.graph_config or {}).get("nodes", [])
+            if "id" in node
+        }
 
     def _build_iteration_result(
         self,
