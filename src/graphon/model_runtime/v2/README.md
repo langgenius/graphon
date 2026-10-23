@@ -21,3 +21,30 @@ source dependencies, not the absence of ancestor imports from `sys.modules`.
 
 Existing model consumers require explicit future adapters; introducing these
 declarations does not switch any caller to V2.
+
+[DataFormat](domain/formats.py) carries an owned JSON object schema, a
+`mime_types` tuple of strings, and an optional profile string. MIME types describe
+supported payload formats, such as `text/plain`, `image/png`, or `application/json`;
+profiles identify separately defined semantics. No shared profile is standardized
+here. [JSON values](domain/json_values.py)
+preserve scalar types and require finite numbers, string object keys, and acyclic
+lists and objects. The `schema` property returns a defensive copy; callers cannot
+change a description by mutating the supplied schema or a returned dictionary.
+[Format checks](../../../../tests/model_runtime/v2/test_formats.py) cover these
+ownership and JSON boundaries.
+
+MIME types describe content, excluding invocation parameters and the JSON
+transport envelope. Plugins advertise concrete media types with MIME parameters
+when needed, not wildcard media ranges. Values are preserved unchanged, including
+parameter case. An empty tuple means unspecified, not support for every format.
+MIME labels do not define tool semantics, score meaning, or valid input/output
+combinations; schemas and profile definitions carry those constraints.
+Declarations check only that MIME metadata is a tuple of strings. Plugins
+validate [media-type syntax and parameter semantics](https://www.rfc-editor.org/rfc/rfc9110.html#section-8.3.1)
+and actual format support.
+
+The plugin boundary is responsible for interpreting self-contained JSON Schema
+Draft 2020-12 with document-local references. Request schemas describe the joint
+`{input, parameters}` object; output schemas describe native JSON values. The
+declarations check JSON value categories only; schema keywords, validity,
+reference policy, and semantic constraints belong to the plugin boundary.
