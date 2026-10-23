@@ -658,17 +658,108 @@ def _extract_text_from_docx(file_content: bytes) -> str:
     """
     try:
         doc = _load_docx_document(file_content)
+    except Exception as e:
+        # python-docx only resolves the transitional OPC relationship. Strict
+        # Open XML and packages with no `_rels/.rels` still have word/document.xml.
+        fallback = _read_docx_text_from_document_xml(file_content)
+        if fallback is not None:
+            return fallback
+        logger.exception("Failed to extract text from DOCX")
+        msg = f"Failed to extract text from DOCX: {e!s}"
+        raise TextExtractionError(msg) from e
+
+    try:
         text: list[str] = []
         for item_type, item in _iter_docx_content_items(doc):
             extracted_text = _extract_docx_item_text(item_type, item)
             if extracted_text is not None:
                 text.append(extracted_text)
         return "\n".join(text)
-
     except Exception as e:
         logger.exception("Failed to extract text from DOCX")
         msg = f"Failed to extract text from DOCX: {e!s}"
         raise TextExtractionError(msg) from e
+
+
+def _read_docx_text_from_document_xml(file_content: bytes) -> str | None:
+    """Read paragraph and table text from word/document.xml inside the package."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_content)) as archive:
+            document_name = _docx_document_xml_name(archive.namelist())
+            if document_name is None:
+                return None
+            root = ElementTree.fromstring(archive.read(document_name))
+    except (
+        zipfile.BadZipFile,
+        ElementTree.ParseError,
+        ValueError,
+        KeyError,
+        OSError,
+    ):
+        return None
+    return "\n".join(_docx_xml_block_lines(root))
+
+
+def _docx_document_xml_name(names: Sequence[str]) -> str | None:
+    for name in names:
+        normalized = name.replace("\\", "/").lstrip("/")
+        if normalized == "word/document.xml" or normalized.endswith(
+            "/word/document.xml"
+        ):
+            return name
+    return None
+
+
+def _xml_local_name(tag: object) -> str:
+    if not isinstance(tag, str):
+        return ""
+    return tag.rpartition("}")[2]
+
+
+def _docx_xml_block_lines(element: Any) -> list[str]:
+    lines: list[str] = []
+    for child in element:
+        local_name = _xml_local_name(child.tag)
+        if local_name == "p":
+            lines.append(_docx_xml_paragraph_text(child))
+        elif local_name == "tbl":
+            lines.append(_docx_xml_markdown_table(child))
+        else:
+            lines.extend(_docx_xml_block_lines(child))
+    return lines
+
+
+def _docx_xml_paragraph_text(paragraph: Any) -> str:
+    return "".join(
+        node.text or "" for node in paragraph.iter() if _xml_local_name(node.tag) == "t"
+    )
+
+
+def _docx_xml_cell_text(cell: Any) -> str:
+    return "\n".join(
+        _docx_xml_paragraph_text(child)
+        for child in cell
+        if _xml_local_name(child.tag) == "p"
+    )
+
+
+def _docx_xml_markdown_table(table: Any) -> str:
+    rows = [
+        [
+            _docx_xml_cell_text(cell).replace("\n", "<br>")
+            for cell in row
+            if _xml_local_name(cell.tag) == "tc"
+        ]
+        for row in table
+        if _xml_local_name(row.tag) == "tr"
+    ]
+    if not rows:
+        return ""
+    markdown_table = f"| {' | '.join(rows[0])} |\n"
+    markdown_table += f"| {' | '.join(['---'] * len(rows[0]))} |\n"
+    for row in rows[1:]:
+        markdown_table += "| " + " | ".join(row) + " |\n"
+    return markdown_table
 
 
 def extract_text_from_docx(file_content: bytes) -> str:
