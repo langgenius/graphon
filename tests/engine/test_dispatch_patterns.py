@@ -55,6 +55,7 @@ from graphon.engine_events.node import (
     NodeRunPauseRequestedEvent,
     NodeRunStartedEvent,
     NodeRunSucceededEvent,
+    NodeRunVariableUpdatedEvent,
 )
 from graphon.engine_events.traversal import (
     GraphEdgeSkippedEvent,
@@ -69,7 +70,7 @@ from graphon.enums import (
     NodeState,
     NodeType,
 )
-from graphon.graph.graph import Graph
+from graphon.graph.graph import Graph, NodeFactory
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.container_effects import (
@@ -82,16 +83,20 @@ from graphon.nodes.human_input.entities import PauseRequested
 from graphon.nodes.human_input.human_input_node import HumanInputNode
 from graphon.nodes.iteration.iteration_node import IterationNode
 from graphon.runtime.container_state import (
+    CustomContainerFrameState,
+    CustomContainerRunState,
     FrameRuntimeData,
     IterationFrameState,
     IterationRunState,
+    LoopFrameState,
+    LoopRunState,
     create_container_run_state,
 )
 from graphon.runtime.execution import GraphExecution
 from graphon.runtime.init_params import InitParams
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
-from graphon.variables.variables import StringVariable
+from graphon.variables.variables import IntegerVariable, StringVariable
 
 
 def _variable_value(
@@ -315,6 +320,26 @@ class _FrameFactory:
             str(node_config["id"]),
             cast(BuiltinNodeTypes, node_data["type"]),
         )
+
+
+class _ContainerFrameFactory(_FrameFactory):
+    def validate_node(
+        self,
+        node_config: dict[str, object],
+    ) -> NodeExecutionType:
+        """Report Loop and Iteration nodes as containers so graphs can scope them."""
+        node_data = cast(dict[str, object], node_config["data"])
+        if node_data["type"] in {BuiltinNodeTypes.LOOP, BuiltinNodeTypes.ITERATION}:
+            return NodeExecutionType.CONTAINER
+        return NodeExecutionType.EXECUTABLE
+
+
+def _node_config(
+    node_id: str,
+    node_type: str,
+    container_id: str = "",
+) -> dict[str, Any]:
+    return {"id": node_id, "data": {"type": node_type, "container_id": container_id}}
 
 
 @pytest.mark.parametrize(
@@ -2222,6 +2247,197 @@ def test_parallel_iteration_preserves_aggregate_and_response_order() -> None:  #
         "third",
     ]
     assert runtime_state.outputs["answer"] == "third"
+
+
+def test_iteration_in_tool_workflow_passes_only_host_variable_writes() -> None:
+    """Pass only host variable writes out of an Iteration in a tool workflow.
+
+    A downstream container may run a separate workflow graph in its own frame.
+    Here the ``tool`` node runs a tool workflow, whose nodes are not part of the
+    root workflow graph. Inside a round of the tool workflow's Loop, an Iteration
+    round writes the counter of the tool workflow's Start node, the Loop's
+    counter, the result of a Code node that ran earlier in the Loop round, and a
+    conversation variable. The node variables must not reach the Loop round,
+    which is the Iteration's parent; the conversation write must reach the Loop
+    round and, through it, the tool workflow's frame.
+    """
+    ready_queue = InMemoryReadyQueue()
+    graph_execution = GraphExecution(workflow_id="workflow")
+    started_at = datetime.now(UTC).replace(tzinfo=None)
+    node_factory = cast(NodeFactory, _ContainerFrameFactory())
+    frame_registry = FrameRegistry()
+    root_state = RuntimeState(
+        workflow_id="workflow",
+        variable_pool=VariablePool(),
+        start_at=1,
+        ready_queue=ready_queue,
+        graph_execution=graph_execution,
+    )
+    frame_registry.create(
+        frame_id="root",
+        container_id="",
+        graph=Graph.init(
+            graph_config={
+                "nodes": [_node_config("tool", "workflow-tool")],
+                "edges": [],
+            },
+            node_factory=node_factory,
+            root_node_id="tool",
+            skip_validation=True,
+        ),
+        state=root_state,
+    )
+    container_handlers = {
+        **_container_handlers(frame_registry=frame_registry),
+        "workflow-tool": cast(ContainerHandler, MagicMock()),
+    }
+    processor = NodeEventProcessor(
+        graph_execution=graph_execution,
+        event_stream=cast(EventStream, MagicMock()),
+        frame_registry=frame_registry,
+        container_handlers=container_handlers,
+    )
+
+    loop_node_configs = [
+        _node_config("loop-start", BuiltinNodeTypes.LOOP_START, "loop"),
+        _node_config("code", BuiltinNodeTypes.CODE, "loop"),
+        _node_config("iteration", BuiltinNodeTypes.ITERATION, "loop"),
+        _node_config("iteration-start", BuiltinNodeTypes.ITERATION_START, "iteration"),
+        _node_config("assign", BuiltinNodeTypes.VARIABLE_ASSIGNER, "iteration"),
+    ]
+    tool_workflow_pool = VariablePool()
+    tool_workflow_pool.add(["start", "counter"], 1)
+    tool_workflow_pool.add(["loop", "counter"], 1)
+    tool_workflow_pool.add(["conversation", "status"], "pending")
+    tool_workflow_state = RuntimeState(
+        variable_pool=tool_workflow_pool,
+        start_at=root_state.start_at,
+        ready_queue=root_state.ready_queue,
+        deferred_ready_queue=root_state.deferred_ready_queue,
+        graph_execution=root_state.graph_execution,
+    )
+    frame_registry.create(
+        frame_id="tool-workflow",
+        container_id="tool",
+        graph=Graph.init(
+            graph_config={
+                "nodes": [
+                    _node_config("start", BuiltinNodeTypes.START),
+                    _node_config("loop", BuiltinNodeTypes.LOOP),
+                    *loop_node_configs,
+                ],
+                "edges": [
+                    {"source": "start", "target": "loop"},
+                    {"source": "loop-start", "target": "code"},
+                    {"source": "code", "target": "iteration"},
+                    {"source": "iteration-start", "target": "assign"},
+                ],
+            },
+            node_factory=node_factory,
+            root_node_id="start",
+            skip_validation=True,
+        ),
+        state=tool_workflow_state,
+    )
+    root_state.put_container_run(
+        CustomContainerRunState(
+            invocation_id="tool-invocation",
+            frame_id="root",
+            node_id="tool",
+            started_at=started_at,
+            payload="tool-workflow",
+        ),
+    )
+    root_state.put_container_frame(
+        CustomContainerFrameState(
+            frame_id="tool-workflow",
+            parent_invocation_id="tool-invocation",
+            runtime_data=tool_workflow_state.snapshot_frame(copy_variable_pool=False),
+        ),
+    )
+
+    loop_round = frame_registry.create_child(
+        frame_id="loop-invocation:loop:0",
+        parent_frame_id="tool-workflow",
+        container_id="loop",
+        root_node_id="loop-start",
+        variable_pool=tool_workflow_pool.model_copy(deep=True),
+    )
+    loop_round.state.variable_pool.add(["code", "result"], 1)
+    root_state.put_container_run(
+        LoopRunState(
+            invocation_id="loop-invocation",
+            frame_id="tool-workflow",
+            node_id="loop",
+            started_at=started_at,
+            inputs={},
+            outputs={},
+            loop_count=1,
+            root_node_id="loop-start",
+            loop_variable_selectors={"counter": ("loop", "counter")},
+            loop_node_ids=frozenset(config["id"] for config in loop_node_configs),
+        ),
+    )
+    root_state.put_container_frame(
+        LoopFrameState(
+            frame_id="loop-invocation:loop:0",
+            parent_invocation_id="loop-invocation",
+            root_node_id="loop-start",
+            index=0,
+            started_at=started_at,
+            runtime_data=loop_round.state.snapshot_frame(copy_variable_pool=False),
+        ),
+    )
+    request = IterationFrameRequest(
+        items=(build_container_value("a"),),
+        root_node_id="iteration-start",
+        indexes=(0,),
+        output_selector=("iteration", "item"),
+        error_handle_mode=ErrorHandleMode.TERMINATED,
+        flatten_output=False,
+        parallel_nums=1,
+    )
+    root_state.put_container_run(
+        create_container_run_state(
+            invocation_id="iteration-invocation",
+            frame_id="loop-invocation:loop:0",
+            node_id="iteration",
+            started_at=started_at,
+            request=request,
+        ),
+    )
+    container_handlers["iteration"].handle_request(
+        invocation_id="iteration-invocation",
+        request=request,
+    )
+
+    for variable in (
+        IntegerVariable(name="counter", value=2, selector=["start", "counter"]),
+        IntegerVariable(name="counter", value=2, selector=["loop", "counter"]),
+        IntegerVariable(name="result", value=2, selector=["code", "result"]),
+        StringVariable(
+            name="status",
+            value="done",
+            selector=["conversation", "status"],
+        ),
+    ):
+        processor.dispatch(
+            NodeEventTask(
+                frame_id="iteration-invocation:iteration:0",
+                event=NodeRunVariableUpdatedEvent(
+                    id="assign-run",
+                    node_id="assign",
+                    node_type=BuiltinNodeTypes.VARIABLE_ASSIGNER,
+                    variable=variable,
+                ),
+            ),
+        )
+
+    assert _variable_value(loop_round.state, ["start", "counter"]) == 1
+    assert _variable_value(loop_round.state, ["loop", "counter"]) == 1
+    assert _variable_value(loop_round.state, ["code", "result"]) == 1
+    assert _variable_value(loop_round.state, ["conversation", "status"]) == "done"
+    assert _variable_value(tool_workflow_state, ["conversation", "status"]) == "done"
 
 
 def test_terminated_iteration_waits_for_all_scheduled_frames() -> None:

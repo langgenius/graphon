@@ -39,9 +39,12 @@ class ContainerHandler(Protocol):
     ) -> None:
         """Prepare a child event before it is exposed outside the container.
 
-        Variable-update events have already been applied to ``frame.state``
-        when this hook runs, so handlers may inspect or propagate the resulting
-        value. Implementations may also add container metadata to the event.
+        The engine calls this hook for each enclosing container, innermost
+        first, with that container's child frame as ``frame``. A variable-update
+        event is applied to the emitting frame first; an outer ``frame`` holds
+        the new value only if inner containers passed the write on. To pass a
+        write on, a handler adds it to the parent frame's variable pool.
+        Implementations may also add container metadata to the event.
         """
         ...
 

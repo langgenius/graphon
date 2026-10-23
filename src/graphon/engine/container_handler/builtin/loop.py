@@ -154,7 +154,8 @@ class LoopContainerHandler:
             msg = f"loop frame cannot belong to {run_state.kind} run"
             raise TypeError(msg)
         # Frame creation deep-copies variables. Identity therefore survives only
-        # across Loop write-backs and naturally stops at isolated containers.
+        # across container write-backs and stops where a container keeps a write
+        # private.
         if (
             isinstance(event, NodeRunVariableUpdatedEvent)
             and frame.state.variable_pool.get_variable(event.variable.selector)
