@@ -6,16 +6,29 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from graphon.engine import Engine
+from graphon.engine.filter import (
+    EngineEventFilterContext,
+    ResponseStreamFilter,
+    filter_engine_events,
+)
+from graphon.engine_events.graph import GraphRunSucceededEvent
 from graphon.engine_events.node import (
     NodeRunFailedEvent,
     NodeRunStartedEvent,
+    NodeRunStreamChunkEvent,
     NodeRunSucceededEvent,
 )
 from graphon.enums import BuiltinNodeTypes
 from graphon.file.enums import FileTransferMethod, FileType
 from graphon.file.models import File
+from graphon.graph.graph import Graph
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.node_events.node import StreamChunkEvent, StreamCompletedEvent
+from graphon.nodes.answer.answer_node import AnswerNode
+from graphon.nodes.answer.entities import AnswerNodeData
+from graphon.nodes.start import StartNode
+from graphon.nodes.start.entities import StartNodeData
 from graphon.nodes.tool.entities import ToolNodeData, ToolProviderType
 from graphon.nodes.tool.exc import ToolNodeError
 from graphon.nodes.tool.tool_node import ToolNode
@@ -234,6 +247,133 @@ def test_transform_message_dispatches_text_variable_and_file_messages() -> None:
     assert completed_event.node_run_result.outputs["answer"] == "A"
     assert completed_event.node_run_result.outputs["files"].value == [file_obj]
     assert completed_event.node_run_result.outputs["json"] == [{"data": []}]
+
+
+@pytest.mark.parametrize(
+    "value", ["sess_example", "", 0, 0.5, False, None, {"key": "value"}, [1, 2]]
+)
+def test_transform_message_preserves_non_streamed_variables(value: Any) -> None:
+    node, _runtime, _tool_file_manager = _build_tool_node()
+    events = list(
+        node.transform_message(
+            messages=_message_stream(
+                ToolRuntimeMessage(
+                    type=ToolRuntimeMessage.MessageType.VARIABLE,
+                    message=ToolRuntimeMessage.VariableMessage(
+                        variable_name="result",
+                        variable_value="initial",
+                    ),
+                ),
+                ToolRuntimeMessage(
+                    type=ToolRuntimeMessage.MessageType.VARIABLE,
+                    message=ToolRuntimeMessage.VariableMessage(
+                        variable_name="result",
+                        variable_value=value,
+                    ),
+                ),
+            ),
+            tool_info={},
+            parameters_for_log={},
+            node_id=node.id,
+            tool_runtime=ToolRuntimeHandle(raw=object()),
+        ),
+    )
+
+    completed = events[-1]
+    assert isinstance(completed, StreamCompletedEvent)
+    output = completed.node_run_result.outputs["result"]
+    assert output == value
+    assert type(output) is type(value)
+    assert not any(
+        isinstance(event, StreamChunkEvent) and event.selector == [node.id, "result"]
+        for event in events
+    )
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("session_id", ["sess_example", ""])
+def test_tool_session_id_is_preserved_in_filtered_answer(
+    stream: bool, session_id: str
+) -> None:
+    init_params = build_init_params()
+    runtime_state = RuntimeState(
+        workflow_id="workflow",
+        variable_pool=build_variable_pool(),
+        start_at=time(),
+    )
+    start_node = StartNode(
+        node_id="start",
+        data=StartNodeData(title="Start"),
+        init_params=init_params,
+        runtime_state=runtime_state,
+    )
+    session_runtime = _RunStubToolRuntime()
+    session_runtime.messages = _message_stream(
+        ToolRuntimeMessage(
+            type=ToolRuntimeMessage.MessageType.VARIABLE,
+            message=ToolRuntimeMessage.VariableMessage(
+                variable_name="session_id",
+                variable_value=session_id,
+                stream=stream,
+            ),
+        ),
+    )
+    session_node = ToolNode(
+        node_id="session",
+        data=_tool_node_data(),
+        init_params=init_params,
+        runtime_state=runtime_state,
+        tool_file_manager=cast(Any, _StubToolFileManager()),
+        runtime=session_runtime,
+    )
+    forward_runtime = _RunStubToolRuntime()
+    forward_runtime.messages = _message_stream(
+        ToolRuntimeMessage(
+            type=ToolRuntimeMessage.MessageType.TEXT,
+            message=ToolRuntimeMessage.TextMessage(text="Hello"),
+        ),
+    )
+    forward_node = ToolNode(
+        node_id="forward",
+        data=_tool_node_data(),
+        init_params=init_params,
+        runtime_state=runtime_state,
+        tool_file_manager=cast(Any, _StubToolFileManager()),
+        runtime=forward_runtime,
+    )
+    answer_node = AnswerNode(
+        node_id="answer",
+        data=AnswerNodeData(
+            answer="Reply: {{#forward.text#}}\n\nsession_id: {{#session.session_id#}}",
+        ),
+        init_params=init_params,
+        runtime_state=runtime_state,
+    )
+    graph = (
+        Graph
+        .new()
+        .add_root(start_node)
+        .add_node(session_node)
+        .add_node(forward_node)
+        .add_node(answer_node)
+        .build()
+    )
+    engine = Engine(graph=graph, runtime_state=runtime_state)
+    events = list(
+        filter_engine_events(
+            engine.run(),
+            context=EngineEventFilterContext.from_engine(engine),
+            filters=[ResponseStreamFilter()],
+        ),
+    )
+    chunks = [event for event in events if isinstance(event, NodeRunStreamChunkEvent)]
+    successes = [event for event in events if isinstance(event, GraphRunSucceededEvent)]
+    expected = f"Reply: Hello\n\nsession_id: {session_id}"
+
+    assert len(successes) == 1
+    assert successes[0].outputs["answer"] == expected
+    assert "".join(event.chunk for event in chunks) == expected
+    assert chunks[-1].is_final is True
 
 
 def test_transform_message_dispatches_image_link_with_handler_map() -> None:

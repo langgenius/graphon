@@ -51,6 +51,7 @@ class _ToolMessageState:
     files: list[File] = field(default_factory=list)
     json_values: list[dict | list] = field(default_factory=list)
     variables: dict[str, Any] = field(default_factory=dict)
+    streamed_variables: set[str] = field(default_factory=set)
     blob_chunks: dict[str, "_BlobChunkState"] = field(default_factory=dict)
 
 
@@ -666,6 +667,7 @@ class ToolNode(Node[ToolNodeData]):
         if variable_name not in state.variables:
             state.variables[variable_name] = ""
         state.variables[variable_name] += variable_value
+        state.streamed_variables.add(variable_name)
         yield StreamChunkEvent(
             selector=[node_id, variable_name],
             chunk=variable_value,
@@ -717,6 +719,8 @@ class ToolNode(Node[ToolNodeData]):
             is_final=True,
         )
         for var_name in state.variables:
+            if var_name not in state.streamed_variables:
+                continue
             yield StreamChunkEvent(
                 selector=[self._node_id, var_name],
                 chunk="",
