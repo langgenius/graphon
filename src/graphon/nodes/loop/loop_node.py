@@ -30,7 +30,6 @@ from graphon.nodes.loop.entities import LoopNodeData
 from graphon.variables.factory import (
     TypeMismatchError,
     build_segment_with_type,
-    segment_to_variable,
 )
 from graphon.variables.segments import Segment
 from graphon.variables.types import SegmentType
@@ -99,11 +98,15 @@ class LoopNode(Node[LoopNodeData]):
 
         if isinstance(result, ContainerExecutionResult):
             node_run_result = result.node_run_result.to_node_run_result()
+            outputs = {
+                key: value.to_object()
+                for key, value in result.node_run_result.outputs.items()
+            }
             if node_run_result.status == WorkflowNodeExecutionStatus.SUCCEEDED:
                 yield LoopSucceededEvent(
                     start_at=self._start_at,
                     inputs=node_run_result.inputs,
-                    outputs=node_run_result.outputs,
+                    outputs=outputs,
                     metadata=result.metadata,
                     steps=result.steps,
                 )
@@ -111,7 +114,7 @@ class LoopNode(Node[LoopNodeData]):
                 yield LoopFailedEvent(
                     start_at=self._start_at,
                     inputs=node_run_result.inputs,
-                    outputs=node_run_result.outputs,
+                    outputs=outputs,
                     metadata=result.metadata,
                     steps=result.steps,
                     error=node_run_result.error,
@@ -156,13 +159,9 @@ class LoopNode(Node[LoopNodeData]):
                 raise ValueError(msg)
 
             variable_selector = (self._node_id, loop_variable.label)
-            variable = segment_to_variable(
-                segment=processed_segment,
-                selector=variable_selector,
-            )
             self.runtime_state.variable_pool.add(
                 variable_selector,
-                variable.value,
+                build_container_value(processed_segment),
             )
             loop_variable_selectors[loop_variable.label] = variable_selector
             inputs[loop_variable.label] = processed_segment.value

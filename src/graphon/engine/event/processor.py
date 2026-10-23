@@ -46,6 +46,7 @@ from graphon.nodes.container_effects import (
 )
 from graphon.runtime.execution import ROOT_FRAME_ID, GraphExecution
 from graphon.runtime.ready_queue import ResumeTask, StartTask
+from graphon.variables.segments import Segment
 
 from ..container_handler import ContainerHandler
 from ..frame import ExecutionFrame, FrameRegistry
@@ -190,11 +191,15 @@ class NodeEventProcessor:
         frame: ExecutionFrame,
     ) -> None:
         if isinstance(event, NodeRunLoopSucceededEvent):
-            event.outputs = self._current_loop_outputs(
+            outputs = self._current_loop_outputs(
                 frame=frame,
                 node_id=event.node_id,
                 outputs=event.outputs,
             )
+            event.outputs = {
+                key: value.to_object() if isinstance(value, Segment) else value
+                for key, value in outputs.items()
+            }
         self._collect(frame=frame, event=event)
 
     @_dispatch.register
@@ -389,7 +394,7 @@ class NodeEventProcessor:
         for key in outputs:
             value = frame.state.variable_pool.get((node_id, key))
             if value is not None:
-                current_outputs[key] = value.to_object()
+                current_outputs[key] = value
         return current_outputs
 
     def _store_node_outputs(

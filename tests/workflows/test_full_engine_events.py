@@ -35,7 +35,7 @@ from graphon.engine_events.node import (
     NodeRunVariableUpdatedEvent,
 )
 from graphon.variables.factory import build_segment, segment_to_variable
-from graphon.variables.segments import Segment
+from graphon.variables.segments import ArrayStringSegment, Segment
 from tests.helpers.workflow_events import (
     event_path,
     fake_slim_llm,
@@ -836,6 +836,57 @@ def test_full_loop_graph_stops_at_loop_end_node() -> None:
     )
     assert succeeded.outputs == {"loop_round": 1}
     assert succeeded.metadata["completed_reason"] == "loop_break"
+
+
+def test_loop_keeps_empty_typed_array_outputs_in_the_parent_pool() -> None:
+    dsl = _graph_dsl(
+        nodes=[
+            _start_node(),
+            {
+                "id": "loop",
+                "data": {
+                    "type": "loop",
+                    "loop_count": 1,
+                    "start_node_id": "loop-start",
+                    "break_conditions": [],
+                    "logical_operator": "and",
+                    "loop_variables": [
+                        {
+                            "label": "items",
+                            "var_type": "array[string]",
+                            "value_type": "constant",
+                            "value": "[]",
+                        }
+                    ],
+                },
+            },
+            {
+                "id": "loop-start",
+                "data": {"type": "loop-start", "container_id": "loop"},
+            },
+            {
+                "id": "stop",
+                "data": {"type": "loop-end", "container_id": "loop"},
+            },
+            _end_node([]),
+        ],
+        edges=[
+            _edge("start", "loop"),
+            _edge("loop-start", "stop"),
+            _edge("loop", "end"),
+        ],
+    )
+    engine = loads(dsl)
+
+    events = list(engine.run())
+
+    items = engine.runtime_state.variable_pool.get(("loop", "items"))
+    assert isinstance(items, ArrayStringSegment)
+    assert items.value == []
+    succeeded = next(
+        event for event in events if isinstance(event, NodeRunLoopSucceededEvent)
+    )
+    assert succeeded.outputs == {"items": [], "loop_round": 1}
 
 
 def test_full_loop_graph_uses_custom_container_handler_factory() -> None:
