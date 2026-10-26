@@ -114,7 +114,10 @@ class Dispatcher:
         finally:
             if not self._graph_execution.paused and not self._graph_execution.completed:
                 self._graph_execution.complete()
-            self._event_stream.mark_complete()
+            try:
+                self._event_processor.finish_frames()
+            finally:
+                self._event_stream.mark_complete()
 
     def _run_until_exit(self) -> bool:
         self._process_commands()

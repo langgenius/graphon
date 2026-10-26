@@ -8,6 +8,7 @@ from graphon.engine_events.base import EngineEvent
 from graphon.file.protocols import WorkflowFileRuntimeProtocol
 from graphon.file.runtime import peek_workflow_file_runtime
 from graphon.graph.graph import Graph
+from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.runtime_state_protocol import ReadOnlyRuntimeState
 
@@ -24,6 +25,7 @@ class EngineEventFilterContext:
     file_runtime: WorkflowFileRuntimeProtocol | None = field(
         default_factory=peek_workflow_file_runtime,
     )
+    run_id: str | None = None
 
     @classmethod
     def from_engine(cls, engine: Engine) -> EngineEventFilterContext:
@@ -33,6 +35,10 @@ class EngineEventFilterContext:
                 engine.runtime_state,
             ),
             file_runtime=engine.file_runtime,
+            run_id=engine.runtime_state.graph_execution.get_or_create_node_execution(
+                frame_id=ROOT_FRAME_ID,
+                node_id=engine.graph.root_node.id,
+            ).execution_id,
         )
 
 

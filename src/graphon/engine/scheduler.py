@@ -1,6 +1,6 @@
 """Frame-local graph scheduling, traversal, and execution tracking."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TypedDict, final
 
 from graphon.engine_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTakenEvent
@@ -41,6 +41,7 @@ class Scheduler:
         self._state = state
         self._frame_id = frame_id
         self._unfinished_nodes: set[str] = set()
+        self.before_schedule: Callable[[str], None] | None = None
 
     # ============= Node State Operations =============
 
@@ -54,6 +55,8 @@ class Scheduler:
             node_id: The ID of the node to enqueue
 
         """
+        if self.before_schedule is not None:
+            self.before_schedule(self._frame_id)
         self._graph.nodes[node_id].state = NodeState.TAKEN
         self._unfinished_nodes.add(node_id)
         self._state.enqueue_ready_task(

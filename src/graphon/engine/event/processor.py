@@ -148,11 +148,24 @@ class NodeEventProcessor:
                 ),
             )
 
+    def finish_frames(self) -> None:
+        self._frame_registry.finish_frames()
+
     def _dispatch_event(self, *, frame_id: str, event: NodeEvent) -> None:
         frame = self._frame_registry[frame_id]
+        self._frame_registry.start_frame(frame_id)
+        event.frame_id = frame_id
         event.container_id = frame.container_id
+        if not isinstance(event, NodeRunRetryEvent):
+            event.retry_index = self._graph_execution.get_or_create_node_execution(
+                frame_id=frame_id,
+                node_id=event.node_id,
+            ).retry_count
         if isinstance(event, NodeRunVariableUpdatedEvent):
-            frame.state.variable_pool.add(event.variable.selector, event.variable)
+            self._frame_registry.update_variables(
+                frame_id,
+                [(event.variable.selector, event.variable)],
+            )
         for container_frame, handler in self._container_ancestors(frame_id):
             handler.prepare_frame_event(frame=container_frame, event=event)
         self._dispatch(event, frame=frame)
@@ -275,6 +288,7 @@ class NodeEventProcessor:
             # Process the resulting event (retry, exception, etc.)
             self._dispatch_event(frame_id=frame.frame_id, event=result)
         else:
+            self._frame_registry.record_failure(frame.frame_id, event.error)
             handler = self._container_handler_for_frame(frame.frame_id)
             if handler is not None:
                 handler.record_frame_failure(frame=frame, event=event)
@@ -406,11 +420,10 @@ class NodeEventProcessor:
             outputs: Mapping of output names to values produced by the node.
 
         """
-        for variable_name, variable_value in outputs.items():
-            frame.state.variable_pool.add(
-                (node_id, variable_name),
-                variable_value,
-            )
+        self._frame_registry.update_variables(
+            frame.frame_id,
+            (((node_id, name), value) for name, value in outputs.items()),
+        )
 
     def _container_handler_for_frame(self, frame_id: str) -> ContainerHandler | None:
         return next(

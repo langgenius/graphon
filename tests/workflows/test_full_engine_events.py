@@ -589,6 +589,7 @@ def test_full_loop_graph_breaks_at_the_configured_condition(
         _event("GraphEdgeTakenEvent", "start->loop"),
         _event("NodeRunSucceededEvent", "start"),
         _event("NodeRunStartedEvent", "loop"),
+        _event("NodeRunVariableUpdatedEvent", "loop"),
         _event("NodeRunLoopStartedEvent", "loop"),
     ]
     for index in range(completed_rounds):
@@ -878,7 +879,7 @@ def test_nested_containers_preserve_external_updates_and_iteration_isolation() -
         for event in events
         if isinstance(event, NodeRunVariableUpdatedEvent)
         and tuple(event.variable.selector) == ("inner-loop", "counter")
-    ] == [1, 11, 12]
+    ] == [0, 1, 11, 12]
     assert final_outputs(events) == {"counter": 11, "start_counter": 0}
 
 

@@ -70,8 +70,8 @@ flowchart LR
    instantiated nodes; see the [Python example](examples/slim_llm/code.py).
 2. [Engine](src/graphon/engine/engine.py) binds a root frame, command processor,
    event stream, fixed worker pool, and dispatcher. Calling `run()` starts or
-   resumes execution and yields graph lifecycle events plus processed node and
-   traversal events.
+   resumes execution and yields graph and frame lifecycle events, committed
+   variable observations, and processed node and traversal events.
 3. [Scheduler](src/graphon/engine/scheduler.py) queues frame-qualified `StartTask`
    values. [Workers](src/graphon/engine/worker/worker.py) bind execution IDs,
    execute node generators inside [layer task contexts](src/graphon/engine/layer/README.md),
@@ -88,10 +88,50 @@ flowchart LR
    resources. A failed graph emits `GraphRunFailedEvent` and raises its error.
 
 Response presentation is a consumer concern. `Engine.run()` yields raw engine
-events; [filter_engine_events](src/graphon/engine/filter/chain.py) and
+events; hosts use [filter_engine_events](src/graphon/engine/filter/chain.py) with
 [ResponseStreamFilter](src/graphon/engine/filter/builtin/response_stream/filter.py)
-can transform that stream separately. See [raw-event tests](tests/engine/test_raw_engine_events.py)
-and [filter tests](tests/engine/test_event_filters.py).
+for response selection, template assembly, buffering, and presentation order.
+Producer chunks remain immediate, including across parallel container items.
+See [raw-event tests](tests/engine/test_raw_engine_events.py) and
+[filter tests](tests/engine/test_event_filters.py).
+
+## Raw frame observations
+
+[Frame events](src/graphon/engine_events/frame.py) expose execution state for
+consumers that may read events after a child frame has been removed:
+
+| Event | Meaning |
+| --- | --- |
+| `FrameStartedEvent` | A detached, typed variable baseline and reserved node execution IDs, published after setup and before body scheduling. Child frames also identify their parent and owning container invocation. |
+| `FrameVariablesUpdatedEvent` | Detached replacements at the written selectors, published after successful commits. Empty and `None` values are retained; partial failures report only writes that succeeded. |
+| `FrameFinishedEvent` | The frame has emitted its last node, traversal, and variable observations, with a succeeded, failed, or aborted outcome. Child completion is published before registry removal. |
+
+[FrameRegistry](src/graphon/engine/frame.py) publishes commits for node outputs
+and handled-failure defaults, variable requests, Loop initialization and
+ancestor write-back, and external commands. Every affected frame sharing a pool
+receives the observation. Output commits precede dependent traversal; existing
+node request/result events remain available and must not be applied again when
+maintaining a view from commit events.
+
+[NodeEvent](src/graphon/engine_events/base.py) carries `frame_id` and
+`retry_index`; `id` remains the reserved execution ID across retries.
+`NodeRunRetryEvent.retry_index` identifies the next attempt.
+[EngineEventFilterContext.from_engine](src/graphon/engine/filter/protocol.py)
+sets `run_id` to the persisted root entry execution ID, so it survives
+pause/restore and distinguishes separate runs with the same `workflow_id`.
+
+Pause leaves unfinished frames open. Resume publishes new baselines with the
+resumption reason and existing execution IDs before resumed body events; terminal
+failure or abort closes remaining frames. Root has no owning invocation, and
+custom containers may omit item index and declared root metadata without adding
+methods to the [handler protocol](src/graphon/engine/container_handler/protocol.py).
+The [frame observation tests](tests/engine/test_frame_observations.py) cover these
+contracts, detached values, and raw chunk delivery.
+
+Baselines and commits contain full variable values. `ResponseStreamFilter`
+suppresses those events from its output; this compatibility guard does not add
+child response assembly. Response buffers and presentation state remain in the
+filter, separate from runtime snapshots.
 
 ## State and execution invariants
 

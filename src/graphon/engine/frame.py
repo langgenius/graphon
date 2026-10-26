@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import final
+from typing import Literal, final
 
+from graphon.engine_events.frame import (
+    FrameFinishedEvent,
+    FrameStartedEvent,
+    FrameVariablesUpdatedEvent,
+)
+from graphon.entities.workflow_start_reason import WorkflowStartReason
 from graphon.graph.graph import Graph
 from graphon.runtime.container_state import FrameRuntimeData
+from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
+from graphon.variables.variables import Variable
 
 from .event.node_failure import NodeFailureHandler
+from .event.stream import EventStream
 from .scheduler import Scheduler
 
 
@@ -26,8 +36,11 @@ class ExecutionFrame:
 
 @final
 class FrameRegistry:
-    def __init__(self) -> None:
+    def __init__(self, event_stream: EventStream | None = None) -> None:
         self._frames: dict[str, ExecutionFrame] = {}
+        self._event_stream = event_stream
+        self._open_frame_ids: set[str] = set()
+        self._frame_errors: dict[str, str] = {}
 
     def register(self, frame: ExecutionFrame) -> None:
         graph_config = frame.graph.graph_config or {}
@@ -37,6 +50,146 @@ class FrameRegistry:
             if "id" in node_config
         }
         self._frames[frame.frame_id] = frame
+        frame.scheduler.before_schedule = self.start_frame
+
+    def start_frame(
+        self,
+        frame_id: str,
+        *,
+        reason: WorkflowStartReason = WorkflowStartReason.INITIAL,
+    ) -> None:
+        """Publish setup once, including for handlers using the existing scheduler."""
+        if self._event_stream is None or frame_id in self._open_frame_ids:
+            return
+        frame = self[frame_id]
+        root_state = self[ROOT_FRAME_ID].state
+        execution = root_state.graph_execution
+        parent_frame_id = invocation_id = container_execution_id = None
+        root_node_id = frame.graph.root_node.id
+        index = None
+        if frame_id != ROOT_FRAME_ID:
+            frame_state = root_state.get_container_frame(frame_id)
+            run_state = root_state.get_container_run(frame_state.parent_invocation_id)
+            parent_frame_id = run_state.frame_id
+            invocation_id = run_state.invocation_id
+            self.start_frame(parent_frame_id, reason=reason)
+            container_execution_id = execution.get_or_create_node_execution(
+                frame_id=parent_frame_id,
+                node_id=run_state.node_id,
+            ).execution_id
+            root_node_id = getattr(frame_state, "root_node_id", None)
+            index = getattr(frame_state, "index", None)
+            errors = getattr(frame_state, "errors", ())
+            if errors:
+                self.record_failure(frame_id, errors[0])
+        self._open_frame_ids.add(frame_id)
+        variables_by_node = frame.state.variable_pool.variable_dictionary
+        self._event_stream.collect(
+            FrameStartedEvent(
+                frame_id=frame_id,
+                container_id=frame.container_id,
+                parent_frame_id=parent_frame_id,
+                invocation_id=invocation_id,
+                container_execution_id=container_execution_id,
+                root_node_id=root_node_id,
+                index=index,
+                reason=reason,
+                node_execution_ids={
+                    node_id: execution.get_or_create_node_execution(
+                        frame_id=frame_id,
+                        node_id=node_id,
+                    ).execution_id
+                    for node_id in frame.graph.nodes
+                },
+                variables=tuple(
+                    variable.model_copy(update={"selector": [node_id, name]})
+                    for node_id, variables in variables_by_node.items()
+                    for name, variable in variables.items()
+                ),
+            )
+        )
+
+    def reset_observations(self) -> None:
+        """Restored frames receive fresh baselines without changing persisted IDs."""
+        self._open_frame_ids.clear()
+
+    def record_failure(self, frame_id: str, error: str) -> None:
+        self._frame_errors.setdefault(frame_id, error)
+
+    def finish_frame(
+        self,
+        frame_id: str,
+        *,
+        outcome: Literal["succeeded", "failed", "aborted"] | None = None,
+        error: str | None = None,
+    ) -> None:
+        if self._event_stream is None or frame_id not in self._open_frame_ids:
+            return
+        error = self._frame_errors.pop(frame_id, error)
+        self._event_stream.collect(
+            FrameFinishedEvent(
+                frame_id=frame_id,
+                container_id=self[frame_id].container_id,
+                outcome=outcome or ("failed" if error is not None else "succeeded"),
+                error=error,
+            )
+        )
+        self._open_frame_ids.remove(frame_id)
+
+    def finish_frames(self) -> None:
+        """Close remaining observations at a terminal run boundary, never a pause."""
+        if self._event_stream is None:
+            return
+        execution = self[ROOT_FRAME_ID].state.graph_execution
+        outcome: Literal["succeeded", "failed", "aborted"]
+        if execution.aborted:
+            outcome = "aborted"
+        elif execution.error is not None:
+            outcome = "failed"
+        elif execution.paused:
+            return
+        else:
+            outcome = "succeeded"
+        for frame in reversed(self.frames()):
+            self.finish_frame(
+                frame.frame_id,
+                outcome=outcome,
+                error=str(execution.error) if execution.error is not None else None,
+            )
+
+    def update_variables(
+        self,
+        frame_id: str,
+        updates: Iterable[tuple[Sequence[str], object]],
+    ) -> None:
+        """Commit once and publish actual writes to every frame sharing the pool."""
+        pool = self[frame_id].state.variable_pool
+        frames = [frame for frame in self.frames() if frame.state.variable_pool is pool]
+        for frame in frames:
+            self.start_frame(frame.frame_id)
+        committed_variables: list[Variable] = []
+        try:
+            for selector, value in updates:
+                pool.add(selector, value)
+                if self._event_stream is not None:
+                    variable = pool.variable_dictionary[selector[0]][selector[1]]
+                    committed_variables.append(
+                        variable.model_copy(
+                            deep=True,
+                            update={"selector": list(selector)},
+                        )
+                    )
+        finally:
+            # A later rejected write must not hide preceding successful writes.
+            if committed_variables and self._event_stream is not None:
+                for frame in frames:
+                    self._event_stream.collect(
+                        FrameVariablesUpdatedEvent(
+                            frame_id=frame.frame_id,
+                            container_id=frame.container_id,
+                            variables=tuple(committed_variables),
+                        )
+                    )
 
     def __getitem__(self, frame_id: str) -> ExecutionFrame:
         """Return a registered frame by its required identifier.
@@ -69,6 +222,7 @@ class FrameRegistry:
         return tuple(self._frames.values())
 
     def remove(self, frame_id: str) -> None:
+        self.finish_frame(frame_id)
         del self._frames[frame_id]
 
     def create(

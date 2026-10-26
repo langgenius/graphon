@@ -1695,6 +1695,9 @@ def test_dispatcher_preserves_task_event_for_dispatch() -> None:
             self.dispatched_events.append(event)
             self.received.set()
 
+        def finish_frames(self) -> None:
+            pass
+
     event_processor = RecordingNodeEventProcessor()
     graph_execution = MagicMock(
         aborted=False,

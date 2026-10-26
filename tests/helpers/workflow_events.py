@@ -151,9 +151,15 @@ def run_workflow(
 def event_path(
     events: Sequence[EngineEvent],
 ) -> list[tuple[str, str, str]]:
-    """Project events to stable fields while preserving the complete event order."""
+    """Project node, traversal and graph order; frame events are covered separately."""
     path: list[tuple[str, str, str]] = []
     for event in events:
+        if type(event).__name__ in {
+            "FrameStartedEvent",
+            "FrameFinishedEvent",
+            "FrameVariablesUpdatedEvent",
+        }:
+            continue
         if isinstance(event, NodeEvent):
             path.append((
                 type(event).__name__,

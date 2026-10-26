@@ -113,7 +113,8 @@ class Engine:
         dispatch_queue: queue.Queue[DispatchTask] = queue.Queue()
 
         # === State Management ===
-        self._frame_registry = FrameRegistry()
+        self._event_stream = EventStream(self._layers)
+        self._frame_registry = FrameRegistry(self._event_stream)
         root_frame = self._frame_registry.create(
             frame_id=ROOT_FRAME_ID,
             container_id="",
@@ -121,9 +122,6 @@ class Engine:
             state=self._runtime_state,
         )
         self._scheduler = root_frame.scheduler
-
-        # === Event Streaming ===
-        self._event_stream = EventStream(self._layers)
 
         # === Command Processing ===
         # Processes external commands (e.g., abort requests)
@@ -272,7 +270,14 @@ class Engine:
         )
         self._event_stream.notify_layers(started_event)
         yield started_event
-        self._start_execution(resume=resume)
+        try:
+            self._start_execution(resume=resume)
+        except Exception as error:
+            self._graph_execution.fail(error)
+            self._frame_registry.finish_frames()
+            self._event_stream.mark_complete()
+            yield from self._event_stream.emit_events()
+            raise
         yield from self._event_stream.emit_events()
         yield from self._emit_terminal_events()
 
@@ -337,6 +342,13 @@ class Engine:
     def _start_execution(self, *, resume: bool) -> None:  # ruff:ignore[complex-structure]
         """Start execution subsystems."""
         ready_tasks = []
+        self._frame_registry.reset_observations()
+        self._frame_registry.start_frame(
+            ROOT_FRAME_ID,
+            reason=WorkflowStartReason.RESUMPTION
+            if resume
+            else WorkflowStartReason.INITIAL,
+        )
         if resume:
             for frame_state in self._runtime_state.container_frames():
                 run_state = self._runtime_state.get_container_run(
@@ -347,6 +359,10 @@ class Engine:
                 ]
                 self._container_handlers[parent_node.node_type].restore_frame(
                     frame_state,
+                )
+                self._frame_registry.start_frame(
+                    frame_state.frame_id,
+                    reason=WorkflowStartReason.RESUMPTION,
                 )
             for run_state in self._runtime_state.container_runs():
                 self._frame_registry[run_state.frame_id].scheduler.track_unfinished(

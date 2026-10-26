@@ -5,6 +5,7 @@ from typing import final
 
 from graphon.entities.pause_reason import SchedulingPause
 from graphon.runtime.execution import ROOT_FRAME_ID, GraphExecution
+from graphon.variables.variables import Variable
 
 from ..frame import FrameRegistry
 from .entities import (
@@ -89,18 +90,7 @@ class CommandProcessor:
             case UpdateVariablesCommand():
                 for variable in command.updates:
                     try:
-                        for frame in self._frame_registry.frames():
-                            variable_pool = frame.state.variable_pool
-                            if (
-                                frame.frame_id != ROOT_FRAME_ID
-                                and variable_pool.get_variable(variable.selector)
-                                is None
-                            ):
-                                continue
-                            variable_pool.add(
-                                variable.selector,
-                                variable.model_copy(deep=True),
-                            )
+                        self._update_variable(variable)
                         logger.debug(
                             "Updated variable %s for workflow %s",
                             variable.selector,
@@ -118,3 +108,20 @@ class CommandProcessor:
                     "Unsupported command: %s",
                     command.__class__.__name__,
                 )
+
+    def _update_variable(self, variable: Variable) -> None:
+        updated_pool_ids: set[int] = set()
+        for frame in self._frame_registry.frames():
+            variable_pool = frame.state.variable_pool
+            if id(variable_pool) in updated_pool_ids:
+                continue
+            if (
+                frame.frame_id != ROOT_FRAME_ID
+                and variable_pool.get_variable(variable.selector) is None
+            ):
+                continue
+            self._frame_registry.update_variables(
+                frame.frame_id,
+                [(variable.selector, variable.model_copy(deep=True))],
+            )
+            updated_pool_ids.add(id(variable_pool))

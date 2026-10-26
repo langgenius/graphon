@@ -7,6 +7,7 @@ from typing import cast
 
 from graphon.engine.filter.protocol import EngineEventFilterContext
 from graphon.engine_events.base import EngineEvent
+from graphon.engine_events.frame import FrameStartedEvent, FrameVariablesUpdatedEvent
 from graphon.engine_events.graph import GraphRunStartedEvent
 from graphon.engine_events.node import (
     NodeRunExceptionEvent,
@@ -103,8 +104,11 @@ class ResponseStreamFilter:
     def _process_event(self, event: EngineEvent) -> Iterable[EngineEvent]:
         self._ensure_initialized()
         match event:
+            case FrameStartedEvent() | FrameVariablesUpdatedEvent():
+                # Full frame values may contain secrets and unselected inputs.
+                output: Iterable[EngineEvent] = []
             case GraphRunStartedEvent():
-                output: Iterable[EngineEvent] = [
+                output = [
                     event,
                     *self._activate_initial_sessions(),
                 ]

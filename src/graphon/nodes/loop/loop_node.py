@@ -18,7 +18,7 @@ from graphon.node_events.loop import (
     LoopStartedEvent,
     LoopSucceededEvent,
 )
-from graphon.node_events.node import StreamCompletedEvent
+from graphon.node_events.node import StreamCompletedEvent, VariableUpdatedEvent
 from graphon.nodes.base.node import Node
 from graphon.nodes.container_effects import (
     ContainerExecutionResult,
@@ -27,10 +27,10 @@ from graphon.nodes.container_effects import (
     build_container_value,
 )
 from graphon.nodes.loop.entities import LoopNodeData
+from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.factory import (
     TypeMismatchError,
     build_segment_with_type,
-    segment_to_variable,
 )
 from graphon.variables.segments import Segment
 from graphon.variables.types import SegmentType
@@ -60,7 +60,12 @@ class LoopNode(Node[LoopNodeData]):
         loop_count = self.node_data.loop_count
         inputs: dict[str, object] = {"loop_count": loop_count}
         root_node_id = self.node_data.start_node_id
-        loop_variable_selectors = self._initialize_loop_variables(inputs=inputs)
+        loop_variable_selectors = {}
+        for update in self._initialize_loop_variables(inputs=inputs):
+            yield update
+            loop_variable_selectors[update.variable.name] = tuple(
+                update.variable.selector
+            )
         loop_node_ids = self._extract_loop_node_ids_from_config(
             self.graph_config,
             self._node_id,
@@ -129,10 +134,8 @@ class LoopNode(Node[LoopNodeData]):
         self,
         *,
         inputs: dict[str, Any],
-    ) -> dict[str, tuple[str, ...]]:
-        loop_variable_selectors: dict[str, tuple[str, ...]] = {}
-        if not self.node_data.loop_variables:
-            return loop_variable_selectors
+    ) -> Generator[VariableUpdatedEvent]:
+        initialized_pool = VariablePool()
 
         for loop_variable in self.node_data.loop_variables:
             match loop_variable.value_type:
@@ -145,9 +148,14 @@ class LoopNode(Node[LoopNodeData]):
                     if not isinstance(loop_variable.value, list):
                         msg = f"Invalid value for loop variable {loop_variable.label}"
                         raise TypeError(msg)
-                    processed_segment = self.runtime_state.variable_pool.get(
-                        loop_variable.value,
+                    # Later initializers can reference earlier pending writes.
+                    pool = (
+                        initialized_pool
+                        if initialized_pool.get_variable(loop_variable.value[:2])
+                        is not None
+                        else self.runtime_state.variable_pool
                     )
+                    processed_segment = pool.get(loop_variable.value)
                 case _:
                     assert_never(loop_variable.value_type)
 
@@ -156,17 +164,12 @@ class LoopNode(Node[LoopNodeData]):
                 raise ValueError(msg)
 
             variable_selector = (self._node_id, loop_variable.label)
-            variable = segment_to_variable(
-                segment=processed_segment,
-                selector=variable_selector,
-            )
-            self.runtime_state.variable_pool.add(
-                variable_selector,
-                variable.value,
-            )
-            loop_variable_selectors[loop_variable.label] = variable_selector
+            initialized_pool.add(variable_selector, processed_segment.value)
+            variable = initialized_pool.variable_dictionary[self._node_id][
+                loop_variable.label
+            ]
+            yield VariableUpdatedEvent(variable=variable)
             inputs[loop_variable.label] = processed_segment.value
-        return loop_variable_selectors
 
     @classmethod
     @override

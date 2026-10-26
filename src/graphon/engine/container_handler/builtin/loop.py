@@ -158,12 +158,20 @@ class LoopContainerHandler:
         # private.
         if (
             isinstance(event, NodeRunVariableUpdatedEvent)
+            # Initialization replaces local Loop bindings, not ancestor values.
+            and event.node_type != BuiltinNodeTypes.LOOP
             and frame.state.variable_pool.get_variable(event.variable.selector)
             is event.variable
         ):
             parent_pool = self._frame_registry[run_state.frame_id].state.variable_pool
-            if parent_pool.get_variable(event.variable.selector) is not None:
-                parent_pool.add(event.variable.selector, event.variable)
+            if (
+                parent_pool is not frame.state.variable_pool
+                and parent_pool.get_variable(event.variable.selector) is not None
+            ):
+                self._frame_registry.update_variables(
+                    run_state.frame_id,
+                    [(event.variable.selector, event.variable)],
+                )
         loop_metadata = {
             WorkflowNodeExecutionMetadataKey.LOOP_ID: run_state.node_id,
             WorkflowNodeExecutionMetadataKey.LOOP_INDEX: frame_state.index,
@@ -235,6 +243,7 @@ class LoopContainerHandler:
                 frame_state=frame_state,
             )
         except (TypeError, ValueError) as error:
+            self._frame_registry.record_failure(frame.frame_id, str(error))
             run_state = root_runtime_state.get_container_run(
                 frame_state.parent_invocation_id,
             )
