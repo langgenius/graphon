@@ -38,10 +38,8 @@ class AnswerNode(Node[AnswerNodeData]):
         files = self._extract_files_from_segments(segments.value)
         return NodeRunResult(
             status=WorkflowNodeExecutionStatus.SUCCEEDED,
-            outputs={
-                "answer": segments.markdown,
-                "files": ArrayFileSegment(value=files),
-            },
+            outputs={"answer": segments.markdown},
+            attachments=files,
         )
 
     def _extract_files_from_segments(self, segments: Sequence[Segment]) -> list[File]:
