@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import cast
-from uuid import uuid4
 
 from graphon.engine.filter.protocol import EngineEventFilterContext
 from graphon.engine_events.base import EngineEvent
@@ -20,9 +19,9 @@ from graphon.engine_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTake
 from graphon.enums import NodeExecutionType, NodeState
 from graphon.file.protocols import WorkflowFileRuntimeProtocol
 from graphon.file.runtime import use_workflow_file_runtime
-from graphon.nodes.base.template import Template, TextSegment, VariableSegment
+from graphon.nodes.base.template import VariableSegment
 from graphon.runtime.execution import ROOT_FRAME_ID
-from graphon.runtime.runtime_state import GraphProtocol, NodeProtocol
+from graphon.runtime.runtime_state import GraphProtocol
 from graphon.runtime.runtime_state_protocol import ReadOnlyRuntimeState
 
 from . import snapshot, v2
@@ -30,9 +29,8 @@ from .snapshot import (
     ResponseSessionState,
     ResponseStreamFilterSnapshot,
     Selector,
-    StreamBufferState,
-    StreamPositionState,
 )
+from .template_stream import _ResponseSession, _StreamBuffers, _TemplateStream
 
 __all__ = ["ResponseStreamFilter"]
 
@@ -55,129 +53,6 @@ class _Path:
         return len(self.edges) == 0
 
 
-@dataclass
-class _ResponseSession:
-    """Streaming cursor for one response node template."""
-
-    node_id: str
-    template: Template
-    index: int = 0
-
-    @classmethod
-    def from_node(cls, node: NodeProtocol) -> _ResponseSession:
-        get_streaming_template = getattr(node, "get_streaming_template", None)
-        if not callable(get_streaming_template):
-            msg = (
-                "Response streaming requires get_streaming_template() on response nodes"
-            )
-            raise TypeError(msg)
-        return cls(node_id=node.id, template=get_streaming_template())
-
-    def is_complete(self) -> bool:
-        return self.index >= len(self.template.segments)
-
-
-@dataclass
-class _StreamBuffers:
-    """Buffered stream chunks plus per-selector read cursors."""
-
-    events: dict[_Selector, list[NodeRunStreamChunkEvent]] = field(default_factory=dict)
-    positions: dict[_Selector, int] = field(default_factory=dict)
-    closed_selectors: set[_Selector] = field(default_factory=set)
-
-    @classmethod
-    def from_state(
-        cls,
-        *,
-        buffers: Sequence[StreamBufferState],
-        positions: Sequence[StreamPositionState],
-        closed_selectors: Sequence[_Selector],
-    ) -> _StreamBuffers:
-        stream_buffers = cls(
-            events={
-                tuple(buffer.selector): [
-                    event.model_copy(deep=True) for event in buffer.events
-                ]
-                for buffer in buffers
-            },
-            positions={
-                tuple(position.selector): position.position for position in positions
-            },
-            closed_selectors={tuple(selector) for selector in closed_selectors},
-        )
-        for selector in stream_buffers.events:
-            stream_buffers.positions.setdefault(selector, 0)
-        return stream_buffers
-
-    def append(
-        self,
-        selector: Sequence[str],
-        event: NodeRunStreamChunkEvent,
-    ) -> None:
-        key = tuple(selector)
-        if key in self.closed_selectors:
-            msg = f"Stream {'.'.join(selector)} is already closed"
-            raise ValueError(msg)
-
-        if key not in self.events:
-            self.events[key] = []
-            self.positions[key] = 0
-
-        self.events[key].append(event)
-
-    def pop(
-        self,
-        selector: Sequence[str],
-    ) -> NodeRunStreamChunkEvent | None:
-        key = tuple(selector)
-        if key not in self.events:
-            return None
-
-        position = self.positions.get(key, 0)
-        buffer = self.events[key]
-        if position >= len(buffer):
-            return None
-
-        event = buffer[position]
-        self.positions[key] = position + 1
-        return event
-
-    def has_unread(self, selector: Sequence[str]) -> bool:
-        key = tuple(selector)
-        if key not in self.events:
-            return False
-
-        position = self.positions.get(key, 0)
-        return position < len(self.events[key])
-
-    def has_events(self, selector: Sequence[str]) -> bool:
-        return tuple(selector) in self.events
-
-    def close(self, selector: Sequence[str]) -> None:
-        self.closed_selectors.add(tuple(selector))
-
-    def is_closed(self, selector: Sequence[str]) -> bool:
-        return tuple(selector) in self.closed_selectors
-
-    def dump_buffers(self) -> list[StreamBufferState]:
-        return [
-            StreamBufferState(
-                selector=selector,
-                events=[event.model_copy(deep=True) for event in events],
-            )
-            for selector, events in sorted(self.events.items())
-        ]
-
-    def dump_positions(self) -> list[StreamPositionState]:
-        return [
-            StreamPositionState(selector=selector, position=position)
-            for selector, position in sorted(self.positions.items())
-        ]
-
-    def dump_closed_selectors(self) -> list[_Selector]:
-        return sorted(self.closed_selectors)
-
-
 class ResponseStreamFilter:
     """Opt-in event filter that recreates legacy ordered response streaming."""
 
@@ -192,10 +67,9 @@ class ResponseStreamFilter:
     def _reset_run_state(self) -> None:
         self._active_session: _ResponseSession | None = None
         self._waiting_sessions: deque[_ResponseSession] = deque()
-        self._stream_buffers = _StreamBuffers()
+        self._template_stream = _TemplateStream()
         self._response_nodes: set[str] = set()
         self._paths_maps: dict[str, list[_Path]] = {}
-        self._node_execution_ids: dict[str, str] = {}
         self._response_sessions: dict[str, _ResponseSession] = {}
         self._referenced_selectors: set[_Selector] = set()
 
@@ -235,7 +109,7 @@ class ResponseStreamFilter:
                     *self._activate_initial_sessions(),
                 ]
             case NodeRunStartedEvent():
-                self._node_execution_ids[event.node_id] = event.id
+                self._template_stream.node_execution_ids[event.node_id] = event.id
                 output = [event]
             case NodeRunStreamChunkEvent():
                 output = self._handle_stream_chunk(event)
@@ -278,14 +152,16 @@ class ResponseStreamFilter:
                 for _, session in sorted(self._response_sessions.items())
                 if (session_state := self._serialize_session(session)) is not None
             ],
-            node_execution_ids=dict(sorted(self._node_execution_ids.items())),
+            node_execution_ids=dict(
+                sorted(self._template_stream.node_execution_ids.items())
+            ),
             paths_map={
                 node_id: [path.edges.copy() for path in paths]
                 for node_id, paths in sorted(self._paths_maps.items())
             },
-            stream_buffers=self._stream_buffers.dump_buffers(),
-            stream_positions=self._stream_buffers.dump_positions(),
-            closed_streams=self._stream_buffers.dump_closed_selectors(),
+            stream_buffers=self._template_stream.stream_buffers.dump_buffers(),
+            stream_positions=self._template_stream.stream_buffers.dump_positions(),
+            closed_streams=self._template_stream.stream_buffers.dump_closed_selectors(),
         )
         return snapshot.dumps(state)
 
@@ -335,10 +211,11 @@ class ResponseStreamFilter:
 
         self._active_session = active_session
         self._waiting_sessions = waiting_sessions
-        self._stream_buffers = stream_buffers
+        self._template_stream = _TemplateStream(
+            stream_buffers=stream_buffers, node_execution_ids=node_execution_ids
+        )
         self._response_nodes = response_nodes
         self._paths_maps = paths_maps
-        self._node_execution_ids = node_execution_ids
         self._response_sessions = response_sessions
         self._referenced_selectors = referenced_selectors
         self._pending_state = None
@@ -519,9 +396,9 @@ class ResponseStreamFilter:
     ) -> list[EngineEvent]:
         selector_key = tuple(event.selector)
         if selector_key in self._referenced_selectors:
-            self._stream_buffers.append(event.selector, event)
+            self._template_stream.stream_buffers.append(event.selector, event)
             if event.is_final:
-                self._stream_buffers.close(event.selector)
+                self._template_stream.stream_buffers.close(event.selector)
             return self._try_flush()
         if self._pass_unmatched_chunks:
             return [event]
@@ -582,167 +459,19 @@ class ResponseStreamFilter:
             for segment in session.template.segments
         )
 
-    def _get_or_create_execution_id(self, node_id: _NodeID) -> str:
-        if node_id not in self._node_execution_ids:
-            self._node_execution_ids[node_id] = str(uuid4())
-        return self._node_execution_ids[node_id]
-
-    def _create_stream_chunk_event(
-        self,
-        node_id: _NodeID,
-        execution_id: str,
-        selector: Sequence[str],
-        chunk: str,
-        is_final: bool = False,
-    ) -> NodeRunStreamChunkEvent:
-        graph = self._bound_graph
-        if selector and selector[0] not in graph.nodes and self._active_session:
-            response_node = graph.nodes[self._active_session.node_id]
-            return NodeRunStreamChunkEvent(
-                id=execution_id,
-                node_id=response_node.id,
-                node_type=response_node.node_type,
-                selector=list(selector),
-                chunk=chunk,
-                is_final=is_final,
-            )
-
-        node = graph.nodes[node_id]
-        return NodeRunStreamChunkEvent(
-            id=execution_id,
-            node_id=node.id,
-            node_type=node.node_type,
-            selector=list(selector),
-            chunk=chunk,
-            is_final=is_final,
-        )
-
-    def _process_variable_segment(
-        self,
-        segment: VariableSegment,
-    ) -> tuple[list[NodeRunStreamChunkEvent], bool]:
-        events: list[NodeRunStreamChunkEvent] = []
-        source_selector_prefix = segment.selector[0] if segment.selector else ""
-        is_complete = False
-
-        is_special_selector = source_selector_prefix not in self._bound_graph.nodes
-        if self._active_session and is_special_selector:
-            output_node_id = self._active_session.node_id
-        else:
-            output_node_id = source_selector_prefix
-        execution_id = self._get_or_create_execution_id(output_node_id)
-        has_stream_events = self._stream_buffers.has_events(segment.selector)
-
-        while self._stream_buffers.has_unread(segment.selector):
-            event = self._stream_buffers.pop(segment.selector)
-            if event is None:
-                continue
-
-            if self._active_session and is_special_selector:
-                response_node = self._bound_graph.nodes[self._active_session.node_id]
-                events.append(
-                    NodeRunStreamChunkEvent(
-                        id=execution_id,
-                        node_id=response_node.id,
-                        node_type=response_node.node_type,
-                        container_id=event.container_id,
-                        selector=list(event.selector),
-                        chunk=event.chunk,
-                        is_final=event.is_final,
-                    )
-                )
-            else:
-                events.append(event)
-
-        if self._stream_buffers.is_closed(segment.selector):
-            is_complete = True
-        elif not has_stream_events and (
-            value := self._bound_runtime_state.variable_pool.get(segment.selector)
-        ):
-            is_last_segment = bool(
-                self._active_session
-                and self._active_session.index
-                == len(self._active_session.template.segments) - 1,
-            )
-            events.append(
-                self._create_stream_chunk_event(
-                    node_id=output_node_id,
-                    execution_id=execution_id,
-                    selector=segment.selector,
-                    chunk=value.markdown,
-                    is_final=is_last_segment,
-                ),
-            )
-            is_complete = True
-
-        return events, is_complete
-
-    def _process_text_segment(
-        self,
-        segment: TextSegment,
-    ) -> list[NodeRunStreamChunkEvent]:
-        active_session = self._active_session
-        if active_session is None:
-            msg = "Cannot process a text segment without an active response session."
-            raise RuntimeError(msg)
-
-        current_response_node = self._bound_graph.nodes[active_session.node_id]
-        execution_id = self._get_or_create_execution_id(current_response_node.id)
-        is_last_segment = (
-            active_session.index == len(active_session.template.segments) - 1
-        )
-        return [
-            self._create_stream_chunk_event(
-                node_id=current_response_node.id,
-                execution_id=execution_id,
-                selector=self._get_text_segment_selector(current_response_node.id),
-                chunk=segment.text,
-                is_final=is_last_segment,
-            )
-        ]
-
-    def _get_text_segment_selector(self, response_node_id: _NodeID) -> Sequence[str]:
-        response_node = self._bound_graph.nodes[response_node_id]
-        get_streaming_text_selector = getattr(
-            response_node,
-            "get_streaming_text_selector",
-            None,
-        )
-        if callable(get_streaming_text_selector):
-            selector = get_streaming_text_selector()
-            return [str(part) for part in selector]
-        return [response_node.id, "answer"]
-
     def _try_flush(self) -> list[EngineEvent]:
         if not self._active_session:
             return []
 
-        template = self._active_session.template
         response_node_id = self._active_session.node_id
         events: list[EngineEvent] = []
-
-        while self._active_session.index < len(template.segments):
-            segment = template.segments[self._active_session.index]
-
-            if isinstance(segment, VariableSegment):
-                source_selector_prefix = segment.selector[0] if segment.selector else ""
-                if source_selector_prefix in self._bound_graph.nodes:
-                    source_node = self._bound_graph.nodes[source_selector_prefix]
-                    if source_node.state == NodeState.SKIPPED:
-                        self._active_session.index += 1
-                        continue
-
-                segment_events, is_complete = self._process_variable_segment(segment)
-                events.extend(segment_events)
-
-                if is_complete:
-                    self._active_session.index += 1
-                else:
-                    break
-            else:
-                events.extend(self._process_text_segment(segment))
-                self._active_session.index += 1
-
+        events.extend(
+            self._template_stream.flush(
+                self._active_session,
+                graph=self._bound_graph,
+                variable_pool=self._bound_runtime_state.variable_pool,
+            )
+        )
         if self._active_session.is_complete():
             events.extend(self._end_session(response_node_id))
 

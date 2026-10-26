@@ -6,6 +6,7 @@ from typing import Any, ClassVar, cast
 
 import pytest
 
+from graphon.dsl import loads
 from graphon.engine.filter import (
     EngineEventFilterContext,
     ResponseStreamFilter,
@@ -260,7 +261,9 @@ def test_response_stream_filter_passes_answer_visible_reasoning_chunk() -> None:
 
     assert output == [reasoning]
     assert output[0] is reasoning
-    assert not event_filter._stream_buffers.has_events(reasoning.selector)
+    assert not event_filter._template_stream.stream_buffers.has_events(
+        reasoning.selector
+    )
 
 
 def test_response_stream_filter_passes_reasoning_for_text_selector_prefix() -> None:
@@ -274,7 +277,9 @@ def test_response_stream_filter_passes_reasoning_for_text_selector_prefix() -> N
 
     assert output == [reasoning]
     assert output[0] is reasoning
-    assert not event_filter._stream_buffers.has_events(reasoning.selector)
+    assert not event_filter._template_stream.stream_buffers.has_events(
+        reasoning.selector
+    )
 
 
 def test_response_stream_filter_passes_explicit_reasoning_reference() -> None:
@@ -288,7 +293,9 @@ def test_response_stream_filter_passes_explicit_reasoning_reference() -> None:
 
     assert output == [reasoning]
     assert output[0] is reasoning
-    assert not event_filter._stream_buffers.has_events(reasoning.selector)
+    assert not event_filter._template_stream.stream_buffers.has_events(
+        reasoning.selector
+    )
 
 
 def test_response_stream_filter_filters_unreferenced_reasoning_chunk() -> None:
@@ -321,7 +328,7 @@ def test_response_stream_filter_passes_visible_final_reasoning_marker() -> None:
 
     assert output == [marker]
     assert marker.is_final is True
-    assert not event_filter._stream_buffers.has_events(marker.selector)
+    assert not event_filter._template_stream.stream_buffers.has_events(marker.selector)
 
 
 def test_response_stream_filter_filters_reasoning_before_branch_is_reached() -> None:
@@ -586,6 +593,52 @@ def test_response_stream_filter_reads_scalar_variable_values() -> None:
     assert [event.chunk for event in chunks] == ["saved"]
 
 
+@pytest.mark.parametrize("node_type", [BuiltinNodeTypes.ANSWER, BuiltinNodeTypes.END])
+def test_response_stream_filter_assembles_builtin_response_values(
+    node_type: NodeType,
+) -> None:
+    response_node_data: dict[str, Any] = {"type": node_type}
+    if node_type == BuiltinNodeTypes.ANSWER:
+        response_node_data["answer"] = "{{#sys.first#}} / {{#sys.second#}}"
+    else:
+        response_node_data["outputs"] = [
+            {"variable": name, "value_selector": ["sys", name]}
+            for name in ["first", "second"]
+        ]
+    engine = loads(
+        json.dumps({
+            "kind": "graph",
+            "graph": {
+                "nodes": [
+                    {"id": "start", "data": {"type": "start", "variables": []}},
+                    {"id": "response", "data": response_node_data},
+                ],
+                "edges": [{"source": "start", "target": "response"}],
+            },
+        })
+    )
+    engine.runtime_state.variable_pool.add(["sys", "first"], "first")
+    engine.runtime_state.variable_pool.add(["sys", "second"], "second")
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(EngineEventFilterContext.from_engine(engine))
+
+    output = list(event_filter.on_event(GraphRunStartedEvent()))
+
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    separator = " / " if node_type == BuiltinNodeTypes.ANSWER else "\n"
+    assert [event.chunk for event in chunks] == ["first", separator, "second"]
+    assert [event.selector for event in chunks] == [
+        ["sys", "first"],
+        ["response", "answer"],
+        ["sys", "second"],
+    ]
+    assert all(
+        event.node_id == "response" and event.node_type == node_type for event in chunks
+    )
+    assert len({event.id for event in chunks}) == 1
+    assert [event.is_final for event in chunks] == [False, False, True]
+
+
 def test_response_stream_filter_does_not_mix_buffered_chunks_with_final_value() -> None:
     graph = _variable_response_graph()
     variable_pool = VariablePool()
@@ -773,6 +826,124 @@ def test_response_stream_filter_round_trips_resume_state() -> None:
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     assert [event.chunk for event in chunks] == ["resumed"]
+
+
+def test_response_stream_filter_resumes_partly_consumed_template_in_order() -> None:
+    graph = _variable_response_graph(
+        segments=[
+            TextSegment(text="prefix "),
+            VariableSegment(selector=["source", "first"]),
+            TextSegment(text=" / "),
+            VariableSegment(selector=["source", "second"]),
+            TextSegment(text=" suffix"),
+        ],
+    )
+    context = _context(graph)
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(context)
+    start_events = list(event_filter.on_event(GraphRunStartedEvent()))
+    prefix_chunk = next(
+        event for event in start_events if isinstance(event, NodeRunStreamChunkEvent)
+    )
+    assert prefix_chunk.chunk == "prefix "
+
+    second_chunk = _stream_chunk("second", selector=["source", "second"])
+    first_chunk = _stream_chunk("fi", selector=["source", "first"], is_final=False)
+    assert list(event_filter.on_event(second_chunk)) == []
+    assert list(event_filter.on_event(first_chunk)) == [first_chunk]
+
+    restored_filter = ResponseStreamFilter()
+    restored_filter.loads(event_filter.dumps())
+    restored_filter.initialize(context)
+    output = list(
+        restored_filter.on_event(_stream_chunk("rst", selector=["source", "first"]))
+    )
+
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert [event.chunk for event in chunks] == ["rst", " / ", "second", " suffix"]
+    assert chunks[-1].id == prefix_chunk.id
+    assert chunks[-1].selector == ["answer", "answer"]
+    assert chunks[-1].is_final is True
+    assert list(restored_filter.flush()) == []
+
+
+def test_response_stream_filters_keep_interleaved_buffers_and_cursors_separate() -> (
+    None
+):
+    graph = _variable_response_graph(
+        segments=[
+            TextSegment(text="prefix "),
+            VariableSegment(selector=["source", "text"]),
+            TextSegment(text=" suffix"),
+        ],
+    )
+    context = _context(graph)
+    first_filter = ResponseStreamFilter()
+    second_filter = ResponseStreamFilter()
+    first_filter.initialize(context)
+    second_filter.initialize(context)
+    list(first_filter.on_event(GraphRunStartedEvent()))
+
+    second_chunk = _stream_chunk("second", selector=["source", "text"])
+    assert list(second_filter.on_event(second_chunk)) == []
+    first_chunk = _stream_chunk("first", selector=["source", "text"], is_final=False)
+    assert list(first_filter.on_event(first_chunk)) == [first_chunk]
+
+    second_output = list(second_filter.on_event(GraphRunStartedEvent()))
+    second_chunks = [
+        event for event in second_output if isinstance(event, NodeRunStreamChunkEvent)
+    ]
+    assert [event.chunk for event in second_chunks] == ["prefix ", "second", " suffix"]
+
+    first_output = list(
+        first_filter.on_event(_stream_chunk(" end", selector=["source", "text"]))
+    )
+    first_chunks = [
+        event for event in first_output if isinstance(event, NodeRunStreamChunkEvent)
+    ]
+    assert [event.chunk for event in first_chunks] == [" end", " suffix"]
+
+
+@pytest.mark.parametrize("streamed", [False, True])
+def test_response_stream_filter_preserves_shared_selector_consumption(
+    streamed: bool,
+) -> None:
+    source = _TestNode("source")
+    first_answer = _TestNode(
+        "first-answer",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template.from_answer_template("{{#source.text#}}/{{#source.text#}}!"),
+    )
+    second_answer = _TestNode(
+        "second-answer",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template.from_answer_template("next:{{#source.text#}}"),
+    )
+    graph = _TestGraph(
+        nodes={node.id: node for node in [source, first_answer, second_answer]},
+        edges={
+            "first": _TestEdge("first", "source", "first-answer"),
+            "second": _TestEdge("second", "source", "second-answer"),
+        },
+        root_node_id="source",
+    )
+    variable_pool = VariablePool()
+    if not streamed:
+        variable_pool.add(["source", "text"], "value")
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph, variable_pool))
+    output = list(event_filter.on_event(GraphRunStartedEvent()))
+    if streamed:
+        output.extend(
+            event_filter.on_event(_stream_chunk("value", selector=["source", "text"]))
+        )
+
+    text = "".join(
+        event.chunk for event in output if isinstance(event, NodeRunStreamChunkEvent)
+    )
+    # Root streams currently share one read cursor per selector, unlike saved values.
+    assert text == ("value/!next:" if streamed else "value/value!next:value")
+    assert list(event_filter.flush()) == []
 
 
 def test_response_stream_filter_can_load_before_filter_chain_initializes() -> None:
