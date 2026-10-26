@@ -1,0 +1,41 @@
+# The autofix.ci action requires this exact workflow name.
+name: autofix.ci
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  autofix:
+    name: Update document timestamps
+    runs-on: depot-ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Read the pull request's own commits instead of the test merge commit.
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Update document timestamps
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 .github/scripts/update_document_timestamps.py "$PR_BASE_SHA"
+
+      # The autofix.ci GitHub App, which must be installed for this repository,
+      # commits the updates to the pull request branch. Unlike pushes made with
+      # GITHUB_TOKEN, its commits trigger the required checks.
+      - name: Commit document timestamps
+        uses: autofix-ci/action@c5b2d67aa2274e7b5a18224e8171550871fc7e4a # v1.3.4
+        with:
+          commit-message: "docs: update document review timestamps"

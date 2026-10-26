@@ -3,8 +3,8 @@ last_checked: "2026-10-22T01:04:00Z"
 -->
 # Architecture
 
-Current implementation; the metadata records the latest source and test review.
-This is a navigation map, not a record of historical design decisions.
+This navigation map describes the current implementation, not historical design
+decisions.
 Contributor commands and contribution rules live in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Public entry points
