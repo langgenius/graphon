@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-10-22T01:02:48Z"
+last_checked: "2026-10-27T05:11:36Z"
 -->
 # Contributing to Graphon
 
@@ -144,6 +144,11 @@ The [PR workflow](.github/workflows/pr.yml) is authoritative for automated PR
 requirements; the reusable [test workflow](.github/workflows/test.yml) defines
 the Python matrix. Local checks help catch failures before pushing; review CI
 results for checks that depend on GitHub events or other Python versions.
+
+When a pull request changes a knowledge page, the
+[autofix.ci workflow](.github/workflows/autofix.yml) commits its
+[review timestamp](docs/maintenance.md#document-metadata-and-review-deadline)
+update to the pull request branch. Pull that commit before pushing again.
 
 ## Repository Knowledge
 
