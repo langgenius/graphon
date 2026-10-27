@@ -12,6 +12,7 @@ import pytest
 import yaml
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+# Fixed timestamps are more than a day before any test run.
 BASE_TIMESTAMP = "2026-09-01T00:00:00Z"
 REVIEW_TIMESTAMP = "2026-09-02T00:00:00Z"
 GUIDE = "README.md"
@@ -159,9 +160,75 @@ def update_timestamp_only(repository: GitRepository) -> None:
     repository.commit("review guide")
 
 
-def edit_page_after_timestamp_update(repository: GitRepository) -> None:
-    update_timestamp_only(repository)
+def format_hours_ago(hours: int) -> str:
+    # 23 and 25 hours leave an hour on each side of the one-day limit.
+    timestamp = datetime.now(UTC) - timedelta(hours=hours)
+    return timestamp.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def edit_page_after_setting_timestamp(
+    repository: GitRepository, timestamp: str
+) -> None:
+    repository.replace(GUIDE, BASE_TIMESTAMP, timestamp)
+    repository.commit("review guide")
     edit_page(repository)
+
+
+def edit_page_after_timestamp_update_within_a_day_ago(
+    repository: GitRepository,
+) -> None:
+    edit_page_after_setting_timestamp(repository, format_hours_ago(23))
+
+
+def edit_page_after_timestamp_update_over_a_day_ago(
+    repository: GitRepository,
+) -> None:
+    edit_page_after_setting_timestamp(repository, format_hours_ago(25))
+
+
+def edit_page_after_timestamp_update_within_a_day_ahead(
+    repository: GitRepository,
+) -> None:
+    edit_page_after_setting_timestamp(repository, format_hours_ago(-23))
+
+
+def edit_page_after_timestamp_update_over_a_day_ahead(
+    repository: GitRepository,
+) -> None:
+    edit_page_after_setting_timestamp(repository, format_hours_ago(-25))
+
+
+def edit_pages_after_invalid_timestamp_updates(repository: GitRepository) -> None:
+    # A lenient ISO parser reads the "+00:00" value as recent, and February 30
+    # matches the format without being a date; both are invalid.
+    repository.replace(
+        GUIDE, BASE_TIMESTAMP, format_hours_ago(1).replace("Z", "+00:00")
+    )
+    repository.replace(PLAN, BASE_TIMESTAMP, "2026-02-30T00:00:00Z")
+    repository.commit("review guide and plan")
+    repository.replace(GUIDE, "Details.", "Updated details.")
+    repository.replace(PLAN, "Result.", "Updated result.")
+    repository.commit("edit guide and plan")
+
+
+def add_page_reviewed_within_a_day(repository: GitRepository) -> None:
+    repository.write(
+        COMPONENT_GUIDE,
+        "# Component\n",
+        metadata=f'last_checked: "{format_hours_ago(23)}"',
+    )
+    repository.commit("add component guide")
+
+
+def edit_page_before_merging_review_within_a_day(
+    repository: GitRepository,
+) -> None:
+    edit_page(repository)
+    repository.run_git("switch", "main")
+    repository.replace(GUIDE, BASE_TIMESTAMP, format_hours_ago(23))
+    repository.commit("review guide")
+    repository.run_git("switch", "feature")
+    repository.merge("main")
 
 
 def edit_page_with_timestamp_update(repository: GitRepository) -> None:
@@ -241,12 +308,18 @@ def merge_base_branch_after_page_review(repository: GitRepository) -> None:
     [
         (edit_page, [GUIDE]),
         (add_page, [COMPONENT_GUIDE]),
-        (edit_page_after_timestamp_update, [GUIDE]),
+        (edit_page_after_timestamp_update_over_a_day_ago, [GUIDE]),
+        (edit_page_after_timestamp_update_over_a_day_ahead, [GUIDE]),
+        (edit_pages_after_invalid_timestamp_updates, [GUIDE, PLAN]),
         (edit_page_and_review_other_page, [PLAN]),
         (edit_page_before_merging_base_branch, [GUIDE]),
         (edit_page_with_timestamp_update, []),
         (update_timestamp_only, []),
         (update_timestamps_after_editing_pages, []),
+        (edit_page_after_timestamp_update_within_a_day_ago, []),
+        (edit_page_before_merging_review_within_a_day, []),
+        (edit_page_after_timestamp_update_within_a_day_ahead, []),
+        (add_page_reviewed_within_a_day, []),
         (archive_plan, []),
         (delete_page, []),
         (edit_file_without_metadata, []),

@@ -146,7 +146,7 @@ the Python matrix. Local checks help catch failures before pushing; review CI
 results for checks that depend on GitHub events or other Python versions.
 
 When a pull request changes a knowledge page, the
-[autofix.ci workflow](.github/workflows/autofix.yml) commits its
+[autofix.ci workflow](.github/workflows/autofix.yml) may commit a
 [review timestamp](docs/maintenance.md#document-metadata-and-review-deadline)
 update to the pull request branch. Pull that commit before pushing again.
 

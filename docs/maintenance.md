@@ -99,10 +99,11 @@ for changes beyond documentation.
 ## Document metadata and review deadline
 
 `last_checked` records when a page was last reviewed as a whole against source and
-evidence, or when a pull request last changed its content. It is not proof that
-all linked tests were executed. When a pull request changes a page's content, the
-[autofix.ci workflow](../.github/workflows/autofix.yml) sets `last_checked` to the
-current time; the [update script](../.github/scripts/update_document_timestamps.py)
+evidence, or approximately when a pull request last changed its content. It is not
+proof that all linked tests were executed. When a pull request changes a page's
+content and its `last_checked` is more than a day from the current time, the
+[autofix.ci workflow](../.github/workflows/autofix.yml) sets it to the current
+time; the [update script](../.github/scripts/update_document_timestamps.py)
 defines which changes qualify. Apply
 [review evidence principles](#repository-knowledge-maintenance) before changing it
 by hand. The format, maintained scope, and deadline are defined and enforced by the

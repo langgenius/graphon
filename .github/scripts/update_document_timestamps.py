@@ -4,18 +4,23 @@
 A document's `last_checked` becomes the current UTC time when the pull request's
 own commits changed its content after they last changed its metadata; adding a
 document counts as a content change. Merges from the base branch do not count,
-and archived plans keep their timestamps.
+archived plans keep their timestamps, and a valid timestamp within a day of the
+current time is kept.
 """
 
 import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 METADATA_BLOCK = re.compile(r"\A<!-- knowledge\n(.*?)\n-->(?:\n|$)", re.DOTALL)
 LAST_CHECKED_LINE = re.compile(r"^last_checked:.*$", re.MULTILINE)
+LAST_CHECKED_TIMESTAMP = re.compile(
+    r'^last_checked: "([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)"$',
+    re.MULTILINE,
+)
 ARCHIVE_DIRECTORY = "docs/archive/"
 
 
@@ -39,6 +44,18 @@ def split_metadata(document: str) -> tuple[str, str]:
     if metadata is None:
         return "", document
     return metadata[0], document[metadata.end() :]
+
+
+def is_checked_within_a_day(metadata: str, now: datetime) -> bool:
+    """Return whether `last_checked` is a valid time within a day of `now`."""
+    timestamp = LAST_CHECKED_TIMESTAMP.search(metadata)
+    if timestamp is None:
+        return False
+    try:
+        last_checked = datetime.fromisoformat(timestamp[1])
+    except ValueError:
+        return False
+    return abs(now - last_checked) <= timedelta(days=1)
 
 
 def needs_new_timestamp(path: str, merge_base: str) -> bool:
@@ -68,7 +85,7 @@ def needs_new_timestamp(path: str, merge_base: str) -> bool:
     return False
 
 
-def find_documents_to_update(base: str) -> list[str]:
+def find_documents_to_update(base: str, now: datetime) -> list[str]:
     merge_base = run_git("merge-base", base, "HEAD").stdout.strip()
     changed_paths = run_git(
         "diff-tree",
@@ -80,16 +97,18 @@ def find_documents_to_update(base: str) -> list[str]:
         merge_base,
         "HEAD",
     ).stdout.split("\0")
-    return [
-        path
-        for path in changed_paths
-        if path.endswith(".md")
-        and not path.startswith(ARCHIVE_DIRECTORY)
-        and LAST_CHECKED_LINE.search(
-            split_metadata(Path(path).read_text(encoding="utf-8"))[0]
-        )
-        and needs_new_timestamp(path, merge_base)
-    ]
+    paths_to_update = []
+    for path in changed_paths:
+        if not path.endswith(".md") or path.startswith(ARCHIVE_DIRECTORY):
+            continue
+        metadata, _ = split_metadata(Path(path).read_text(encoding="utf-8"))
+        if (
+            LAST_CHECKED_LINE.search(metadata)
+            and not is_checked_within_a_day(metadata, now)
+            and needs_new_timestamp(path, merge_base)
+        ):
+            paths_to_update.append(path)
+    return paths_to_update
 
 
 def update_last_checked(path: Path, timestamp: str) -> None:
@@ -99,6 +118,7 @@ def update_last_checked(path: Path, timestamp: str) -> None:
 
 
 if __name__ == "__main__":
-    timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    for path in find_documents_to_update(sys.argv[1]):
+    now = datetime.now(UTC)
+    timestamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    for path in find_documents_to_update(sys.argv[1], now):
         update_last_checked(Path(path), timestamp)
