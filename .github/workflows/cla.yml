@@ -40,7 +40,8 @@ jobs:
           # This branch must be created ahead of time and remain writable to the workflow.
           # Keep it separate from the protected default branch used for normal development.
           branch: "cla-signatures"
-          allowlist: "dependabot[bot],github-actions[bot]"
+          # autofix-ci[bot] commits the document timestamp updates from autofix.yml.
+          allowlist: "dependabot[bot],github-actions[bot],autofix-ci[bot]"
           create-file-commit-message: "chore(cla): create CLA signatures storage"
           signed-commit-message: "chore(cla): $contributorName signed the CLA for #$pullRequestNo"
           custom-notsigned-prcomment: >

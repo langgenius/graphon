@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-10-22T01:02:48Z"
+last_checked: "2026-10-27T05:11:36Z"
 -->
 # Maintaining repository knowledge
 
@@ -34,10 +34,12 @@ Apply these principles to both everyday documentation changes and full inspectio
 - **Retire completed work.** Extract reusable guidance before removing resolved
   debt and completed tasks, following the
   [completion and archive workflow](#archive-completed-work).
-- **Keep review evidence honest.** Advance `last_checked` only after reviewing the
-  whole page. Distinguish reading source or tests from running them. Record actual
-  check results and limitations; never relabel historical test counts as current
-  results or refresh timestamps just to pass CI.
+- **Keep review evidence honest.** Advance `last_checked` by hand only after
+  reviewing the whole page; pull requests that change a page's content update it
+  [automatically](#document-metadata-and-review-deadline). Distinguish reading
+  source or tests from running them. Record actual check results and limitations;
+  never relabel historical test counts as current results or refresh timestamps
+  just to pass CI.
 - **Make focused corrections and validate them.** Remove stale, invalid, redundant,
   or overly specific content while preserving useful decisions and constraints.
   Avoid edits made solely to produce a cleanup diff. Mechanical checks do not
@@ -96,11 +98,15 @@ for changes beyond documentation.
 
 ## Document metadata and review deadline
 
-`last_checked` records when a page's claims were checked against source and
-evidence. It is neither a file modification time nor proof that all linked tests
-were executed. Apply [review evidence principles](#repository-knowledge-maintenance)
-before changing it. The format, maintained scope, and deadline are defined and
-enforced by the [documentation check](../tests/test_repository_docs.py).
+`last_checked` records when a page was last reviewed as a whole against source and
+evidence, or when a pull request last changed its content. It is not proof that
+all linked tests were executed. When a pull request changes a page's content, the
+[autofix.ci workflow](../.github/workflows/autofix.yml) sets `last_checked` to the
+current time; the [update script](../.github/scripts/update_document_timestamps.py)
+defines which changes qualify. Apply
+[review evidence principles](#repository-knowledge-maintenance) before changing it
+by hand. The format, maintained scope, and deadline are defined and enforced by the
+[documentation check](../tests/test_repository_docs.py).
 
 ## Plans for work that needs durable context
 
