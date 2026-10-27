@@ -888,7 +888,10 @@ def test_worker_pool_pause_preserves_task_acquired_during_pause() -> None:  # ru
     frame_registry.register(
         _execution_frame(
             frame_id="root",
-            graph=cast(Graph, SimpleNamespace(nodes={"node": BlockingNode()})),
+            graph=cast(
+                Graph,
+                SimpleNamespace(nodes={"node": BlockingNode()}, graph_config=None),
+            ),
             runtime_state=runtime_state,
         ),
     )
@@ -966,6 +969,7 @@ def test_worker_pool_runs_queued_siblings_with_fixed_workers() -> None:
     first_node_started = threading.Event()
     barrier = threading.Barrier(2)
     graph = SimpleNamespace(
+        graph_config=None,
         nodes={
             "first": ParallelNode("first"),
             "second": ParallelNode("second"),
@@ -1488,7 +1492,7 @@ def test_worker_executes_node_from_ready_task() -> None:
     ready_queue = InMemoryReadyQueue()
     ready_queue.put(StartTask(frame_id="root", node_id="start"))
     dispatch_queue = queue.Queue()
-    graph = SimpleNamespace(nodes={"start": RunnableNode()})
+    graph = SimpleNamespace(nodes={"start": RunnableNode()}, graph_config=None)
     runtime_state = RuntimeState(
         workflow_id="workflow",
         variable_pool=VariablePool(),
@@ -1548,8 +1552,12 @@ def test_worker_resolves_node_from_task_frame() -> None:
     ready_queue = InMemoryReadyQueue()
     ready_queue.put(StartTask(frame_id="child", node_id="answer"))
     dispatch_queue = queue.Queue()
-    root_graph = SimpleNamespace(nodes={"answer": RunnableNode("answer", "Root")})
-    child_graph = SimpleNamespace(nodes={"answer": RunnableNode("answer", "Child")})
+    root_graph = SimpleNamespace(
+        nodes={"answer": RunnableNode("answer", "Root")}, graph_config=None
+    )
+    child_graph = SimpleNamespace(
+        nodes={"answer": RunnableNode("answer", "Child")}, graph_config=None
+    )
     graph_execution = GraphExecution(workflow_id="workflow")
     runtime_state = RuntimeState(
         workflow_id="workflow",
@@ -1632,7 +1640,9 @@ def test_worker_binds_node_execution_id_from_task_frame() -> None:
         ready_queue=ready_queue,
         graph_execution=graph_execution,
     )
-    graph = SimpleNamespace(nodes={"answer": RunnableNode(root_execution.execution_id)})
+    graph = SimpleNamespace(
+        nodes={"answer": RunnableNode(root_execution.execution_id)}, graph_config=None
+    )
     frame_registry = FrameRegistry()
     frame_registry.register(
         _execution_frame(

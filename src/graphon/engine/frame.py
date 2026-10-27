@@ -30,6 +30,12 @@ class FrameRegistry:
         self._frames: dict[str, ExecutionFrame] = {}
 
     def register(self, frame: ExecutionFrame) -> None:
+        graph_config = frame.graph.graph_config or {}
+        frame.state.variable_pool.node_ids |= frame.graph.nodes.keys() | {
+            node_config["id"]
+            for node_config in graph_config.get("nodes", [])
+            if "id" in node_config
+        }
         self._frames[frame.frame_id] = frame
 
     def __getitem__(self, frame_id: str) -> ExecutionFrame:
@@ -235,6 +241,9 @@ class FrameRegistry:
             root_node_id=root_node_id,
             container_id=container_id,
         )
+        state.variable_pool.node_ids |= self[
+            parent_frame_id
+        ].state.variable_pool.node_ids
         return self.create(
             frame_id=frame_id,
             container_id=container_id,

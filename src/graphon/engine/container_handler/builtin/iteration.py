@@ -426,44 +426,24 @@ class IterationContainerHandler:
         parent_frame: ExecutionFrame,
         variable: Variable,
     ) -> None:
-        """Pass a round's write to a variable that no workflow node owns.
+        """Pass a round's write to a host variable already held by its parent.
 
-        Rounds keep node-owned values, such as node outputs and Loop variables,
-        private. A namespace that is not a node ID, such as ``conversation``,
-        holds host variables shared beyond the round, so the parent pool
-        stores the same object when it already holds the variable. Frame
-        creation deep-copies variables, so the identity check also confirms that
-        inner containers passed the write on. For the same reason, parallel
-        rounds miss each other's writes, and the last write to a variable wins.
+        The pool retains node ownership when copied or serialized, so rounds
+        keep inherited node outputs and Loop variables private. Independent
+        workflows have their own pools and cannot change that ownership.
+        Frame creation deep-copies variables, so the identity check confirms
+        that inner containers passed the write on. Parallel rounds miss each
+        other's writes, and the last write to a variable wins.
         """
         selector = variable.selector
         parent_pool = parent_frame.state.variable_pool
         if (
-            selector[0] in self._node_ids()
+            selector[0] in frame.state.variable_pool.node_ids
             or frame.state.variable_pool.get_variable(selector) is not variable
             or parent_pool.get_variable(selector) is None
         ):
             return
         parent_pool.add(selector, variable)
-
-    def _node_ids(self) -> set[str]:
-        """Return the IDs of nodes in every graph the engine is running.
-
-        A child frame's graph config holds only its container's subtree, and a
-        downstream container may run a separate workflow graph in its own frame.
-        Enclosing frames stay registered while their child frames run, so the
-        graphs whose nodes own a round's outer values are always included.
-
-        Returns:
-            The node IDs listed in the graph configs of all registered frames.
-
-        """
-        return {
-            node["id"]
-            for frame in self._frame_registry.frames()
-            for node in (frame.graph.graph_config or {}).get("nodes", [])
-            if "id" in node
-        }
 
     def _build_iteration_result(
         self,
