@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-10-27T05:33:07Z"
+last_checked: "2026-10-27T09:28:04Z"
 -->
 # Architecture
 
