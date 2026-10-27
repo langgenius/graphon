@@ -1,10 +1,9 @@
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from graphon.enums import WorkflowNodeExecutionMetadataKey, WorkflowNodeExecutionStatus
-from graphon.file.models import File
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 
 
@@ -25,8 +24,6 @@ class NodeRunResult(BaseModel):
     inputs: Mapping[str, Any] = Field(default_factory=dict)
     process_data: Mapping[str, Any] = Field(default_factory=dict)
     outputs: Mapping[str, Any] = Field(default_factory=dict)
-    # Answer nodes supply files here for host delivery on node success.
-    attachments: Sequence[File] = Field(default_factory=list)
     metadata: Mapping[WorkflowNodeExecutionMetadataKey, Any] = Field(
         default_factory=_default_metadata,
     )

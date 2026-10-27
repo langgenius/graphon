@@ -2,13 +2,6 @@ from graphon.enums import WorkflowNodeExecutionMetadataKey, WorkflowNodeExecutio
 from graphon.node_events.base import NodeRunResult
 
 
-def test_node_run_result_without_attachments_remains_readable() -> None:
-    result = NodeRunResult.model_validate({"outputs": {"text": "hello"}})
-
-    assert result.outputs == {"text": "hello"}
-    assert result.attachments == []
-
-
 def test_node_run_result_accepts_trigger_info_metadata() -> None:
     result = NodeRunResult(
         status=WorkflowNodeExecutionStatus.SUCCEEDED,

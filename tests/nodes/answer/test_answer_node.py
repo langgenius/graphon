@@ -22,6 +22,7 @@ from graphon.nodes.base.template import TextSegment, VariableSegment
 from graphon.nodes.start.entities import StartNodeData
 from graphon.nodes.start.start_node import StartNode
 from graphon.runtime import RuntimeState
+from graphon.variables.segments import ArrayFileSegment
 from tests.helpers import build_init_params, build_variable_pool
 from tests.helpers.workflow_events import final_outputs
 
@@ -30,7 +31,7 @@ from tests.helpers.workflow_events import final_outputs
     ("template", "expected"),
     [("", ""), ("Hello", "Hello"), ("Hello {{#start.name#}}!", "Hello Graphon!")],
 )
-def test_answer_returns_one_completed_output(template: str, expected: str) -> None:
+def test_answer_returns_completed_outputs(template: str, expected: str) -> None:
     node = AnswerNode(
         "answer",
         AnswerNodeData(answer=template),
@@ -55,14 +56,16 @@ def test_answer_returns_one_completed_output(template: str, expected: str) -> No
     assert isinstance(succeeded, NodeRunSucceededEvent)
     assert succeeded.id == "answer-run"
     assert succeeded.node_run_result.status == WorkflowNodeExecutionStatus.SUCCEEDED
-    assert succeeded.node_run_result.outputs == {"answer": expected}
-    assert succeeded.node_run_result.attachments == []
+    assert succeeded.node_run_result.outputs == {
+        "answer": expected,
+        "files": ArrayFileSegment(value=[]),
+    }
     assert node.get_streaming_text_selector() == ["answer", "answer"]
     assert str(node.get_streaming_template()) == template
 
 
 @pytest.mark.parametrize("filtered", [False, True])
-def test_answer_delivers_rendered_files_outside_outputs(filtered: bool) -> None:
+def test_answer_preserves_file_outputs_and_rendering(filtered: bool) -> None:
     document = File(
         file_type=FileType.DOCUMENT,
         transfer_method=FileTransferMethod.LOCAL_FILE,
@@ -132,8 +135,8 @@ def test_answer_delivers_rendered_files_outside_outputs(filtered: bool) -> None:
         if filtered
         else raw_events
     )
-    succeeded = next(
-        event
+    result = next(
+        event.node_run_result
         for event in events
         if isinstance(event, NodeRunSucceededEvent) and event.node_id == "answer"
     )
@@ -143,15 +146,15 @@ def test_answer_delivers_rendered_files_outside_outputs(filtered: bool) -> None:
         "[report.txt](https://example.com/report.txt)\n"
         "[report.txt](https://example.com/report.txt)"
     )
-    result = succeeded.node_run_result
-    assert result.attachments == [document, image, document, document]
-    assert result.outputs == {"answer": expected}
-    assert final_outputs(events) == {"answer": expected}
+    files = ArrayFileSegment(value=[document, image, document, document])
+    assert result.outputs == {"answer": expected, "files": files}
+    assert final_outputs(events) == {"answer": expected, "files": files}
     value = state.variable_pool.get(["answer", "answer"])
     assert value is not None
     assert value.to_object() == expected
-    assert state.variable_pool.get(["answer", "files"]) is None
-    assert state.variable_pool.get(["answer", "attachments"]) is None
+    file_output = state.variable_pool.get(["answer", "files"])
+    assert file_output is not None
+    assert file_output.to_object() == files.value
     assert answer.get_streaming_template().segments == [
         TextSegment("Files: "),
         VariableSegment(["start", "document"]),
@@ -160,9 +163,6 @@ def test_answer_delivers_rendered_files_outside_outputs(filtered: bool) -> None:
         TextSegment("\n"),
         VariableSegment(["start", "document"]),
     ]
-    restored = NodeRunSucceededEvent.model_validate_json(succeeded.model_dump_json())
-    assert restored.node_run_result.attachments == result.attachments
-    assert all(isinstance(file, File) for file in restored.node_run_result.attachments)
     if filtered:
         chunks = [
             event for event in events if isinstance(event, NodeRunStreamChunkEvent)

@@ -243,7 +243,8 @@ def test_full_answer_graph_is_verified_from_events() -> None:
         _event("GraphRunSucceededEvent"),
     ]
     outputs = final_outputs(events)
-    assert outputs == {"answer": "Hello Graphon"}
+    assert set(outputs) == {"answer", "files"}
+    assert outputs["answer"] == "Hello Graphon"
 
 
 def test_resume_replays_tasks_through_a_bounded_ready_queue() -> None:
