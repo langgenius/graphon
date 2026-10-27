@@ -443,7 +443,10 @@ class IterationContainerHandler:
             or parent_pool.get_variable(selector) is None
         ):
             return
-        parent_pool.add(selector, variable)
+        self._frame_registry.update_variables(
+            parent_frame.frame_id,
+            [(selector, variable)],
+        )
 
     def _build_iteration_result(
         self,

@@ -771,6 +771,87 @@ def test_loop_assignment_commits_each_changed_ancestor() -> None:
         assert all(events.index(event) < events.index(finish) for event in matching)
 
 
+@pytest.mark.parametrize(
+    ("outer_type", "inner_type"),
+    [("loop", "iteration"), ("iteration", "loop"), ("iteration", "iteration")],
+)
+def test_iteration_host_writes_commit_each_changed_ancestor(
+    outer_type: str, inner_type: str
+) -> None:
+    nodes = []
+    for node_id, node_type, rounds in (
+        ("outer", outer_type, 1),
+        ("inner", inner_type, 2),
+    ):
+        settings: dict[str, Any] = (
+            {"loop_count": rounds, "break_conditions": [], "logical_operator": "and"}
+            if node_type == "loop"
+            else {
+                "iterator_selector": ["start", f"{node_id}_items"],
+                "output_selector": ["host", "counter"],
+                "flatten_output": False,
+            }
+        )
+        if node_id == "inner":
+            settings["container_id"] = "outer"
+        nodes.extend([
+            _node(node_id, node_type, start_node_id=f"{node_id}-start", **settings),
+            _node(f"{node_id}-start", f"{node_type}-start", container_id=node_id),
+        ])
+    nodes.append(
+        _node(
+            "assign",
+            "assigner",
+            version="2",
+            container_id="inner",
+            items=[
+                {
+                    "variable_selector": ["host", "counter"],
+                    "input_type": "constant",
+                    "operation": "+=",
+                    "value": 1,
+                }
+            ],
+        )
+    )
+    engine = loads(
+        _dsl(
+            nodes,
+            [("start", "outer"), ("outer-start", "inner"), ("inner-start", "assign")],
+        ),
+        start_inputs={"outer_items": [0], "inner_items": [0, 1]},
+    )
+    engine.runtime_state.variable_pool.add(("host", "counter"), 0)
+    events = list(engine.run())
+    _assert_frame_lifetimes(events)
+    counter = engine.runtime_state.variable_pool.get_variable(("host", "counter"))
+    assert counter is not None
+    assert counter.value == 2
+    starts = _events(events, "FrameStartedEvent")
+    outer = next(event for event in starts if event.container_id == "outer")
+    inner = [event for event in starts if event.container_id == "inner"]
+    assert len(inner) == 2
+    for index, child in enumerate(inner, start=1):
+        assert _values(child)["host", "counter"] == index - 1
+        commits = [
+            event
+            for event in _events(events, "FrameVariablesUpdatedEvent")
+            if _values(event).get(("host", "counter")) == index
+        ]
+        assert len(commits) == 3
+        assert {event.frame_id for event in commits} == {
+            "root",
+            outer.frame_id,
+            child.frame_id,
+        }
+        assignment = next(
+            event
+            for event in _events(events, "NodeRunVariableUpdatedEvent")
+            if event.frame_id == child.frame_id and event.node_id == "assign"
+        )
+        assert all(events.index(event) < events.index(assignment) for event in commits)
+
+
 def test_partial_output_writes_report_the_committed_selector(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

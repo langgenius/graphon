@@ -16,6 +16,7 @@ from graphon.engine.layer import Layer
 from graphon.engine.ready_queue.entities import StartTask
 from graphon.engine.ready_queue.in_memory import InMemoryReadyQueue
 from graphon.engine_events.base import EngineEvent
+from graphon.engine_events.frame import FrameVariablesUpdatedEvent
 from graphon.engine_events.graph import (
     GraphRunFailedEvent,
     GraphRunPartialSucceededEvent,
@@ -881,6 +882,23 @@ def test_nested_containers_preserve_external_updates_and_iteration_isolation() -
         and tuple(event.variable.selector) == ("inner-loop", "counter")
     ] == [0, 1, 11, 12]
     assert final_outputs(events) == {"counter": 11, "start_counter": 0}
+    iteration_frame_id = next(
+        event.frame_id
+        for event in events
+        if isinstance(event, NodeRunVariableUpdatedEvent)
+        and event.node_id == "iteration-increment"
+    )
+    for selector, value in ((("inner-loop", "counter"), 12), (("start", "counter"), 1)):
+        updated_frame_ids = [
+            event.frame_id
+            for event in events
+            if isinstance(event, FrameVariablesUpdatedEvent)
+            and any(
+                tuple(variable.selector) == selector and variable.value == value
+                for variable in event.variables
+            )
+        ]
+        assert updated_frame_ids == [iteration_frame_id]
 
 
 def _run_append_item_workflow(

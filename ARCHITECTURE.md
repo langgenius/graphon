@@ -107,10 +107,11 @@ consumers that may read events after a child frame has been removed:
 | `FrameFinishedEvent` | The frame has emitted its last node, traversal, and variable observations, with a succeeded, failed, or aborted outcome. Child completion is published before registry removal. |
 
 [FrameRegistry](src/graphon/engine/frame.py) publishes commits for node outputs
-and handled-failure defaults, variable requests, Loop initialization and
-ancestor write-back, and external commands. Every affected frame sharing a pool
-receives the observation. Output commits precede dependent traversal; existing
-node request/result events remain available and must not be applied again when
+and handled-failure defaults, variable requests, Loop initialization, Loop and
+Iteration ancestor write-back, and external commands. Every frame sharing an
+updated pool receives the observation; private Iteration writes do not produce
+ancestor commits. Output commits precede dependent traversal; existing node
+request/result events remain available and must not be applied again when
 maintaining a view from commit events.
 
 [NodeEvent](src/graphon/engine_events/base.py) carries `frame_id` and

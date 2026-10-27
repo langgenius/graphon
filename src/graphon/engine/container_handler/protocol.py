@@ -43,8 +43,9 @@ class ContainerHandler(Protocol):
         first, with that container's child frame as ``frame``. A variable-update
         event is applied to the emitting frame first; an outer ``frame`` holds
         the new value only if inner containers passed the write on. To pass a
-        write on, a handler adds it to the parent frame's variable pool.
-        Implementations may also add container metadata to the event.
+        write on, a handler calls ``FrameRegistry.update_variables()`` for the
+        parent frame so the commit is observed. Implementations may also add
+        container metadata to the event.
         """
         ...
 
