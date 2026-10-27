@@ -1,3 +1,4 @@
+from graphon.model_runtime.v2.application.catalog import ModelCatalog
 from graphon.model_runtime.v2.application.context import CallContext
 from graphon.model_runtime.v2.application.errors import ModelCallError
 from graphon.model_runtime.v2.domain.descriptors import ModelContract, ModelDescriptor
@@ -15,6 +16,7 @@ __all__ = [
     "JsonObject",
     "JsonValue",
     "ModelCallError",
+    "ModelCatalog",
     "ModelContract",
     "ModelDescriptor",
     "ModelError",
