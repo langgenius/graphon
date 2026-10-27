@@ -3,7 +3,17 @@ from graphon.model_runtime.v2.application import (
     DataFormat,
     JsonObject,
     JsonValue,
+    ModelContract,
+    ModelDescriptor,
     ModelRef,
 )
 
-__all__ = ["ContractRef", "DataFormat", "JsonObject", "JsonValue", "ModelRef"]
+__all__ = [
+    "ContractRef",
+    "DataFormat",
+    "JsonObject",
+    "JsonValue",
+    "ModelContract",
+    "ModelDescriptor",
+    "ModelRef",
+]
