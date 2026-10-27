@@ -13,7 +13,7 @@ from graphon.engine_events.frame import (
 )
 from graphon.entities.workflow_start_reason import WorkflowStartReason
 from graphon.graph.graph import Graph
-from graphon.runtime.container_state import FrameRuntimeData
+from graphon.runtime.container_state import CustomContainerFrameState, FrameRuntimeData
 from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
@@ -115,6 +115,17 @@ class FrameRegistry:
 
     def record_failure(self, frame_id: str, error: str) -> None:
         self._frame_errors.setdefault(frame_id, error)
+        if frame_id == ROOT_FRAME_ID:
+            return
+        root_state = self[ROOT_FRAME_ID].state
+        frame_state = root_state.get_container_frame(frame_id)
+        if (
+            isinstance(frame_state, CustomContainerFrameState)
+            and not frame_state.errors
+        ):
+            root_state.put_container_frame(
+                frame_state.model_copy(update={"errors": (error,)}),
+            )
 
     def finish_frame(
         self,

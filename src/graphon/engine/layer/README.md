@@ -14,6 +14,8 @@ suspension without carrying context tokens between workers. The
 [context tests](../../../../tests/engine/test_layer_node_run_context.py) enforce
 nested context binding and failure isolation.
 
+See [raw frame observations](../../../../ARCHITECTURE.md#raw-frame-observations) for variable commits and frame lifecycle ordering shared by layers and the public event stream.
+
 ## Usage
 
 Register a layer with [Engine.add_layer](../engine.py) before consuming

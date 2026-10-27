@@ -278,8 +278,20 @@ class Engine:
             self._event_stream.mark_complete()
             yield from self._event_stream.emit_events()
             raise
-        yield from self._event_stream.emit_events()
-        yield from self._emit_terminal_events()
+        events = self._event_stream.emit_events()
+        try:
+            # Keep the iterator open so consumer errors can drain queued events.
+            for event in events:  # ruff: ignore[yield-in-for-loop]
+                yield event
+            yield from self._emit_terminal_events()
+        except Exception as error:
+            self._graph_execution.fail(error)
+            self._dispatcher.stop()
+            yield from events
+            self._frame_registry.finish_frames()
+            self._event_stream.mark_complete()
+            yield from self._event_stream.emit_events()
+            raise
 
     def _emit_terminal_events(self) -> Generator[EngineEvent, None, None]:
         if self._graph_execution.aborted:

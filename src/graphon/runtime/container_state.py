@@ -187,6 +187,7 @@ class CustomContainerFrameState(BaseModel):
     kind: Literal["custom"] = "custom"
     frame_id: str
     parent_invocation_id: str
+    errors: tuple[str, ...] = ()
     runtime_data: FrameRuntimeData
 
 
