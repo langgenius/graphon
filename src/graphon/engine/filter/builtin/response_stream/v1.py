@@ -11,7 +11,7 @@ from . import v2
 from .snapshot import ResponseStreamFilterSnapshot, Selector
 
 
-class Snapshot(ResponseStreamFilterSnapshot):
+class Snapshot(ResponseStreamFilterSnapshot[Literal["1.0"]]):
     """Legacy ResponseStreamFilter snapshot written before scoped graphs."""
 
     version: Literal["1.0"] = "1.0"

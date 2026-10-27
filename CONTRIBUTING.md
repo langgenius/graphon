@@ -183,9 +183,9 @@ Rules:
 
 ## Pull Requests
 
-Follow the [PR template](.github/pull_request_template.md) when preparing the
-body. The [body check](.github/scripts/check_pr.py) enforces its structure and
-issue reference. Use the [commit guidance](#git-commits) for the title.
+Follow the [PR template](.github/pull_request_template.md) when preparing the body.
+The [PR workflow](.github/workflows/pr.yml) controls when the [body check](.github/scripts/check_pr.py) enforces the template structure and issue reference.
+Use the [commit guidance](#git-commits) for the title.
 
 Before opening a PR, follow the [issue search](#issues),
 [validation](#testing-and-validation), and

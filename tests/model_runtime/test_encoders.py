@@ -1,5 +1,5 @@
 import dataclasses
-import datetime
+import datetime as dt
 from collections import deque
 from collections.abc import Callable, Iterator
 from decimal import Decimal
@@ -72,9 +72,9 @@ class TestEncoders:
         assert result == {"name": "test", "age": 20}
 
     def test_isoformat(self) -> None:
-        d = datetime.date(2023, 1, 1)
+        d = dt.date(2023, 1, 1)
         assert isoformat(d) == "2023-01-01"
-        t = datetime.time(12, 0, 0)
+        t = dt.time(12, 0, 0)
         assert isoformat(t) == "12:00:00"
 
     def test_decimal_encoder(self) -> None:
@@ -166,16 +166,16 @@ class TestEncoders:
         assert jsonable_encoder(b"bytes") == "bytes"
         assert jsonable_encoder(Color("red")) == "red"
 
-        dt = datetime.datetime(2023, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
-        assert jsonable_encoder(dt) == dt.isoformat()
+        timestamp = dt.datetime(2023, 1, 1, 12, 0, 0, tzinfo=dt.UTC)
+        assert jsonable_encoder(timestamp) == timestamp.isoformat()
 
-        date = datetime.date(2023, 1, 1)
+        date = dt.date(2023, 1, 1)
         assert jsonable_encoder(date) == date.isoformat()
 
-        time = datetime.time(12, 0, 0)
+        time = dt.time(12, 0, 0)
         assert jsonable_encoder(time) == time.isoformat()
 
-        td = datetime.timedelta(seconds=60)
+        td = dt.timedelta(seconds=60)
         assert jsonable_encoder(td) == pytest.approx(60.0)
 
         assert jsonable_encoder(IPv4Address("127.0.0.1")) == "127.0.0.1"

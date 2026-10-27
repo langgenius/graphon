@@ -17,9 +17,9 @@ dependencies = [
     'odfdo>=3.22.8',
     'orjson>=3',
     'pandas[excel]>=2.1',
-    'pydantic>=2.7',
+    'pydantic>=2.11',
     'pydantic-extra-types>=2',
-    'pypdf>=6.19.0',
+    'pypdf>=6.21.2',
     'pypdfium2>=5',
     'python-docx>=1.2',
     'pyyaml>=6',
@@ -50,7 +50,7 @@ dev = [
 ]
 
 [build-system]
-requires = ['uv_build>=0.12.24,<0.13']
+requires = ['uv_build>=0.13.6,<0.14']
 build-backend = 'uv_build'
 
 [tool.uv]

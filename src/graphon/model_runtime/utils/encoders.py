@@ -1,5 +1,5 @@
 import dataclasses
-import datetime
+import datetime as dt
 from collections import defaultdict, deque
 from collections.abc import Callable, Mapping, Sequence
 from decimal import Decimal
@@ -34,7 +34,7 @@ def model_dump(
 
 
 # Taken from Pydantic v1 as is
-def isoformat(o: datetime.date | datetime.time) -> str:
+def isoformat(o: dt.date | dt.time) -> str:
     return o.isoformat()
 
 
@@ -67,10 +67,10 @@ def decimal_encoder(dec_value: Decimal) -> int | float:
 ENCODERS_BY_TYPE: dict[type[Any], Callable[[Any], Any]] = {
     bytes: lambda o: o.decode(),
     Color: str,
-    datetime.date: isoformat,
-    datetime.datetime: isoformat,
-    datetime.time: isoformat,
-    datetime.timedelta: lambda td: td.total_seconds(),
+    dt.date: isoformat,
+    dt.datetime: isoformat,
+    dt.time: isoformat,
+    dt.timedelta: lambda td: td.total_seconds(),
     Decimal: decimal_encoder,
     Enum: lambda o: o.value,
     frozenset: list,
