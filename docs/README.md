@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-10-22T01:02:48Z"
+last_checked: "2026-10-27T05:34:56Z"
 -->
 # Repository knowledge
 
