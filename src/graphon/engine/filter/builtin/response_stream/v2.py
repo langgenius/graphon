@@ -11,6 +11,8 @@ class Snapshot(ResponseStreamFilterSnapshot[Literal["2.0"]]):
     """ResponseStreamFilter snapshot written by Graphon 0.8."""
 
     version: Literal["2.0"] = "2.0"
+    # Missing metadata retains the historical paired-graph skip lookup.
+    skipped_edges: list[str] | None = None
 
 
 def loads(data: str) -> Snapshot:
@@ -40,7 +42,9 @@ def dumps(snapshot: ResponseStreamFilterSnapshot) -> str:
     if not isinstance(snapshot, Snapshot):
         msg = "Expected a version 2 ResponseStreamFilter snapshot"
         raise TypeError(msg)
-    return snapshot.model_dump_json()
+    return snapshot.model_dump_json(
+        exclude={"skipped_edges"} if snapshot.skipped_edges is None else set()
+    )
 
 
 def for_graph(

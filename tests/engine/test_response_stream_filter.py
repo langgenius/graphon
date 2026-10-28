@@ -12,6 +12,7 @@ from graphon.engine.filter import (
     ResponseStreamFilter,
     filter_engine_events,
 )
+from graphon.engine_events.frame import FrameStartedEvent
 from graphon.engine_events.graph import GraphRunStartedEvent
 from graphon.engine_events.node import (
     NodeRunReasoningChunkEvent,
@@ -261,8 +262,10 @@ def test_response_stream_filter_passes_answer_visible_reasoning_chunk() -> None:
 
     assert output == [reasoning]
     assert output[0] is reasoning
-    assert not event_filter._template_stream.stream_buffers.has_events(
-        reasoning.selector
+    assert not (
+        event_filter._initialized_root_session._template_stream.stream_buffers.has_events(
+            reasoning.selector
+        )
     )
 
 
@@ -277,8 +280,10 @@ def test_response_stream_filter_passes_reasoning_for_text_selector_prefix() -> N
 
     assert output == [reasoning]
     assert output[0] is reasoning
-    assert not event_filter._template_stream.stream_buffers.has_events(
-        reasoning.selector
+    assert not (
+        event_filter._initialized_root_session._template_stream.stream_buffers.has_events(
+            reasoning.selector
+        )
     )
 
 
@@ -293,8 +298,10 @@ def test_response_stream_filter_passes_explicit_reasoning_reference() -> None:
 
     assert output == [reasoning]
     assert output[0] is reasoning
-    assert not event_filter._template_stream.stream_buffers.has_events(
-        reasoning.selector
+    assert not (
+        event_filter._initialized_root_session._template_stream.stream_buffers.has_events(
+            reasoning.selector
+        )
     )
 
 
@@ -328,7 +335,11 @@ def test_response_stream_filter_passes_visible_final_reasoning_marker() -> None:
 
     assert output == [marker]
     assert marker.is_final is True
-    assert not event_filter._template_stream.stream_buffers.has_events(marker.selector)
+    assert not (
+        event_filter._initialized_root_session._template_stream.stream_buffers.has_events(
+            marker.selector
+        )
+    )
 
 
 def test_response_stream_filter_filters_reasoning_before_branch_is_reached() -> None:
@@ -622,7 +633,21 @@ def test_response_stream_filter_assembles_builtin_response_values(
     event_filter = ResponseStreamFilter()
     event_filter.initialize(EngineEventFilterContext.from_engine(engine))
 
-    output = list(event_filter.on_event(GraphRunStartedEvent()))
+    variables = engine.runtime_state.variable_pool.variable_dictionary
+    output = [
+        *event_filter.on_event(GraphRunStartedEvent()),
+        *event_filter.on_event(
+            FrameStartedEvent(
+                frame_id="root",
+                node_execution_ids={"response": "response-run"},
+                variables=tuple(
+                    variable
+                    for values in variables.values()
+                    for variable in values.values()
+                ),
+            )
+        ),
+    ]
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     separator = " / " if node_type == BuiltinNodeTypes.ANSWER else "\n"

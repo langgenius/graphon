@@ -4,6 +4,7 @@ import base64
 import json
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import replace
 from itertools import zip_longest
 from unittest.mock import MagicMock
 
@@ -341,7 +342,8 @@ def test_response_filter_renders_files_with_its_engine_adapter(
             }),
             workers=1,
         )
-        context = EngineEventFilterContext.from_engine(engine)
+        # This exercises legacy manual streams without frame observations.
+        context = replace(EngineEventFilterContext.from_engine(engine), run_id=None)
     with use_workflow_file_runtime(_make_file_adapter("caller")):
         stream_filter = ResponseStreamFilter()
         stream_filter.initialize(context)
