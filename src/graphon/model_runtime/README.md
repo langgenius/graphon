@@ -37,5 +37,11 @@ Aggregation preserves the order of mixed strings and content blocks, including e
 Hosts can display chunks while calling `consume(chunk)` on one [LLMResultAccumulator](model_providers/base/large_language_model.py) per invocation.
 After consuming the stream, call its `to_result(model=..., prompt_messages=...)` and use the returned `message` for replay or [JSON persistence](../../../tests/model_runtime/test_llm_result_accumulator.py).
 
+Tool calls must be complete and emitted once per invocation, with nonempty IDs unique across all chunks.
+The accumulator preserves their arrival order and exact argument strings.
+An empty ID or a duplicate in the same or an earlier chunk raises `ValueError` before any calls from the incoming chunk are appended.
+Provider adapters assemble fragments and generate missing IDs before emitting tool calls.
+The accumulator retains the last non-`None` usage snapshot, including zero counters.
+
 [SlimLLM](../dsl/slim/llm.py) uses the same aggregation for blocking ordinary and structured output calls; see the [Slim tests](../../../tests/dsl/test_slim_llm.py).
 [Prompt filtering](../nodes/llm/llm_utils.py) preserves state on supported content blocks and keeps assistant messages with non-`None` state even when their content list is empty; see the [prompt tests](../../../tests/nodes/llm/test_llm_utils.py).

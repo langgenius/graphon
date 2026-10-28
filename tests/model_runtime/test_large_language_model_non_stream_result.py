@@ -40,7 +40,9 @@ def _make_chunk(
     )
 
 
-def test_non_stream_result_merges_first_chunk_content_and_tool_calls() -> None:
+def test_non_stream_result_preserves_first_chunk_content_and_complete_tool_calls() -> (
+    None
+):
     prompt_messages = [UserPromptMessage(content="hi")]
 
     tool_calls = [
@@ -49,23 +51,7 @@ def test_non_stream_result_merges_first_chunk_content_and_tool_calls() -> None:
             type="function",
             function=AssistantPromptMessage.ToolCall.ToolCallFunction(
                 name="func_foo",
-                arguments="",
-            ),
-        ),
-        AssistantPromptMessage.ToolCall(
-            id="",
-            type="function",
-            function=AssistantPromptMessage.ToolCall.ToolCallFunction(
-                name="",
-                arguments='{"arg1": ',
-            ),
-        ),
-        AssistantPromptMessage.ToolCall(
-            id="",
-            type="function",
-            function=AssistantPromptMessage.ToolCall.ToolCallFunction(
-                name="",
-                arguments='"value"}',
+                arguments='{"arg1": "value"}',
             ),
         ),
     ]

@@ -239,13 +239,13 @@ def test_slim_llm_collects_mixed_content_and_latest_opaque_body(
             ("", None),
         ])
     ]
-    for index, arguments in enumerate(['{"city":', '"Paris"}']):
+    for index, arguments in enumerate(['{"city":"Paris"}', '{"city":"London"}']):
         chunks[index]["delta"]["message"]["tool_calls"] = [
             {
-                "id": "call-1" if index == 0 else "",
+                "id": f"call-{index + 1}",
                 "type": "function",
                 "function": {
-                    "name": "weather" if index == 0 else "",
+                    "name": "weather",
                     "arguments": arguments,
                 },
             },
@@ -286,6 +286,13 @@ def test_slim_llm_collects_mixed_content_and_latest_opaque_body(
                 type="function",
                 function=AssistantPromptMessage.ToolCall.ToolCallFunction(
                     name="weather", arguments='{"city":"Paris"}'
+                ),
+            ),
+            AssistantPromptMessage.ToolCall(
+                id="call-2",
+                type="function",
+                function=AssistantPromptMessage.ToolCall.ToolCallFunction(
+                    name="weather", arguments='{"city":"London"}'
                 ),
             ),
         ],

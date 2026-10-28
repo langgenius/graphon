@@ -1,6 +1,5 @@
 import logging
 import time
-import uuid
 from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 
@@ -53,70 +52,6 @@ def _run_callbacks(
             )
 
 
-def generate_tool_call_id() -> str:
-    return f"chatcmpl-tool-{uuid.uuid4().hex!s}"
-
-
-def _get_or_create_tool_call(
-    existing_tools_calls: list[AssistantPromptMessage.ToolCall],
-    tool_call_id: str,
-) -> AssistantPromptMessage.ToolCall:
-    """Get or create a tool call by ID.
-
-    If `tool_call_id` is empty, returns the most recently created tool call.
-
-    Returns:
-        The existing or newly created tool call that should receive the delta.
-
-    Raises:
-        ValueError: If `tool_call_id` is empty and there is no prior tool call to reuse.
-
-    """
-    if not tool_call_id:
-        if not existing_tools_calls:
-            msg = (
-                "tool_call_id is empty but no existing tool call is "
-                "available to apply the delta"
-            )
-            raise ValueError(msg)
-        return existing_tools_calls[-1]
-
-    tool_call = next(
-        (
-            tool_call
-            for tool_call in existing_tools_calls
-            if tool_call.id == tool_call_id
-        ),
-        None,
-    )
-    if tool_call is None:
-        tool_call = AssistantPromptMessage.ToolCall(
-            id=tool_call_id,
-            type="function",
-            function=AssistantPromptMessage.ToolCall.ToolCallFunction(
-                name="",
-                arguments="",
-            ),
-        )
-        existing_tools_calls.append(tool_call)
-
-    return tool_call
-
-
-def _merge_tool_call_delta(
-    tool_call: AssistantPromptMessage.ToolCall,
-    delta: AssistantPromptMessage.ToolCall,
-) -> None:
-    if delta.id:
-        tool_call.id = delta.id
-    if delta.type:
-        tool_call.type = delta.type
-    if delta.function.name:
-        tool_call.function.name = delta.function.name
-    if delta.function.arguments:
-        tool_call.function.arguments += delta.function.arguments
-
-
 @dataclass(slots=True)
 class LLMResultAccumulator:
     """Retain a complete result while a caller consumes and displays each chunk."""
@@ -133,10 +68,19 @@ class LLMResultAccumulator:
             self.consume(chunk)
 
     def consume(self, chunk: LLMResultChunk) -> None:
+        calls = chunk.delta.message.tool_calls
+        call_ids = {call.id for call in self.tool_calls}
+        for call in calls:
+            if not call.id:
+                msg = "Tool call ID must not be empty."
+                raise ValueError(msg)
+            if call.id in call_ids:
+                msg = f"Duplicate tool call ID: {call.id}"
+                raise ValueError(msg)
+            call_ids.add(call.id)
+        self.tool_calls.extend(calls)
         self._consume_content(chunk)
-        if chunk.delta.message.tool_calls:
-            merge_tool_call_deltas(chunk.delta.message.tool_calls, self.tool_calls)
-        if chunk.delta.usage:
+        if chunk.delta.usage is not None:
             self.usage = chunk.delta.usage
         if chunk.system_fingerprint:
             self.system_fingerprint = chunk.system_fingerprint
@@ -271,28 +215,6 @@ def normalize_non_stream_runtime_result(
         prompt_messages=prompt_messages,
         chunks=result,
     )
-
-
-def merge_tool_call_deltas(
-    new_tool_calls: list[AssistantPromptMessage.ToolCall],
-    existing_tools_calls: list[AssistantPromptMessage.ToolCall],
-    *,
-    id_generator: Callable[[], str] | None = None,
-) -> None:
-    """Merge incremental tool call deltas into existing tool calls.
-
-    :param new_tool_calls: List of new tool call deltas to be merged.
-    :param existing_tools_calls: List of existing tool calls modified in place.
-    :param id_generator: Optional callable for generating IDs in tests/callers.
-    """
-    generator = generate_tool_call_id if id_generator is None else id_generator
-
-    for new_tool_call in new_tool_calls:
-        if new_tool_call.function.name and not new_tool_call.id:
-            new_tool_call.id = generator()
-
-        tool_call = _get_or_create_tool_call(existing_tools_calls, new_tool_call.id)
-        _merge_tool_call_delta(tool_call, new_tool_call)
 
 
 def _invoke_llm_via_runtime(
