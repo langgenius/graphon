@@ -39,6 +39,10 @@ blocks retain their order and block state; see the
 [SlimLLM](../dsl/slim/llm.py) shares this aggregation for blocking ordinary and
 structured output calls, covered by the [Slim tests](../../../tests/dsl/test_slim_llm.py).
 
+After a `LargeLanguageModel.invoke` stream is fully consumed without errors, `on_after_invoke` receives a result containing all tool calls, assembled with the same merging rules as blocking results.
+Iteration failures, including before the first chunk, notify `on_invoke_error` once with the original exception before normal exception conversion and propagation, and skip `on_after_invoke`.
+See the [callback regression tests](../../../tests/model_runtime/test_model_dispatch.py).
+
 Hosts can display chunks while calling `consume(chunk)` on one [LLMResultAccumulator](model_providers/base/large_language_model.py) per invocation.
 After consuming the stream, call its `to_result(model=..., prompt_messages=...)` and use the returned `message` for replay or [JSON persistence](../../../tests/model_runtime/test_llm_result_accumulator.py).
 
