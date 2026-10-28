@@ -251,6 +251,8 @@ class AssistantPromptMessage(PromptMessage):
         @classmethod
         def transform_id_to_str(cls, value: Any) -> str:
             match value:
+                case None:
+                    result = ""
                 case str():
                     result = value
                 case _:

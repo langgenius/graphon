@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from graphon.model_runtime.entities.llm_entities import (
@@ -149,3 +151,33 @@ def test_accumulated_result_rejects_invalid_call_ids_before_appending(
 
     result = accumulator.to_result(model="test-model", prompt_messages=[])
     assert [call.id for call in result.message.tool_calls] == initial_ids
+
+
+@pytest.mark.parametrize("from_json", [False, True])
+def test_accumulated_result_rejects_null_call_ids_after_parsing(
+    from_json: bool,
+) -> None:
+    payload = {
+        "model": "test-model",
+        "delta": {
+            "index": 0,
+            "message": {
+                "tool_calls": [
+                    {
+                        "id": None,
+                        "type": "function",
+                        "function": {"name": "lookup", "arguments": "{}"},
+                    }
+                ]
+            },
+        },
+    }
+    chunk = (
+        LLMResultChunk.model_validate_json(json.dumps(payload))
+        if from_json
+        else LLMResultChunk.model_validate(payload)
+    )
+    accumulator = large_language_model.LLMResultAccumulator()
+
+    with pytest.raises(ValueError):  # ruff: ignore[pytest-raises-too-broad] - Only the exception type is contractual.
+        accumulator.consume(chunk)
