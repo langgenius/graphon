@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from graphon.engine.filter import ResponseStreamFilter
+from graphon.engine.filter.builtin.response_stream.frame_session import _FrameSession
 from graphon.enums import NodeExecutionType, NodeState
 from graphon.nodes.base.template import Template, VariableSegment
 from tests.engine.test_response_stream_filter import (
@@ -142,7 +143,7 @@ def test_response_filter_paths_keep_parallel_edges_with_distinct_source_handles(
         "success",
         "failure",
     }
-    assert event_filter._find_all_paths("root", "answer") == [
+    assert event_filter._initialized_root_session._find_all_paths("root", "answer") == [
         ["root-success"],
         ["root-failure"],
     ]
@@ -172,7 +173,7 @@ def test_response_filter_paths_keep_skipped_edge_for_otherwise_reachable_target(
     event_filter = ResponseStreamFilter()
     event_filter.initialize(_context(graph))
 
-    assert event_filter._find_all_paths("root", "answer") == [
+    assert event_filter._initialized_root_session._find_all_paths("root", "answer") == [
         ["root-skipped"],
         ["root-live", "live-answer"],
     ]
@@ -214,10 +215,16 @@ def test_response_filter_builds_selector_specific_blocking_paths_per_response() 
     event_filter = ResponseStreamFilter()
     event_filter.initialize(_context(graph))
 
-    assert [path.edges for path in event_filter._paths_maps["answer-a"]] == [
+    assert [
+        path.edge_ids
+        for path in event_filter._initialized_root_session._blocking_paths["answer-a"]
+    ] == [
         ["shared-merge"],
     ]
-    assert [path.edges for path in event_filter._paths_maps["answer-b"]] == [
+    assert [
+        path.edge_ids
+        for path in event_filter._initialized_root_session._blocking_paths["answer-b"]
+    ] == [
         [],
         ["other-answer-b"],
     ]
@@ -231,10 +238,16 @@ def test_response_filter_reinitialization_recomputes_selector_dependent_blocking
     event_filter = ResponseStreamFilter()
 
     event_filter.initialize(_context(first_graph))
-    assert [path.edges for path in event_filter._paths_maps["answer"]] == [["edge-1"]]
+    assert [
+        path.edge_ids
+        for path in event_filter._initialized_root_session._blocking_paths["answer"]
+    ] == [["edge-1"]]
 
     event_filter.initialize(_context(second_graph))
-    assert [path.edges for path in event_filter._paths_maps["answer"]] == [[]]
+    assert [
+        path.edge_ids
+        for path in event_filter._initialized_root_session._blocking_paths["answer"]
+    ] == [[]]
 
 
 def test_response_filter_find_all_paths_handles_root_target_with_backedge() -> None:
@@ -255,8 +268,12 @@ def test_response_filter_find_all_paths_handles_root_target_with_backedge() -> N
     event_filter = ResponseStreamFilter()
     event_filter.initialize(_context(graph))
 
-    assert event_filter._find_all_paths("root", "root") == [[]]
-    assert event_filter._find_all_paths("branch", "root") == [["branch-root"]]
+    assert event_filter._initialized_root_session._find_all_paths("root", "root") == [
+        []
+    ]
+    assert event_filter._initialized_root_session._find_all_paths("branch", "root") == [
+        ["branch-root"]
+    ]
 
 
 def test_response_filter_does_not_expand_dead_branches() -> None:
@@ -300,13 +317,15 @@ def test_response_filter_classifies_each_path_edge_once_per_response(
     )
     event_filter = ResponseStreamFilter()
     calls: list[str] = []
-    original = event_filter._is_blocking_edge
+    original = _FrameSession._is_blocking_edge
 
-    def classify_once(edge_id: str, selectors: set[tuple[str, ...]]) -> bool:
+    def classify_once(
+        self: _FrameSession, edge_id: str, selectors: set[tuple[str, ...]]
+    ) -> bool:
         calls.append(edge_id)
-        return original(edge_id, selectors)
+        return original(self, edge_id, selectors)
 
-    monkeypatch.setattr(event_filter, "_is_blocking_edge", classify_once)
+    monkeypatch.setattr(_FrameSession, "_is_blocking_edge", classify_once)
 
     event_filter.initialize(_context(graph))
 
@@ -356,7 +375,7 @@ def test_response_filter_paths_match_reference_dfs_for_cyclic_graphs(
     event_filter = ResponseStreamFilter()
     event_filter.initialize(_context(graph))
 
-    actual = event_filter._find_all_paths("n0", "n5")
+    actual = event_filter._initialized_root_session._find_all_paths("n0", "n5")
     expected = _reference_paths(graph, "n0", "n5")
 
     assert actual == expected
@@ -382,7 +401,7 @@ def test_response_filter_preserves_seed_path_and_visited_nodes() -> None:
     event_filter = ResponseStreamFilter()
     event_filter.initialize(_context(graph))
 
-    actual = event_filter._find_all_paths(
+    actual = event_filter._initialized_root_session._find_all_paths(
         "root",
         "answer",
         current_path=["seed-edge"],
