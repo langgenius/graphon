@@ -14,12 +14,13 @@ from graphon.engine.filter import (
 )
 from graphon.engine_events.graph import GraphRunStartedEvent
 from graphon.engine_events.node import (
+    NodeRunExceptionEvent,
     NodeRunReasoningChunkEvent,
     NodeRunRetryEvent,
     NodeRunStartedEvent,
     NodeRunStreamChunkEvent,
 )
-from graphon.engine_events.traversal import GraphEdgeTakenEvent
+from graphon.engine_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTakenEvent
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType, NodeState, NodeType
 from graphon.graph.graph import Graph
 from graphon.nodes.base.template import (
@@ -58,9 +59,11 @@ class _TestNode(NodeProtocol):
         *,
         execution_type: NodeExecutionType = NodeExecutionType.EXECUTABLE,
         template: Template | None = None,
+        promoted_to_branch: bool = False,
     ) -> None:
         self.id = node_id
         self.execution_type = execution_type
+        self.promoted_to_branch = promoted_to_branch
         self.state = NodeState.UNKNOWN
         self._template = template or Template(segments=[])
 
@@ -83,6 +86,7 @@ class _BrokenResponseNode:
     def __init__(self, node_id: str) -> None:
         self.id = node_id
         self.execution_type = NodeExecutionType.RESPONSE
+        self.promoted_to_branch = False
         self.state = NodeState.UNKNOWN
 
     def blocks_variable_output(
@@ -93,12 +97,18 @@ class _BrokenResponseNode:
 
 
 class _TestEdge(EdgeProtocol):
-    def __init__(self, edge_id: str, tail: str, head: str) -> None:
+    def __init__(
+        self,
+        edge_id: str,
+        tail: str,
+        head: str,
+        source_handle: str = "success",
+    ) -> None:
         self.id = edge_id
         self.state = NodeState.UNKNOWN
         self.tail = tail
         self.head = head
-        self.source_handle = "success"
+        self.source_handle = source_handle
 
 
 class _TestGraph(GraphProtocol):
@@ -418,6 +428,125 @@ def test_response_stream_filter_filters_reasoning_from_skipped_merge_branch() ->
 
     assert list(event_filter.on_event(chosen_reasoning)) == [chosen_reasoning]
     assert list(event_filter.on_event(skipped_reasoning)) == []
+
+
+# ---------------------------------------------------------------------------
+# Regression tests (dify#43938): a node promoted to BRANCH by FAIL_BRANCH
+# error handling streams its normal-path output while it runs. Before the fix
+# the downstream Answer session waited for node completion and every chunk was
+# delivered in one burst at the end of the node run.
+# ---------------------------------------------------------------------------
+
+
+def _fail_branch_graph() -> _TestGraph:
+    agent = _TestNode(
+        "agent",
+        execution_type=NodeExecutionType.BRANCH,
+        promoted_to_branch=True,
+    )
+    answer = _TestNode(
+        "answer",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template(segments=[VariableSegment(selector=["agent", "text"])]),
+    )
+    fail_answer = _TestNode(
+        "fail-answer",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template(segments=[TextSegment(text="Agent failed")]),
+    )
+    return _TestGraph(
+        nodes={"agent": agent, "answer": answer, "fail-answer": fail_answer},
+        edges={
+            "agent-answer": _TestEdge("agent-answer", "agent", "answer", "source"),
+            "agent-fail": _TestEdge(
+                "agent-fail", "agent", "fail-answer", "fail-branch"
+            ),
+        },
+        root_node_id="agent",
+    )
+
+
+def test_response_stream_filter_streams_promoted_fail_branch_chunks() -> None:
+    """Normal-path chunks stream while the promoted node runs; only the
+    fail-branch edge stays blocking."""
+    graph = _fail_branch_graph()
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+    chunk1 = _stream_chunk(
+        "Hel",
+        source_id="agent",
+        selector=["agent", "text"],
+        is_final=False,
+    )
+    chunk2 = _stream_chunk(
+        "lo",
+        source_id="agent",
+        selector=["agent", "text"],
+        is_final=False,
+    )
+
+    list(event_filter.on_event(GraphRunStartedEvent()))
+
+    # The normal-path session is already active; the fail-branch session waits.
+    assert event_filter._active_session is not None
+    assert event_filter._active_session.node_id == "answer"
+    assert all(
+        session.node_id != "fail-answer" for session in event_filter._waiting_sessions
+    )
+
+    assert list(event_filter.on_event(chunk1)) == [chunk1]
+    assert list(event_filter.on_event(chunk2)) == [chunk2]
+
+
+def test_response_stream_filter_releases_session_when_promoted_node_fails() -> None:
+    """When the promoted node fails, its early-started session is abandoned so
+    the fail-branch Answer can stream."""
+    graph = _fail_branch_graph()
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+    chunk = _stream_chunk(
+        "Hel",
+        source_id="agent",
+        selector=["agent", "text"],
+        is_final=False,
+    )
+
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    assert list(event_filter.on_event(chunk)) == [chunk]
+
+    exception = NodeRunExceptionEvent(
+        id="agent-run",
+        node_id="agent",
+        node_type=BuiltinNodeTypes.CODE,
+        error="agent failed",
+        start_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    output = list(event_filter.on_event(exception))
+
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert chunks == []
+    assert event_filter._active_session is None
+
+    skipped = GraphEdgeSkippedEvent(
+        frame_id=ROOT_FRAME_ID,
+        edge_id="agent-answer",
+        source_node_id="agent",
+        target_node_id="answer",
+        source_handle="source",
+    )
+    list(event_filter.on_event(skipped))
+
+    taken = GraphEdgeTakenEvent(
+        frame_id=ROOT_FRAME_ID,
+        edge_id="agent-fail",
+        source_node_id="agent",
+        target_node_id="fail-answer",
+        source_handle="fail-branch",
+    )
+    output = list(event_filter.on_event(taken))
+
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert [chunk.chunk for chunk in chunks] == ["Agent failed"]
 
 
 def test_response_stream_filter_passes_reasoning_for_waiting_session() -> None:
