@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-10-27T13:30:50Z"
+last_checked: "2026-10-29T01:02:46Z"
 -->
 # Architecture
 
@@ -121,16 +121,20 @@ maintaining a view from commit events.
 sets `run_id` to the persisted root entry execution ID, so it survives
 pause/restore and distinguishes separate runs with the same `workflow_id`.
 
-Pause leaves unfinished frames open.
-Resume publishes new baselines with the resumption reason and existing execution IDs before resumed body events.
-[Custom container frame state](src/graphon/runtime/container_state.py) retains the first unhandled node error in `errors`, preserving failed frame observations through pause and snapshot restore.
-Terminal failure or abort closes each remaining frame once.
-An `Exception` thrown into the `Engine.run()` iterator during execution or at its `GraphRunPausedEvent` yield also fails open frames.
-Their `FrameFinishedEvent` values precede `GraphRunFailedEvent` in both layers and the public event stream; continued consumption re-raises the exception.
+Pause leaves unfinished frames open. Resume publishes new baselines with the
+resumption reason and existing execution IDs before resumed body events.
+[Persisted container state](src/graphon/runtime/container_state.py) preserves
+pending frame failures across pause and snapshot restore. Terminal failure or
+abort closes each remaining frame once, before the graph's terminal event.
+An `Exception` thrown into `Engine.run()` during execution or at the paused event
+follows the same failure ordering; continued consumption re-raises the exception.
 
-Root has no owning invocation, and custom containers may omit item index and declared root metadata without adding methods to the [handler protocol](src/graphon/engine/container_handler/protocol.py).
-The [frame observation tests](tests/engine/test_frame_observations.py) cover baselines, commits, detached values, and raw chunk delivery.
-The [frame failure tests](tests/engine/test_frame_failures.py) cover custom container pause/restore and consumer exceptions.
+Root has no owning invocation. Custom containers may omit optional item index
+and root metadata. See the
+[frame observation tests](tests/engine/test_frame_observations.py) for baselines,
+commits, detached values, and raw chunk delivery, and the
+[frame failure tests](tests/engine/test_frame_failures.py) for pause/restore and
+consumer exceptions.
 
 Baselines and commits contain full variable values. `ResponseStreamFilter`
 suppresses those events from its output; this compatibility guard does not add

@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-10-22T01:04:05Z"
+last_checked: "2026-10-29T01:01:57Z"
 -->
 # Graphon
 
@@ -13,7 +13,7 @@ protocols, and a runnable end-to-end example.
 
 - Queue-based `Engine` orchestration with event-driven execution
 - Graph parsing, validation, and fluent graph building
-- Shared runtime state, variable pool, and workflow execution state
+- Frame-owned runtime state and variables with shared workflow execution state
 - Built-in node implementations for common workflow patterns
 - DSL import support with Slim-backed LLM nodes
 - HTTP, file, tool, and human-input integration protocols
