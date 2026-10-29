@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import cast, final
+from typing import final
 
 from graphon.engine_events.base import NodeEvent
 from graphon.engine_events.node import NodeRunFailedEvent, NodeRunVariableUpdatedEvent
@@ -29,7 +29,7 @@ from graphon.runtime.container_state import (
 from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.ready_queue import ResumeTask
 from graphon.runtime.runtime_state import RuntimeState
-from graphon.variables.segments import NoneSegment, SerializableSegment
+from graphon.variables.segments import ArrayAnySegment, ArraySegment, NoneSegment
 from graphon.variables.variables import Variable
 
 from ...frame import ExecutionFrame, FrameRegistry
@@ -206,13 +206,12 @@ class IterationContainerHandler:
         result = frame.state.variable_pool.get(
             run_state.output_selector,
         )
-        output = NoneSegment() if result is None else cast(SerializableSegment, result)
         run_state = self._complete_iteration_step(
             frame=frame,
             frame_state=frame_state,
             parent_frame=parent_frame,
             run_state=run_state,
-            output=output,
+            output=build_container_value(result),
             store_output=True,
         )
         self._continue_or_complete_iteration(
@@ -266,7 +265,7 @@ class IterationContainerHandler:
         frame_state: IterationFrameState,
         parent_frame: ExecutionFrame,
         run_state: IterationRunState,
-        output: SerializableSegment,
+        output: ContainerValue,
         store_output: bool,
     ) -> IterationRunState:
         duration_map = dict(run_state.duration_map)
@@ -455,14 +454,7 @@ class IterationContainerHandler:
         status: WorkflowNodeExecutionStatus,
         error: str = "",
     ) -> ContainerExecutionResult:
-        outputs: dict[str, ContainerValue] = {
-            "output": build_container_value(
-                self._flatten_outputs_if_needed(
-                    self._ordered_iteration_outputs(run_state),
-                    flatten_output=run_state.flatten_output,
-                ),
-            ),
-        }
+        outputs = {"output": self._collect_iteration_outputs(run_state)}
         metadata = self._iteration_metadata(run_state)
         return ContainerExecutionResult(
             metadata=self._event_metadata(metadata),
@@ -492,36 +484,26 @@ class IterationContainerHandler:
             ),
         }
 
-    def _flatten_outputs_if_needed(
-        self,
-        outputs: list[object],
-        *,
-        flatten_output: bool,
-    ) -> list[object]:
-        if not flatten_output:
-            return outputs
-        non_empty_outputs = [output for output in outputs if output is not None]
-        if not non_empty_outputs:
-            return outputs
-        if not all(isinstance(output, list) for output in non_empty_outputs):
-            return outputs
-
-        flattened: list[object] = []
-        for output in outputs:
-            if isinstance(output, list):
-                flattened.extend(output)
-            elif output is not None:
-                flattened.append(output)
-        return flattened
-
-    def _ordered_iteration_outputs(
+    def _collect_iteration_outputs(
         self,
         run_state: IterationRunState,
-    ) -> list[object]:
-        return [
-            run_state.outputs[key].to_object()
-            for key in sorted(run_state.outputs, key=int)
-        ]
+    ) -> ContainerValue:
+        outputs = [run_state.outputs[key] for key in sorted(run_state.outputs, key=int)]
+        arrays = [output for output in outputs if isinstance(output, ArraySegment)]
+        if (
+            run_state.flatten_output
+            and arrays
+            and all(
+                isinstance(output, (ArraySegment, NoneSegment)) for output in outputs
+            )
+        ):
+            flattened = [item for output in arrays for item in output.value]
+            if len({output.value_type for output in arrays}) == 1:
+                return build_container_value(arrays[0]).model_copy(
+                    update={"value": flattened}
+                )
+            return ArrayAnySegment(value=flattened)
+        return build_container_value([output.to_object() for output in outputs])
 
     def _enqueue_container_result(
         self,

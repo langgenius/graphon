@@ -7,6 +7,7 @@ from graphon.nodes.variable_assigner.common.exc import VariableOperatorNodeError
 from graphon.variables.consts import SELECTORS_LENGTH
 from graphon.variables.segments import Segment
 from graphon.variables.types import SegmentType
+from graphon.variables.variables import FloatVariable, IntegerVariable, VariableBase
 
 # Use double underscore (`__`) prefix for internal variables
 # to minimize risk of collision with user-defined variable names.
@@ -18,6 +19,17 @@ class UpdatedVariable(BaseModel):
     selector: Sequence[str]
     value_type: SegmentType
     new_value: Any = None
+
+
+def copy_variable_with_value[T: VariableBase](
+    variable: T, value: Any
+) -> T | FloatVariable:
+    if isinstance(variable, IntegerVariable) and isinstance(value, float):
+        return FloatVariable(
+            **variable.model_dump(exclude={"value_type", "value"}),
+            value=value,
+        )
+    return variable.model_copy(update={"value": value})
 
 
 def variable_to_processed_data(

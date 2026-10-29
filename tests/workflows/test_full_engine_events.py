@@ -36,7 +36,14 @@ from graphon.engine_events.node import (
     NodeRunVariableUpdatedEvent,
 )
 from graphon.variables.factory import build_segment, segment_to_variable
-from graphon.variables.segments import ArrayStringSegment, Segment
+from graphon.variables.segments import (
+    ArrayAnySegment,
+    ArrayFileSegment,
+    ArrayNumberSegment,
+    ArrayStringSegment,
+    NoneSegment,
+    Segment,
+)
 from graphon.variables.variables import ArrayStringVariable, StringVariable
 from tests.helpers.workflow_events import (
     event_path,
@@ -1198,6 +1205,125 @@ def test_loop_keeps_empty_typed_array_outputs_in_the_parent_pool() -> None:
         event for event in events if isinstance(event, NodeRunLoopSucceededEvent)
     )
     assert succeeded.outputs == {"items": [], "loop_round": 1}
+
+
+def test_loop_completes_after_integer_division_produces_a_fraction() -> None:
+    loop_nodes = _loop_nodes("loop")
+    loop_nodes[0]["data"]["loop_variables"] = [
+        {"label": "number", "var_type": "number", "value_type": "constant", "value": 1},
+    ]
+    dsl = _graph_dsl(
+        nodes=[
+            _start_node(),
+            *loop_nodes,
+            {
+                "id": "divide",
+                "data": {
+                    "type": "assigner",
+                    "version": "2",
+                    "container_id": "loop",
+                    "items": [
+                        {
+                            "variable_selector": ["loop", "number"],
+                            "input_type": "constant",
+                            "operation": "/=",
+                            "value": 2,
+                        },
+                    ],
+                },
+            },
+            _end_node([{"variable": "number", "value_selector": ["loop", "number"]}]),
+        ],
+        edges=[
+            _edge("start", "loop"),
+            _edge("loop-start", "divide"),
+            _edge("loop", "end"),
+        ],
+    )
+
+    events = run_workflow(dsl)
+
+    assert final_outputs(events) == {"number": 0.5}
+    succeeded = next(
+        event for event in events if isinstance(event, NodeRunLoopSucceededEvent)
+    )
+    assert succeeded.outputs == {"number": 0.5, "loop_round": 1}
+
+
+@pytest.mark.parametrize("is_parallel", [False, True], ids=["serial", "parallel"])
+@pytest.mark.parametrize(
+    ("items", "flatten_output", "expected_type", "expected_value"),
+    [
+        (
+            [ArrayFileSegment(value=[]), ArrayFileSegment(value=[])],
+            True,
+            "array[file]",
+            [],
+        ),
+        (
+            [ArrayAnySegment(value=["first"]), ArrayAnySegment(value=["last"])],
+            True,
+            "array[any]",
+            ["first", "last"],
+        ),
+        (
+            [
+                ArrayStringSegment(value=["first"]),
+                NoneSegment(),
+                ArrayStringSegment(value=[]),
+            ],
+            True,
+            "array[string]",
+            ["first"],
+        ),
+        (
+            [ArrayStringSegment(value=["first"]), ArrayNumberSegment(value=[])],
+            True,
+            "array[any]",
+            ["first"],
+        ),
+        (
+            [ArrayFileSegment(value=[]), ArrayFileSegment(value=[])],
+            False,
+            "array[any]",
+            [[], []],
+        ),
+    ],
+    ids=["empty-files", "declared-any", "missing-output", "mixed-types", "unflattened"],
+)
+def test_iteration_preserves_array_output_types(
+    is_parallel: bool,
+    items: list[Segment],
+    flatten_output: bool,
+    expected_type: str,
+    expected_value: list[object],
+) -> None:
+    iteration_nodes = _iteration_nodes(
+        "iteration", is_parallel=is_parallel, parallel_nums=2
+    )
+    iteration_nodes[0]["data"]["flatten_output"] = flatten_output
+    dsl = _graph_dsl(
+        nodes=[
+            _start_node(),
+            *iteration_nodes,
+            _end_node([
+                {"variable": "items", "value_selector": ["iteration", "output"]}
+            ]),
+        ],
+        edges=[_edge("start", "iteration"), _edge("iteration", "end")],
+    )
+    engine = loads(dsl, start_inputs={"items": items})
+
+    events = list(engine.run())
+
+    output = engine.runtime_state.variable_pool.get(("iteration", "output"))
+    assert output is not None
+    assert output.value_type == expected_type
+    assert final_outputs(events) == {"items": expected_value}
+    succeeded = next(
+        event for event in events if isinstance(event, NodeRunIterationSucceededEvent)
+    )
+    assert succeeded.outputs == {"output": expected_value}
 
 
 def test_full_loop_graph_uses_custom_container_handler_factory() -> None:

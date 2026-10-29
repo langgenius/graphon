@@ -12,6 +12,8 @@ from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.variables import (
     ArrayStringVariable,
+    FloatVariable,
+    IntegerVariable,
     StringVariable,
 )
 
@@ -158,3 +160,35 @@ def test_clear_array() -> None:
     assert updated_variables[0].new_value == []
     assert updated_event.variable.value == []
     assert succeeded_event.node_run_result.inputs == {"value": []}
+
+
+def test_overwrite_number_keeps_fractional_value_and_variable_identity() -> None:
+    original = IntegerVariable(
+        id="number-id",
+        name="number",
+        description="Mutable number",
+        selector=["conversation", "number"],
+        value=1,
+    )
+    pool = build_variable_pool(
+        conversation_variables=[original],
+        variables=[(("input", "number"), FloatVariable(name="input", value=0.5))],
+    )
+    node = _build_node(
+        variable_pool=pool,
+        assigned_selector=original.selector,
+        write_mode=WriteMode.OVER_WRITE,
+        input_selector=("input", "number"),
+    )
+
+    update = next(
+        event for event in node.run() if isinstance(event, NodeRunVariableUpdatedEvent)
+    )
+    restored = NodeRunVariableUpdatedEvent.model_validate_json(update.model_dump_json())
+
+    assert restored.variable.value == 0.5  # ruff: ignore[float-equality-comparison] - Exact binary fraction.
+    assert restored.variable.value_type == "float"
+    assert restored.variable.id == original.id
+    assert restored.variable.name == original.name
+    assert restored.variable.description == original.description
+    assert restored.variable.selector == original.selector

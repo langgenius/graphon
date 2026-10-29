@@ -165,13 +165,13 @@ compatibility details:
 | Pause, resume, and snapshot quiescence | [Dispatcher](src/graphon/engine/dispatcher.py), [execution guard](src/graphon/runtime/execution.py) | [Serialization](tests/engine/test_runtime_state_serialization.py) |
 | Snapshot versions and migrations | [Snapshot loading](src/graphon/runtime/runtime_state/snapshot.py) | [Runtime snapshots](tests/runtime/test_runtime_state.py), [version isolation](tests/test_snapshot_version_isolation.py) |
 
-Container values preserve serializable segments' declared types across construction
-and snapshots, including empty typed arrays. Conversion discards source variable
-identity so completion binds outputs to the container's selectors in the parent
-pool. `ContainerNodeRunResult.to_node_run_result()` retains typed outputs for
-storage while unwrapping inputs; resumed Loop/Iteration presentation events unwrap
-outputs separately. Raw Python values still use type inference, and secrets still
-normalize to strings.
+Container values preserve serializable segments' declared types through construction, snapshots, and completion, including empty typed arrays.
+Conversion discards source variable identity so the parent pool binds completed outputs to the container's selectors.
+Stored outputs remain typed; inputs and Loop/Iteration presentation events expose plain values.
+Raw Python values use type inference, and secrets normalize to strings.
+
+When [Iteration](src/graphon/engine/container_handler/builtin/iteration.py) flattens outputs, matching declared array types survive in both serial and parallel runs; mixed array types become `array[any]`.
+[Variable assignment](src/graphon/nodes/variable_assigner/common/helpers.py) converts integer variables to float when assignments or arithmetic produce float values, retaining their identity and metadata.
 
 For host rendering, bind the engine's adapter with
 [use_workflow_file_runtime](src/graphon/file/runtime.py); use
