@@ -252,7 +252,7 @@ class _RecordingCallback(Callback):
         llm_instance: AIModel,
         model: str,
         credentials: dict,
-        prompt_messages: list[PromptMessage],
+        prompt_messages: Sequence[PromptMessage],
         model_parameters: dict,
         tools: list[PromptMessageTool] | None = None,
         stop: Sequence[str] | None = None,
@@ -335,7 +335,7 @@ class _RecordingCallback(Callback):
         ex: Exception,
         model: str,
         credentials: dict,
-        prompt_messages: list[PromptMessage],
+        prompt_messages: Sequence[PromptMessage],
         model_parameters: dict,
         tools: list[PromptMessageTool] | None = None,
         stop: Sequence[str] | None = None,
@@ -672,7 +672,7 @@ def test_large_language_model_accepts_llm_only_runtime_surface() -> None:
         model.invoke(
             model="fake-chat",
             credentials={},
-            prompt_messages=[UserPromptMessage(content="hello")],
+            prompt_messages=(UserPromptMessage(content="hello"),),
             stream=False,
         ),
     )
@@ -682,7 +682,7 @@ def test_large_language_model_accepts_llm_only_runtime_surface() -> None:
         model.get_num_tokens(
             model="fake-chat",
             credentials={},
-            prompt_messages=[UserPromptMessage(content="hello")],
+            prompt_messages=(UserPromptMessage(content="hello"),),
         )
         == 7
     )
@@ -746,7 +746,7 @@ def test_large_language_model_stream_after_invoke_preserves_chunk_state(
         ]),
     )
     model = LargeLanguageModel(provider_schema=provider, model_runtime=runtime)
-    prompt_messages: list[PromptMessage] = [UserPromptMessage(content="hello")]
+    prompt_messages: Sequence[PromptMessage] = (UserPromptMessage(content="hello"),)
     callback = _RecordingCallback()
 
     result = model.invoke(
@@ -890,7 +890,7 @@ def test_large_language_model_stream_failures_notify_callbacks(
             model.invoke(
                 model="fake-chat",
                 credentials={},
-                prompt_messages=[UserPromptMessage(content="hello")],
+                prompt_messages=(UserPromptMessage(content="hello"),),
                 stream=stream,
                 callbacks=[callback],
             )
