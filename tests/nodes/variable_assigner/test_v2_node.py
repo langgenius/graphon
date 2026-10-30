@@ -18,6 +18,7 @@ from graphon.nodes.variable_assigner.v2.node import VariableAssignerNode
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.variables import (
+    ArrayFileVariable,
     ArrayStringVariable,
     IntegerVariable,
     StringVariable,
@@ -107,6 +108,32 @@ def test_remove_last_from_array() -> None:
         event for event in events if isinstance(event, NodeRunVariableUpdatedEvent)
     )
     assert updated_event.variable.value == ["first", "second"]
+
+
+def test_clear_preserves_the_file_array_type() -> None:
+    variable = ArrayFileVariable(
+        name="files", selector=["iteration", "output"], value=[]
+    )
+    pool = build_variable_pool(variables=[(variable.selector, variable)])
+    node = _build_node(
+        variable_pool=pool,
+        items=[
+            VariableOperationItem(
+                variable_selector=variable.selector,
+                input_type=InputType.VARIABLE,
+                operation=Operation.CLEAR,
+            ),
+        ],
+    )
+
+    updates = [
+        event for event in node.run() if isinstance(event, NodeRunVariableUpdatedEvent)
+    ]
+
+    assert len(updates) == 1
+    assert updates[0].variable.value_type == "array[file]"
+    assert updates[0].variable.value == []
+    assert updates[0].variable.selector == variable.selector
 
 
 def test_multiple_operations_emit_single_final_update_per_selector() -> None:

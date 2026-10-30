@@ -1288,8 +1288,28 @@ def test_loop_completes_after_integer_division_produces_a_fraction() -> None:
             "array[any]",
             [[], []],
         ),
+        (
+            [ArrayNumberSegment(value=(1, 2))],
+            False,
+            "array[any]",
+            [(1, 2)],
+        ),
+        (
+            [ArrayAnySegment(value=[("nested",)])],
+            False,
+            "array[any]",
+            [[("nested",)]],
+        ),
     ],
-    ids=["empty-files", "declared-any", "missing-output", "mixed-types", "unflattened"],
+    ids=[
+        "empty-files",
+        "declared-any",
+        "missing-output",
+        "mixed-types",
+        "unflattened",
+        "tuple-array",
+        "opaque-elements",
+    ],
 )
 def test_iteration_preserves_array_output_types(
     is_parallel: bool,
@@ -1324,6 +1344,56 @@ def test_iteration_preserves_array_output_types(
         event for event in events if isinstance(event, NodeRunIterationSucceededEvent)
     )
     assert succeeded.outputs == {"output": expected_value}
+
+
+def test_empty_iteration_output_is_independent_of_its_input() -> None:
+    iteration_nodes = _iteration_nodes("iteration")
+    iteration_nodes[0]["data"]["iterator_selector"] = ["host", "items"]
+    dsl = _graph_dsl(
+        nodes=[
+            _start_node(),
+            *iteration_nodes,
+            {
+                "id": "append",
+                "data": {
+                    "type": "assigner",
+                    "version": "2",
+                    "items": [
+                        {
+                            "variable_selector": ["iteration", "output"],
+                            "input_type": "variable",
+                            "operation": "append",
+                            "value": ["start", "item"],
+                        },
+                    ],
+                },
+            },
+            _end_node([
+                {"variable": "input", "value_selector": ["host", "items"]},
+                {"variable": "output", "value_selector": ["iteration", "output"]},
+            ]),
+        ],
+        edges=[
+            _edge("start", "iteration"),
+            _edge("iteration", "append"),
+            _edge("append", "end"),
+        ],
+    )
+    engine = loads(dsl, start_inputs={"item": "appended"})
+    engine.runtime_state.variable_pool.add(
+        ("host", "items"), ArrayStringSegment(value=[])
+    )
+
+    events = list(engine.run())
+
+    assert final_outputs(events) == {"input": [], "output": ["appended"]}
+    output = engine.runtime_state.variable_pool.get_variable(("iteration", "output"))
+    assert isinstance(output, ArrayStringVariable)
+    assert list(output.selector) == ["iteration", "output"]
+    succeeded = next(
+        event for event in events if isinstance(event, NodeRunIterationSucceededEvent)
+    )
+    assert succeeded.outputs == {"output": []}
 
 
 def test_full_loop_graph_uses_custom_container_handler_factory() -> None:

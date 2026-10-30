@@ -232,9 +232,7 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
             operation=item.operation,
             value=input_value,
         )
-        updated_variable = common_helpers.copy_variable_with_value(
-            variable, updated_value
-        )
+        updated_variable = variable.copy_with_value(updated_value)
         working_variable_pool.add(updated_variable.selector, updated_variable)
         return updated_variable.selector
 

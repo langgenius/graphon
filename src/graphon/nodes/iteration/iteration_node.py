@@ -1,6 +1,6 @@
 from collections.abc import Generator, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any, cast, override
+from typing import Any, override
 
 from graphon.enums import (
     BuiltinNodeTypes,
@@ -9,7 +9,7 @@ from graphon.enums import (
     WorkflowNodeExecutionStatus,
 )
 from graphon.graph.scoping import resolve_container_id
-from graphon.node_events.base import NodeEventPayload, NodeRunResult
+from graphon.node_events.base import NodeEventPayload
 from graphon.node_events.iteration import (
     IterationFailedEvent,
     IterationNextEvent,
@@ -20,6 +20,7 @@ from graphon.node_events.node import StreamCompletedEvent
 from graphon.nodes.base.node import Node
 from graphon.nodes.container_effects import (
     ContainerExecutionResult,
+    ContainerNodeRunResult,
     ContainerRunResult,
     IterationFrameRequest,
     build_container_value,
@@ -153,10 +154,10 @@ class IterationNode(Node[IterationNodeData]):
             msg = f"invalid iterator value: {variable}, please provide a list."
             raise TypeError(msg)
         iterator_value = variable.to_object()
-        if not isinstance(iterator_value, list):
+        if not isinstance(iterator_value, Sequence):
             msg = f"Invalid iterator value: {iterator_value}, please provide a list."
             raise TypeError(msg)
-        return cast(list[object], iterator_value)
+        return list(iterator_value)
 
     def _run_empty_iteration(
         self,
@@ -164,10 +165,17 @@ class IterationNode(Node[IterationNodeData]):
         variable: NoneSegment | ArraySegment,
         started_at: datetime,
     ) -> Generator[NodeEventPayload, None, None]:
-        outputs = {"output": ArrayAnySegment(value=[])}
-        if isinstance(variable, ArraySegment):
-            outputs = {"output": variable.model_copy(update={"value": []})}
+        outputs = {
+            "output": build_container_value(
+                variable if isinstance(variable, ArraySegment) else []
+            )
+        }
         inputs: dict[str, object] = {"iterator_selector": []}
+        result = ContainerNodeRunResult(
+            status=WorkflowNodeExecutionStatus.SUCCEEDED,
+            outputs=outputs,
+            inputs={"iterator_selector": ArrayAnySegment(value=[])},
+        )
         yield IterationStartedEvent(
             start_at=started_at,
             inputs=inputs,
@@ -176,16 +184,12 @@ class IterationNode(Node[IterationNodeData]):
         yield IterationSucceededEvent(
             start_at=started_at,
             inputs=inputs,
-            outputs=outputs,
+            outputs={key: value.to_object() for key, value in result.outputs.items()},
             metadata={},
             steps=0,
         )
         yield StreamCompletedEvent(
-            node_run_result=NodeRunResult(
-                status=WorkflowNodeExecutionStatus.SUCCEEDED,
-                outputs=outputs,
-                inputs=inputs,
-            ),
+            node_run_result=result.to_node_run_result(),
         )
 
     @classmethod

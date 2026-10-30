@@ -105,7 +105,9 @@ class SegmentType(StrEnum):
                 internal exhaustive match.
 
         """
-        if isinstance(value, list):
+        if isinstance(value, (list, tuple)):
+            if not value:
+                return SegmentType.ARRAY_ANY
             elem_types: set[SegmentType] = set()
             for item in value:
                 segment_type = cls.infer_segment_type(item)
@@ -280,6 +282,7 @@ _ARRAY_SEGMENT_TYPE_BY_ELEMENT_TYPE: Mapping[SegmentType, SegmentType] = {
     SegmentType.BOOLEAN: SegmentType.ARRAY_BOOLEAN,
 }
 _EMPTY_ARRAY_ZERO_VALUE_TYPES = frozenset((
+    SegmentType.ARRAY_FILE,
     SegmentType.ARRAY_OBJECT,
     SegmentType.ARRAY_ANY,
     SegmentType.ARRAY_STRING,

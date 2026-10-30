@@ -9,19 +9,9 @@ from graphon.enums import ErrorHandleMode
 from graphon.node_events.base import NodeRunResult
 from graphon.variables.factory import build_segment
 from graphon.variables.segments import Segment, SerializableSegment
-from graphon.variables.types import SegmentType
 
 
-def _to_serializable_segment(value: object) -> object:
-    if isinstance(value, Segment):
-        return {
-            "value_type": (
-                SegmentType.STRING
-                if value.value_type == SegmentType.SECRET
-                else value.value_type
-            ),
-            "value": value.to_object(),
-        }
+def _parse_container_value(value: object) -> Segment | Mapping[str, object]:
     if isinstance(value, Mapping) and "value_type" in value:
         return value
     return build_segment(value)
@@ -29,7 +19,7 @@ def _to_serializable_segment(value: object) -> object:
 
 type ContainerValue = Annotated[
     SerializableSegment,
-    BeforeValidator(_to_serializable_segment),
+    BeforeValidator(_parse_container_value),
 ]
 
 _CONTAINER_VALUE_ADAPTER = TypeAdapter(ContainerValue)

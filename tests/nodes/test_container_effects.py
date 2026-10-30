@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 
 from graphon.engine.ready_queue.entities import ResumeTask
 from graphon.enums import WorkflowNodeExecutionStatus
@@ -16,9 +17,11 @@ from graphon.variables.segments import (
     ArrayNumberSegment,
     ArrayObjectSegment,
     ArrayStringSegment,
+    IntegerSegment,
     SerializableSegment,
 )
 from graphon.variables.variables import ArrayFileVariable, SecretVariable
+from graphon.workflow_type_encoder import WorkflowRuntimeTypeConverter
 
 
 @pytest.mark.parametrize("use_builder", [False, True], ids=["direct", "builder"])
@@ -32,8 +35,9 @@ from graphon.variables.variables import ArrayFileVariable, SecretVariable
         ArrayBooleanSegment(value=[]),
         ArrayAnySegment(value=["text"]),
         ArrayFileVariable(name="files", selector=["child", "files"], value=[]),
+        SecretVariable(name="token", selector=["env", "token"], value="example-value"),
     ],
-    ids=["file", "string", "number", "object", "boolean", "any", "variable"],
+    ids=["file", "string", "number", "object", "boolean", "any", "variable", "secret"],
 )
 def test_container_outputs_keep_their_type_after_snapshot_and_resume(
     segment: SerializableSegment,
@@ -88,7 +92,7 @@ def test_live_container_outputs_rebind_variable_selectors(use_builder: bool) -> 
     assert list(files.selector) == ["container", "files"]
 
 
-def test_container_values_keep_existing_secret_normalization() -> None:
+def test_container_values_preserve_secret_masking() -> None:
     secret = SecretVariable(name="token", value="example-value")
 
     result = ContainerNodeRunResult.model_validate({
@@ -100,6 +104,30 @@ def test_container_values_keep_existing_secret_normalization() -> None:
 
     token = pool.get(("container", "token"))
     assert token is not None
-    assert token.value_type == "string"
+    assert token.value_type == "secret"
     assert token.value == "example-value"
+    assert WorkflowRuntimeTypeConverter().to_json_encodable(result.outputs) == {
+        "token": secret.log,
+    }
+    assert token.log == secret.log
     assert result.inputs == {"token": "example-value"}
+
+
+@pytest.mark.parametrize("use_builder", [False, True], ids=["direct", "builder"])
+@pytest.mark.parametrize(
+    "segment",
+    [
+        IntegerSegment(value=1).model_copy(update={"value": "invalid"}),
+        ArrayNumberSegment(value=[1]).model_copy(update={"value": ["invalid"]}),
+    ],
+    ids=["integer", "array"],
+)
+def test_container_outputs_reject_invalid_typed_values(
+    segment: SerializableSegment, use_builder: bool
+) -> None:
+    if use_builder:
+        with pytest.raises(ValidationError):
+            build_container_value(segment)
+    else:
+        with pytest.raises(ValidationError):
+            ContainerNodeRunResult(outputs={"output": segment})

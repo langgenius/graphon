@@ -165,18 +165,28 @@ compatibility details:
 | Pause, resume, and snapshot quiescence | [Dispatcher](src/graphon/engine/dispatcher.py), [execution guard](src/graphon/runtime/execution.py) | [Serialization](tests/engine/test_runtime_state_serialization.py) |
 | Snapshot versions and migrations | [Snapshot loading](src/graphon/runtime/runtime_state/snapshot.py) | [Runtime snapshots](tests/runtime/test_runtime_state.py), [version isolation](tests/test_snapshot_version_isolation.py) |
 
-Container values preserve serializable segments' declared types through construction, snapshots, and completion, including empty typed arrays.
-Conversion discards source variable identity so the parent pool binds completed outputs to the container's selectors.
-Stored outputs remain typed; inputs and Loop/Iteration presentation events expose plain values.
-Raw Python values use type inference, and secrets normalize to strings.
+[Concrete segment models](src/graphon/variables/segments.py) own fixed `value_type` tags and value validation; serialized values select their model by that tag.
+[Factories](src/graphon/variables/factory.py) infer types for raw values or validate explicit declarations, preserving declared empty arrays and `array[any]` values.
+See [factory tests](tests/variables/test_factory.py) for declared types and serialized tag selection.
+[VariableBase.copy_with_value](src/graphon/variables/variables.py) validates replacements for assignment nodes, retaining identity and metadata and promoting integer variables when the new value is a float.
+The [v1 assignment tests](tests/nodes/variable_assigner/test_v1_node.py) and [v2 assignment tests](tests/nodes/variable_assigner/test_v2_node.py) cover invalid updates, fractional results, and clearing arrays while preserving their declared type, including `array[file]`.
 
-When [Iteration](src/graphon/engine/container_handler/builtin/iteration.py) flattens outputs, matching declared array types survive in both serial and parallel runs; mixed array types become `array[any]`.
-[Variable assignment](src/graphon/nodes/variable_assigner/common/helpers.py) converts integer variables to float when assignments or arithmetic produce float values, retaining their identity and metadata.
+[Container values](src/graphon/nodes/container_effects.py) preserve declared segment types through construction, snapshots, and completion, including secret tags.
+Conversion removes source variable identity so the parent pool binds completed outputs to the container's selectors.
+Pool conversion also assigns a new identity when storing an existing variable under a different selector; see [destination binding tests](tests/runtime/test_variable_pool.py).
+Stored outputs remain typed; container node-result inputs and Loop/Iteration presentation events expose plain values.
+The [runtime JSON converter](src/graphon/workflow_type_encoder.py) masks typed secrets using their log representation; hosts must apply redaction separately to plain values in logs and presentation.
+See [container secret tests](tests/nodes/test_container_effects.py) for this boundary.
+
+[Iteration](src/graphon/nodes/iteration/iteration_node.py) accepts array sequences, including tuples.
+When its [handler](src/graphon/engine/container_handler/builtin/iteration.py) flattens outputs, matching declared array types survive in both serial and parallel runs; mixed array types become `array[any]`.
+Empty iterations preserve the input array type and bind a separate output variable; see [workflow tests](tests/workflows/test_full_engine_events.py).
 
 For host rendering, bind the engine's adapter with
 [use_workflow_file_runtime](src/graphon/file/runtime.py); use
 [EngineEventFilterContext.from_engine](src/graphon/engine/filter/protocol.py) to
 wire response filters. Supply host adapters again when rebuilding from snapshots.
+Runtime JSON conversion renders tuple file arrays as JSON lists within the same adapter scope; see [host file conversion tests](tests/variables/test_workflow_type_encoder.py).
 
 Persist after fully consuming the run iterator or from a quiescent `on_graph_end`
 hook. Hosts must also coordinate direct mutation of exposed runtime objects: the

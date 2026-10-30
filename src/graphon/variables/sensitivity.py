@@ -1,6 +1,5 @@
 from .segment_group import SegmentGroup
-from .segments import Segment
-from .variables import SecretVariable
+from .segments import SecretSegment, Segment
 
 
 def is_sensitive(segment: Segment) -> bool:
@@ -10,10 +9,10 @@ def is_sensitive(segment: Segment) -> bool:
     ``.log`` representation instead of the plaintext ``.value``.
 
     Returns:
-        True if the segment is a SecretVariable or a SegmentGroup that
-        contains at least one SecretVariable (at any depth), False otherwise.
+        True if the segment is a SecretSegment or a SegmentGroup that
+        contains at least one SecretSegment (at any depth), False otherwise.
     """
-    if isinstance(segment, SecretVariable):
+    if isinstance(segment, SecretSegment):
         return True
     if isinstance(segment, SegmentGroup):
         return any(is_sensitive(child) for child in segment.value)
