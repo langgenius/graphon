@@ -257,7 +257,6 @@ class SegmentType(StrEnum):
         # Lazy import to avoid circular dependency between segment types
         # and factory helpers.
         from .factory import (  # ruff:ignore[import-outside-top-level]
-            build_segment,
             build_segment_with_type,
         )
 
@@ -268,7 +267,7 @@ class SegmentType(StrEnum):
         if zero_value is None:
             msg = f"unsupported variable type: {t}"
             raise ValueError(msg)
-        return build_segment(zero_value)
+        return build_segment_with_type(t, zero_value)
 
 
 _ARRAY_SEGMENT_TYPE_BY_ELEMENT_TYPE: Mapping[SegmentType, SegmentType] = {
@@ -295,6 +294,7 @@ _SCALAR_ZERO_VALUES_BY_SEGMENT_TYPE: Mapping[
 ] = {
     SegmentType.OBJECT: {},
     SegmentType.STRING: "",
+    SegmentType.SECRET: "",
     SegmentType.INTEGER: 0,
     SegmentType.FLOAT: 0.0,
     SegmentType.NUMBER: 0,

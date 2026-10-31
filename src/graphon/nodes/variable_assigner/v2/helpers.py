@@ -17,6 +17,7 @@ _NUMERIC_SEGMENT_TYPES = frozenset((
 ))
 _SCALAR_INPUT_TYPES: dict[SegmentType, type[Any]] = {
     SegmentType.STRING: str,
+    SegmentType.SECRET: str,
     SegmentType.BOOLEAN: bool,
     SegmentType.OBJECT: dict,
 }
@@ -66,6 +67,7 @@ def is_operation_supported(
             return variable_type in frozenset((
                 SegmentType.OBJECT,
                 SegmentType.STRING,
+                SegmentType.SECRET,
                 SegmentType.NUMBER,
                 SegmentType.INTEGER,
                 SegmentType.FLOAT,
@@ -107,7 +109,12 @@ def is_constant_input_supported(
     operation: Operation,
 ) -> bool:
     match variable_type:
-        case SegmentType.STRING | SegmentType.OBJECT | SegmentType.BOOLEAN:
+        case (
+            SegmentType.STRING
+            | SegmentType.SECRET
+            | SegmentType.OBJECT
+            | SegmentType.BOOLEAN
+        ):
             return operation in frozenset((Operation.OVER_WRITE, Operation.SET))
         case SegmentType.NUMBER | SegmentType.INTEGER | SegmentType.FLOAT:
             return operation in frozenset((

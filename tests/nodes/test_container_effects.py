@@ -3,6 +3,8 @@ from pydantic import ValidationError
 
 from graphon.engine.ready_queue.entities import ResumeTask
 from graphon.enums import WorkflowNodeExecutionStatus
+from graphon.file.enums import FileTransferMethod, FileType
+from graphon.file.models import File
 from graphon.nodes.container_effects import (
     ContainerExecutionResult,
     ContainerNodeRunResult,
@@ -34,10 +36,32 @@ from graphon.workflow_type_encoder import WorkflowRuntimeTypeConverter
         ArrayObjectSegment(value=[]),
         ArrayBooleanSegment(value=[]),
         ArrayAnySegment(value=["text"]),
+        ArrayAnySegment(
+            value=[
+                {
+                    "file": File(
+                        file_type=FileType.DOCUMENT,
+                        transfer_method=FileTransferMethod.LOCAL_FILE,
+                        reference="example-record",
+                    ),
+                    "metadata": {"type": "document", "reference": "plain-value"},
+                }
+            ]
+        ),
         ArrayFileVariable(name="files", selector=["child", "files"], value=[]),
         SecretVariable(name="token", selector=["env", "token"], value="example-value"),
     ],
-    ids=["file", "string", "number", "object", "boolean", "any", "variable", "secret"],
+    ids=[
+        "file",
+        "string",
+        "number",
+        "object",
+        "boolean",
+        "any",
+        "nested-file",
+        "variable",
+        "secret",
+    ],
 )
 def test_container_outputs_keep_their_type_after_snapshot_and_resume(
     segment: SerializableSegment,
@@ -111,6 +135,24 @@ def test_container_values_preserve_secret_masking() -> None:
     }
     assert token.log == secret.log
     assert result.inputs == {"token": "example-value"}
+
+
+def test_container_any_array_rejects_invalid_serialized_file() -> None:
+    with pytest.raises(ValidationError, match="Missing file reference"):
+        ContainerNodeRunResult.model_validate({
+            "outputs": {
+                "files": {
+                    "value_type": "array[any]",
+                    "value": [
+                        {
+                            "dify_model_identity": "__dify__file__",
+                            "type": "document",
+                            "transfer_method": "local_file",
+                        },
+                    ],
+                },
+            },
+        })
 
 
 @pytest.mark.parametrize("use_builder", [False, True], ids=["direct", "builder"])

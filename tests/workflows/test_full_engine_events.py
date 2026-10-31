@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from threading import Event, Thread
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
@@ -35,6 +36,11 @@ from graphon.engine_events.node import (
     NodeRunSucceededEvent,
     NodeRunVariableUpdatedEvent,
 )
+from graphon.file.enums import FileTransferMethod, FileType
+from graphon.file.models import File
+from graphon.file.protocols import WorkflowFileRuntimeProtocol
+from graphon.file.runtime import use_workflow_file_runtime
+from graphon.runtime import RuntimeState
 from graphon.variables.factory import build_segment, segment_to_variable
 from graphon.variables.segments import (
     ArrayAnySegment,
@@ -44,7 +50,12 @@ from graphon.variables.segments import (
     NoneSegment,
     Segment,
 )
-from graphon.variables.variables import ArrayStringVariable, StringVariable
+from graphon.variables.variables import (
+    ArrayStringVariable,
+    SecretVariable,
+    StringVariable,
+)
+from graphon.workflow_type_encoder import WorkflowRuntimeTypeConverter
 from tests.helpers.workflow_events import (
     event_path,
     fake_slim_llm,
@@ -1250,6 +1261,73 @@ def test_loop_completes_after_integer_division_produces_a_fraction() -> None:
     assert succeeded.outputs == {"number": 0.5, "loop_round": 1}
 
 
+@pytest.mark.parametrize(
+    ("operation", "input_type", "value", "expected_value"),
+    [
+        ("set", "constant", "replacement-token", "replacement-token"),
+        ("over-write", "variable", ["start", "replacement"], "replacement-token"),
+        ("clear", "variable", None, ""),
+    ],
+)
+def test_loop_secret_can_be_assigned_and_cleared(
+    operation: str,
+    input_type: str,
+    value: object,
+    expected_value: str,
+) -> None:
+    loop_nodes = _loop_nodes("loop")
+    loop_nodes[0]["data"]["loop_variables"] = [
+        {
+            "label": "token",
+            "var_type": "string",
+            "value_type": "variable",
+            "value": ["env", "token"],
+        },
+    ]
+    dsl = _graph_dsl(
+        nodes=[
+            _start_node(),
+            *loop_nodes,
+            {
+                "id": "assign",
+                "data": {
+                    "type": "assigner",
+                    "version": "2",
+                    "container_id": "loop",
+                    "items": [
+                        {
+                            "variable_selector": ["loop", "token"],
+                            "input_type": input_type,
+                            "operation": operation,
+                            "value": value,
+                        },
+                    ],
+                },
+            },
+            _end_node([{"variable": "token", "value_selector": ["loop", "token"]}]),
+        ],
+        edges=[
+            _edge("start", "loop"),
+            _edge("loop-start", "assign"),
+            _edge("loop", "end"),
+        ],
+    )
+    engine = loads(dsl, start_inputs={"replacement": "replacement-token"})
+    engine.runtime_state.variable_pool.add(
+        ("env", "token"), SecretVariable(name="token", value="initial-token")
+    )
+
+    events = list(engine.run())
+
+    assert final_outputs(events) == {"token": expected_value}
+    output = engine.runtime_state.variable_pool.get(("loop", "token"))
+    assert output is not None
+    assert output.value_type == "secret"
+    assert WorkflowRuntimeTypeConverter().to_json_encodable({"token": output}) == {
+        "token": "replac************en" if expected_value else "",
+    }
+
+
 @pytest.mark.parametrize("is_parallel", [False, True], ids=["serial", "parallel"])
 @pytest.mark.parametrize(
     ("items", "flatten_output", "expected_type", "expected_value"),
@@ -1344,6 +1422,38 @@ def test_iteration_preserves_array_output_types(
         event for event in events if isinstance(event, NodeRunIterationSucceededEvent)
     )
     assert succeeded.outputs == {"output": expected_value}
+
+
+@pytest.mark.parametrize("flatten_output", [False, True])
+def test_iteration_any_array_files_survive_snapshot(flatten_output: bool) -> None:
+    file = File(
+        file_type=FileType.DOCUMENT,
+        transfer_method=FileTransferMethod.LOCAL_FILE,
+        reference="example-record",
+        filename="report.txt",
+    )
+    iteration_nodes = _iteration_nodes("iteration")
+    iteration_nodes[0]["data"]["flatten_output"] = flatten_output
+    dsl = _graph_dsl(
+        nodes=[_start_node(), *iteration_nodes, _end_node([])],
+        edges=[_edge("start", "iteration"), _edge("iteration", "end")],
+    )
+    engine = loads(dsl, start_inputs={"items": [ArrayAnySegment(value=[file])]})
+    list(engine.run())
+
+    restored = RuntimeState.from_snapshot(engine.runtime_state.dumps())
+    output = restored.variable_pool.get(("iteration", "output"))
+
+    assert output is not None
+    assert output.value_type == "array[any]"
+    assert output.value == ([file] if flatten_output else [[file]])
+    runtime = MagicMock(spec=WorkflowFileRuntimeProtocol)
+    runtime.resolve_file_url.return_value = "https://host.test/report.txt"
+    with use_workflow_file_runtime(runtime):
+        expected_files = [file.to_dict()]
+        assert WorkflowRuntimeTypeConverter().to_json_encodable({"files": output}) == {
+            "files": expected_files if flatten_output else [expected_files],
+        }
 
 
 def test_empty_iteration_output_is_independent_of_its_input() -> None:

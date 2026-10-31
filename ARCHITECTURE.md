@@ -168,6 +168,8 @@ compatibility details:
 [Concrete segment models](src/graphon/variables/segments.py) own fixed `value_type` tags and value validation; serialized values select their model by that tag.
 [Factories](src/graphon/variables/factory.py) infer types for raw values or validate explicit declarations, preserving declared empty arrays and `array[any]` values.
 See [factory tests](tests/variables/test_factory.py) for declared types and serialized tag selection.
+`array[any]` restores serialized [marked file values](src/graphon/file/constants.py) recursively inside arrays and objects using [File validation](src/graphon/file/models.py), preserving file values in container task and variable pool snapshots.
+Unmarked objects retain their data, and invalid marked files fail validation; see [container tests](tests/nodes/test_container_effects.py) and [workflow tests](tests/workflows/test_full_engine_events.py).
 [VariableBase.copy_with_value](src/graphon/variables/variables.py) validates replacements for assignment nodes, retaining identity and metadata and promoting integer variables when the new value is a float.
 The [v1 assignment tests](tests/nodes/variable_assigner/test_v1_node.py) and [v2 assignment tests](tests/nodes/variable_assigner/test_v2_node.py) cover invalid updates, fractional results, and clearing arrays while preserving their declared type, including `array[file]`.
 
@@ -176,7 +178,7 @@ Conversion removes source variable identity so the parent pool binds completed o
 Pool conversion also assigns a new identity when storing an existing variable under a different selector; see [destination binding tests](tests/runtime/test_variable_pool.py).
 Stored outputs remain typed; container node-result inputs and Loop/Iteration presentation events expose plain values.
 The [runtime JSON converter](src/graphon/workflow_type_encoder.py) masks typed secrets using their log representation; hosts must apply redaction separately to plain values in logs and presentation.
-See [container secret tests](tests/nodes/test_container_effects.py) for this boundary.
+The [container secret tests](tests/nodes/test_container_effects.py) cover this boundary; [Loop workflow tests](tests/workflows/test_full_engine_events.py) also cover v2 `SET`, `OVER_WRITE`, and `CLEAR` preserving the secret tag and masking.
 
 [Iteration](src/graphon/nodes/iteration/iteration_node.py) accepts array sequences, including tuples.
 When its [handler](src/graphon/engine/container_handler/builtin/iteration.py) flattens outputs, matching declared array types survive in both serial and parallel runs; mixed array types become `array[any]`.

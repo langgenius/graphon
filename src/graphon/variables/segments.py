@@ -3,8 +3,9 @@ import sys
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
+from graphon.file.constants import maybe_file_object
 from graphon.file.models import File
 
 from .types import SegmentType
@@ -18,6 +19,16 @@ def _mask_token(token: str) -> str:
     if len(token) <= SHORT_TOKEN_MAX_LENGTH:
         return "*" * 20
     return token[:6] + "*" * 12 + token[-2:]
+
+
+def _restore_files(value: Any) -> Any:
+    if maybe_file_object(value):
+        return File.model_validate(value)
+    if isinstance(value, (list, tuple)):
+        return type(value)(_restore_files(item) for item in value)
+    if isinstance(value, dict):
+        return {key: _restore_files(item) for key, item in value.items()}
+    return value
 
 
 class Segment(BaseModel):
@@ -180,7 +191,7 @@ class BooleanSegment(Segment):
 
 class ArrayAnySegment(ArraySegment):
     value_type: Literal[SegmentType.ARRAY_ANY] = SegmentType.ARRAY_ANY
-    value: Sequence[Any]
+    value: Annotated[Sequence[Any], AfterValidator(_restore_files)]
 
 
 class ArrayStringSegment(ArraySegment):
