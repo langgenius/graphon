@@ -1,9 +1,11 @@
+from typing import Literal
+
 from .segments import Segment
 from .types import SegmentType
 
 
 class SegmentGroup(Segment):
-    value_type: SegmentType = SegmentType.GROUP
+    value_type: Literal[SegmentType.GROUP] = SegmentType.GROUP
     value: list[Segment]
 
     @property

@@ -46,7 +46,7 @@ class WorkflowRuntimeTypeConverter:
                 for key, item in value.items():
                     encoded_mapping[key] = self.value_to_json_encodable_recursive(item)
                 result = encoded_mapping
-            case list():
+            case list() | tuple():
                 result = [
                     self.value_to_json_encodable_recursive(item) for item in value
                 ]

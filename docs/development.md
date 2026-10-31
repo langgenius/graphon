@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-10-29T01:01:57Z"
+last_checked: "2026-10-30T16:06:28Z"
 -->
 # Development navigation
 
@@ -16,15 +16,19 @@ Choose boundaries around state ownership and callers. Extract a responsibility
 when it has independent ownership or repeated churn; file length alone does not
 justify splitting a module.
 
+For runtime values, let concrete types own their tags, validation, and value replacement.
+Preserve typed values across state transfers and convert to plain values at presentation boundaries, where redaction is a separate responsibility.
+Follow the [variable and container contracts](../ARCHITECTURE.md#state-and-execution-invariants) when changing those boundaries.
+
 | Task | Start in source | Relevant checks |
 | --- | --- | --- |
 | Change package dependencies or queue ownership | [Import boundaries](../ARCHITECTURE.md#import-boundaries), [runtime queues](../src/graphon/runtime/ready_queue/) | `just imports`, [runtime isolation](../tests/runtime/test_runtime_imports.py), [public contract imports](../tests/test_protocols_exports.py) |
 | Parse or validate a graph | [graph](../src/graphon/graph/), [graph config](../src/graphon/entities/graph_config.py) | [graph tests](../tests/graph/), especially validation and scoping |
 | Import Dify DSL or wire node dependencies | [importer](../src/graphon/dsl/importer.py), [node factory](../src/graphon/dsl/node_factory.py) | [DSL tests](../tests/dsl/), especially importer, node factory, and app bootstrap |
 | Change a built-in node | [nodes](../src/graphon/nodes/), [base node](../src/graphon/nodes/base/node.py) | Matching [node tests](../tests/nodes/); [workflow events](../tests/workflows/test_full_engine_events.py) for graph-visible changes |
-| Change dispatch, scheduling, or containers | [engine](../src/graphon/engine/), [container effects](../src/graphon/nodes/container_effects.py) | [engine tests](../tests/engine/), [container dispatch](../tests/nodes/test_container_dispatch.py), [workflow events](../tests/workflows/test_full_engine_events.py) |
+| Change dispatch, scheduling, or containers | [engine](../src/graphon/engine/), [container effects](../src/graphon/nodes/container_effects.py) | [engine tests](../tests/engine/), [container values](../tests/nodes/test_container_effects.py), [container dispatch](../tests/nodes/test_container_dispatch.py), [workflow events](../tests/workflows/test_full_engine_events.py) |
 | Change event payloads or response streaming | [raw frame observations](../ARCHITECTURE.md#raw-frame-observations), [node events](../src/graphon/node_events/), [engine events](../src/graphon/engine_events/), [filters](../src/graphon/engine/filter/) | [frame observation tests](../tests/engine/test_frame_observations.py), [frame failure tests](../tests/engine/test_frame_failures.py), [node event tests](../tests/node_events/), [engine event tests](../tests/engine_events/), [response filter tests](../tests/engine/test_response_stream_filter.py) |
-| Change variables or secrets | [variable pool](../src/graphon/runtime/variable_pool.py), [variables](../src/graphon/variables/) | [variable pool tests](../tests/runtime/test_variable_pool.py), [Iteration variable ownership](../tests/engine/test_iteration_variable_scopes.py), [variable tests](../tests/variables/), [HTTP secret masking](../tests/http/test_executor_secret_masking.py) |
+| Change variables or secrets | [variable pool](../src/graphon/runtime/variable_pool.py), [segment models](../src/graphon/variables/segments.py), [variable models](../src/graphon/variables/variables.py), [conversion](../src/graphon/variables/factory.py), [variable assignment](../src/graphon/nodes/variable_assigner/) | [variable pool tests](../tests/runtime/test_variable_pool.py), [Iteration variable ownership](../tests/engine/test_iteration_variable_scopes.py), [variable tests](../tests/variables/), [assignment tests](../tests/nodes/variable_assigner/), [HTTP secret masking](../tests/http/test_executor_secret_masking.py) |
 | Change persistence or resume | [runtime state](../src/graphon/runtime/runtime_state/), [container state](../src/graphon/runtime/container_state.py) | [runtime tests](../tests/runtime/), [engine serialization](../tests/engine/test_runtime_state_serialization.py), [frame failure restoration](../tests/engine/test_frame_failures.py), [version isolation](../tests/test_snapshot_version_isolation.py) |
 | Change model invocation | [graph-facing LLM protocol](../src/graphon/nodes/llm/runtime_protocols.py), [Slim adapter](../src/graphon/dsl/slim/llm.py), [model runtime](../src/graphon/model_runtime/) | [LLM node tests](../tests/nodes/llm/), [Slim tests](../tests/dsl/test_slim_llm.py), [model dispatch](../tests/model_runtime/test_model_dispatch.py) |
 | Change file or HTTP integration | [file](../src/graphon/file/), [engine adapter binding](../src/graphon/engine/engine.py), [HTTP](../src/graphon/http/), [node ports](../src/graphon/nodes/protocols.py) | [file tests](../tests/file/), [execution file isolation](../tests/engine/test_file_runtime.py), [HTTP tests](../tests/http/), [HTTP node tests](../tests/nodes/http_request/), [extractor tests](../tests/nodes/document_extractor/) |

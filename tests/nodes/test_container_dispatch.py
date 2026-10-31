@@ -10,8 +10,38 @@ from graphon.nodes.container_effects import (
     LoopFrameRequest,
     build_container_value,
 )
+from graphon.nodes.iteration.entities import IterationNodeData
 from graphon.nodes.iteration.iteration_node import IterationNode
 from graphon.nodes.loop.loop_node import LoopNode
+from graphon.runtime import RuntimeState, VariablePool
+from graphon.variables.segments import ArrayNumberSegment
+from tests.helpers import build_init_params
+
+
+def test_iteration_accepts_a_typed_sequence_input() -> None:
+    pool = VariablePool()
+    pool.add(("host", "items"), ArrayNumberSegment(value=(1, 2)))
+    node = IterationNode(
+        node_id="iteration",
+        data=IterationNodeData(
+            title="Iteration",
+            iterator_selector=["host", "items"],
+            output_selector=["iteration", "item"],
+            start_node_id="iteration-start",
+        ),
+        init_params=build_init_params(),
+        runtime_state=RuntimeState(
+            workflow_id="workflow", variable_pool=pool, start_at=1
+        ),
+    )
+    node.bind_execution_id("iteration-run")
+
+    requests = [
+        event for event in node.run() if isinstance(event, IterationFrameRequest)
+    ]
+
+    assert len(requests) == 1
+    assert [item.value for item in requests[0].items] == [1, 2]
 
 
 def test_container_await_requests_have_intrinsic_kind_tags() -> None:

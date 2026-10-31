@@ -9,6 +9,8 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 from uuid import uuid4
 
+from pydantic import ValidationError
+
 from graphon.file.models import File
 
 from .segments import (
@@ -25,7 +27,9 @@ from .segments import (
     IntegerSegment,
     NoneSegment,
     ObjectSegment,
+    SecretSegment,
     Segment,
+    SerializableSegment,
     StringSegment,
 )
 from .types import SegmentType
@@ -85,29 +89,6 @@ def _build_uniform_array_segment(
         case _:
             msg = f"not supported value {value}"
             raise ValueError(msg)
-    return result
-
-
-def _build_empty_array_segment_for_type(
-    *,
-    segment_type: SegmentType,
-    value: list[Any],
-) -> Segment | None:
-    match segment_type:
-        case SegmentType.ARRAY_ANY:
-            result: Segment | None = ArrayAnySegment(value=value)
-        case SegmentType.ARRAY_STRING:
-            result = ArrayStringSegment(value=value)
-        case SegmentType.ARRAY_BOOLEAN:
-            result = ArrayBooleanSegment(value=value)
-        case SegmentType.ARRAY_NUMBER:
-            result = ArrayNumberSegment(value=value)
-        case SegmentType.ARRAY_OBJECT:
-            result = ArrayObjectSegment(value=value)
-        case SegmentType.ARRAY_FILE:
-            result = ArrayFileSegment(value=value)
-        case _:
-            result = None
     return result
 
 
@@ -261,6 +242,14 @@ def _build_scalar_variable(
                 value=segment.value,
                 selector=selector,
             )
+        case SecretSegment():
+            result = SecretVariable(
+                id=variable_id,
+                name=name,
+                description=description,
+                value=segment.value,
+                selector=selector,
+            )
         case StringSegment():
             result = StringVariable(
                 id=variable_id,
@@ -314,46 +303,21 @@ def _build_list_segment(value: list[Any]) -> Segment:
     return _build_uniform_array_segment(element_type=types.pop(), value=value)
 
 
-def _build_empty_array_segment(
-    *,
-    segment_type: SegmentType,
-    value: list[Any],
-) -> Segment | None:
-    return _build_empty_array_segment_for_type(
-        segment_type=segment_type,
-        value=value,
-    )
-
-
-def _resolve_segment_class_for_type_match(
-    *,
-    segment_type: SegmentType,
-    inferred_type: SegmentType,
-) -> type[Segment] | None:
-    if inferred_type == segment_type:
-        return _SEGMENT_FACTORY[segment_type]
-    if segment_type == SegmentType.NUMBER and inferred_type in frozenset((
-        SegmentType.INTEGER,
-        SegmentType.FLOAT,
-    )):
-        return _SEGMENT_FACTORY[inferred_type]
-    return None
-
-
 def build_segment(value: Any, /) -> Segment:
     """Build a runtime segment from a Python value."""
     segment = _build_non_list_segment(value)
     if segment is not None:
         return segment
-    if isinstance(value, list):
-        return _build_list_segment(value)
+    if isinstance(value, (list, tuple)):
+        return _build_list_segment(list(value))
     msg = f"not supported value {value}"
     raise ValueError(msg)
 
 
-_SEGMENT_FACTORY: Mapping[SegmentType, type[Segment]] = {
+_SEGMENT_FACTORY: Mapping[SegmentType, type[SerializableSegment]] = {
     SegmentType.NONE: NoneSegment,
     SegmentType.STRING: StringSegment,
+    SegmentType.SECRET: SecretSegment,
     SegmentType.INTEGER: IntegerSegment,
     SegmentType.FLOAT: FloatSegment,
     SegmentType.FILE: FileSegment,
@@ -368,46 +332,23 @@ _SEGMENT_FACTORY: Mapping[SegmentType, type[Segment]] = {
 }
 
 
-def build_segment_with_type(segment_type: SegmentType, value: Any) -> Segment:
+def build_segment_with_type(
+    segment_type: SegmentType, value: Any
+) -> SerializableSegment:
     """Build a segment while enforcing compatibility with the expected runtime type."""
-    if value is None:
-        if segment_type == SegmentType.NONE:
-            return NoneSegment()
-        msg = f"Type mismatch: expected {segment_type}, but got None"
-        raise TypeMismatchError(msg)
-
-    if isinstance(value, list) and len(value) == 0:
-        empty_segment = _build_empty_array_segment(
-            segment_type=segment_type,
-            value=value,
+    if segment_type == SegmentType.NUMBER:
+        segment_type = (
+            SegmentType.INTEGER if isinstance(value, int) else SegmentType.FLOAT
         )
-        if empty_segment is not None:
-            return empty_segment
-        msg = f"Type mismatch: expected {segment_type}, but got empty list"
-        raise TypeMismatchError(msg)
-
-    inferred_type = SegmentType.infer_segment_type(value)
-    if inferred_type is None:
-        msg = (
-            f"Type mismatch: expected {segment_type}, but got python object, "
-            f"type={type(value)}, value={value}"
-        )
-        raise TypeMismatchError(msg)
-
-    segment_class = _resolve_segment_class_for_type_match(
-        segment_type=segment_type,
-        inferred_type=inferred_type,
-    )
-    if segment_class is not None:
-        value_type = (
-            inferred_type if segment_type == SegmentType.NUMBER else segment_type
-        )
-        return segment_class(value_type=value_type, value=value)
-    msg = (
-        f"Type mismatch: expected {segment_type}, but got {inferred_type}, "
-        f"value={value}"
-    )
-    raise TypeMismatchError(msg)
+    segment_class = _SEGMENT_FACTORY.get(segment_type)
+    if segment_class is None:
+        msg = f"Unsupported segment type: {segment_type}"
+        raise UnsupportedSegmentTypeError(msg)
+    try:
+        return segment_class.model_validate({"value": value}, strict=True)
+    except ValidationError as error:
+        msg = f"Value does not match {segment_type}"
+        raise TypeMismatchError(msg) from error
 
 
 def segment_to_variable(
@@ -419,7 +360,7 @@ def segment_to_variable(
     description: str = "",
 ) -> Variable:
     """Convert a runtime segment into a runtime variable for storage in the pool."""
-    if isinstance(segment, VariableBase):
+    if isinstance(segment, VariableBase) and tuple(segment.selector) == tuple(selector):
         return _existing_variable_from_segment(segment)
     name = name or selector[-1]
     resolved_variable_id = variable_id or str(uuid4())
