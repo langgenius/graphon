@@ -1,4 +1,6 @@
 import inspect
+import logging
+import weakref
 from collections.abc import Generator, Mapping, Sequence
 from decimal import Decimal
 from io import BytesIO
@@ -773,6 +775,104 @@ def test_large_language_model_stream_after_invoke_preserves_chunk_state(
     assert after_result.usage == usage
     assert after_result.system_fingerprint == "fp-2"
     assert after_result.message.tool_calls == tool_calls
+
+
+@pytest.mark.parametrize("stream", [True, False])
+def test_large_language_model_replaces_named_tool_call_snapshots(stream: bool) -> None:
+    provider = ProviderEntity(
+        provider="test-provider",
+        label=I18nObject(en_US="Test Provider"),
+        supported_model_types=[ModelType.LLM],
+        configurate_methods=[],
+    )
+    calls = [
+        AssistantPromptMessage.ToolCall(
+            id=call_id,
+            type="function",
+            function=AssistantPromptMessage.ToolCall.ToolCallFunction(
+                name=name, arguments=arguments
+            ),
+        )
+        for call_id, name, arguments in (
+            ("first", "lookup", '{"text":"a'),
+            ("second", "lookup", '{"city":"Rome"}'),
+            ("first", "lookup", '{"text":"aa"}'),
+            ("first", "lookup", '{"text":"aa"}'),
+            ("third", "lookup", '{"text":"'),
+            ("third", "", "aa"),
+            ("third", "", "aa"),
+            ("third", "", '"}'),
+        )
+    ]
+    runtime = _StreamingLLMRuntimeStub([
+        _make_chunk(model="test-model", content="", tool_calls=[call]) for call in calls
+    ])
+    model = LargeLanguageModel(
+        provider_schema=provider, model_runtime=cast("LLMModelRuntime", runtime)
+    )
+    callback = _RecordingCallback()
+
+    result = model.invoke(
+        model="test-model",
+        credentials={},
+        prompt_messages=[],
+        stream=stream,
+        callbacks=[callback],
+    )
+    if stream:
+        list(cast("Generator[LLMResultChunk, None, None]", result))
+
+    assert len(callback.after_results) == 1
+    assert [
+        (call.id, call.function.name, call.function.arguments)
+        for call in callback.after_results[0].message.tool_calls
+    ] == [
+        ("first", "lookup", '{"text":"aa"}'),
+        ("second", "lookup", '{"city":"Rome"}'),
+        ("third", "lookup", '{"text":"aaaa"}'),
+    ]
+    assert calls[0].function.arguments == '{"text":"a'
+
+
+def test_large_language_model_without_callbacks_releases_consumed_content(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(
+        logging.INFO,
+        logger="graphon.model_runtime.model_providers.base.large_language_model",
+    )
+    references: list[weakref.ReferenceType[TextPromptMessageContent]] = []
+
+    class TextChunkRuntime(_LLMRuntimeStub):
+        def invoke_llm(self, **_: Any) -> Generator[LLMResultChunk, None, None]:
+            for index in range(8):
+                content = TextPromptMessageContent(data=str(index))
+                references.append(weakref.ref(content))
+                yield _make_chunk(model="test-model", content=[content])
+
+    provider = ProviderEntity(
+        provider="test-provider",
+        label=I18nObject(en_US="Test Provider"),
+        supported_model_types=[ModelType.LLM],
+        configurate_methods=[],
+    )
+    model = LargeLanguageModel(
+        provider_schema=provider,
+        model_runtime=cast("LLMModelRuntime", TextChunkRuntime()),
+    )
+    result = model.invoke(
+        model="test-model", credentials={}, prompt_messages=[], callbacks=[]
+    )
+
+    chunk_count = 0
+    for chunk_count, chunk in enumerate(
+        cast("Generator[LLMResultChunk, None, None]", result), start=1
+    ):
+        assert chunk.delta.message.content == [
+            TextPromptMessageContent(data=str(chunk_count - 1))
+        ]
+        assert sum(reference() is not None for reference in references) <= 2
+    assert chunk_count == 8
 
 
 @pytest.mark.parametrize("stream", [True, False])

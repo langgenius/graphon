@@ -3,6 +3,8 @@ from typing import Any
 
 import orjson
 
+from graphon.file.models import File
+
 from .segment_group import SegmentGroup
 from .segments import ArrayFileSegment, FileSegment, Segment
 
@@ -14,7 +16,7 @@ def to_selector(node_id: str, name: str, paths: Iterable[str] = ()) -> Sequence[
 
 
 def segment_orjson_default(o: Any) -> object:
-    """Default function for orjson serialization of Segment types"""
+    """Unwrap segments and files without redacting values used for persistence."""
     result: object
     match o:
         case ArrayFileSegment():
@@ -25,6 +27,8 @@ def segment_orjson_default(o: Any) -> object:
             result = [segment_orjson_default(seg) for seg in o.value]
         case Segment():
             result = o.value
+        case File():
+            result = o.model_dump(mode="json")
         case _:
             msg = f"Object of type {type(o).__name__} is not JSON serializable"
             raise TypeError(msg)

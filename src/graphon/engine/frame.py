@@ -114,7 +114,8 @@ class FrameRegistry:
         self._open_frame_ids.clear()
 
     def record_failure(self, frame_id: str, error: str) -> None:
-        self._frame_errors.setdefault(frame_id, error)
+        if self._event_stream is not None:
+            self._frame_errors.setdefault(frame_id, error)
         if frame_id == ROOT_FRAME_ID:
             return
         root_state = self[ROOT_FRAME_ID].state

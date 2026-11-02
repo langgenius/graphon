@@ -113,7 +113,8 @@ def _merge_tool_call_delta(
         tool_call.type = delta.type
     if delta.function.name:
         tool_call.function.name = delta.function.name
-    if delta.function.arguments:
+        tool_call.function.arguments = delta.function.arguments
+    elif delta.function.arguments:
         tool_call.function.arguments += delta.function.arguments
 
 
@@ -283,9 +284,13 @@ def merge_tool_call_deltas(
     *,
     id_generator: Callable[[], str] | None = None,
 ) -> None:
-    """Merge incremental tool call deltas into existing tool calls.
+    """Merge tool-call snapshots and argument fragments in first-seen order.
 
-    :param new_tool_calls: List of new tool call deltas to be merged.
+    Named calls carry the current argument snapshot and replace the previous
+    snapshot for their ID. Unnamed calls append an argument fragment to their
+    ID, or to the latest call when the ID is empty. Inputs are not retained.
+
+    :param new_tool_calls: Named snapshots or unnamed argument fragments.
     :param existing_tools_calls: List of existing tool calls modified in place.
     :param id_generator: Optional callable for generating IDs in tests/callers.
     """
@@ -455,7 +460,9 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
     ) -> Generator[LLMResultChunk, None, None]:
         """Stream runtime result chunks through callbacks and bookkeeping hooks."""
         callbacks = callbacks or []
-        accumulator = _StreamingInvokeAccumulator(real_model=model)
+        accumulator = (
+            _StreamingInvokeAccumulator(real_model=model) if callbacks else None
+        )
 
         try:
             yield from self._stream_invoke_result_chunks(
@@ -486,26 +493,27 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
             )
             raise self._transform_invoke_error(e) from e
 
-        self._trigger_after_invoke_callbacks(
-            model=model,
-            result=accumulator.to_result(
+        if accumulator is not None:
+            self._trigger_after_invoke_callbacks(
+                model=model,
+                result=accumulator.to_result(
+                    prompt_messages=prompt_messages,
+                ),
+                credentials=credentials,
                 prompt_messages=prompt_messages,
-            ),
-            credentials=credentials,
-            prompt_messages=prompt_messages,
-            model_parameters=model_parameters,
-            tools=tools,
-            stop=stop,
-            stream=stream,
-            request_metadata=request_metadata,
-            callbacks=callbacks,
-        )
+                model_parameters=model_parameters,
+                tools=tools,
+                stop=stop,
+                stream=stream,
+                request_metadata=request_metadata,
+                callbacks=callbacks,
+            )
 
     def _stream_invoke_result_chunks(
         self,
         *,
         result: Generator[LLMResultChunk, None, None],
-        accumulator: _StreamingInvokeAccumulator,
+        accumulator: _StreamingInvokeAccumulator | None,
         model: str,
         credentials: dict,
         prompt_messages: Sequence[PromptMessage],
@@ -536,7 +544,8 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
                 request_metadata=request_metadata,
                 callbacks=callbacks,
             )
-            accumulator.consume(chunk)
+            if accumulator is not None:
+                accumulator.consume(chunk)
 
     def get_num_tokens(
         self,

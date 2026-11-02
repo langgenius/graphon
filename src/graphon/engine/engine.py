@@ -68,6 +68,7 @@ class Engine:
         container_handler_factories: Sequence[ContainerHandlerFactory] = (),
         *,
         file_runtime: WorkflowFileRuntimeProtocol | None = None,
+        emit_frame_events: bool = True,
     ) -> None:
         """Build an engine for one graph execution.
 
@@ -86,6 +87,9 @@ class Engine:
             file_runtime: File adapter for this execution. None captures the
                 current scoped adapter, even if it is unconfigured.
                 Supply it again when rebuilding an engine from a snapshot.
+            emit_frame_events: Publish frame lifecycle and variable observations.
+                False skips their construction and value copies without changing
+                execution. Supply it again when rebuilding from a snapshot.
 
         Raises:
             ValueError: If ``workers`` is not a positive integer.
@@ -114,7 +118,9 @@ class Engine:
 
         # === State Management ===
         self._event_stream = EventStream(self._layers)
-        self._frame_registry = FrameRegistry(self._event_stream)
+        self._frame_registry = FrameRegistry(
+            self._event_stream if emit_frame_events else None
+        )
         root_frame = self._frame_registry.create(
             frame_id=ROOT_FRAME_ID,
             container_id="",
