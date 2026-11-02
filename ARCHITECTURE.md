@@ -97,14 +97,16 @@ See [raw-event tests](tests/engine/test_raw_engine_events.py) and
 
 ## Raw frame observations
 
-[Frame events](src/graphon/engine_events/frame.py) expose execution state for
-consumers that may read events after a child frame has been removed:
+By default, [Engine](src/graphon/engine/engine.py) emits [frame events](src/graphon/engine_events/frame.py) that expose execution state for consumers that may read events after a child frame has been removed:
 
 | Event | Meaning |
 | --- | --- |
 | `FrameStartedEvent` | A detached, typed variable baseline and reserved node execution IDs, published after setup and before body scheduling. Child frames also identify their parent and owning container invocation. |
 | `FrameVariablesUpdatedEvent` | Detached replacements at the written selectors, published after successful commits. Empty and `None` values are retained; partial failures report only writes that succeeded. |
 | `FrameFinishedEvent` | The frame has emitted its last node, traversal, and variable observations, with a succeeded, failed, or aborted outcome. Child completion is published before registry removal. |
+
+Set `Engine(..., emit_frame_events=False)` to skip these events and their detached value copies for both event consumers and layers while execution and variable commits continue.
+This engine option is not persisted; supply it again when rebuilding from a snapshot.
 
 [FrameRegistry](src/graphon/engine/frame.py) publishes commits for node outputs
 and handled-failure defaults, variable requests, Loop initialization, Loop and
@@ -136,10 +138,9 @@ commits, detached values, and raw chunk delivery, and the
 [frame failure tests](tests/engine/test_frame_failures.py) for pause/restore and
 consumer exceptions.
 
-Baselines and commits contain full variable values. `ResponseStreamFilter`
-suppresses those events from its output; this compatibility guard does not add
-child response assembly. Response buffers and presentation state remain in the
-filter, separate from runtime snapshots.
+Baselines and commits contain full variable values.
+`ResponseStreamFilter` suppresses those events from its output after the engine has constructed and copied them; this compatibility guard does not add child response assembly.
+Response buffers and presentation state remain in the filter, separate from runtime snapshots.
 
 ## State and execution invariants
 
@@ -169,6 +170,7 @@ compatibility details:
 [Factories](src/graphon/variables/factory.py) infer types for raw values or validate explicit declarations, preserving declared empty arrays and `array[any]` values.
 See [factory tests](tests/variables/test_factory.py) for declared types and serialized tag selection.
 `array[any]` restores serialized [marked file values](src/graphon/file/constants.py) recursively inside arrays and objects using [File validation](src/graphon/file/models.py), preserving file values in container task and variable pool snapshots.
+The [segment serializer](src/graphon/variables/utils.py) preserves nested `File` model fields and their identity marker without log redaction; see the [serialization tests](tests/utils/test_variable_utils.py).
 Unmarked objects retain their data, and invalid marked files fail validation; see [container tests](tests/nodes/test_container_effects.py) and [workflow tests](tests/workflows/test_full_engine_events.py).
 [VariableBase.copy_with_value](src/graphon/variables/variables.py) validates replacements for assignment nodes, retaining identity and metadata and promoting integer variables when the new value is a float.
 The [v1 assignment tests](tests/nodes/variable_assigner/test_v1_node.py) and [v2 assignment tests](tests/nodes/variable_assigner/test_v2_node.py) cover invalid updates, fractional results, and clearing arrays while preserving their declared type, including `array[file]`.
