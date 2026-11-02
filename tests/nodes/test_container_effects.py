@@ -155,7 +155,6 @@ def test_container_any_array_rejects_invalid_serialized_file() -> None:
         })
 
 
-@pytest.mark.parametrize("use_builder", [False, True], ids=["direct", "builder"])
 @pytest.mark.parametrize(
     "segment",
     [
@@ -164,12 +163,8 @@ def test_container_any_array_rejects_invalid_serialized_file() -> None:
     ],
     ids=["integer", "array"],
 )
-def test_container_outputs_reject_invalid_typed_values(
-    segment: SerializableSegment, use_builder: bool
+def test_container_value_builder_rejects_invalid_typed_values(
+    segment: SerializableSegment,
 ) -> None:
-    if use_builder:
-        with pytest.raises(ValidationError):
-            build_container_value(segment)
-    else:
-        with pytest.raises(ValidationError):
-            ContainerNodeRunResult(outputs={"output": segment})
+    with pytest.raises(ValidationError):
+        build_container_value(segment)

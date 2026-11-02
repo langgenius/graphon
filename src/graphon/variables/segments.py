@@ -71,8 +71,6 @@ class Segment(BaseModel):
 
 
 class NoneSegment(Segment):
-    model_config = ConfigDict(revalidate_instances="always")
-
     value_type: Literal[SegmentType.NONE] = SegmentType.NONE
     value: None = None
 
@@ -93,8 +91,6 @@ class NoneSegment(Segment):
 
 
 class StringSegment(Segment):
-    model_config = ConfigDict(revalidate_instances="always")
-
     value_type: Literal[SegmentType.STRING] = SegmentType.STRING
     value: str
 
@@ -103,8 +99,6 @@ class StringSegment(Segment):
 
 
 class SecretSegment(Segment):
-    model_config = ConfigDict(revalidate_instances="always")
-
     value_type: Literal[SegmentType.SECRET] = SegmentType.SECRET
     value: str
 
@@ -117,8 +111,6 @@ class SecretSegment(Segment):
 
 
 class FloatSegment(Segment):
-    model_config = ConfigDict(revalidate_instances="always")
-
     value_type: Literal[SegmentType.FLOAT] = SegmentType.FLOAT
     value: float
     # NOTE(QuantumGhost): seems that the equality for FloatSegment with `NaN`
@@ -142,8 +134,6 @@ class FloatSegment(Segment):
 
 
 class IntegerSegment(Segment):
-    model_config = ConfigDict(revalidate_instances="always")
-
     value_type: Literal[SegmentType.INTEGER] = SegmentType.INTEGER
     value: int
 
@@ -152,8 +142,6 @@ class IntegerSegment(Segment):
 
 
 class ObjectSegment(Segment):
-    model_config = ConfigDict(revalidate_instances="always")
-
     value_type: Literal[SegmentType.OBJECT] = SegmentType.OBJECT
     value: Mapping[str, Any]
 
@@ -174,8 +162,6 @@ class ObjectSegment(Segment):
 
 
 class ArraySegment(Segment):
-    model_config = ConfigDict(revalidate_instances="always")
-
     @property
     def text(self) -> str:
         # Return empty string for empty arrays instead of "[]"
@@ -189,8 +175,6 @@ class ArraySegment(Segment):
 
 
 class FileSegment(Segment):
-    model_config = ConfigDict(revalidate_instances="always")
-
     value_type: Literal[SegmentType.FILE] = SegmentType.FILE
     value: File
 
@@ -211,8 +195,6 @@ class FileSegment(Segment):
 
 
 class BooleanSegment(Segment):
-    model_config = ConfigDict(revalidate_instances="always")
-
     value_type: Literal[SegmentType.BOOLEAN] = SegmentType.BOOLEAN
     value: bool
 
