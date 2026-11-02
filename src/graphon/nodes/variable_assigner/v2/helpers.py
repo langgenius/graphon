@@ -109,12 +109,7 @@ def is_constant_input_supported(
     operation: Operation,
 ) -> bool:
     match variable_type:
-        case (
-            SegmentType.STRING
-            | SegmentType.SECRET
-            | SegmentType.OBJECT
-            | SegmentType.BOOLEAN
-        ):
+        case SegmentType.STRING | SegmentType.OBJECT | SegmentType.BOOLEAN:
             return operation in frozenset((Operation.OVER_WRITE, Operation.SET))
         case SegmentType.NUMBER | SegmentType.INTEGER | SegmentType.FLOAT:
             return operation in frozenset((

@@ -21,6 +21,7 @@ from graphon.variables.variables import (
     ArrayFileVariable,
     ArrayStringVariable,
     IntegerVariable,
+    SecretVariable,
     StringVariable,
 )
 
@@ -213,6 +214,36 @@ def test_invalid_constant_input_returns_failed_event() -> None:
     )
     assert failed_event.node_run_result.status == WorkflowNodeExecutionStatus.FAILED
     assert failed_event.node_run_result.error == "Invalid input value 123"
+
+
+@pytest.mark.parametrize("operation", [Operation.SET, Operation.OVER_WRITE])
+def test_constant_input_cannot_assign_secret(operation: Operation) -> None:
+    variable = SecretVariable(
+        name="token",
+        value="initial-token",
+        selector=["loop", "token"],
+    )
+    variable_pool = build_variable_pool(variables=[(variable.selector, variable)])
+    node = _build_node(
+        variable_pool=variable_pool,
+        items=[
+            VariableOperationItem(
+                variable_selector=variable.selector,
+                input_type=InputType.CONSTANT,
+                operation=operation,
+                value="replacement-token",
+            ),
+        ],
+    )
+
+    events = list(node.run())
+
+    failed_events = [event for event in events if isinstance(event, NodeRunFailedEvent)]
+    assert len(failed_events) == 1
+    assert failed_events[0].node_run_result.error == (
+        f"Input type constant is not supported for operation {operation}"
+    )
+    assert not any(isinstance(event, NodeRunVariableUpdatedEvent) for event in events)
 
 
 @pytest.mark.parametrize(

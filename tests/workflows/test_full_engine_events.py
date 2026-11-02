@@ -1264,7 +1264,6 @@ def test_loop_completes_after_integer_division_produces_a_fraction() -> None:
 @pytest.mark.parametrize(
     ("operation", "input_type", "value", "expected_value"),
     [
-        ("set", "constant", "replacement-token", "replacement-token"),
         ("over-write", "variable", ["start", "replacement"], "replacement-token"),
         ("clear", "variable", None, ""),
     ],

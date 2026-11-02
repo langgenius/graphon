@@ -179,7 +179,8 @@ Snapshot restoration uses the `SerializableSegment` discriminated union directly
 Pool conversion also assigns a new identity when storing an existing variable under a different selector; see [destination binding tests](tests/runtime/test_variable_pool.py).
 Stored outputs remain typed; container node-result inputs and Loop/Iteration presentation events expose plain values.
 The [runtime JSON converter](src/graphon/workflow_type_encoder.py) masks typed secrets using their log representation; hosts must apply redaction separately to plain values in logs and presentation.
-The [container secret tests](tests/nodes/test_container_effects.py) cover this boundary; [Loop workflow tests](tests/workflows/test_full_engine_events.py) also cover v2 `SET`, `OVER_WRITE`, and `CLEAR` preserving the secret tag and masking.
+The [container secret tests](tests/nodes/test_container_effects.py) cover this boundary; [Loop workflow tests](tests/workflows/test_full_engine_events.py) also cover v2 variable-input `OVER_WRITE` and `CLEAR` preserving the secret tag and masking.
+[V2 input validation](src/graphon/nodes/variable_assigner/v2/helpers.py) rejects constant inputs for secret targets.
 
 [Iteration](src/graphon/nodes/iteration/iteration_node.py) accepts array sequences, including tuples.
 When its [handler](src/graphon/engine/container_handler/builtin/iteration.py) flattens outputs, matching declared array types survive in both serial and parallel runs; mixed array types become `array[any]`.
