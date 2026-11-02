@@ -166,9 +166,10 @@ compatibility details:
 | Snapshot versions and migrations | [Snapshot loading](src/graphon/runtime/runtime_state/snapshot.py) | [Runtime snapshots](tests/runtime/test_runtime_state.py), [version isolation](tests/test_snapshot_version_isolation.py) |
 
 Container values preserve serializable segments' declared types through construction, snapshots, and completion, including empty typed arrays.
-Conversion discards source variable identity so the parent pool binds completed outputs to the container's selectors.
+Explicit `to_segment()` conversion discards source variable identity so the parent pool binds completed outputs to the container's selectors.
 Stored outputs remain typed; inputs and Loop/Iteration presentation events expose plain values.
-Raw Python values use type inference, and secrets normalize to strings.
+Raw Python values use type inference; secrets retain their type and log masking.
+Snapshot restoration uses the `SerializableSegment` discriminated union directly.
 
 When [Iteration](src/graphon/engine/container_handler/builtin/iteration.py) flattens outputs, matching declared array types survive in both serial and parallel runs; mixed array types become `array[any]`.
 [Variable assignment](src/graphon/nodes/variable_assigner/common/helpers.py) converts integer variables to float when assignments or arithmetic produce float values, retaining their identity and metadata.

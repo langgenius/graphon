@@ -12,6 +12,14 @@ def test_secret_variable_is_masked() -> None:
     assert result == {"key": MASKED}
 
 
+def test_secret_segment_is_masked() -> None:
+    segment = SecretVariable(value=SECRET, name="api_key").to_segment()
+
+    result = WorkflowRuntimeTypeConverter().to_json_encodable({"key": segment})
+
+    assert result == {"key": MASKED}
+
+
 def test_segment_group_masks_only_the_secret_part() -> None:
     group = SegmentGroup(
         value=[StringSegment(value="Bearer "), SecretVariable(value=SECRET, name="k")]

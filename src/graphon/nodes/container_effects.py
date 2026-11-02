@@ -3,40 +3,18 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field
 
 from graphon.enums import ErrorHandleMode
 from graphon.node_events.base import NodeRunResult
 from graphon.variables.factory import build_segment
-from graphon.variables.segments import Segment, SerializableSegment
-from graphon.variables.types import SegmentType
+from graphon.variables.segments import SerializableSegment
 
-
-def _to_serializable_segment(value: object) -> object:
-    if isinstance(value, Segment):
-        return {
-            "value_type": (
-                SegmentType.STRING
-                if value.value_type == SegmentType.SECRET
-                else value.value_type
-            ),
-            "value": value.to_object(),
-        }
-    if isinstance(value, Mapping) and "value_type" in value:
-        return value
-    return build_segment(value)
-
-
-type ContainerValue = Annotated[
-    SerializableSegment,
-    BeforeValidator(_to_serializable_segment),
-]
-
-_CONTAINER_VALUE_ADAPTER = TypeAdapter(ContainerValue)
+type ContainerValue = SerializableSegment
 
 
 def build_container_value(value: object) -> ContainerValue:
-    return _CONTAINER_VALUE_ADAPTER.validate_python(build_segment(value))
+    return build_segment(value).to_segment()
 
 
 class ContainerNodeRunResult(NodeRunResult):

@@ -15,6 +15,12 @@ def test_secret_variable_is_sensitive() -> None:
     assert is_sensitive(SecretVariable(value=SECRET, name="api_key")) is True
 
 
+def test_secret_segment_is_sensitive() -> None:
+    assert (
+        is_sensitive(SecretVariable(value=SECRET, name="api_key").to_segment()) is True
+    )
+
+
 def test_plain_string_segment_is_not_sensitive() -> None:
     assert is_sensitive(StringSegment(value="hello")) is False
 

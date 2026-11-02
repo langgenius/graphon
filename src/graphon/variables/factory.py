@@ -25,6 +25,7 @@ from .segments import (
     IntegerSegment,
     NoneSegment,
     ObjectSegment,
+    SecretSegment,
     Segment,
     StringSegment,
 )
@@ -255,6 +256,14 @@ def _build_scalar_variable(
             )
         case ObjectSegment():
             result = ObjectVariable(
+                id=variable_id,
+                name=name,
+                description=description,
+                value=segment.value,
+                selector=selector,
+            )
+        case SecretSegment():
+            result = SecretVariable(
                 id=variable_id,
                 name=name,
                 description=description,

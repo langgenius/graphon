@@ -32,14 +32,17 @@ from graphon.variables.variables import ArrayFileVariable, SecretVariable
         ArrayBooleanSegment(value=[]),
         ArrayAnySegment(value=["text"]),
         ArrayFileVariable(name="files", selector=["child", "files"], value=[]),
+        SecretVariable(
+            name="token", selector=["child", "token"], value="example-value"
+        ),
     ],
-    ids=["file", "string", "number", "object", "boolean", "any", "variable"],
+    ids=["file", "string", "number", "object", "boolean", "any", "variable", "secret"],
 )
 def test_container_outputs_keep_their_type_after_snapshot_and_resume(
     segment: SerializableSegment,
     use_builder: bool,
 ) -> None:
-    value = build_container_value(segment) if use_builder else segment
+    value = build_container_value(segment) if use_builder else segment.to_segment()
     state = RuntimeState(
         workflow_id="workflow", variable_pool=VariablePool(), start_at=1
     )
@@ -76,7 +79,7 @@ def test_container_outputs_keep_their_type_after_snapshot_and_resume(
 @pytest.mark.parametrize("use_builder", [False, True], ids=["direct", "builder"])
 def test_live_container_outputs_rebind_variable_selectors(use_builder: bool) -> None:
     variable = ArrayFileVariable(name="files", selector=["child", "files"], value=[])
-    value = build_container_value(variable) if use_builder else variable
+    value = build_container_value(variable) if use_builder else variable.to_segment()
     result = ContainerNodeRunResult(outputs={"files": value}).to_node_run_result()
     pool = VariablePool()
 
@@ -88,11 +91,11 @@ def test_live_container_outputs_rebind_variable_selectors(use_builder: bool) -> 
     assert list(files.selector) == ["container", "files"]
 
 
-def test_container_values_keep_existing_secret_normalization() -> None:
+def test_container_values_preserve_secret_types_and_masking() -> None:
     secret = SecretVariable(name="token", value="example-value")
 
     result = ContainerNodeRunResult.model_validate({
-        "inputs": {"token": secret},
+        "inputs": {"token": secret.to_segment()},
         "outputs": {"token": build_container_value(secret)},
     }).to_node_run_result()
     pool = VariablePool()
@@ -100,6 +103,7 @@ def test_container_values_keep_existing_secret_normalization() -> None:
 
     token = pool.get(("container", "token"))
     assert token is not None
-    assert token.value_type == "string"
+    assert token.value_type == "secret"
     assert token.value == "example-value"
+    assert token.log == secret.log
     assert result.inputs == {"token": "example-value"}

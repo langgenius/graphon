@@ -18,21 +18,12 @@ from .segments import (
     IntegerSegment,
     NoneSegment,
     ObjectSegment,
+    SecretSegment,
     Segment,
     StringSegment,
     get_segment_discriminator,
 )
 from .types import SegmentType
-
-SHORT_TOKEN_MAX_LENGTH = 8
-
-
-def _obfuscated_token(token: str) -> str:
-    if not token:
-        return token
-    if len(token) <= SHORT_TOKEN_MAX_LENGTH:
-        return "*" * 20
-    return token[:6] + "*" * 12 + token[-2:]
 
 
 class VariableBase(Segment):
@@ -88,12 +79,8 @@ class ArrayObjectVariable(ArrayObjectSegment, ArrayVariable):
     pass
 
 
-class SecretVariable(StringVariable):
-    value_type: SegmentType = SegmentType.SECRET
-
-    @property
-    def log(self) -> str:
-        return _obfuscated_token(self.value)
+class SecretVariable(SecretSegment, StringVariable):
+    pass
 
 
 class NoneVariable(NoneSegment, VariableBase):
