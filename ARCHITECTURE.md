@@ -125,9 +125,8 @@ pause/restore and distinguishes separate runs with the same `workflow_id`.
 
 Pause leaves unfinished frames open. Resume publishes new baselines with the
 resumption reason and existing execution IDs before resumed body events.
-[Persisted container state](src/graphon/runtime/container_state.py) preserves
-pending frame failures across pause and snapshot restore. Terminal failure or
-abort closes each remaining frame once, before the graph's terminal event.
+[Persisted container state](src/graphon/runtime/container_state.py) preserves pending frame failures across pause and snapshot restore even when frame events are disabled.
+Terminal failure or abort closes each remaining frame once, before the graph's terminal event.
 An `Exception` thrown into `Engine.run()` during execution or at the paused event
 follows the same failure ordering; continued consumption re-raises the exception.
 
@@ -174,6 +173,9 @@ The [segment serializer](src/graphon/variables/utils.py) preserves nested `File`
 Unmarked objects retain their data, and invalid marked files fail validation; see [container tests](tests/nodes/test_container_effects.py) and [workflow tests](tests/workflows/test_full_engine_events.py).
 [VariableBase.copy_with_value](src/graphon/variables/variables.py) validates replacements for assignment nodes, retaining identity and metadata and promoting integer variables when the new value is a float.
 The [v1 assignment tests](tests/nodes/variable_assigner/test_v1_node.py) and [v2 assignment tests](tests/nodes/variable_assigner/test_v2_node.py) cover invalid updates, fractional results, and clearing arrays while preserving their declared type, including `array[file]`.
+
+In [template interpolation](src/graphon/variables/template_resolution.py), nonempty object arrays render as JSON, including nested `File` and segment model data.
+Empty object arrays render as an empty string; see [template resolution tests](tests/variables/test_template_resolution.py).
 
 [Container values](src/graphon/nodes/container_effects.py) preserve declared segment types through construction, snapshots, and completion, including secret tags.
 Explicit `to_segment()` conversion removes source variable identity so the parent pool binds completed outputs to the container's selectors.
