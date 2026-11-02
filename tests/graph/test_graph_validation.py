@@ -286,6 +286,44 @@ def test_graph_promotes_fail_branch_nodes_to_branch_execution_type(
     )
 
     assert graph.nodes["branch"].execution_type == NodeExecutionType.BRANCH
+    assert graph.nodes["branch"].promoted_to_branch is True
+
+
+def test_graph_does_not_mark_already_branch_nodes_as_promoted(
+    graph_init_dependencies: tuple[_SimpleNodeFactory, dict[str, object]],
+) -> None:
+    node_factory, graph_config = graph_init_dependencies
+    graph_config["nodes"] = [
+        {
+            "id": "start",
+            "data": {
+                "type": BuiltinNodeTypes.START,
+                "title": "Start",
+                "execution_type": NodeExecutionType.ROOT,
+            },
+        },
+        {
+            "id": "branch",
+            "data": {
+                "type": BuiltinNodeTypes.IF_ELSE,
+                "title": "Branch",
+                "error_strategy": ErrorStrategy.FAIL_BRANCH,
+                "execution_type": NodeExecutionType.BRANCH,
+            },
+        },
+    ]
+    graph_config["edges"] = [
+        {"source": "start", "target": "branch", "sourceHandle": "success"},
+    ]
+
+    graph = Graph.init(
+        graph_config=graph_config,
+        node_factory=node_factory,
+        root_node_id="start",
+    )
+
+    assert graph.nodes["branch"].execution_type == NodeExecutionType.BRANCH
+    assert graph.nodes["branch"].promoted_to_branch is False
 
 
 def test_graph_init_ignores_custom_note_nodes_before_node_data_validation(

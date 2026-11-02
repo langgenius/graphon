@@ -414,6 +414,10 @@ class Node[NodeDataT: BaseNodeData](
 
     node_type: ClassVar[NodeType]
     execution_type: NodeExecutionType = NodeExecutionType.EXECUTABLE
+    # Set by ``Graph`` when a FAIL_BRANCH error strategy promotes the node to
+    # branch execution type; unlike a genuine branch node it streams its
+    # normal-path output while it runs.
+    promoted_to_branch: bool = False
     _node_data_type: ClassVar[type[BaseNodeData]] = BaseNodeData
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
