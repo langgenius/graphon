@@ -1,8 +1,11 @@
+import json
+
 import pytest
 
+from graphon.file import File, FileTransferMethod, FileType
 from graphon.runtime.read_only_wrappers import ReadOnlyVariablePoolWrapper
 from graphon.runtime.variable_pool import VariablePool
-from graphon.variables.segments import ArrayObjectSegment
+from graphon.variables.segments import ArrayObjectSegment, StringSegment
 from graphon.variables.template_resolution import convert_template
 
 
@@ -85,3 +88,26 @@ class TestConvertTemplate:
         )
         assert nullable.text == '[{"a": null}]'
         assert ArrayObjectSegment(value=[]).text == ""
+
+    def test_inserts_object_arrays_with_files_and_segments_as_json(self) -> None:
+        file = File(
+            file_type=FileType.IMAGE,
+            transfer_method=FileTransferMethod.REMOTE_URL,
+            remote_url="https://example.com/image.png",
+            filename="image.png",
+        )
+        pool = VariablePool.empty()
+        pool.add(
+            ("iteration", "output"),
+            [{"file": file, "group": {"output": StringSegment(value="hello")}}],
+        )
+
+        rendered = convert_template(
+            ReadOnlyVariablePoolWrapper(pool),
+            '{"items": {{#iteration.output#}}}',
+        )
+        item = json.loads(rendered.text)["items"][0]
+
+        assert item["file"]["remote_url"] == "https://example.com/image.png"
+        assert item["file"]["filename"] == "image.png"
+        assert item["group"]["output"] == {"value_type": "string", "value": "hello"}

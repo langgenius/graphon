@@ -242,7 +242,7 @@ class ArrayObjectSegment(ArraySegment):
         # Return empty string for empty arrays instead of "[]"
         if not self.value:
             return ""
-        return json.dumps(self.value, ensure_ascii=False)
+        return json.dumps(self.model_dump()["value"], ensure_ascii=False)
 
     def to_segment(self) -> ArrayObjectSegment:
         return ArrayObjectSegment(value=self.value)
