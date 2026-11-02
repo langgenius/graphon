@@ -181,12 +181,15 @@ class LLMResultAccumulator:
 class _StreamingInvokeAccumulator:
     real_model: str
     message_content: list[PromptMessageContentUnionTypes] = field(default_factory=list)
+    tool_calls: list[AssistantPromptMessage.ToolCall] = field(default_factory=list)
     usage: LLMUsage | None = None
     system_fingerprint: str | None = None
     opaque_body: JsonValue = None
 
     def consume(self, chunk: LLMResultChunk) -> None:
         self._consume_content(chunk.delta.message.content)
+        if chunk.delta.message.tool_calls:
+            merge_tool_call_deltas(chunk.delta.message.tool_calls, self.tool_calls)
         self.real_model = chunk.model
         if chunk.delta.usage:
             self.usage = chunk.delta.usage
@@ -217,6 +220,7 @@ class _StreamingInvokeAccumulator:
             prompt_messages=prompt_messages,
             message=AssistantPromptMessage(
                 content=self.message_content,
+                tool_calls=self.tool_calls,
                 opaque_body=self.opaque_body,
             ),
             usage=self.usage or LLMUsage.empty_usage(),
@@ -330,7 +334,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
         self,
         model: str,
         credentials: dict,
-        prompt_messages: list[PromptMessage],
+        prompt_messages: Sequence[PromptMessage],
         model_parameters: dict | None = None,
         tools: list[PromptMessageTool] | None = None,
         stop: list[str] | None = None,
@@ -468,6 +472,18 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
                 callbacks=callbacks,
             )
         except Exception as e:
+            self._trigger_invoke_error_callbacks(
+                model=model,
+                ex=e,
+                credentials=credentials,
+                prompt_messages=prompt_messages,
+                model_parameters=model_parameters,
+                tools=tools,
+                stop=stop,
+                stream=stream,
+                request_metadata=request_metadata,
+                callbacks=callbacks,
+            )
             raise self._transform_invoke_error(e) from e
 
         self._trigger_after_invoke_callbacks(
@@ -526,7 +542,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
         self,
         model: str,
         credentials: dict,
-        prompt_messages: list[PromptMessage],
+        prompt_messages: Sequence[PromptMessage],
         tools: list[PromptMessageTool] | None = None,
     ) -> int:
         """Count prompt tokens for the given messages and optional tools."""
@@ -584,7 +600,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
         self,
         model: str,
         credentials: dict,
-        prompt_messages: list[PromptMessage],
+        prompt_messages: Sequence[PromptMessage],
         model_parameters: dict,
         tools: list[PromptMessageTool] | None = None,
         stop: Sequence[str] | None = None,
@@ -710,7 +726,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
         model: str,
         ex: Exception,
         credentials: dict,
-        prompt_messages: list[PromptMessage],
+        prompt_messages: Sequence[PromptMessage],
         model_parameters: dict,
         tools: list[PromptMessageTool] | None = None,
         stop: Sequence[str] | None = None,

@@ -245,13 +245,14 @@ class _StreamingLLMRuntimeStub(_LLMRuntimeStub):
 class _RecordingCallback(Callback):
     def __init__(self) -> None:
         self.after_results: list[LLMResult] = []
+        self.invoke_errors: list[Exception] = []
 
     def on_before_invoke(
         self,
         llm_instance: AIModel,
         model: str,
         credentials: dict,
-        prompt_messages: list[PromptMessage],
+        prompt_messages: Sequence[PromptMessage],
         model_parameters: dict,
         tools: list[PromptMessageTool] | None = None,
         stop: Sequence[str] | None = None,
@@ -334,7 +335,7 @@ class _RecordingCallback(Callback):
         ex: Exception,
         model: str,
         credentials: dict,
-        prompt_messages: list[PromptMessage],
+        prompt_messages: Sequence[PromptMessage],
         model_parameters: dict,
         tools: list[PromptMessageTool] | None = None,
         stop: Sequence[str] | None = None,
@@ -344,7 +345,6 @@ class _RecordingCallback(Callback):
     ) -> None:
         _ = (
             llm_instance,
-            ex,
             model,
             credentials,
             prompt_messages,
@@ -355,6 +355,7 @@ class _RecordingCallback(Callback):
             user,
             request_metadata,
         )
+        self.invoke_errors.append(ex)
 
 
 def _make_chunk(
@@ -363,12 +364,15 @@ def _make_chunk(
     content: str | list[PromptMessageContentUnionTypes] | None,
     usage: LLMUsage | None = None,
     system_fingerprint: str | None = None,
+    tool_calls: list[AssistantPromptMessage.ToolCall] | None = None,
 ) -> LLMResultChunk:
     return LLMResultChunk(
         model=model,
         delta=LLMResultChunkDelta(
             index=0,
-            message=AssistantPromptMessage(content=content),
+            message=AssistantPromptMessage(
+                content=content, tool_calls=tool_calls or []
+            ),
             usage=usage,
         ),
         system_fingerprint=system_fingerprint,
@@ -668,7 +672,7 @@ def test_large_language_model_accepts_llm_only_runtime_surface() -> None:
         model.invoke(
             model="fake-chat",
             credentials={},
-            prompt_messages=[UserPromptMessage(content="hello")],
+            prompt_messages=(UserPromptMessage(content="hello"),),
             stream=False,
         ),
     )
@@ -678,13 +682,16 @@ def test_large_language_model_accepts_llm_only_runtime_surface() -> None:
         model.get_num_tokens(
             model="fake-chat",
             credentials={},
-            prompt_messages=[UserPromptMessage(content="hello")],
+            prompt_messages=(UserPromptMessage(content="hello"),),
         )
         == 7
     )
 
 
-def test_large_language_model_stream_after_invoke_preserves_chunk_state() -> None:
+@pytest.mark.parametrize("split_tool_call", [False, True])
+def test_large_language_model_stream_after_invoke_preserves_chunk_state(
+    split_tool_call: bool,
+) -> None:
     provider = ProviderEntity(
         provider="test-provider",
         label=I18nObject(en_US="Test Provider"),
@@ -697,6 +704,29 @@ def test_large_language_model_stream_after_invoke_preserves_chunk_state() -> Non
     list_content: list[PromptMessageContentUnionTypes] = [
         TextPromptMessageContent(data=" there"),
     ]
+    tool_calls = [
+        AssistantPromptMessage.ToolCall(
+            id=f"call-{index}",
+            type="function",
+            function=AssistantPromptMessage.ToolCall.ToolCallFunction(
+                name="lookup", arguments=arguments
+            ),
+        )
+        for index, arguments in enumerate(['{ "city": "Paris" }', '{"city":"Rome"}'])
+    ]
+    first_chunk_tool_calls = [tool_calls[0].model_copy(deep=True)]
+    second_chunk_tool_calls = [tool_calls[1].model_copy(deep=True)]
+    if split_tool_call:
+        first_chunk_tool_calls[0].function.arguments = '{ "city": '
+        second_chunk_tool_calls.append(
+            AssistantPromptMessage.ToolCall(
+                id=tool_calls[0].id,
+                type="function",
+                function=AssistantPromptMessage.ToolCall.ToolCallFunction(
+                    name="", arguments='"Paris" }'
+                ),
+            )
+        )
     runtime = cast(
         "LLMModelRuntime",
         _StreamingLLMRuntimeStub([
@@ -704,17 +734,19 @@ def test_large_language_model_stream_after_invoke_preserves_chunk_state() -> Non
                 model="first-model",
                 content="hi",
                 system_fingerprint="fp-1",
+                tool_calls=first_chunk_tool_calls,
             ),
             _make_chunk(
                 model="second-model",
                 content=list_content,
                 usage=usage,
                 system_fingerprint="fp-2",
+                tool_calls=second_chunk_tool_calls,
             ),
         ]),
     )
     model = LargeLanguageModel(provider_schema=provider, model_runtime=runtime)
-    prompt_messages: list[PromptMessage] = [UserPromptMessage(content="hello")]
+    prompt_messages: Sequence[PromptMessage] = (UserPromptMessage(content="hello"),)
     callback = _RecordingCallback()
 
     result = model.invoke(
@@ -740,6 +772,7 @@ def test_large_language_model_stream_after_invoke_preserves_chunk_state() -> Non
     ]
     assert after_result.usage == usage
     assert after_result.system_fingerprint == "fp-2"
+    assert after_result.message.tool_calls == tool_calls
 
 
 @pytest.mark.parametrize("stream", [True, False])
@@ -831,7 +864,11 @@ def test_large_language_model_uses_last_opaque_body_per_invocation(
             assert type(blocks[1].opaque_body) is type(snapshot)
 
 
-def test_large_language_model_stream_errors_are_transformed() -> None:
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("emit_chunk", [False, True])
+def test_large_language_model_stream_failures_notify_callbacks(
+    stream: bool, emit_chunk: bool
+) -> None:
     provider = ProviderEntity(
         provider="test-provider",
         label=I18nObject(en_US="Test Provider"),
@@ -841,20 +878,26 @@ def test_large_language_model_stream_errors_are_transformed() -> None:
     runtime = cast(
         "LLMModelRuntime",
         _StreamingLLMRuntimeStub(
-            [_make_chunk(model="first-model", content="hi")],
+            [_make_chunk(model="first-model", content="hi")] if emit_chunk else [],
             fail_after_chunks=True,
         ),
     )
     model = LargeLanguageModel(provider_schema=provider, model_runtime=runtime)
-    result = model.invoke(
-        model="fake-chat",
-        credentials={},
-        prompt_messages=[UserPromptMessage(content="hello")],
-        stream=True,
-    )
+    callback = _RecordingCallback()
 
-    with pytest.raises(InvokeError, match="stream failed"):
-        list(cast("Generator[LLMResultChunk, None, None]", result))
+    with pytest.raises(InvokeError, match="stream failed") as raised:
+        list(
+            model.invoke(
+                model="fake-chat",
+                credentials={},
+                prompt_messages=(UserPromptMessage(content="hello"),),
+                stream=stream,
+                callbacks=[callback],
+            )
+        )
+
+    assert callback.invoke_errors == [raised.value.__cause__]
+    assert callback.after_results == []
 
 
 def test_text_embedding_model_accepts_embedding_only_runtime_surface() -> None:

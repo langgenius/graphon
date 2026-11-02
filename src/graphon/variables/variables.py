@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 from collections.abc import Sequence
-from typing import Annotated, Any
+from typing import Annotated, Any, Self
 from uuid import uuid4
 
-from pydantic import BaseModel, Discriminator, Field, Tag
+from pydantic import BaseModel, ConfigDict, Field
 
 from .segments import (
     ArrayAnySegment,
@@ -18,21 +20,10 @@ from .segments import (
     IntegerSegment,
     NoneSegment,
     ObjectSegment,
+    SecretSegment,
     Segment,
     StringSegment,
-    get_segment_discriminator,
 )
-from .types import SegmentType
-
-SHORT_TOKEN_MAX_LENGTH = 8
-
-
-def _obfuscated_token(token: str) -> str:
-    if not token:
-        return token
-    if len(token) <= SHORT_TOKEN_MAX_LENGTH:
-        return "*" * 20
-    return token[:6] + "*" * 12 + token[-2:]
 
 
 class VariableBase(Segment):
@@ -43,6 +34,9 @@ class VariableBase(Segment):
     Note: this class is abstract, you should use subclasses of this class instead.
     """
 
+    # Ancestor write-back uses variable instance identity to recognize committed writes.
+    model_config = ConfigDict(revalidate_instances="never")
+
     id: str = Field(
         default_factory=lambda: str(uuid4()),
         description="Unique identity for variable.",
@@ -50,6 +44,23 @@ class VariableBase(Segment):
     name: str
     description: str = Field(default="", description="Description of the variable.")
     selector: Sequence[str] = Field(default_factory=list)
+
+    def copy_with_value(self, value: object) -> Self | FloatVariable:
+        variable_class = (
+            FloatVariable
+            if isinstance(self, IntegerVariable) and isinstance(value, float)
+            else type(self)
+        )
+        return variable_class.model_validate(
+            {
+                "id": self.id,
+                "name": self.name,
+                "description": self.description,
+                "selector": self.selector,
+                "value": value,
+            },
+            strict=True,
+        )
 
 
 class StringVariable(StringSegment, VariableBase):
@@ -88,17 +99,12 @@ class ArrayObjectVariable(ArrayObjectSegment, ArrayVariable):
     pass
 
 
-class SecretVariable(StringVariable):
-    value_type: SegmentType = SegmentType.SECRET
-
-    @property
-    def log(self) -> str:
-        return _obfuscated_token(self.value)
+class SecretVariable(SecretSegment, VariableBase):
+    pass
 
 
 class NoneVariable(NoneSegment, VariableBase):
-    value_type: SegmentType = SegmentType.NONE
-    value: None = None
+    pass
 
 
 class FileVariable(FileSegment, VariableBase):
@@ -166,20 +172,20 @@ class RAGPipelineVariableInput(BaseModel):
 # - The union must include all non-abstract subclasses of `VariableBase`.
 type Variable = Annotated[
     (
-        Annotated[NoneVariable, Tag(SegmentType.NONE)]
-        | Annotated[StringVariable, Tag(SegmentType.STRING)]
-        | Annotated[FloatVariable, Tag(SegmentType.FLOAT)]
-        | Annotated[IntegerVariable, Tag(SegmentType.INTEGER)]
-        | Annotated[ObjectVariable, Tag(SegmentType.OBJECT)]
-        | Annotated[FileVariable, Tag(SegmentType.FILE)]
-        | Annotated[BooleanVariable, Tag(SegmentType.BOOLEAN)]
-        | Annotated[ArrayAnyVariable, Tag(SegmentType.ARRAY_ANY)]
-        | Annotated[ArrayStringVariable, Tag(SegmentType.ARRAY_STRING)]
-        | Annotated[ArrayNumberVariable, Tag(SegmentType.ARRAY_NUMBER)]
-        | Annotated[ArrayObjectVariable, Tag(SegmentType.ARRAY_OBJECT)]
-        | Annotated[ArrayFileVariable, Tag(SegmentType.ARRAY_FILE)]
-        | Annotated[ArrayBooleanVariable, Tag(SegmentType.ARRAY_BOOLEAN)]
-        | Annotated[SecretVariable, Tag(SegmentType.SECRET)]
+        NoneVariable
+        | StringVariable
+        | FloatVariable
+        | IntegerVariable
+        | ObjectVariable
+        | FileVariable
+        | BooleanVariable
+        | ArrayAnyVariable
+        | ArrayStringVariable
+        | ArrayNumberVariable
+        | ArrayObjectVariable
+        | ArrayFileVariable
+        | ArrayBooleanVariable
+        | SecretVariable
     ),
-    Discriminator(get_segment_discriminator),
+    Field(discriminator="value_type"),
 ]

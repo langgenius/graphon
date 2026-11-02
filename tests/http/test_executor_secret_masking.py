@@ -25,7 +25,7 @@ from graphon.runtime.variable_pool import VariablePool
 from graphon.variables import SecretVariable
 
 SECRET = "sk-supersecret-123456"  # ruff: ignore[hardcoded-password-string]
-# The obfuscated form per _obfuscated_token(): first 6 chars + 12 stars + last 2 chars.
+# The obfuscated form per _mask_token(): first 6 chars + 12 stars + last 2 chars.
 # len(SECRET) = 22 > 8, so: "sk-sup" + "************" + "56"
 OBFUSCATED = "sk-sup" + "*" * 12 + "56"
 # When the obfuscated token is percent-encoded (e.g. inside urlencode for params/body)
