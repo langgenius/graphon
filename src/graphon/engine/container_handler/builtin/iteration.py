@@ -503,7 +503,10 @@ class IterationContainerHandler:
                     update={"value": flattened}
                 )
             return ArrayAnySegment(value=flattened)
-        return build_container_value([output.to_object() for output in outputs])
+        values = [output.to_object() for output in outputs]
+        return (
+            ArrayAnySegment(value=values) if arrays else build_container_value(values)
+        )
 
     def _enqueue_container_result(
         self,

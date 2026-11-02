@@ -840,16 +840,16 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         if not isinstance(param_value, list):
             return _TRANSFORM_RESULT_UNSET
 
-        segment_value = build_segment_with_type(segment_type=parameter_type, value=[])
+        values = []
         handler_name = _ARRAY_ITEM_TRANSFORMER_NAMES.get(element_type)
         if handler_name is None:
-            return segment_value
+            return build_segment_with_type(parameter_type, values)
 
         for item in param_value:
             transformed_item = getattr(self, handler_name)(item)
             if transformed_item is not _TRANSFORM_RESULT_UNSET:
-                segment_value.value.append(transformed_item)
-        return segment_value
+                values.append(transformed_item)
+        return build_segment_with_type(parameter_type, values)
 
     def _transform_number_value(self, value: Any) -> Any:
         transformed = self._transform_number(value)

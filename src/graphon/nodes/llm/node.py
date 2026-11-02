@@ -81,6 +81,7 @@ from graphon.variables.segments import (
     ArraySegment,
     NoneSegment,
     ObjectSegment,
+    SecretSegment,
     StringSegment,
 )
 
@@ -1197,7 +1198,7 @@ class LLMNode(Node[LLMNodeData]):
         if context_value_variable is None:
             return
 
-        if isinstance(context_value_variable, StringSegment):
+        if isinstance(context_value_variable, (StringSegment, SecretSegment)):
             yield RunRetrieverResourceEvent(
                 retriever_resources=[],
                 context=context_value_variable.value,

@@ -135,9 +135,7 @@ class VariableAssignerNode(Node[VariableAssignerData]):
             case _:
                 assert_never(write_mode)
 
-        updated_variable = common_helpers.copy_variable_with_value(
-            original_variable, updated_value
-        )
+        updated_variable = original_variable.copy_with_value(updated_value)
         updated_variables = [
             common_helpers.variable_to_processed_data(
                 assigned_variable_selector,
