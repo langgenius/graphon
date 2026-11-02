@@ -8,38 +8,43 @@ class OutputParserError(ValueError):
 
 
 _JSON_START_CHARS = frozenset(("{", "["))
-_JSON_END_CHARS = frozenset(("}", "]"))
+_FENCE_MARKERS = ("```json", "```")
+
+
+def _payload_start(text: str) -> int:
+    """Offset of the payload's first JSON start character, or -1 when there is none.
+
+    Braces are checked before array brackets, and both before backticks, so an inline
+    code span elsewhere in the text cannot hide the payload: the earlier `find` on a
+    backtick used to win over a `{` that comes first. Fenced payloads keep priority so
+    the fenced block still wins over prose braces that appear before it.
+    """
+    for marker in (*_FENCE_MARKERS, "{", "["):
+        index = text.find(marker)
+        if index == -1:
+            continue
+        if marker in _JSON_START_CHARS:
+            return index
+        follow = index + len(marker)
+        while follow < len(text) and text[follow].isspace():
+            follow += 1
+        if follow < len(text) and text[follow] in _JSON_START_CHARS:
+            return follow
+    return -1
 
 
 def parse_json_markdown(json_string: str) -> dict | list:
     """Extract and parse the first JSON object or array embedded in markdown text."""
-    json_string = json_string.strip()
-    starts = ["```json", "```", "``", "`", "{", "["]
-    ends = ["```", "``", "`", "}", "]"]
-    end_index = -1
-    start_index = 0
-
-    for start_marker in starts:
-        start_index = json_string.find(start_marker)
-        if start_index != -1:
-            if json_string[start_index] not in _JSON_START_CHARS:
-                start_index += len(start_marker)
-            break
-
-    if start_index != -1:
-        for end_marker in ends:
-            end_index = json_string.rfind(end_marker, start_index)
-            if end_index != -1:
-                if json_string[end_index] in _JSON_END_CHARS:
-                    end_index += 1
-                break
-
-    if start_index == -1 or end_index == -1 or start_index >= end_index:
+    text = json_string.strip()
+    start_index = _payload_start(text)
+    if start_index == -1:
         msg = "could not find json block in the output."
         raise ValueError(msg)
 
-    extracted_content = json_string[start_index:end_index].strip()
-    return json.loads(extracted_content)
+    # The decoder parses exactly one value and stops there, so trailing prose, a second
+    # payload, or a brace inside a string can no longer extend the slice past the value.
+    value, _end = json.JSONDecoder().raw_decode(text, start_index)
+    return value
 
 
 def parse_and_check_json_markdown(text: str, expected_keys: list[str]) -> dict:
