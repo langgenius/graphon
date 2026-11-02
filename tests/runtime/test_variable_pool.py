@@ -166,6 +166,26 @@ class TestVariablePoolGetAndNestedAttribute:
         assert segment is not None
         assert segment.value == "Paris"
 
+    def test_add_binds_copied_outputs_to_the_destination(self) -> None:
+        pool = VariablePool.empty()
+        original = StringVariable(
+            name="input", selector=["source", "input"], value="before"
+        )
+        pool.add(original.selector, original)
+        pool.add(("copy", "output"), original)
+        output = pool.get_variable(("copy", "output"))
+        assert output is not None
+
+        pool.add(output.selector, output.model_copy(update={"value": "after"}))
+
+        assert pool.get(("source", "input")) == original
+        updated = pool.get(("copy", "output"))
+        assert updated is not None
+        assert updated.value == "after"
+        assert list(output.selector) == ["copy", "output"]
+        assert output.name == "output"
+        assert output.id != original.id
+
 
 class TestVariablePoolGetNotModifyVariableDictionary:
     _NODE_ID = "start"

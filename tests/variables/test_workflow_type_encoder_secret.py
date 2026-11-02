@@ -2,13 +2,21 @@ from graphon.variables import SecretVariable, SegmentGroup, StringSegment
 from graphon.workflow_type_encoder import WorkflowRuntimeTypeConverter
 
 SECRET = "sk-1234567890abcdef"  # ruff: ignore[hardcoded-password-string]
-MASKED = "sk-123" + "*" * 12 + "ef"  # _obfuscated_token(SECRET)
+MASKED = "sk-123" + "*" * 12 + "ef"  # _mask_token(SECRET)
 
 
 def test_secret_variable_is_masked() -> None:
     result = WorkflowRuntimeTypeConverter().to_json_encodable({
         "key": SecretVariable(value=SECRET, name="api_key")
     })
+    assert result == {"key": MASKED}
+
+
+def test_secret_segment_is_masked() -> None:
+    segment = SecretVariable(value=SECRET, name="api_key").to_segment()
+
+    result = WorkflowRuntimeTypeConverter().to_json_encodable({"key": segment})
+
     assert result == {"key": MASKED}
 
 

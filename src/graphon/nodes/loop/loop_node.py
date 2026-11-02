@@ -104,11 +104,15 @@ class LoopNode(Node[LoopNodeData]):
 
         if isinstance(result, ContainerExecutionResult):
             node_run_result = result.node_run_result.to_node_run_result()
+            outputs = {
+                key: value.to_object()
+                for key, value in result.node_run_result.outputs.items()
+            }
             if node_run_result.status == WorkflowNodeExecutionStatus.SUCCEEDED:
                 yield LoopSucceededEvent(
                     start_at=self._start_at,
                     inputs=node_run_result.inputs,
-                    outputs=node_run_result.outputs,
+                    outputs=outputs,
                     metadata=result.metadata,
                     steps=result.steps,
                 )
@@ -116,7 +120,7 @@ class LoopNode(Node[LoopNodeData]):
                 yield LoopFailedEvent(
                     start_at=self._start_at,
                     inputs=node_run_result.inputs,
-                    outputs=node_run_result.outputs,
+                    outputs=outputs,
                     metadata=result.metadata,
                     steps=result.steps,
                     error=node_run_result.error,
@@ -164,7 +168,10 @@ class LoopNode(Node[LoopNodeData]):
                 raise ValueError(msg)
 
             variable_selector = (self._node_id, loop_variable.label)
-            initialized_pool.add(variable_selector, processed_segment.value)
+            initialized_pool.add(
+                variable_selector,
+                build_container_value(processed_segment),
+            )
             variable = initialized_pool.variable_dictionary[self._node_id][
                 loop_variable.label
             ]

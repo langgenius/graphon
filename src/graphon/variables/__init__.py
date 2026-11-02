@@ -19,6 +19,7 @@ from .segments import (
     IntegerSegment,
     NoneSegment,
     ObjectSegment,
+    SecretSegment,
     Segment,
     StringSegment,
 )
@@ -65,6 +66,7 @@ __all__ = [
     "NoneVariable",
     "ObjectSegment",
     "ObjectVariable",
+    "SecretSegment",
     "SecretVariable",
     "Segment",
     "SegmentGroup",
