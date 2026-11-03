@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import json
+from collections import UserDict
 from collections.abc import Generator, Sequence
 from datetime import UTC, datetime
 from threading import Event, Thread
-from typing import Any
+from typing import Any, override
 
 import pytest
 
 from graphon import engine_events
 from graphon.dsl import loads
+from graphon.engine import Engine
 from graphon.engine.command import (
     CommandProcessor,
     UpdateVariablesCommand,
@@ -29,6 +31,7 @@ from graphon.engine_events.node import (
 )
 from graphon.entities.workflow_start_reason import WorkflowStartReason
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
+from graphon.graph import Graph
 from graphon.node_events.base import NodeEventPayload, NodeRunResult
 from graphon.node_events.node import StreamChunkEvent, StreamCompletedEvent
 from graphon.nodes.container_effects import (
@@ -38,6 +41,8 @@ from graphon.nodes.container_effects import (
     LoopFrameRequest,
 )
 from graphon.nodes.human_input.entities import Completed, HITLContext, PauseRequested
+from graphon.nodes.start.entities import StartNodeData
+from graphon.nodes.start.start_node import StartNode
 from graphon.nodes.template_transform.template_transform_node import (
     TemplateTransformNode,
 )
@@ -56,6 +61,7 @@ from tests.engine.test_runtime_state_serialization import (
     _iteration_dsl,
     _new_runtime_state,
 )
+from tests.helpers import build_init_params
 
 
 def _node(node_id: str, node_type: str, **data: Any) -> dict[str, Any]:
@@ -163,6 +169,87 @@ def test_root_baseline_commits_identity_and_detached_values() -> None:
         assert name in engine_events.__all__
         event = _events(events, name)[0]
         assert type(event).model_validate_json(event.model_dump_json()) == event
+
+
+@pytest.mark.parametrize("emit_frame_events", [True, False])
+def test_frame_observations_can_be_disabled_without_changing_iteration_results(
+    emit_frame_events: bool,
+) -> None:
+    loaded = loads(
+        _dsl(
+            [
+                _node(
+                    "iteration",
+                    "iteration",
+                    start_node_id="body",
+                    iterator_selector=["start", "items"],
+                    output_selector=["iteration", "item"],
+                ),
+                _node("body", "iteration-start", container_id="iteration"),
+                _node(
+                    "end",
+                    "end",
+                    outputs=[
+                        {
+                            "variable": "result",
+                            "value_selector": ["iteration", "output"],
+                        }
+                    ],
+                ),
+            ],
+            [("start", "iteration"), ("iteration", "end")],
+        ),
+        start_inputs={"items": ["first", "second"]},
+    )
+    engine = Engine(
+        graph=loaded.graph,
+        runtime_state=loaded.runtime_state,
+        emit_frame_events=emit_frame_events,
+    )
+
+    events = list(engine.run())
+
+    assert isinstance(events[-1], engine_events.GraphRunSucceededEvent)
+    assert events[-1].outputs == {"result": ["first", "second"]}
+    for event_type in (
+        engine_events.FrameStartedEvent,
+        engine_events.FrameVariablesUpdatedEvent,
+        engine_events.FrameFinishedEvent,
+    ):
+        assert (
+            any(isinstance(event, event_type) for event in events) is emit_frame_events
+        )
+
+
+def test_disabled_frame_observations_do_not_copy_unused_context() -> None:
+    class UncopyablePayload(UserDict[str, str]):
+        def __deepcopy__(self, _memo: dict[int, Any]) -> UncopyablePayload:
+            msg = "unused context must not be copied for frame observations"
+            raise AssertionError(msg)
+
+    class EmptyStartNode(StartNode):
+        node_type = "empty-root"
+
+        @override
+        def _run(self) -> NodeRunResult:
+            return NodeRunResult(status=WorkflowNodeExecutionStatus.SUCCEEDED)
+
+    state = _new_runtime_state({})
+    state.variable_pool.add(
+        ("context", "payload"), {"unused": UncopyablePayload(value="unchanged")}
+    )
+    root = EmptyStartNode(
+        "root", StartNodeData(), init_params=build_init_params(), runtime_state=state
+    )
+    engine = Engine(
+        graph=Graph.new().add_root(root).build(),
+        runtime_state=state,
+        emit_frame_events=False,
+    )
+
+    events = list(engine.run())
+
+    assert isinstance(events[-1], engine_events.GraphRunSucceededEvent)
 
 
 @pytest.mark.parametrize("items", [[], ["a", "b"]])
