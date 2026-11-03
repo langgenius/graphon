@@ -168,9 +168,12 @@ compatibility details:
 [Concrete segment models](src/graphon/variables/segments.py) own fixed `value_type` tags and value validation; serialized values select their model by that tag.
 [Factories](src/graphon/variables/factory.py) infer types for raw values or validate explicit declarations, preserving declared empty arrays and `array[any]` values.
 See [factory tests](tests/variables/test_factory.py) for declared types and serialized tag selection.
-`array[any]` restores serialized [marked file values](src/graphon/file/constants.py) recursively inside arrays and objects using [File validation](src/graphon/file/models.py), preserving file values in container task and variable pool snapshots.
-The [segment serializer](src/graphon/variables/utils.py) preserves nested `File` model fields and their identity marker without log redaction; see the [serialization tests](tests/utils/test_variable_utils.py).
-Unmarked objects retain their data, and invalid marked files fail validation; see [container tests](tests/nodes/test_container_effects.py) and [workflow tests](tests/workflows/test_full_engine_events.py).
+`array[any]` keeps ordinary JSON dictionaries as data, including dictionaries with a file identity marker or the full set of file fields.
+Complete snapshots produced without `include` or `exclude` record the locations of actual [File](src/graphon/file/models.py) values in the segment's `file_paths`, preserving their types through variable pool and container task restoration.
+These snapshots require string keys on dictionaries containing files; dictionaries without files follow ordinary JSON serialization.
+Exports using `include` or `exclude` omit file restoration metadata, as does [dumps_with_segments](src/graphon/variables/utils.py), which exports plain values without log redaction.
+Historical `array[any]` snapshots without `file_paths` retain dictionaries as data.
+Invalid declared paths or file payloads fail validation; see [serialization tests](tests/utils/test_variable_utils.py) and [container tests](tests/nodes/test_container_effects.py).
 [VariableBase.copy_with_value](src/graphon/variables/variables.py) validates replacements for assignment nodes, retaining identity and metadata and promoting integer variables when the new value is a float.
 The [v1 assignment tests](tests/nodes/variable_assigner/test_v1_node.py) and [v2 assignment tests](tests/nodes/variable_assigner/test_v2_node.py) cover invalid updates, fractional results, and clearing arrays while preserving their declared type, including `array[file]`.
 
