@@ -2,12 +2,22 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Annotated, Any, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializationInfo,
+    SerializerFunctionWrapHandler,
+    StrictInt,
+    StrictStr,
+    TypeAdapter,
+    model_serializer,
+    model_validator,
+)
 
-from graphon.file.constants import maybe_file_object
 from graphon.file.models import File
 
 from .types import SegmentType
@@ -23,13 +33,45 @@ def _mask_token(token: str) -> str:
     return token[:6] + "*" * 12 + token[-2:]
 
 
-def _restore_files(value: Any) -> Any:
-    if maybe_file_object(value):
+type FilePath = tuple[StrictStr | StrictInt, ...]
+
+_FILE_PATHS_ADAPTER = TypeAdapter(list[FilePath])
+
+
+def _iter_file_paths(value: Any, path: FilePath = ()) -> Iterator[FilePath]:
+    """Record actual files without interpreting fields inside ordinary JSON."""
+    if isinstance(value, File):
+        yield path
+    if isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            yield from _iter_file_paths(item, (*path, index))
+    if isinstance(value, dict):
+        paths = [
+            file_path
+            for key, item in value.items()
+            for file_path in _iter_file_paths(item, (*path, key))
+        ]
+        if paths and any(not isinstance(key, str) for key in value):
+            msg = "File snapshots require string object keys"
+            raise ValueError(msg)
+        yield from paths
+
+
+def _restore_files(value: Any, paths: set[FilePath], path: FilePath = ()) -> Any:
+    """Restore declared files once, leaving unmatched paths for validation."""
+    if path in paths:
+        paths.remove(path)
         return File.model_validate(value)
     if isinstance(value, (list, tuple)):
-        return type(value)(_restore_files(item) for item in value)
+        return type(value)(
+            _restore_files(item, paths, (*path, index))
+            for index, item in enumerate(value)
+        )
     if isinstance(value, dict):
-        return {key: _restore_files(item) for key, item in value.items()}
+        return {
+            key: _restore_files(item, paths, (*path, key))
+            for key, item in value.items()
+        }
     return value
 
 
@@ -203,8 +245,40 @@ class BooleanSegment(Segment):
 
 
 class ArrayAnySegment(ArraySegment):
+    """Keep ordinary JSON distinct from files in complete, unfiltered snapshots.
+
+    Objects containing files require string keys. Exports using include or exclude
+    are plain JSON and do not carry file types for restoration.
+    """
+
     value_type: Literal[SegmentType.ARRAY_ANY] = SegmentType.ARRAY_ANY
-    value: Annotated[Sequence[Any], AfterValidator(_restore_files)]
+    value: Sequence[Any]
+
+    @model_serializer(mode="wrap")
+    def _serialize_with_file_paths(  # ruff: ignore[missing-return-type-private-function] - A return type would replace the declared segment JSON Schema.
+        self, handler: SerializerFunctionWrapHandler, info: SerializationInfo
+    ):
+        data = handler(self)
+        if (
+            "value" in data
+            and info.include is None
+            and info.exclude is None
+            and (paths := list(_iter_file_paths(self.value)))
+        ):
+            data["file_paths"] = paths
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def _restore_snapshot_files(cls, data: Any) -> Any:
+        if not isinstance(data, dict) or "file_paths" not in data:
+            return data
+        paths = set(_FILE_PATHS_ADAPTER.validate_python(data["file_paths"]))
+        value = _restore_files(data.get("value"), paths)
+        if paths:
+            msg = "Invalid file path in array snapshot"
+            raise ValueError(msg)
+        return {**data, "value": value}
 
     def to_segment(self) -> ArrayAnySegment:
         return ArrayAnySegment(value=self.value)
