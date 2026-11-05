@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-02T01:58:31Z"
+last_checked: "2026-11-05T13:33:47Z"
 -->
 # Development navigation
 
@@ -16,9 +16,8 @@ Choose boundaries around state ownership and callers. Extract a responsibility
 when it has independent ownership or repeated churn; file length alone does not
 justify splitting a module.
 
-For runtime values, let concrete types own their tags, validation, and value replacement.
-Preserve typed values across state transfers and convert to plain values at presentation boundaries, where redaction is a separate responsibility.
-Follow the [variable and container contracts](../ARCHITECTURE.md#state-and-execution-invariants) when changing those boundaries.
+Follow the [state and execution invariants](../ARCHITECTURE.md#state-and-execution-invariants)
+when changing variable types, container values, or presentation boundaries.
 
 | Task | Start in source | Relevant checks |
 | --- | --- | --- |
