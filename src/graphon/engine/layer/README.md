@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-10-29T01:02:46Z"
+last_checked: "2026-11-05T13:34:13Z"
 -->
 # Layers
 
@@ -20,7 +20,8 @@ See [raw frame observations](../../../../ARCHITECTURE.md#raw-frame-observations)
 
 Register a layer with [Engine.add_layer](../engine.py) before consuming
 `engine.run()`. Registration binds read-only runtime access and a command channel
-for execution controls.
+for execution controls. Use event execution IDs for per-invocation data; graph-local
+node IDs repeat across container frames.
 
 ```python
 from graphon.engine.layer import Layer
@@ -28,20 +29,20 @@ from graphon.engine_events import EngineEvent, NodeRunSucceededEvent
 
 
 class MetricsLayer(Layer):
-    def __init__(self):
+    def __init__(self) -> None:
         """Create storage for elapsed time collected during one engine run."""
         super().__init__()
         self.metrics: dict[str, float] = {}
 
     def on_graph_start(self) -> None:
-        """Reset collected metrics before the engine starts a new graph run."""
+        """Reset collected metrics before execution starts or resumes."""
         self.metrics.clear()
 
     def on_event(self, event: EngineEvent) -> None:
         """Record elapsed time when a node run succeeds."""
         if isinstance(event, NodeRunSucceededEvent) and event.finished_at is not None:
             duration = event.finished_at - event.start_at
-            self.metrics[event.node_id] = duration.total_seconds()
+            self.metrics[event.id] = duration.total_seconds()
 ```
 
 For snapshot persistence from hooks, follow the

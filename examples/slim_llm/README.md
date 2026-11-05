@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-10-29T01:01:57Z"
+last_checked: "2026-11-05T13:32:51Z"
 -->
 # Slim LLM Example
 
@@ -14,8 +14,8 @@ start -> llm -> answer
 [graph.yml](graph.yml) defines the workflow; [dsl.py](dsl.py) imports it and
 [code.py](code.py) constructs it directly. [settings.py](settings.py) handles
 example configuration; the [Slim client](../../src/graphon/dsl/slim/client.py)
-defines daemon configuration and binary lookup. Use
-[credentials.example.json](credentials.example.json) as the credential schema.
+defines daemon configuration and binary lookup. Start from the configuration in
+[credentials.example.json](credentials.example.json).
 Complete [repository setup](../../CONTRIBUTING.md#development-setup) first.
 
 ## Prepare

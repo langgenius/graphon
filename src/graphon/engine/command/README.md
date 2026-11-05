@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-10-29T01:02:46Z"
+last_checked: "2026-11-05T13:34:13Z"
 -->
 # Commands
 
@@ -10,14 +10,17 @@ literals, [CommandProcessor](processor.py) for dispatch, and the channel
 implementations for [in-memory](builtin/in_memory.py) or
 [Redis](builtin/redis.py) delivery. The
 [dispatch tests](../../../../tests/engine/test_dispatch_patterns.py) cover
-workflow control behavior. Successful variable writes also produce
-[frame commit observations](../../../../ARCHITECTURE.md#raw-frame-observations),
-including writes completed before a later command update fails.
+workflow control behavior. Variable updates are not atomic: earlier writes remain
+committed if a later update fails. Successful writes produce
+[frame commit observations](../../../../ARCHITECTURE.md#raw-frame-observations).
 
 ## Usage
 
 Pass the channel to [Engine](../engine.py) through `command_channel`; each
-channel belongs to one workflow execution.
+channel belongs to one workflow execution. The [dispatcher](../dispatcher.py)
+polls it during execution, so sending a command does not apply it synchronously.
+Pause is cooperative: queued work is deferred while active tasks finish. Persist
+only after the run becomes [quiescent](../../../../ARCHITECTURE.md#state-and-execution-invariants).
 
 ```python
 from graphon.engine import Engine

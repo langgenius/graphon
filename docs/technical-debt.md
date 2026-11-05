@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-10-29T01:01:57Z"
+last_checked: "2026-11-05T13:33:47Z"
 -->
 # Technical debt
 
@@ -79,10 +79,12 @@ successful node order. Keep the example small enough to serve as a reproduction.
 
 ## TD-09 — Performance feedback
 
-The [benchmark](../benchmarks/test_engine_performance.py) does not isolate the
-response-filter initialization cost, leaving a gap in performance feedback.
+The [benchmark](../benchmarks/test_engine_performance.py) times raw `Engine.run()`
+after graph and engine construction, without response filters. It does not cover
+[response-filter initialization](../src/graphon/engine/filter/builtin/response_stream/filter.py),
+leaving a gap in performance feedback.
 
-Continue [PR #271](https://github.com/langgenius/graphon/pull/271) for the known
+Continue the open [PR #271](https://github.com/langgenius/graphon/pull/271) for the known
 response-filter initialization path and
 [PR #266](https://github.com/langgenius/graphon/pull/266) for benchmark instructions.
 Prefer deterministic complexity checks for that path and identify which phase a
@@ -95,10 +97,10 @@ and execution. Preserve existing benchmarks and
 
 ## TD-10 — Decision records
 
-[Issue #199](https://github.com/langgenius/graphon/issues/199) and
+The open [issue #199](https://github.com/langgenius/graphon/issues/199) and
 [PR #200](https://github.com/langgenius/graphon/pull/200) cover decision records,
-including HITL and model polling boundaries. Current behavior guides do not
-substitute for accepted decisions.
+including HITL and model polling boundaries. Their proposed mechanism has not
+merged; current behavior guides do not substitute for accepted decisions.
 
 Continue that work and reconcile it with [maintenance guidance](maintenance.md).
 Promote approved lasting rules to stable guides and executable checks.
