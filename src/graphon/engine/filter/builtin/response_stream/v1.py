@@ -56,8 +56,8 @@ def for_graph(
 
     Version 1 stored generated ``edge_N`` IDs over the complete workflow. Version 2
     stores public edge IDs from the root graph. The mapping therefore requires the
-    graph that owns the restored filter. Child-frame response state is discarded
-    because the current filter is scoped to the root frame.
+    graph that owns the restored filter. Migration discards child response state
+    because filter persistence supports only root response state.
 
     TODO: Delete this file when version 1 snapshots leave the migration window.
     Version dispatch derives this module from the persisted version, so no remaining
