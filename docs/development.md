@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-02T01:58:31Z"
+last_checked: "2026-11-09T05:24:03Z"
 -->
 # Development navigation
 
@@ -22,7 +22,8 @@ Follow the [variable and container contracts](../ARCHITECTURE.md#state-and-execu
 
 | Task | Start in source | Relevant checks |
 | --- | --- | --- |
-| Change package dependencies or queue ownership | [Import boundaries](../ARCHITECTURE.md#import-boundaries), [runtime queues](../src/graphon/runtime/ready_queue/) | `just imports`, [runtime isolation](../tests/runtime/test_runtime_imports.py), [public contract imports](../tests/test_protocols_exports.py) |
+| Update runtime, development, build, or CI dependencies | [Package metadata](../pyproject.toml), [lockfile](../uv.lock), [CI workflows](../.github/workflows/) | [Repository validation](../CONTRIBUTING.md#testing-and-validation), [package build](../justfile), [extractor tests](../tests/nodes/document_extractor/) |
+| Change import boundaries or queue ownership | [Import boundaries](../ARCHITECTURE.md#import-boundaries), [runtime queues](../src/graphon/runtime/ready_queue/) | `just imports`, [runtime isolation](../tests/runtime/test_runtime_imports.py), [public contract imports](../tests/test_protocols_exports.py) |
 | Parse or validate a graph | [graph](../src/graphon/graph/), [graph config](../src/graphon/entities/graph_config.py) | [graph tests](../tests/graph/), especially validation and scoping |
 | Import Dify DSL or wire node dependencies | [importer](../src/graphon/dsl/importer.py), [node factory](../src/graphon/dsl/node_factory.py) | [DSL tests](../tests/dsl/), especially importer, node factory, and app bootstrap |
 | Change a built-in node | [nodes](../src/graphon/nodes/), [base node](../src/graphon/nodes/base/node.py) | Matching [node tests](../tests/nodes/); [workflow events](../tests/workflows/test_full_engine_events.py) for graph-visible changes |

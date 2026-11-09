@@ -26,7 +26,7 @@ dependencies = [
     'tiktoken>=0.12',
     'transformers>=4',
     'typing-extensions>=4.10.0',
-    'unstructured[docx,md,ppt,pptx]>=0.21',
+    'unstructured[docx,md,ppt,pptx]>=0.27.37',
     'webvtt-py>=0.5',
 ]
 
@@ -50,7 +50,7 @@ dev = [
 ]
 
 [build-system]
-requires = ['uv_build>=0.13.6,<0.14']
+requires = ['uv_build>=0.13.7,<0.14']
 build-backend = 'uv_build'
 
 [tool.uv]
