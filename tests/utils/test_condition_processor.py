@@ -1,3 +1,7 @@
+from typing import Literal
+
+import pytest
+
 from graphon.runtime import ReadOnlyVariablePoolWrapper
 from graphon.runtime.variable_pool import VariablePool
 from graphon.utils.condition.entities import Condition
@@ -123,6 +127,71 @@ def test_process_conditions_contains_supports_string_and_list_values() -> None:
 
     assert text_result.final_result is True
     assert list_result.final_result is True
+
+
+@pytest.mark.parametrize("comparison_operator", ["in", "not in"])
+@pytest.mark.parametrize(
+    ("actual_value", "members", "matches"),
+    [
+        ("", ["", "a"], True),
+        ("", ["a"], False),
+        ("", [], False),
+        (False, ["false", "true"], True),
+        (False, ["true"], False),
+        (False, [], False),
+        ("a", ["a"], True),
+        ("b", ["a"], False),
+        (True, ["true"], True),
+        (None, [""], False),
+    ],
+)
+def test_process_conditions_membership(
+    actual_value: str | bool | None,
+    members: list[str],
+    matches: bool,
+    comparison_operator: Literal["in", "not in"],
+) -> None:
+    variable_pool = VariablePool()
+    variable_pool.add(["start", "choice"], actual_value)
+
+    result = ConditionProcessor().process_conditions(
+        variable_pool=variable_pool,
+        conditions=[
+            Condition(
+                variable_selector=["start", "choice"],
+                comparison_operator=comparison_operator,
+                value=members,
+            ),
+        ],
+        operator="and",
+    )
+
+    assert result.final_result is (
+        matches if comparison_operator == "in" else not matches
+    )
+
+
+@pytest.mark.parametrize("comparison_operator", ["in", "not in"])
+@pytest.mark.parametrize("actual_value", ["", False])
+def test_process_conditions_membership_requires_list(
+    actual_value: str | bool,
+    comparison_operator: Literal["in", "not in"],
+) -> None:
+    variable_pool = VariablePool()
+    variable_pool.add(["start", "choice"], actual_value)
+
+    with pytest.raises(ValueError, match="Invalid expected value type: array"):
+        ConditionProcessor().process_conditions(
+            variable_pool=variable_pool,
+            conditions=[
+                Condition(
+                    variable_selector=["start", "choice"],
+                    comparison_operator=comparison_operator,
+                    value="true",
+                ),
+            ],
+            operator="and",
+        )
 
 
 def test_process_conditions_resolves_templates_from_read_only_variable_pool() -> None:
