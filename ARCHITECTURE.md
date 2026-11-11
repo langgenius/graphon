@@ -169,11 +169,14 @@ compatibility details:
 [Factories](src/graphon/variables/factory.py) infer types for raw values or validate explicit declarations, preserving declared empty arrays and `array[any]` values.
 See [factory tests](tests/variables/test_factory.py) for declared types and serialized tag selection.
 `array[any]` keeps ordinary JSON dictionaries as data, including dictionaries with a file identity marker or the full set of file fields.
-Complete snapshots produced without `include` or `exclude` record the locations of actual [File](src/graphon/file/models.py) values in the segment's `file_paths`, preserving their types through variable pool and container task restoration.
+Complete snapshots produced without `include` or `exclude` use [file snapshot serialization](src/graphon/variables/file_snapshot.py) to record actual [File](src/graphon/file/models.py) locations in `file_paths`.
+Paths follow Pydantic's Python serialization of nested values, honoring declared model fields, aliases, field exclusions, and caller context.
+Nested models become plain data; sequences, sets, and iterators become arrays, while recorded files restore as `File` objects through variable pool and container task restoration.
+[File serialization markers](src/graphon/file/serialization.py) are scoped to this projection and reset on exit, including serialization errors.
 These snapshots require string keys on dictionaries containing files; dictionaries without files follow ordinary JSON serialization.
 Exports using `include` or `exclude` omit file restoration metadata, as does [dumps_with_segments](src/graphon/variables/utils.py), which exports plain values without log redaction.
 Historical `array[any]` snapshots without `file_paths` retain dictionaries as data.
-Invalid declared paths or file payloads fail validation; see [serialization tests](tests/utils/test_variable_utils.py) and [container tests](tests/nodes/test_container_effects.py).
+Invalid declared paths or file payloads fail validation; see [snapshot tests](tests/variables/test_file_snapshots.py), [plain value export tests](tests/utils/test_variable_utils.py), and [container tests](tests/nodes/test_container_effects.py).
 [VariableBase.copy_with_value](src/graphon/variables/variables.py) validates replacements for assignment nodes, retaining identity and metadata and promoting integer variables when the new value is a float.
 The [v1 assignment tests](tests/nodes/variable_assigner/test_v1_node.py) and [v2 assignment tests](tests/nodes/variable_assigner/test_v2_node.py) cover invalid updates, fractional results, and clearing arrays while preserving their declared type, including `array[file]`.
 

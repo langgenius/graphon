@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal
 
 from pydantic import (
@@ -11,15 +11,14 @@ from pydantic import (
     Field,
     SerializationInfo,
     SerializerFunctionWrapHandler,
-    StrictInt,
-    StrictStr,
-    TypeAdapter,
     model_serializer,
     model_validator,
 )
 
 from graphon.file.models import File
+from graphon.file.serialization import file_markers_enabled
 
+from .file_snapshot import restore_file_snapshot, serialize_file_snapshot
 from .types import SegmentType
 
 SHORT_TOKEN_MAX_LENGTH = 8
@@ -31,48 +30,6 @@ def _mask_token(token: str) -> str:
     if len(token) <= SHORT_TOKEN_MAX_LENGTH:
         return "*" * 20
     return token[:6] + "*" * 12 + token[-2:]
-
-
-type FilePath = tuple[StrictStr | StrictInt, ...]
-
-_FILE_PATHS_ADAPTER = TypeAdapter(list[FilePath])
-
-
-def _iter_file_paths(value: Any, path: FilePath = ()) -> Iterator[FilePath]:
-    """Record actual files without interpreting fields inside ordinary JSON."""
-    if isinstance(value, File):
-        yield path
-    if isinstance(value, (list, tuple)):
-        for index, item in enumerate(value):
-            yield from _iter_file_paths(item, (*path, index))
-    if isinstance(value, dict):
-        paths = [
-            file_path
-            for key, item in value.items()
-            for file_path in _iter_file_paths(item, (*path, key))
-        ]
-        if paths and any(not isinstance(key, str) for key in value):
-            msg = "File snapshots require string object keys"
-            raise ValueError(msg)
-        yield from paths
-
-
-def _restore_files(value: Any, paths: set[FilePath], path: FilePath = ()) -> Any:
-    """Restore declared files once, leaving unmatched paths for validation."""
-    if path in paths:
-        paths.remove(path)
-        return File.model_validate(value)
-    if isinstance(value, (list, tuple)):
-        return type(value)(
-            _restore_files(item, paths, (*path, index))
-            for index, item in enumerate(value)
-        )
-    if isinstance(value, dict):
-        return {
-            key: _restore_files(item, paths, (*path, key))
-            for key, item in value.items()
-        }
-    return value
 
 
 class Segment(BaseModel):
@@ -258,27 +215,19 @@ class ArrayAnySegment(ArraySegment):
     def _serialize_with_file_paths(  # ruff: ignore[missing-return-type-private-function] - A return type would replace the declared segment JSON Schema.
         self, handler: SerializerFunctionWrapHandler, info: SerializationInfo
     ):
-        data = handler(self)
-        if (
-            "value" in data
-            and info.include is None
-            and info.exclude is None
-            and (paths := list(_iter_file_paths(self.value)))
-        ):
-            data["file_paths"] = paths
-        return data
+        if file_markers_enabled():
+            return handler(self)
+        return serialize_file_snapshot(self, handler, info)
 
     @model_validator(mode="before")
     @classmethod
     def _restore_snapshot_files(cls, data: Any) -> Any:
         if not isinstance(data, dict) or "file_paths" not in data:
             return data
-        paths = set(_FILE_PATHS_ADAPTER.validate_python(data["file_paths"]))
-        value = _restore_files(data.get("value"), paths)
-        if paths:
-            msg = "Invalid file path in array snapshot"
-            raise ValueError(msg)
-        return {**data, "value": value}
+        return {
+            **data,
+            "value": restore_file_snapshot(data.get("value"), data["file_paths"]),
+        }
 
     def to_segment(self) -> ArrayAnySegment:
         return ArrayAnySegment(value=self.value)
