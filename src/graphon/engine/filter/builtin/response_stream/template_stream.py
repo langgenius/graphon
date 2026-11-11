@@ -249,8 +249,25 @@ class _TemplateStream:
             else:
                 events.append(event)
 
+        emitted_text = "".join(event.chunk for event in events)
         if self.stream_buffers.is_closed(segment.selector):
             is_complete = True
+            # A non-streamed variable produces no incremental chunks - only the empty
+            # final marker. If nothing meaningful was streamed, fall back to the value
+            # in the variable pool so the response node still renders it.
+            pool_value = variable_pool.get(segment.selector)
+            if not emitted_text.strip() and pool_value:
+                is_last_segment = session.index == len(session.template.segments) - 1
+                events.append(
+                    self._create_stream_chunk_event(
+                        node_id=output_node_id,
+                        execution_id=execution_id,
+                        selector=segment.selector,
+                        chunk=pool_value.markdown,
+                        is_final=is_last_segment,
+                        graph=graph,
+                    ),
+                )
         elif not has_stream_events and (value := variable_pool.get(segment.selector)):
             is_last_segment = session.index == len(session.template.segments) - 1
             events.append(

@@ -1040,3 +1040,36 @@ def test_response_stream_filter_keeps_current_state_when_load_fails() -> None:
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     assert [event.chunk for event in chunks] == ["preserved"]
+
+
+def test_response_stream_filter_falls_back_to_pool_for_non_streamed_variable() -> None:
+    """A non-streamed variable produces only the empty final marker; the response
+    node must still render the value from the variable pool (dify#46034)."""
+    graph = _variable_response_graph()
+    variable_pool = VariablePool()
+    variable_pool.add(["source", "answer"], StringSegment(value="saved"))
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph, variable_pool))
+
+    # The non-streamed variable contributes a single empty final marker.
+    assert list(event_filter.on_event(_stream_chunk("", is_final=True))) == []
+
+    output = list(event_filter.on_event(_edge_taken()))
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    # The empty marker still passes through (adds no text); the pool value is appended.
+    assert "".join(event.chunk for event in chunks) == "saved"
+
+
+def test_response_stream_filter_no_pool_fallback_when_streamed() -> None:
+    """A variable that streamed meaningful chunks must not get a pool fallback."""
+    graph = _variable_response_graph()
+    variable_pool = VariablePool()
+    variable_pool.add(["source", "answer"], StringSegment(value="saved"))
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph, variable_pool))
+
+    assert list(event_filter.on_event(_stream_chunk("streamed", is_final=True))) == []
+
+    output = list(event_filter.on_event(_edge_taken()))
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert [event.chunk for event in chunks] == ["streamed"]
