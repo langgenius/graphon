@@ -654,8 +654,28 @@ class ResponseStreamFilter:
             else:
                 events.append(event)
 
+        emitted_text = "".join(event.chunk for event in events)
         if self._stream_buffers.is_closed(segment.selector):
             is_complete = True
+            # A non-streamed variable produces no incremental chunks - only the empty
+            # final marker. If nothing meaningful was streamed, fall back to the value
+            # in the variable pool so the Answer node still renders it.
+            pool_value = self._bound_runtime_state.variable_pool.get(segment.selector)
+            if not emitted_text.strip() and pool_value:
+                is_last_segment = bool(
+                    self._active_session
+                    and self._active_session.index
+                    == len(self._active_session.template.segments) - 1,
+                )
+                events.append(
+                    self._create_stream_chunk_event(
+                        node_id=output_node_id,
+                        execution_id=execution_id,
+                        selector=segment.selector,
+                        chunk=pool_value.markdown,
+                        is_final=is_last_segment,
+                    ),
+                )
         elif not has_stream_events and (
             value := self._bound_runtime_state.variable_pool.get(segment.selector)
         ):
