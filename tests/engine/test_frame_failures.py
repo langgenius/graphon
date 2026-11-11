@@ -124,7 +124,10 @@ class _CustomLoopHandler:
 
 
 @pytest.mark.parametrize("restore_snapshot", [False, True])
-def test_custom_frame_failure_survives_pause(restore_snapshot: bool) -> None:
+@pytest.mark.parametrize("emit_frame_events", [False, True])
+def test_custom_frame_failure_survives_pause(
+    restore_snapshot: bool, emit_frame_events: bool
+) -> None:
     document = _dsl(
         [
             _node(
@@ -175,6 +178,7 @@ def test_custom_frame_failure_survives_pause(restore_snapshot: bool) -> None:
         human_input_engine.runtime_state,
         workers=2,
         container_handler_factories=[_CustomLoopHandler],
+        emit_frame_events=emit_frame_events,
     )
     pause_events = list(engine.run())
     assert isinstance(pause_events[-1], GraphRunPausedEvent)
@@ -195,18 +199,22 @@ def test_custom_frame_failure_survives_pause(restore_snapshot: bool) -> None:
             human_input_engine.runtime_state,
             workers=2,
             container_handler_factories=[_CustomLoopHandler],
+            emit_frame_events=emit_frame_events,
         )
     human_input_ready.set()
     events: list[EngineEvent] = []
     with pytest.raises(RuntimeError, match="missing"):
         events.extend(engine.run())
+    graph_failed = next(
+        event for event in events if isinstance(event, GraphRunFailedEvent)
+    )
+    assert graph_failed.error == failure.error
     frame_finished_events = [
         event for event in events if isinstance(event, FrameFinishedEvent)
     ]
-    assert {event.frame_id for event in frame_finished_events} == {
-        "root",
-        failure.frame_id,
-    }
+    assert {event.frame_id for event in frame_finished_events} == (
+        {"root", failure.frame_id} if emit_frame_events else set()
+    )
     assert all(
         event.outcome == "failed" and event.error == failure.error
         for event in frame_finished_events

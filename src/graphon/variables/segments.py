@@ -5,11 +5,20 @@ import sys
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializationInfo,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
-from graphon.file.constants import maybe_file_object
 from graphon.file.models import File
+from graphon.file.serialization import file_markers_enabled
 
+from .file_snapshot import restore_file_snapshot, serialize_file_snapshot
 from .types import SegmentType
 
 SHORT_TOKEN_MAX_LENGTH = 8
@@ -21,16 +30,6 @@ def _mask_token(token: str) -> str:
     if len(token) <= SHORT_TOKEN_MAX_LENGTH:
         return "*" * 20
     return token[:6] + "*" * 12 + token[-2:]
-
-
-def _restore_files(value: Any) -> Any:
-    if maybe_file_object(value):
-        return File.model_validate(value)
-    if isinstance(value, (list, tuple)):
-        return type(value)(_restore_files(item) for item in value)
-    if isinstance(value, dict):
-        return {key: _restore_files(item) for key, item in value.items()}
-    return value
 
 
 class Segment(BaseModel):
@@ -203,8 +202,32 @@ class BooleanSegment(Segment):
 
 
 class ArrayAnySegment(ArraySegment):
+    """Keep ordinary JSON distinct from files in complete, unfiltered snapshots.
+
+    Objects containing files require string keys. Exports using include or exclude
+    are plain JSON and do not carry file types for restoration.
+    """
+
     value_type: Literal[SegmentType.ARRAY_ANY] = SegmentType.ARRAY_ANY
-    value: Annotated[Sequence[Any], AfterValidator(_restore_files)]
+    value: Sequence[Any]
+
+    @model_serializer(mode="wrap")
+    def _serialize_with_file_paths(  # ruff: ignore[missing-return-type-private-function] - A return type would replace the declared segment JSON Schema.
+        self, handler: SerializerFunctionWrapHandler, info: SerializationInfo
+    ):
+        if file_markers_enabled():
+            return handler(self)
+        return serialize_file_snapshot(self, handler, info)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _restore_snapshot_files(cls, data: Any) -> Any:
+        if not isinstance(data, dict) or "file_paths" not in data:
+            return data
+        return {
+            **data,
+            "value": restore_file_snapshot(data.get("value"), data["file_paths"]),
+        }
 
     def to_segment(self) -> ArrayAnySegment:
         return ArrayAnySegment(value=self.value)
@@ -242,7 +265,7 @@ class ArrayObjectSegment(ArraySegment):
         # Return empty string for empty arrays instead of "[]"
         if not self.value:
             return ""
-        return json.dumps(self.value, ensure_ascii=False)
+        return json.dumps(self.model_dump()["value"], ensure_ascii=False)
 
     def to_segment(self) -> ArrayObjectSegment:
         return ArrayObjectSegment(value=self.value)

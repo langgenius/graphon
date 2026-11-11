@@ -19,6 +19,7 @@ from graphon.variables.segments import (
     ArrayNumberSegment,
     ArrayObjectSegment,
     ArrayStringSegment,
+    FileSegment,
     IntegerSegment,
     SerializableSegment,
 )
@@ -101,6 +102,83 @@ def test_container_outputs_keep_their_type_after_snapshot_and_resume(
     assert result.inputs == {"input": segment.to_object()}
 
 
+def test_snapshot_distinguishes_files_from_json_in_pool_and_resume_task() -> None:
+    file = File(
+        file_type=FileType.DOCUMENT,
+        transfer_method=FileTransferMethod.LOCAL_FILE,
+        reference="example-record",
+    )
+    file_data = file.model_dump(mode="json")
+    value = [file, file_data, {"files": [file, file_data], "file_paths": [[0]]}]
+    segment = ArrayAnySegment(value=value)
+    state = RuntimeState(
+        workflow_id="workflow", variable_pool=VariablePool(), start_at=1
+    )
+    state.variable_pool.add(("source", "value"), segment)
+    state.enqueue_ready_task(
+        ResumeTask(
+            invocation_id="container-run",
+            result=ContainerExecutionResult(
+                metadata={},
+                steps=1,
+                node_run_result=ContainerNodeRunResult(outputs={"output": segment}),
+            ),
+        )
+    )
+
+    for _ in range(2):
+        state = RuntimeState.from_snapshot(state.dumps())
+
+    stored = state.variable_pool.get_variable(("source", "value"))
+    assert stored is not None
+    assert stored.to_object() == value
+    task = state.ready_queue.get(timeout=0.01)
+    assert isinstance(task, ResumeTask)
+    assert isinstance(task.result, ContainerExecutionResult)
+    assert task.result.node_run_result.outputs["output"].to_object() == value
+
+
+def test_nested_file_remains_downloadable_after_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    file = File(
+        file_type=FileType.DOCUMENT,
+        transfer_method=FileTransferMethod.LOCAL_FILE,
+        reference="upload-id",
+    )
+    segment = ArrayAnySegment(value=[FileSegment(value=file)])
+    state = RuntimeState(
+        workflow_id="workflow", variable_pool=VariablePool(), start_at=1
+    )
+    state.variable_pool.add(("source", "value"), segment)
+    state.enqueue_ready_task(
+        ResumeTask(
+            invocation_id="container-run",
+            result=ContainerExecutionResult(
+                metadata={},
+                steps=1,
+                node_run_result=ContainerNodeRunResult(outputs={"output": segment}),
+            ),
+        )
+    )
+    for _ in range(2):
+        state = RuntimeState.from_snapshot(state.dumps())
+
+    task = state.ready_queue.get(timeout=0.01)
+    assert isinstance(task, ResumeTask)
+    assert isinstance(task.result, ContainerExecutionResult)
+    monkeypatch.setattr(
+        File, "generate_url", lambda *_args, **_kwargs: "https://example.com/download"
+    )
+    result = WorkflowRuntimeTypeConverter().to_json_encodable({
+        "pool": state.variable_pool.get_variable(("source", "value")),
+        "task": task.result.node_run_result.outputs["output"],
+    })
+
+    assert result["pool"][0]["value"]["url"] == "https://example.com/download"
+    assert result["task"][0]["value"]["url"] == "https://example.com/download"
+
+
 @pytest.mark.parametrize("use_builder", [False, True], ids=["direct", "builder"])
 def test_live_container_outputs_rebind_variable_selectors(use_builder: bool) -> None:
     variable = ArrayFileVariable(name="files", selector=["child", "files"], value=[])
@@ -138,21 +216,22 @@ def test_container_values_preserve_secret_types_and_masking() -> None:
 
 
 def test_container_any_array_rejects_invalid_serialized_file() -> None:
+    snapshot = ContainerNodeRunResult(
+        outputs={
+            "files": ArrayAnySegment(
+                value=[
+                    File(
+                        file_type=FileType.DOCUMENT,
+                        transfer_method=FileTransferMethod.LOCAL_FILE,
+                        reference="example-record",
+                    )
+                ]
+            )
+        }
+    ).model_dump(mode="json")
+    del snapshot["outputs"]["files"]["value"][0]["reference"]
     with pytest.raises(ValidationError, match="Missing file reference"):
-        ContainerNodeRunResult.model_validate({
-            "outputs": {
-                "files": {
-                    "value_type": "array[any]",
-                    "value": [
-                        {
-                            "dify_model_identity": "__dify__file__",
-                            "type": "document",
-                            "transfer_method": "local_file",
-                        },
-                    ],
-                },
-            },
-        })
+        ContainerNodeRunResult.model_validate(snapshot)
 
 
 @pytest.mark.parametrize(

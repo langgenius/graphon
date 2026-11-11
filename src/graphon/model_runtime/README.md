@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-09T05:21:15Z"
+last_checked: "2026-11-11T05:46:47Z"
 -->
 # Model Runtime
 
@@ -39,9 +39,14 @@ blocks retain their order and block state; see the
 [SlimLLM](../dsl/slim/llm.py) shares this aggregation for blocking ordinary and
 structured output calls, covered by the [Slim tests](../../../tests/dsl/test_slim_llm.py).
 
+[LLMResultChunkDelta](entities/llm_entities.py) tool calls with a nonempty function name carry the current argument snapshot, replacing earlier arguments for that ID, including with an empty string.
+Updates with an empty name append arguments to their ID, or to the most recently created call when the ID is empty; the latter requires a preceding call.
+Calls keep their first-seen order, and a named call without an ID starts a new call with a generated ID; see the [tool call tests](../../../tests/model_runtime/test_large_language_model_tool_calls.py) and [dispatch tests](../../../tests/model_runtime/test_model_dispatch.py).
+
 After a `LargeLanguageModel.invoke` stream is fully consumed without errors, `on_after_invoke` receives a result containing all tool calls, assembled with the same merging rules as blocking results.
 Iteration failures, including before the first chunk, notify `on_invoke_error` once with the original exception before normal exception conversion and propagation, and skip `on_after_invoke`.
 See the [callback regression tests](../../../tests/model_runtime/test_model_dispatch.py).
+With no active callbacks, streaming invocation yields chunks without accumulating a complete result; enabling DEBUG on the wrapper's logger adds a `LoggingCallback` and enables accumulation.
 
 Hosts can display chunks while calling `consume(chunk)` on one [LLMResultAccumulator](model_providers/base/large_language_model.py) per invocation.
 After consuming the stream, call its `to_result(model=..., prompt_messages=...)` and use the returned `message` for replay or [JSON persistence](../../../tests/model_runtime/test_llm_result_accumulator.py).
