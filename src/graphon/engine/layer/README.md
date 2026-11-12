@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-09T05:21:15Z"
+last_checked: "2026-11-12T01:12:24Z"
 -->
 # Layers
 
@@ -21,6 +21,8 @@ See [raw frame observations](../../../../ARCHITECTURE.md#raw-frame-observations)
 Register a layer with [Engine.add_layer](../engine.py) before consuming
 `engine.run()`. Registration binds read-only runtime access and a command channel
 for execution controls.
+Key execution metrics by the event's `id`; a node can execute in
+multiple container frames with the same `node_id`.
 
 ```python
 from graphon.engine.layer import Layer
@@ -41,7 +43,7 @@ class MetricsLayer(Layer):
         """Record elapsed time when a node run succeeds."""
         if isinstance(event, NodeRunSucceededEvent) and event.finished_at is not None:
             duration = event.finished_at - event.start_at
-            self.metrics[event.node_id] = duration.total_seconds()
+            self.metrics[event.id] = duration.total_seconds()
 ```
 
 For snapshot persistence from hooks, follow the

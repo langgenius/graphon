@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-09T05:21:15Z"
+last_checked: "2026-11-12T01:14:36Z"
 -->
 # Technical debt
 
@@ -50,7 +50,8 @@ and [extractor](../tests/nodes/parameter_extractor/test_prompts.py) behavior.
 Document-extraction packages are mandatory in [pyproject.toml](../pyproject.toml),
 and [the extractor](../src/graphon/nodes/document_extractor/node.py) imports several
 eagerly. Minimal engine consumers inherit these dependencies, including the Python
-upper bound tied to `unstructured`. No size or startup benefit has been measured.
+upper bound tied to `unstructured`. Measure installation size and startup cost
+before claiming a benefit from optional dependencies.
 
 Consider one document-extraction extra within the existing distribution. Isolate
 its imports, provide an actionable missing-extra error, retain a fully equipped
@@ -62,6 +63,9 @@ separately if needed.
 extra passes [extractor tests](../tests/nodes/document_extractor/) and package/lockfile
 checks. Moving `unstructured` alone does not establish Python 3.14 support; verify
 the remaining dependencies and version matrix before changing that claim.
+Continue the separate Python support work in
+[issue #386](https://github.com/langgenius/graphon/issues/386) and
+[PR #392](https://github.com/langgenius/graphon/pull/392), which are still open.
 
 ## TD-08 — Offline execution example
 

@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-09T05:21:15Z"
+last_checked: "2026-11-12T01:12:24Z"
 -->
 # Commands
 
@@ -10,7 +10,8 @@ literals, [CommandProcessor](processor.py) for dispatch, and the channel
 implementations for [in-memory](builtin/in_memory.py) or
 [Redis](builtin/redis.py) delivery. The
 [dispatch tests](../../../../tests/engine/test_dispatch_patterns.py) cover
-workflow control behavior. Successful variable writes also produce
+workflow control behavior. With frame observations enabled, successful variable
+writes produce
 [frame commit observations](../../../../ARCHITECTURE.md#raw-frame-observations),
 including writes completed before a later command update fails.
 

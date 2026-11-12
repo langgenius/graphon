@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-11T05:46:47Z"
+last_checked: "2026-11-12T01:14:36Z"
 -->
 # Architecture
 
@@ -34,16 +34,9 @@ The [Import Linter configuration](pyproject.toml) is the source of truth for
 allowed package dependencies. [Layer regression tests](tests/test_import_layers.py)
 exercise enforcement in CI.
 
-The execution model shares graph/node schemas and
-[container state](src/graphon/runtime/container_state.py);
-[legacy snapshot migration](src/graphon/runtime/runtime_state/v2.py) uses graph
-scoping, and [condition utilities](src/graphon/utils/condition/processor.py)
-consume runtime interfaces. The public facade sits above this layer because it
-re-exports `NodeFactory` and consumer contracts. These layers permit imports of
-concrete node implementations from the facade; fresh-process tests below enforce
-its node-registration guarantee.
-
-Import isolation and lazy registration are enforced by
+The public runtime package can restore snapshots without importing the engine.
+Importing `graphon.protocols` does not register built-in nodes; importing a concrete
+node implementation registers its type and version. These guarantees are enforced by
 [runtime import tests](tests/runtime/test_runtime_imports.py) and
 [public-contract import tests](tests/test_protocols_exports.py). Use the public
 runtime paths for new integrations; engine queue aliases exist for compatibility.
@@ -165,42 +158,46 @@ compatibility details:
 | Pause, resume, and snapshot quiescence | [Dispatcher](src/graphon/engine/dispatcher.py), [execution guard](src/graphon/runtime/execution.py) | [Serialization](tests/engine/test_runtime_state_serialization.py) |
 | Snapshot versions and migrations | [Snapshot loading](src/graphon/runtime/runtime_state/snapshot.py) | [Runtime snapshots](tests/runtime/test_runtime_state.py), [version isolation](tests/test_snapshot_version_isolation.py) |
 
-[Concrete segment models](src/graphon/variables/segments.py) own fixed `value_type` tags and value validation; serialized values select their model by that tag.
-[Factories](src/graphon/variables/factory.py) infer types for raw values or validate explicit declarations, preserving declared empty arrays and `array[any]` values.
-See [factory tests](tests/variables/test_factory.py) for declared types and serialized tag selection.
-`array[any]` keeps ordinary JSON dictionaries as data, including dictionaries with a file identity marker or the full set of file fields.
-Complete snapshots produced without `include` or `exclude` use [file snapshot serialization](src/graphon/variables/file_snapshot.py) to record actual [File](src/graphon/file/models.py) locations in `file_paths`.
-Paths follow Pydantic's Python serialization of nested values, honoring declared model fields, aliases, field exclusions, and caller context.
-Nested models become plain data; sequences, sets, and iterators become arrays, while recorded files restore as `File` objects through variable pool and container task restoration.
-[File serialization markers](src/graphon/file/serialization.py) are scoped to this projection and reset on exit, including serialization errors.
-These snapshots require string keys on dictionaries containing files; dictionaries without files follow ordinary JSON serialization.
-Exports using `include` or `exclude` omit file restoration metadata, as does [dumps_with_segments](src/graphon/variables/utils.py), which exports plain values without log redaction.
-Historical `array[any]` snapshots without `file_paths` retain dictionaries as data.
-Invalid declared paths or file payloads fail validation; see [snapshot tests](tests/variables/test_file_snapshots.py), [plain value export tests](tests/utils/test_variable_utils.py), and [container tests](tests/nodes/test_container_effects.py).
-[VariableBase.copy_with_value](src/graphon/variables/variables.py) validates replacements for assignment nodes, retaining identity and metadata and promoting integer variables when the new value is a float.
-The [v1 assignment tests](tests/nodes/variable_assigner/test_v1_node.py) and [v2 assignment tests](tests/nodes/variable_assigner/test_v2_node.py) cover invalid updates, fractional results, and clearing arrays while preserving their declared type, including `array[file]`.
+[Concrete segment models](src/graphon/variables/segments.py) own fixed
+`value_type` tags and value validation. [Factories](src/graphon/variables/factory.py)
+infer raw value types or validate explicit declarations; preserve declared types
+when transferring values, especially empty arrays and secrets. Assignment uses
+[copy_with_value](src/graphon/variables/variables.py) to validate replacements
+while retaining variable identity and metadata. See [factory tests](tests/variables/test_factory.py)
+and [assignment tests](tests/nodes/variable_assigner/).
 
-In [template interpolation](src/graphon/variables/template_resolution.py), nonempty object arrays render as JSON, including nested `File` and segment model data.
-Empty object arrays render as an empty string; see [template resolution tests](tests/variables/test_template_resolution.py).
+Complete `array[any]` snapshots use
+[file paths](src/graphon/variables/file_snapshot.py) to distinguish actual
+[File](src/graphon/file/models.py) objects from ordinary JSON dictionaries.
+Nested models become plain data, while recorded files restore as `File` objects.
+Dictionaries containing files require string keys. Exports using `include` or
+`exclude` omit this restoration metadata; historical snapshots without it retain
+dictionaries as data. See [file snapshot tests](tests/variables/test_file_snapshots.py)
+and [container restoration tests](tests/nodes/test_container_effects.py).
 
-[Container values](src/graphon/nodes/container_effects.py) preserve declared segment types through construction, snapshots, and completion, including secret tags.
-Explicit `to_segment()` conversion removes source variable identity so the parent pool binds completed outputs to the container's selectors.
-Snapshot restoration uses the `SerializableSegment` discriminated union directly.
-Pool conversion also assigns a new identity when storing an existing variable under a different selector; see [destination binding tests](tests/runtime/test_variable_pool.py).
-Stored outputs remain typed; container node-result inputs and Loop/Iteration presentation events expose plain values.
-The [runtime JSON converter](src/graphon/workflow_type_encoder.py) masks typed secrets using their log representation; hosts must apply redaction separately to plain values in logs and presentation.
-The [container secret tests](tests/nodes/test_container_effects.py) cover this boundary; [Loop workflow tests](tests/workflows/test_full_engine_events.py) also cover v2 variable-input `OVER_WRITE` and `CLEAR` preserving the secret tag and masking.
-[V2 input validation](src/graphon/nodes/variable_assigner/v2/helpers.py) rejects constant inputs for secret targets.
+[Container values](src/graphon/nodes/container_effects.py) preserve declared
+segment types through snapshots and completion. Converting a variable with
+`to_segment()` removes its source identity so the parent pool binds completed
+outputs to the container's selectors. Storing an existing variable under a new
+selector also assigns a new identity; see [variable pool tests](tests/runtime/test_variable_pool.py).
+Iteration keeps matching array types when flattening outputs and uses
+`array[any]` for mixed array types. See [workflow tests](tests/workflows/test_full_engine_events.py)
+for empty, serial, and parallel container behavior.
 
-[Iteration](src/graphon/nodes/iteration/iteration_node.py) accepts array sequences, including tuples.
-When its [handler](src/graphon/engine/container_handler/builtin/iteration.py) flattens outputs, matching declared array types survive in both serial and parallel runs; mixed array types become `array[any]`.
-Empty iterations preserve the input array type and bind a separate output variable; see [workflow tests](tests/workflows/test_full_engine_events.py).
+Stored outputs remain typed; container node-result inputs and Loop/Iteration
+presentation events expose plain values. The
+[runtime JSON converter](src/graphon/workflow_type_encoder.py) masks typed
+secrets using their log representation. Hosts must redact plain values separately,
+including exports from [dumps_with_segments](src/graphon/variables/utils.py).
+See [container secret tests](tests/nodes/test_container_effects.py) and
+[plain value export tests](tests/utils/test_variable_utils.py).
 
 For host rendering, bind the engine's adapter with
 [use_workflow_file_runtime](src/graphon/file/runtime.py); use
 [EngineEventFilterContext.from_engine](src/graphon/engine/filter/protocol.py) to
 wire response filters. Supply host adapters again when rebuilding from snapshots.
-Runtime JSON conversion renders tuple file arrays as JSON lists within the same adapter scope; see [host file conversion tests](tests/variables/test_workflow_type_encoder.py).
+See [host file conversion tests](tests/variables/test_workflow_type_encoder.py)
+for rendering within that adapter scope.
 
 Persist after fully consuming the run iterator or from a quiescent `on_graph_end`
 hook. Hosts must also coordinate direct mutation of exposed runtime objects: the
