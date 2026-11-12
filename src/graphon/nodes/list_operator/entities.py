@@ -54,7 +54,7 @@ class OrderByConfig(BaseModel):
 
 class Limit(BaseModel):
     enabled: bool = False
-    size: int = -1
+    size: int = Field(default=-1, description="Negative values mean no limit.")
 
 
 class ExtractConfig(BaseModel):
