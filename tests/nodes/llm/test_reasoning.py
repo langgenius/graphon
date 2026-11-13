@@ -1,9 +1,11 @@
 """Unit tests for graphon.nodes.llm.reasoning (pure, node-independent)."""
 
+from collections.abc import Sequence
+
 from graphon.nodes.llm.reasoning import FilterPiece, ThinkStreamFilter, split_reasoning
 
 
-def _feed_pieces(parts: list[str]) -> list[FilterPiece]:
+def _feed_pieces(parts: Sequence[str]) -> list[FilterPiece]:
     flt = ThinkStreamFilter()
     pieces: list[FilterPiece] = []
     for part in parts:
@@ -12,11 +14,11 @@ def _feed_pieces(parts: list[str]) -> list[FilterPiece]:
     return pieces
 
 
-def _feed_all(parts: list[str]) -> str:
+def _feed_all(parts: Sequence[str]) -> str:
     return "".join(piece.chunk for piece in _feed_pieces(parts) if piece.kind == "text")
 
 
-def _feed_all_reasoning(parts: list[str]) -> str:
+def _feed_all_reasoning(parts: Sequence[str]) -> str:
     return "".join(
         piece.chunk for piece in _feed_pieces(parts) if piece.kind == "reasoning"
     )
@@ -230,3 +232,165 @@ def test_filter_streams_no_reasoning_without_think() -> None:
 def test_filter_streams_reasoning_only_output() -> None:
     assert _feed_all_reasoning(["<think>just reasoning</think>"]) == "just reasoning"
     assert _feed_all(["<think>just reasoning</think>"]) == ""
+
+
+# A literal closing tag inside an inline code span, as reported in #357.
+_LITERAL_CLOSE_STREAM = (
+    "<think>I shouldn't wrap it in a `</think>` tag or something. "
+    "Let me just output the HTML answer directly.</think><html>answer</html>"
+)
+_LITERAL_CLOSE_REASONING = (
+    "I shouldn't wrap it in a `</think>` tag or something. "
+    "Let me just output the HTML answer directly."
+)
+_LITERAL_CLOSE_TEXT = "<html>answer</html>"
+
+
+def test_split_reasoning_keeps_literal_close_inside_backticks() -> None:
+    clean, reasoning = split_reasoning(_LITERAL_CLOSE_STREAM, "separated")
+
+    assert clean == _LITERAL_CLOSE_TEXT
+    assert reasoning == _LITERAL_CLOSE_REASONING
+
+
+def test_filter_keeps_literal_close_inside_backticks() -> None:
+    assert _feed_all([_LITERAL_CLOSE_STREAM]) == _LITERAL_CLOSE_TEXT
+    assert _feed_all_reasoning([_LITERAL_CLOSE_STREAM]) == _LITERAL_CLOSE_REASONING
+
+
+def test_filter_keeps_literal_close_across_chunk_boundaries() -> None:
+    # The reported stream used 7-character chunks. Also split the backtick run
+    # and the closing tag themselves.
+    chunked = [
+        _LITERAL_CLOSE_STREAM[index : index + 7]
+        for index in range(0, len(_LITERAL_CLOSE_STREAM), 7)
+    ]
+    split_tag = [
+        "<think>I shouldn't wrap it in a ",
+        "`</thi",
+        "nk>` tag or something. ",
+        "Let me just output the HTML answer directly.</thi",
+        "nk><html>answer</html>",
+    ]
+
+    assert _feed_all(chunked) == _LITERAL_CLOSE_TEXT
+    assert _feed_all_reasoning(chunked) == _LITERAL_CLOSE_REASONING
+    assert _feed_all(split_tag) == _LITERAL_CLOSE_TEXT
+    assert _feed_all_reasoning(split_tag) == _LITERAL_CLOSE_REASONING
+    assert _feed_all(list(_LITERAL_CLOSE_STREAM)) == _LITERAL_CLOSE_TEXT
+    assert _feed_all_reasoning(list(_LITERAL_CLOSE_STREAM)) == _LITERAL_CLOSE_REASONING
+
+
+def test_literal_close_inside_longer_span_preserves_later_blocks() -> None:
+    text = "<think>keep `a literal </think> tag` inside</think>X<think>b</think>Y"
+
+    clean, reasoning = split_reasoning(text, "separated")
+
+    assert clean == "XY"
+    assert reasoning == "keep `a literal </think> tag` inside\nb"
+    assert _feed_all([text]) == "XY"
+    assert _feed_all_reasoning([text]) == "keep `a literal </think> tag` insideb"
+
+
+def test_closed_code_span_does_not_hide_real_think_close() -> None:
+    text = "<think>use `json`\nthen finish</think>answer `code`"
+    unmatched = "<think>the ` char\n</think>answer `code`"
+
+    clean, reasoning = split_reasoning(text, "separated")
+    unmatched_clean, unmatched_reasoning = split_reasoning(unmatched, "separated")
+
+    assert clean == "answer `code`"
+    assert reasoning == "use `json`\nthen finish"
+    assert unmatched_clean == "answer `code`"
+    assert unmatched_reasoning == "the ` char"
+    assert _feed_all([text]) == "answer `code`"
+    assert _feed_all_reasoning([text]) == "use `json`\nthen finish"
+    assert _feed_all([unmatched]) == "answer `code`"
+    # The stream keeps the newline before the real tag; split_reasoning strips it.
+    assert _feed_all_reasoning([unmatched]) == "the ` char\n"
+
+
+def _seven_char_chunks(text: str) -> list[str]:
+    return [text[index : index + 7] for index in range(0, len(text), 7)]
+
+
+def test_escaped_backtick_does_not_open_code_span() -> None:
+    text = r"<think>A backtick looks like \`.</think>Use \` in text."
+    # Split between the backslash and the backtick it escapes.
+    split_escape = ["<think>A backtick looks like \\", "`.</think>Use \\` in text."]
+
+    clean, reasoning = split_reasoning(text, "separated")
+
+    assert clean == r"Use \` in text."
+    assert reasoning == r"A backtick looks like \`."
+    for parts in ([text], _seven_char_chunks(text), split_escape):
+        assert _feed_all(parts) == r"Use \` in text."
+        assert _feed_all_reasoning(parts) == r"A backtick looks like \`."
+
+    # Any odd number of backslashes escapes the backtick.
+    three = r"<think>three \\\`.</think>Use \` in text."
+    assert split_reasoning(three, "separated") == (r"Use \` in text.", r"three \\\`.")
+    assert _feed_all(_seven_char_chunks(three)) == r"Use \` in text."
+    assert _feed_all_reasoning(_seven_char_chunks(three)) == r"three \\\`."
+
+
+def test_escaped_backtick_leaves_rest_of_run_as_opener() -> None:
+    text = r"<think>a \``</think>` b</think>answer"
+    split_escape = ["<think>a \\", "``</think>` b</think>answer"]
+
+    assert split_reasoning(text, "separated") == ("answer", r"a \``</think>` b")
+    for parts in ([text], _seven_char_chunks(text), split_escape):
+        assert _feed_all(parts) == "answer"
+        assert _feed_all_reasoning(parts) == r"a \``</think>` b"
+
+
+def test_escaped_backslash_before_backtick_still_opens_code_span() -> None:
+    text = r"<think>a path C:\\`</think>` stays</think>answer"
+    split_backslashes = ["<think>a path C:\\", "\\`</think>` stays</think>answer"]
+    split_before_backtick = ["<think>a path C:\\\\", "`</think>` stays</think>answer"]
+
+    clean, reasoning = split_reasoning(text, "separated")
+
+    assert clean == "answer"
+    assert reasoning == r"a path C:\\`</think>` stays"
+    for parts in (
+        [text],
+        _seven_char_chunks(text),
+        split_backslashes,
+        split_before_backtick,
+    ):
+        assert _feed_all(parts) == "answer"
+        assert _feed_all_reasoning(parts) == r"a path C:\\`</think>` stays"
+
+
+def test_filter_streams_reasoning_inside_open_code_span() -> None:
+    flt = ThinkStreamFilter()
+    code = "x" * 2000
+
+    streamed = [
+        piece.chunk
+        for part in _seven_char_chunks("<think>see `" + code)
+        for piece in flt.feed(part)
+        if piece.kind == "reasoning"
+    ]
+
+    # Reasoning before any literal </think> is not held back waiting for the
+    # span to close.
+    assert "".join(streamed) == "see `" + code
+
+    rest = [*flt.feed("</thi"), *flt.feed("nk>` done</think>answer"), *flt.finalize()]
+
+    assert "".join(p.chunk for p in rest if p.kind == "reasoning") == "</think>` done"
+    assert "".join(p.chunk for p in rest if p.kind == "text") == "answer"
+
+
+def test_unclosed_code_span_does_not_hide_later_think_close() -> None:
+    same_line = "<think>see `x" + "y" * 40 + "</think>answer"
+    next_line = "<think>see `x" + "y" * 40 + "\nthen</think>answer"
+
+    for text in (same_line, next_line):
+        clean, reasoning = split_reasoning(text, "separated")
+
+        assert clean == "answer"
+        assert _feed_all(_seven_char_chunks(text)) == "answer"
+        assert _feed_all_reasoning(_seven_char_chunks(text)) == reasoning
