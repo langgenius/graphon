@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-12T01:14:36Z"
+last_checked: "2026-11-13T10:12:41Z"
 -->
 # Architecture
 
@@ -87,6 +87,10 @@ for response selection, template assembly, buffering, and presentation order.
 Producer chunks remain immediate, including across parallel container items.
 See [raw-event tests](tests/engine/test_raw_engine_events.py) and
 [filter tests](tests/engine/test_event_filters.py).
+
+When an LLM emits only an empty final `text` marker, `ResponseStreamFilter` waits for its committed output to fill the response template.
+Earlier text chunks, including explicit empty chunks, remain authoritative across retries and filter snapshots.
+See [LLM response tests](tests/nodes/llm/test_node.py) and [response filter tests](tests/engine/test_response_stream_filter.py).
 
 ## Raw frame observations
 

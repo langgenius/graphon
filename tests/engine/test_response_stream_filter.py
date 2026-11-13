@@ -658,6 +658,26 @@ def test_response_stream_filter_does_not_mix_buffered_chunks_with_final_value() 
     assert [event.chunk for event in chunks] == ["Quiet", " Night", " Thought"]
 
 
+def test_response_stream_filter_closes_empty_text_without_committed_value() -> None:
+    graph = _variable_response_graph(
+        segments=[
+            VariableSegment(selector=["source", "text"]),
+            TextSegment(text="!"),
+        ],
+    )
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+    list(event_filter.on_event(GraphRunStartedEvent()))
+
+    output = list(
+        event_filter.on_event(_stream_chunk("", selector=["source", "text"])),
+    )
+
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert "".join(event.chunk for event in chunks) == "!"
+    assert chunks[-1].is_final
+
+
 def test_response_stream_filter_uses_retry_execution_id_for_scalar_value() -> None:
     graph = _variable_response_graph()
     variable_pool = VariablePool()
