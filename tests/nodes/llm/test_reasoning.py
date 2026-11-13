@@ -308,3 +308,89 @@ def test_closed_code_span_does_not_hide_real_think_close() -> None:
     assert _feed_all([unmatched]) == "answer `code`"
     # The stream keeps the newline before the real tag; split_reasoning strips it.
     assert _feed_all_reasoning([unmatched]) == "the ` char\n"
+
+
+def _seven_char_chunks(text: str) -> list[str]:
+    return [text[index : index + 7] for index in range(0, len(text), 7)]
+
+
+def test_escaped_backtick_does_not_open_code_span() -> None:
+    text = r"<think>A backtick looks like \`.</think>Use \` in text."
+    # Split between the backslash and the backtick it escapes.
+    split_escape = ["<think>A backtick looks like \\", "`.</think>Use \\` in text."]
+
+    clean, reasoning = split_reasoning(text, "separated")
+
+    assert clean == r"Use \` in text."
+    assert reasoning == r"A backtick looks like \`."
+    for parts in ([text], _seven_char_chunks(text), split_escape):
+        assert _feed_all(parts) == r"Use \` in text."
+        assert _feed_all_reasoning(parts) == r"A backtick looks like \`."
+
+    # Any odd number of backslashes escapes the backtick.
+    three = r"<think>three \\\`.</think>Use \` in text."
+    assert split_reasoning(three, "separated") == (r"Use \` in text.", r"three \\\`.")
+    assert _feed_all(_seven_char_chunks(three)) == r"Use \` in text."
+    assert _feed_all_reasoning(_seven_char_chunks(three)) == r"three \\\`."
+
+
+def test_escaped_backtick_leaves_rest_of_run_as_opener() -> None:
+    text = r"<think>a \``</think>` b</think>answer"
+    split_escape = ["<think>a \\", "``</think>` b</think>answer"]
+
+    assert split_reasoning(text, "separated") == ("answer", r"a \``</think>` b")
+    for parts in ([text], _seven_char_chunks(text), split_escape):
+        assert _feed_all(parts) == "answer"
+        assert _feed_all_reasoning(parts) == r"a \``</think>` b"
+
+
+def test_escaped_backslash_before_backtick_still_opens_code_span() -> None:
+    text = r"<think>a path C:\\`</think>` stays</think>answer"
+    split_backslashes = ["<think>a path C:\\", "\\`</think>` stays</think>answer"]
+    split_before_backtick = ["<think>a path C:\\\\", "`</think>` stays</think>answer"]
+
+    clean, reasoning = split_reasoning(text, "separated")
+
+    assert clean == "answer"
+    assert reasoning == r"a path C:\\`</think>` stays"
+    for parts in (
+        [text],
+        _seven_char_chunks(text),
+        split_backslashes,
+        split_before_backtick,
+    ):
+        assert _feed_all(parts) == "answer"
+        assert _feed_all_reasoning(parts) == r"a path C:\\`</think>` stays"
+
+
+def test_filter_streams_reasoning_inside_open_code_span() -> None:
+    flt = ThinkStreamFilter()
+    code = "x" * 2000
+
+    streamed = [
+        piece.chunk
+        for part in _seven_char_chunks("<think>see `" + code)
+        for piece in flt.feed(part)
+        if piece.kind == "reasoning"
+    ]
+
+    # Reasoning before any literal </think> is not held back waiting for the
+    # span to close.
+    assert "".join(streamed) == "see `" + code
+
+    rest = [*flt.feed("</thi"), *flt.feed("nk>` done</think>answer"), *flt.finalize()]
+
+    assert "".join(p.chunk for p in rest if p.kind == "reasoning") == "</think>` done"
+    assert "".join(p.chunk for p in rest if p.kind == "text") == "answer"
+
+
+def test_unclosed_code_span_does_not_hide_later_think_close() -> None:
+    same_line = "<think>see `x" + "y" * 40 + "</think>answer"
+    next_line = "<think>see `x" + "y" * 40 + "\nthen</think>answer"
+
+    for text in (same_line, next_line):
+        clean, reasoning = split_reasoning(text, "separated")
+
+        assert clean == "answer"
+        assert _feed_all(_seven_char_chunks(text)) == "answer"
+        assert _feed_all_reasoning(_seven_char_chunks(text)) == reasoning
