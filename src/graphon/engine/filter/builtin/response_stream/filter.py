@@ -17,7 +17,7 @@ from graphon.engine_events.node import (
     NodeRunSucceededEvent,
 )
 from graphon.engine_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTakenEvent
-from graphon.enums import NodeExecutionType, NodeState
+from graphon.enums import BuiltinNodeTypes, NodeExecutionType, NodeState
 from graphon.file.protocols import WorkflowFileRuntimeProtocol
 from graphon.file.runtime import use_workflow_file_runtime
 from graphon.nodes.base.template import VariableSegment
@@ -400,6 +400,15 @@ class ResponseStreamFilter:
     ) -> list[EngineEvent]:
         selector_key = tuple(event.selector)
         if selector_key in self._referenced_selectors:
+            if (
+                event.node_type == BuiltinNodeTypes.LLM
+                and selector_key == (event.node_id, "text")
+                and event.is_final
+                and not event.chunk
+                and not self._template_stream.stream_buffers.has_events(event.selector)
+            ):
+                # LLM results without text chunks are read from the committed output.
+                return self._try_flush()
             self._template_stream.stream_buffers.append(event.selector, event)
             if event.is_final:
                 self._template_stream.stream_buffers.close(event.selector)

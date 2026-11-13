@@ -88,6 +88,10 @@ Producer chunks remain immediate, including across parallel container items.
 See [raw-event tests](tests/engine/test_raw_engine_events.py) and
 [filter tests](tests/engine/test_event_filters.py).
 
+When an LLM emits only an empty final `text` marker, `ResponseStreamFilter` waits for its committed output to fill the response template.
+Earlier text chunks, including explicit empty chunks, remain authoritative across retries and filter snapshots.
+See [LLM response tests](tests/nodes/llm/test_node.py) and [response filter tests](tests/engine/test_response_stream_filter.py).
+
 ## Raw frame observations
 
 By default, [Engine](src/graphon/engine/engine.py) emits [frame events](src/graphon/engine_events/frame.py) that expose execution state for consumers that may read events after a child frame has been removed:

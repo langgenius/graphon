@@ -2,21 +2,33 @@ import base64
 import re
 from collections.abc import Generator, Sequence
 from datetime import UTC, datetime, timedelta
+from threading import Event
 from types import SimpleNamespace
 from typing import Any, Literal, Never, cast
 from unittest.mock import MagicMock
 
 import pytest
 
+from graphon.engine import Engine
+from graphon.engine.filter import EngineEventFilterContext, ResponseStreamFilter
+from graphon.engine.layer import Layer
+from graphon.engine_events.base import EngineEvent
+from graphon.engine_events.graph import (
+    GraphRunPartialSucceededEvent,
+    GraphRunSucceededEvent,
+)
 from graphon.engine_events.node import (
     NodeRunModelPollingProgressEvent,
     NodeRunReasoningChunkEvent,
+    NodeRunStreamChunkEvent,
 )
-from graphon.entities.base_node_data import BaseNodeData
+from graphon.entities.base_node_data import BaseNodeData, RetryConfig
 from graphon.enums import WorkflowNodeExecutionStatus
 from graphon.file import helpers as file_helpers
 from graphon.file.enums import FileTransferMethod, FileType
 from graphon.file.models import File
+from graphon.graph.graph import Graph
+from graphon.model_runtime.entities.common_entities import I18nObject
 from graphon.model_runtime.entities.llm_entities import (
     LLMPollingConfig,
     LLMPollingResult,
@@ -34,7 +46,12 @@ from graphon.model_runtime.entities.message_entities import (
     PromptMessageContentUnionTypes,
     VideoPromptMessageContent,
 )
-from graphon.model_runtime.entities.model_entities import ModelFeature
+from graphon.model_runtime.entities.model_entities import (
+    AIModelEntity,
+    FetchFrom,
+    ModelFeature,
+    ModelType,
+)
 from graphon.node_events.base import NodeEventPayload
 from graphon.node_events.node import (
     ModelInvokeCompletedEvent,
@@ -43,10 +60,14 @@ from graphon.node_events.node import (
     StreamCompletedEvent,
     StreamReasoningEvent,
 )
+from graphon.nodes.answer.answer_node import AnswerNode
+from graphon.nodes.answer.entities import AnswerNodeData
 from graphon.nodes.llm import LLMNode, LLMNodeData
 from graphon.nodes.llm.exc import LLMNodeError
 from graphon.nodes.llm.reasoning import split_reasoning
 from graphon.nodes.llm.runtime_protocols import LLMPollingCapableProtocol, LLMProtocol
+from graphon.nodes.start import StartNode
+from graphon.nodes.start.entities import StartNodeData
 from graphon.runtime.runtime_state import RuntimeState
 
 from ...helpers import build_init_params, build_variable_pool
@@ -69,6 +90,16 @@ class _PollingLLM(LLMPollingCapableProtocol):
         self._responses = list(responses)
         self.start_calls: list[dict[str, Any]] = []
         self.check_calls: list[dict[str, Any]] = []
+
+    def get_model_schema(self) -> AIModelEntity:
+        return AIModelEntity(
+            model=self.model_name,
+            label=I18nObject(en_US=self.model_name),
+            model_type=ModelType.LLM,
+            features=[ModelFeature.POLLING],
+            fetch_from=FetchFrom.PREDEFINED_MODEL,
+            model_properties={},
+        )
 
     def start_llm_polling(self, **kwargs: Any) -> Any:
         self.start_calls.append(kwargs)
@@ -1422,3 +1453,208 @@ def test_separated_stream_matches_split_reasoning(full_text: str) -> None:
     expected, _ = split_reasoning(full_text, "separated")
 
     assert _normalize_like_split_reasoning("".join(chunks)) == expected
+
+
+class _WaitForTextConsumption(Layer):
+    def __init__(self, *, is_final: bool) -> None:
+        super().__init__()
+        self.is_final = is_final
+        self.consumed = Event()
+
+    def on_event(self, event: EngineEvent) -> None:
+        if (
+            isinstance(event, NodeRunStreamChunkEvent)
+            and event.selector == ["llm", "text"]
+            and event.is_final == self.is_final
+        ):
+            assert self.consumed.wait(timeout=5)
+
+
+def _build_response_engine(node: LLMNode, template: str) -> Engine:
+    args = {
+        "init_params": build_init_params(),
+        "runtime_state": node.runtime_state,
+    }
+    start = StartNode(node_id="start", data=StartNodeData(title="Start"), **args)
+    answer = AnswerNode(
+        node_id="answer",
+        data=AnswerNodeData(answer=template),
+        **args,
+    )
+    following_answer = AnswerNode(
+        node_id="following-answer",
+        data=AnswerNodeData(answer="next"),
+        **args,
+    )
+    graph = (
+        Graph
+        .new()
+        .add_root(start)
+        .add_node(node)
+        .add_node(answer)
+        .add_node(following_answer)
+        .build()
+    )
+    return Engine(graph=graph, runtime_state=node.runtime_state, workers=1)
+
+
+def _read_response_before_commit(
+    engine: Engine,
+    *,
+    is_final: bool,
+) -> tuple[list[EngineEvent], str]:
+    barrier = _WaitForTextConsumption(is_final=is_final)
+    engine.add_layer(barrier)
+    context = EngineEventFilterContext.from_engine(engine)
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(context)
+    output: list[EngineEvent] = []
+    response_before_commit: str | None = None
+    for event in engine.run():
+        output.extend(event_filter.on_event(event))
+        if (
+            isinstance(event, NodeRunStreamChunkEvent)
+            and event.selector == ["llm", "text"]
+            and event.is_final == is_final
+            and not barrier.consumed.is_set()
+        ):
+            try:
+                assert engine.runtime_state.variable_pool.get(["llm", "text"]) is None
+                response_before_commit = "".join(
+                    chunk.chunk
+                    for chunk in output
+                    if isinstance(chunk, NodeRunStreamChunkEvent)
+                )
+                restored_filter = ResponseStreamFilter()
+                restored_filter.loads(event_filter.dumps())
+                restored_filter.initialize(context)
+                event_filter = restored_filter
+            finally:
+                barrier.consumed.set()
+    output.extend(event_filter.flush())
+    assert response_before_commit is not None
+    return output, response_before_commit
+
+
+@pytest.mark.parametrize("polling", [False, True])
+@pytest.mark.parametrize("text", ["done", "", " \n "])
+@pytest.mark.parametrize(
+    "template",
+    ["{{#llm.text#}}", "Reply: {{#llm.text#}}/{{#llm.text#}}!"],
+)
+def test_response_stream_waits_for_completed_llm_result(
+    polling: bool,
+    text: str,
+    template: str,
+) -> None:
+    result = _llm_result(text)
+    if polling:
+        model = _PollingLLM([
+            LLMPollingResult(
+                status=LLMPollingStatus.RUNNING, plugin_state={"job": "1"}
+            ),
+            LLMPollingResult(status=LLMPollingStatus.SUCCEEDED, result=result),
+        ])
+    else:
+        model = MagicMock(
+            spec=LLMProtocol,
+            provider="openai",
+            model_name="gpt-4o",
+            parameters={},
+            stop=(),
+        )
+        model.get_model_schema.return_value = _PollingLLM([]).get_model_schema()
+        model.invoke_llm.return_value = result
+    engine = _build_response_engine(_build_llm_node(model_instance=model), template)
+
+    events, response_before_commit = _read_response_before_commit(engine, is_final=True)
+
+    assert response_before_commit == template.partition("{{#llm.text#}}")[0]
+    chunks = [event for event in events if isinstance(event, NodeRunStreamChunkEvent)]
+    expected = template.replace("{{#llm.text#}}", text) + "next"
+    assert "".join(event.chunk for event in chunks) == expected
+    final = next(event for event in events if isinstance(event, GraphRunSucceededEvent))
+    assert final.outputs["answer"] == expected
+    if template == "{{#llm.text#}}":
+        assert chunks[0].is_final
+    if polling:
+        assert model.check_calls == [{"plugin_state": {"job": "1"}}]
+
+
+@pytest.mark.parametrize("text", ["Hello", "", " \n "])
+def test_response_stream_closes_llm_text_after_snapshot(text: str) -> None:
+    model = MagicMock(
+        spec=LLMProtocol,
+        provider="openai",
+        model_name="gpt-4o",
+        parameters={},
+        stop=(),
+    )
+    model.get_model_schema.return_value = _PollingLLM([]).get_model_schema()
+    model.invoke_llm.return_value = _stream_results(_stream_chunk(text))
+    engine = _build_response_engine(
+        _build_llm_node(model_instance=model),
+        "Reply: {{#llm.text#}}!",
+    )
+
+    events, response_before_commit = _read_response_before_commit(
+        engine, is_final=False
+    )
+
+    assert response_before_commit == f"Reply: {text}"
+    chunks = [event for event in events if isinstance(event, NodeRunStreamChunkEvent)]
+    assert any(
+        event.selector == ["llm", "text"] and event.chunk == text and not event.is_final
+        for event in chunks
+    )
+    expected = f"Reply: {text}!next"
+    assert "".join(event.chunk for event in chunks) == expected
+    final = next(event for event in events if isinstance(event, GraphRunSucceededEvent))
+    assert final.outputs["answer"] == expected
+
+
+def test_response_stream_closes_empty_llm_text_after_retry() -> None:
+    def failed_stream() -> Generator[LLMResultChunk, None, None]:
+        yield _stream_chunk("")
+        msg = "Retry after an empty text chunk"
+        raise ValueError(msg)
+
+    model = MagicMock(
+        spec=LLMProtocol,
+        provider="openai",
+        model_name="gpt-4o",
+        parameters={},
+        stop=(),
+    )
+    model.get_model_schema.return_value = _PollingLLM([]).get_model_schema()
+    model.invoke_llm.side_effect = [
+        failed_stream(),
+        _stream_results(
+            _stream_chunk(None, usage=LLMUsage.empty_usage(), finish_reason="stop"),
+        ),
+    ]
+    node = _build_llm_node(model_instance=model)
+    node.node_data.retry_config = RetryConfig(
+        retry_enabled=True,
+        max_retries=1,
+        retry_interval=0,
+    )
+    engine = _build_response_engine(node, "Reply: {{#llm.text#}}!")
+
+    events, _ = _read_response_before_commit(engine, is_final=False)
+
+    assert (
+        "".join(
+            event.chunk
+            for event in events
+            if isinstance(event, NodeRunStreamChunkEvent)
+        )
+        == "Reply: !next"
+    )
+    final = next(
+        event
+        for event in events
+        if isinstance(event, (GraphRunSucceededEvent, GraphRunPartialSucceededEvent))
+    )
+    assert final.outputs["answer"] == "Reply: !next"
+    assert model.invoke_llm.call_count == 2
