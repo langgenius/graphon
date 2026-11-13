@@ -17,7 +17,11 @@ from graphon.engine_events.node import (
     NodeRunSucceededEvent,
 )
 from graphon.engine_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTakenEvent
-from graphon.enums import NodeExecutionType, NodeState
+from graphon.enums import (
+    FailBranchSourceHandle,
+    NodeExecutionType,
+    NodeState,
+)
 from graphon.file.protocols import WorkflowFileRuntimeProtocol
 from graphon.file.runtime import use_workflow_file_runtime
 from graphon.nodes.base.template import VariableSegment
@@ -127,7 +131,13 @@ class ResponseStreamFilter:
                 )
             case GraphEdgeSkippedEvent():
                 output = []
-            case NodeRunSucceededEvent() | NodeRunExceptionEvent():
+            case NodeRunExceptionEvent():
+                output = [
+                    *self._abandon_sessions_for_failed_node(event.node_id),
+                    *self._try_flush(),
+                    event,
+                ]
+            case NodeRunSucceededEvent():
                 output = [*self._try_flush(), event]
             case _:
                 output = [event]
@@ -348,6 +358,17 @@ class ResponseStreamFilter:
     ) -> bool:
         edge = self._bound_graph.edges[edge_id]
         source_node = self._bound_graph.nodes[edge.tail]
+        if (
+            source_node.promoted_to_branch
+            and edge.source_handle != FailBranchSourceHandle.FAILED
+        ):
+            # A node promoted to BRANCH only because its FAIL_BRANCH error
+            # strategy reroutes failures still streams its normal-path output
+            # while it runs. Blocking it until completion would hold every
+            # chunk back and burst-deliver them at the end of the node run
+            # (dify#43938). Only the fail-branch edge stays blocking: it
+            # resolves when the node actually fails.
+            return False
         return source_node.execution_type in frozenset((
             NodeExecutionType.BRANCH,
             NodeExecutionType.CONTAINER,
@@ -491,6 +512,48 @@ class ResponseStreamFilter:
 
         self._active_session = self._waiting_sessions.popleft()
         return self._try_flush()
+
+    def _abandon_sessions_for_failed_node(self, node_id: _NodeID) -> list[EngineEvent]:
+        """Drop sessions whose source node failed before finishing its output.
+
+        Only promoted fail-branch nodes apply: their normal-path sessions
+        start before the node completes (see ``_is_blocking_edge``), and a
+        failure abandons that path, so those sessions must stop waiting and
+        free the active slot for the fail-branch session. Sessions of other
+        nodes keep today's behavior.
+
+        Args:
+            node_id: ID of the node whose run raised.
+
+        Returns:
+            Events produced while releasing the active session.
+
+        """
+        source_node = self._bound_graph.nodes.get(node_id)
+        if source_node is None or not source_node.promoted_to_branch:
+            return []
+
+        events: list[EngineEvent] = []
+        active_session = self._active_session
+        if active_session is not None and self._session_references_node(
+            active_session,
+            node_id,
+        ):
+            events.extend(self._end_session(active_session.node_id))
+
+        self._waiting_sessions = deque(
+            session
+            for session in self._waiting_sessions
+            if not self._session_references_node(session, node_id)
+        )
+        return events
+
+    @staticmethod
+    def _session_references_node(session: _ResponseSession, node_id: _NodeID) -> bool:
+        return any(
+            isinstance(segment, VariableSegment) and segment.selector[:1] == [node_id]
+            for segment in session.template.segments
+        )
 
     def _serialize_session(
         self,
