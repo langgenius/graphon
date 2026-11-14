@@ -24,6 +24,30 @@ def _make_payload(json_schema: Any) -> dict[str, Any]:
     }
 
 
+def _make_multi_select_payload() -> dict[str, Any]:
+    return {
+        "variable": "machines",
+        "label": "Machines",
+        "type": "multi-select",
+        "required": True,
+        "options": ["A", "B", "C"],
+    }
+
+
+class TestMultiSelect:
+    def test_accepts_multi_select_input(self) -> None:
+        entity = VariableEntity.model_validate(_make_multi_select_payload())
+
+        assert entity.type == VariableEntityType.MULTI_SELECT
+        assert list(entity.options) == ["A", "B", "C"]
+        assert entity.required is True
+
+    def test_serializes_multi_select_input_type(self) -> None:
+        entity = VariableEntity.model_validate(_make_multi_select_payload())
+
+        assert entity.model_dump(mode="json")["type"] == "multi-select"
+
+
 class TestValidateJsonSchema:
     def test_accepts_dict_input(self) -> None:
         entity = VariableEntity.model_validate(_make_payload(_VALID_SCHEMA))
