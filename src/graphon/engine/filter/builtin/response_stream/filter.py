@@ -25,7 +25,8 @@ from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.runtime_state import GraphProtocol, NodeProtocol
 from graphon.runtime.runtime_state_protocol import ReadOnlyRuntimeState
 
-from . import snapshot, v2
+from . import snapshot, v3
+from .reachability import _ResponseReachability
 from .snapshot import (
     ResponseSessionState,
     ResponseStreamFilterSnapshot,
@@ -43,7 +44,7 @@ type _Selector = Selector
 
 @dataclass
 class _Path:
-    """Blocking traversal edges that must be taken before a response can stream."""
+    """Remaining blocking edges loaded from a legacy checkpoint."""
 
     edges: list[_EdgeID] = field(default_factory=list)
 
@@ -194,7 +195,9 @@ class ResponseStreamFilter:
         self._waiting_sessions: deque[_ResponseSession] = deque()
         self._stream_buffers = _StreamBuffers()
         self._response_nodes: set[str] = set()
-        self._paths_maps: dict[str, list[_Path]] = {}
+        self._reachability: dict[str, _ResponseReachability] = {}
+        self._taken_edge_ids: set[str] = set()
+        self._legacy_paths_by_response: dict[str, list[_Path]] | None = None
         self._node_execution_ids: dict[str, str] = {}
         self._response_sessions: dict[str, _ResponseSession] = {}
         self._referenced_selectors: set[_Selector] = set()
@@ -265,7 +268,7 @@ class ResponseStreamFilter:
             return snapshot.dumps(self._pending_state)
         self._ensure_initialized()
 
-        state = v2.Snapshot(
+        state = v3.Snapshot(
             response_nodes=sorted(self._response_nodes),
             active_session=self._serialize_session(self._active_session),
             waiting_sessions=[
@@ -279,10 +282,15 @@ class ResponseStreamFilter:
                 if (session_state := self._serialize_session(session)) is not None
             ],
             node_execution_ids=dict(sorted(self._node_execution_ids.items())),
-            paths_map={
-                node_id: [path.edges.copy() for path in paths]
-                for node_id, paths in sorted(self._paths_maps.items())
-            },
+            taken_edges=sorted(self._taken_edge_ids),
+            legacy_paths_map=(
+                {
+                    node_id: [path.edges.copy() for path in paths]
+                    for node_id, paths in sorted(self._legacy_paths_by_response.items())
+                }
+                if self._legacy_paths_by_response is not None
+                else None
+            ),
             stream_buffers=self._stream_buffers.dump_buffers(),
             stream_positions=self._stream_buffers.dump_positions(),
             closed_streams=self._stream_buffers.dump_closed_selectors(),
@@ -300,12 +308,20 @@ class ResponseStreamFilter:
 
     def _apply_state(self, state: ResponseStreamFilterSnapshot) -> None:
         state = snapshot.for_graph(state, self._bound_graph)
+        if not isinstance(state, v3.Snapshot):
+            msg = "Expected migrated version 3 ResponseStreamFilter state"
+            raise TypeError(msg)
 
         response_nodes = set(state.response_nodes)
-        paths_maps = {
-            node_id: [_Path(edges=list(path_edges)) for path_edges in paths]
-            for node_id, paths in state.paths_map.items()
-        }
+        legacy_paths_by_response = (
+            {
+                node_id: [_Path(edges=list(path_edges)) for path_edges in paths]
+                for node_id, paths in state.legacy_paths_map.items()
+            }
+            if state.legacy_paths_map is not None
+            else None
+        )
+        taken_edge_ids = set(state.taken_edges)
         node_execution_ids = dict(state.node_execution_ids)
 
         stream_buffers = _StreamBuffers.from_state(
@@ -332,12 +348,22 @@ class ResponseStreamFilter:
             referenced_selectors.update(
                 self._get_referenced_selectors(response_node_id)
             )
+        reachability = (
+            {
+                node_id: self._build_reachability(node_id, taken_edge_ids)
+                for node_id in response_nodes
+            }
+            if legacy_paths_by_response is None
+            else {}
+        )
 
         self._active_session = active_session
         self._waiting_sessions = waiting_sessions
         self._stream_buffers = stream_buffers
         self._response_nodes = response_nodes
-        self._paths_maps = paths_maps
+        self._reachability = reachability
+        self._taken_edge_ids = taken_edge_ids
+        self._legacy_paths_by_response = legacy_paths_by_response
         self._node_execution_ids = node_execution_ids
         self._response_sessions = response_sessions
         self._referenced_selectors = referenced_selectors
@@ -370,7 +396,9 @@ class ResponseStreamFilter:
         if response_node_id in self._response_nodes:
             return
         self._response_nodes.add(response_node_id)
-        self._paths_maps[response_node_id] = self._build_paths_map(response_node_id)
+        self._reachability[response_node_id] = self._build_reachability(
+            response_node_id, self._taken_edge_ids
+        )
 
         response_node = self._bound_graph.nodes[response_node_id]
         self._response_sessions[response_node_id] = _ResponseSession.from_node(
@@ -398,17 +426,18 @@ class ResponseStreamFilter:
             if isinstance(segment, VariableSegment)
         }
 
-    def _build_paths_map(self, response_node_id: _NodeID) -> list[_Path]:
-        root_node_id = self._bound_graph.root_node.id
-        if root_node_id == response_node_id:
-            return [_Path()]
-
+    def _build_reachability(
+        self, response_node_id: _NodeID, taken_edge_ids: set[str]
+    ) -> _ResponseReachability:
         variable_selectors = self._get_response_variable_selectors(response_node_id)
-        all_complete_paths = self._find_all_paths(root_node_id, response_node_id)
-        return [
-            _Path(edges=self._get_blocking_edges(path, variable_selectors))
-            for path in all_complete_paths
-        ]
+        blocking_edge_ids = {
+            edge_id
+            for edge_id in self._bound_graph.edges
+            if self._is_blocking_edge(edge_id, variable_selectors)
+        }
+        return _ResponseReachability(
+            self._bound_graph, response_node_id, blocking_edge_ids, taken_edge_ids
+        )
 
     def _get_response_variable_selectors(
         self,
@@ -421,44 +450,6 @@ class ResponseStreamFilter:
             for segment in response_session.template.segments
             if isinstance(segment, VariableSegment)
         }
-
-    def _find_all_paths(
-        self,
-        current_node_id: _NodeID,
-        target_node_id: _NodeID,
-        current_path: list[_EdgeID] | None = None,
-        visited: set[_NodeID] | None = None,
-    ) -> list[list[_EdgeID]]:
-        current_path = current_path or []
-        visited = visited or set()
-        if current_node_id == target_node_id:
-            return [current_path.copy()]
-
-        next_visited = {current_node_id, *visited}
-        paths: list[list[_EdgeID]] = []
-        for edge in self._bound_graph.get_outgoing_edges(current_node_id):
-            if edge.head in next_visited:
-                continue
-            paths.extend(
-                self._find_all_paths(
-                    edge.head,
-                    target_node_id,
-                    [*current_path, edge.id],
-                    next_visited,
-                ),
-            )
-        return paths
-
-    def _get_blocking_edges(
-        self,
-        path: list[_EdgeID],
-        variable_selectors: set[_Selector],
-    ) -> list[_EdgeID]:
-        return [
-            edge_id
-            for edge_id in path
-            if self._is_blocking_edge(edge_id, variable_selectors)
-        ]
 
     def _is_blocking_edge(
         self,
@@ -476,25 +467,35 @@ class ResponseStreamFilter:
     def _activate_initial_sessions(self) -> list[EngineEvent]:
         events: list[EngineEvent] = []
         for response_node_id in sorted(self._response_nodes):
-            paths = self._paths_maps.get(response_node_id, [])
-            if any(path.is_empty() for path in paths):
+            if self._is_response_ready(response_node_id):
                 events.extend(self._active_or_queue_session(response_node_id))
         return events
 
+    def _is_response_ready(self, response_node_id: str) -> bool:
+        if self._legacy_paths_by_response is not None:
+            return any(
+                path.is_empty()
+                for path in self._legacy_paths_by_response.get(response_node_id, [])
+            )
+        return self._reachability[response_node_id].is_ready()
+
     def _handle_edge_taken(self, edge_id: _EdgeID) -> list[EngineEvent]:
         events: list[EngineEvent] = []
+        if (
+            self._legacy_paths_by_response is None
+            and edge_id in self._bound_graph.edges
+        ):
+            self._taken_edge_ids.add(edge_id)
         for response_node_id in sorted(self._response_nodes):
-            paths = self._paths_maps.get(response_node_id)
-            if paths is None:
-                continue
-
-            has_reachable_path = False
-            for path in paths:
-                path.remove_edge(edge_id)
-                if path.is_empty():
-                    has_reachable_path = True
-
-            if has_reachable_path:
+            if self._legacy_paths_by_response is not None:
+                for path in self._legacy_paths_by_response.get(response_node_id, []):
+                    path.remove_edge(edge_id)
+                is_ready = self._is_response_ready(response_node_id)
+            else:
+                is_ready = self._reachability[response_node_id].advance_from_edge(
+                    edge_id
+                )
+            if is_ready:
                 events.extend(self._active_or_queue_session(response_node_id))
         return events
 

@@ -3,18 +3,21 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Literal
 
+from pydantic import Field
+
 from graphon.enums import NodeExecutionType
 from graphon.nodes.base.template import VariableSegment
 from graphon.runtime.runtime_state import GraphProtocol, NodeProtocol
 
-from . import v2
+from . import v3
 from .snapshot import ResponseStreamFilterSnapshot, Selector
 
 
-class Snapshot(ResponseStreamFilterSnapshot):
+class Snapshot(ResponseStreamFilterSnapshot[Literal["1.0"]]):
     """Legacy ResponseStreamFilter snapshot written before scoped graphs."""
 
     version: Literal["1.0"] = "1.0"
+    paths_map: dict[str, list[list[str]]] = Field(default_factory=dict)
 
 
 def loads(data: str) -> Snapshot:
@@ -33,7 +36,7 @@ def dumps(snapshot: ResponseStreamFilterSnapshot) -> str:
     """Prevent unbound version 1 state from being emitted as current state.
 
     Version 1 edge IDs can only be translated after graph binding. Callers must
-    initialize the filter first, which invokes ``for_graph`` and produces v2 state.
+    initialize the filter first, which invokes ``for_graph`` and produces v3 state.
 
     Args:
         snapshot: Unbound legacy state; it is intentionally not serialized.
@@ -51,12 +54,12 @@ def dumps(snapshot: ResponseStreamFilterSnapshot) -> str:
 def for_graph(
     snapshot: ResponseStreamFilterSnapshot,
     graph: GraphProtocol,
-) -> v2.Snapshot:
-    """Migrate a version 1 full-graph snapshot to scoped version 2 state.
+) -> v3.Snapshot:
+    """Migrate a version 1 full-graph snapshot to current root-scoped state.
 
-    Version 1 stored generated ``edge_N`` IDs over the complete workflow. Version 2
-    stores public edge IDs from the root graph. The mapping therefore requires the
-    graph that owns the restored filter. Child-frame response state is discarded
+    Version 1 stored generated ``edge_N`` IDs over the complete workflow. Later
+    versions use public edge IDs from the root graph. The mapping therefore requires
+    the graph that owns the restored filter. Child-frame response state is discarded
     because the current filter is scoped to the root frame.
 
     TODO: Delete this file when version 1 snapshots leave the migration window.
@@ -68,7 +71,7 @@ def for_graph(
         graph: Scoped root graph used to identify retained nodes and public edge IDs.
 
     Returns:
-        Version 2 state restricted to the bound root graph.
+        Version 3 state restricted to the root graph, retaining residual paths.
 
     Raises:
         TypeError: If the snapshot or graph configuration has an invalid shape.
@@ -111,7 +114,7 @@ def for_graph(
         for node_id in root_response_nodes
         for selector in _referenced_selectors(graph.nodes[node_id])
     }
-    return v2.Snapshot(
+    return v3.Snapshot(
         response_nodes=[
             node_id
             for node_id in snapshot.response_nodes
@@ -129,7 +132,7 @@ def for_graph(
             for node_id, execution_id in snapshot.node_execution_ids.items()
             if node_id in graph.nodes
         },
-        paths_map=paths_map,
+        legacy_paths_map=paths_map,
         stream_buffers=[
             buffer
             for buffer in snapshot.stream_buffers

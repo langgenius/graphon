@@ -113,11 +113,34 @@ flowchart LR
    and notifies layers. `Engine.run()` emits terminal status and stops execution
    resources. A failed graph emits `GraphRunFailedEvent` and raises its error.
 
+## Response streaming
+
 Response presentation is a consumer concern. `Engine.run()` yields raw engine
-events; [filter_engine_events](src/graphon/engine/filter/chain.py) and
+events; hosts use [filter_engine_events](src/graphon/engine/filter/chain.py) with
 [ResponseStreamFilter](src/graphon/engine/filter/builtin/response_stream/filter.py)
-can transform that stream separately. See [raw-event tests](tests/engine/test_raw_engine_events.py)
-and [filter tests](tests/engine/test_event_filters.py).
+for root-response selection, template assembly, buffering, and presentation order.
+Producer chunks remain immediate, including across parallel container items.
+See [raw-event tests](tests/engine/test_raw_engine_events.py) and
+[filter tests](tests/engine/test_event_filters.py).
+
+The filter tracks [reachability](src/graphon/engine/filter/builtin/response_stream/reachability.py)
+separately for each response. Nonblocking edges are open before traversal, allowing
+early output. Edges leaving branches, containers, or responses, and edges whose
+source blocks the response's variable selectors, open only after the filter consumes
+their root-frame `GraphEdgeTakenEvent`. Any open route from the root suffices;
+this does not change scheduler join rules. Reachability expands without enumerating
+complete paths or reading live edge states, which may be ahead of the consumer.
+Child-frame traversal events do not open root edges.
+
+Filter checkpoints preserve consumer progress separately from runtime snapshots.
+The [current snapshot model](src/graphon/engine/filter/builtin/response_stream/v3.py)
+records consumed edge IDs; the [v1](src/graphon/engine/filter/builtin/response_stream/v1.py)
+and [v2](src/graphon/engine/filter/builtin/response_stream/v2.py) readers retain
+already-materialized residual paths when binding legacy state. Sessions, buffered
+chunks, and cursors resume together. See [response-filter tests](tests/engine/test_response_stream_filter.py)
+for activation, instance isolation, and restoration, and
+[version-isolation tests](tests/test_snapshot_version_isolation.py) for operation
+without legacy readers.
 
 ## State and execution invariants
 
