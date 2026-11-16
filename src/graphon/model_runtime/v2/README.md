@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-10-27T05:35:40Z"
+last_checked: "2026-11-16T06:22:31Z"
 -->
 # Model Runtime V2
 
@@ -324,7 +324,7 @@ exercise the built-in schemas and reuse with model-local identity and delivery.
 The source choices reflect
 [OpenAI's image inputs](https://developers.openai.com/api/docs/guides/images-vision),
 and ordered parts follow the message structure described by
-[Gemini Content](https://ai.google.dev/api/generate-content#Content). Plugins own
+[Gemini Content](https://aistudio.google.com/api-reference/generate-content#Resource:Content). Plugins own
 conversion to provider formats and their support limits.
 [Tool checks](../../../../tests/model_runtime/v2/test_llm_tools.py) cover
 tool declarations, payload shapes, and incomplete argument previews; they do not
@@ -338,7 +338,7 @@ The distinction between structured output and refusals follows
 [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
 Continuation obligations reflect
 [OpenAI reasoning](https://developers.openai.com/api/docs/guides/reasoning) and
-[Gemini thought signatures](https://ai.google.dev/gemini-api/docs/thinking#thought-signatures).
+[Gemini thought signatures](https://aistudio.google.com/docs/thinking#signatures).
 
 ### Structured output
 
