@@ -1,515 +1,209 @@
 from __future__ import annotations
 
-from collections import deque
-from collections.abc import Iterable
-from dataclasses import dataclass, field
-from typing import cast
+from collections.abc import Iterable, Mapping
+from typing import Any, cast
 
 from graphon.engine.filter.protocol import EngineEventFilterContext
-from graphon.engine_events.base import EngineEvent
-from graphon.engine_events.frame import FrameStartedEvent, FrameVariablesUpdatedEvent
-from graphon.engine_events.graph import GraphRunStartedEvent
+from graphon.engine_events.base import EngineEvent, NodeEvent
+from graphon.engine_events.frame import (
+    FrameFinishedEvent,
+    FrameStartedEvent,
+    FrameVariablesUpdatedEvent,
+)
+from graphon.engine_events.graph import (
+    GraphRunAbortedEvent,
+    GraphRunFailedEvent,
+    GraphRunPartialSucceededEvent,
+    GraphRunStartedEvent,
+    GraphRunSucceededEvent,
+)
 from graphon.engine_events.node import (
-    NodeRunExceptionEvent,
     NodeRunReasoningChunkEvent,
-    NodeRunStartedEvent,
     NodeRunStreamChunkEvent,
-    NodeRunSucceededEvent,
 )
 from graphon.engine_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTakenEvent
-from graphon.enums import NodeExecutionType, NodeState
+from graphon.entities.workflow_start_reason import WorkflowStartReason
 from graphon.file.protocols import WorkflowFileRuntimeProtocol
 from graphon.file.runtime import use_workflow_file_runtime
-from graphon.nodes.base.template import VariableSegment
 from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.runtime_state import GraphProtocol
-from graphon.runtime.runtime_state_protocol import ReadOnlyRuntimeState
 
-from . import snapshot, v3
-from .reachability import _ResponseReachability
-from .snapshot import (
-    ResponseSessionState,
-    ResponseStreamFilterSnapshot,
-    Selector,
-)
-from .template_stream import _ResponseSession, _StreamBuffers, _TemplateStream
+from . import snapshot
+from .frame_graph import build_child_graph
+from .frame_session import _FrameSession
+from .snapshot import ResponseStreamFilterSnapshot
 
 __all__ = ["ResponseStreamFilter"]
 
-type _NodeID = str
-type _EdgeID = str
-type _Selector = Selector
-
-
-@dataclass
-class _Path:
-    """Remaining blocking edges loaded from a legacy checkpoint."""
-
-    edges: list[_EdgeID] = field(default_factory=list)
-
-    def remove_edge(self, edge_id: _EdgeID) -> None:
-        if edge_id in self.edges:
-            self.edges.remove(edge_id)
-
-    def is_empty(self) -> bool:
-        return len(self.edges) == 0
-
 
 class ResponseStreamFilter:
-    """Opt-in event filter that recreates legacy ordered response streaming."""
+    """Select and assemble responses outside execution, with independent frame state."""
 
     def __init__(self, *, pass_unmatched_chunks: bool = False) -> None:
         self._pass_unmatched_chunks = pass_unmatched_chunks
-        self._graph: GraphProtocol | None = None
-        self._runtime_state: ReadOnlyRuntimeState | None = None
         self._file_runtime: WorkflowFileRuntimeProtocol | None = None
         self._pending_state: ResponseStreamFilterSnapshot | None = None
-        self._reset_run_state()
-
-    def _reset_run_state(self) -> None:
-        self._active_session: _ResponseSession | None = None
-        self._waiting_sessions: deque[_ResponseSession] = deque()
-        self._template_stream = _TemplateStream()
-        self._response_nodes: set[str] = set()
-        self._reachability: dict[str, _ResponseReachability] = {}
-        self._taken_edge_ids: set[str] = set()
-        self._legacy_paths_by_response: dict[str, list[_Path]] | None = None
-        self._response_sessions: dict[str, _ResponseSession] = {}
-        self._referenced_selectors: set[_Selector] = set()
+        self._root_session: _FrameSession | None = None
+        self._frame_sessions: dict[str, _FrameSession] = {}
+        self._graph_config: Mapping[str, Any] | None = None
+        self._awaiting_root_baseline = False
+        self._has_child_progress = False
 
     def initialize(self, context: EngineEventFilterContext) -> None:
         with use_workflow_file_runtime(context.file_runtime):
-            pending_state = self._pending_state
-            self._graph = cast(GraphProtocol, context.graph)
-            self._runtime_state = context.runtime_state
             self._file_runtime = context.file_runtime
-
-            try:
-                if pending_state is not None:
-                    self._apply_state(pending_state)
-                    return
-
-                self._reset_run_state()
-                for node in context.graph.nodes.values():
-                    if node.execution_type == NodeExecutionType.RESPONSE:
-                        self._register(node.id)
-            except Exception:
-                self._graph = None
-                self._runtime_state = None
-                if pending_state is None:
-                    self._reset_run_state()
-                raise
+            self._root_session = None
+            self._frame_sessions.clear()
+            self._has_child_progress = False
+            self._awaiting_root_baseline = context.run_id is not None
+            root_session = _FrameSession(
+                cast(GraphProtocol, context.graph),
+                None
+                if self._awaiting_root_baseline
+                else context.runtime_state.variable_pool,
+                pass_unmatched_chunks=self._pass_unmatched_chunks,
+            )
+            if self._pending_state is not None:
+                root_session.load_state(self._pending_state)
+            else:
+                root_session.register_responses()
+            self._root_session = root_session
+            self._frame_sessions[ROOT_FRAME_ID] = root_session
+            self._graph_config = getattr(context.graph, "graph_config", None)
+            self._pending_state = None
 
     def on_event(self, event: EngineEvent) -> Iterable[EngineEvent]:
+        self._ensure_initialized()
         with use_workflow_file_runtime(self._file_runtime):
             return self._process_event(event)
 
-    def _process_event(self, event: EngineEvent) -> Iterable[EngineEvent]:
-        self._ensure_initialized()
+    def _process_event(self, event: EngineEvent) -> list[EngineEvent]:  # ruff: ignore[too-many-return-statements]
         match event:
-            case FrameStartedEvent() | FrameVariablesUpdatedEvent():
-                # Full frame values may contain secrets and unselected inputs.
-                output: Iterable[EngineEvent] = []
+            case FrameStartedEvent():
+                return self._start_frame_session(event)
             case GraphRunStartedEvent():
-                output = [
+                return [
                     event,
-                    *self._activate_initial_sessions(),
+                    *(
+                        []
+                        if self._awaiting_root_baseline
+                        else self._initialized_root_session.activate_initial_sessions()
+                    ),
                 ]
-            case NodeRunStartedEvent():
-                self._template_stream.node_execution_ids[event.node_id] = event.id
-                output = [event]
-            case NodeRunStreamChunkEvent():
-                output = self._handle_stream_chunk(event)
-            case NodeRunReasoningChunkEvent():
-                output = self._handle_reasoning_chunk(event)
-            case GraphEdgeTakenEvent():
+            case FrameFinishedEvent():
+                session = self._frame_sessions.get(event.frame_id)
                 output = (
-                    self._handle_edge_taken(event.edge_id)
-                    if event.frame_id == ROOT_FRAME_ID
+                    session.finish(succeeded=event.outcome == "succeeded")
+                    if session
                     else []
                 )
-            case GraphEdgeSkippedEvent():
-                output = []
-            case NodeRunSucceededEvent() | NodeRunExceptionEvent():
-                output = [*self._try_flush(), event]
-            case _:
-                output = [event]
-        return output
+                if event.frame_id != ROOT_FRAME_ID:
+                    self._frame_sessions.pop(event.frame_id, None)
+                return [*output, event]
+            case (
+                GraphRunSucceededEvent()
+                | GraphRunPartialSucceededEvent()
+                | GraphRunFailedEvent()
+                | GraphRunAbortedEvent()
+            ):
+                succeeded = isinstance(
+                    event, (GraphRunSucceededEvent, GraphRunPartialSucceededEvent)
+                )
+                output = [
+                    chunk
+                    for session in self._frame_sessions.values()
+                    for chunk in session.finish(succeeded=succeeded)
+                ]
+                self._frame_sessions.clear()
+                return [*output, event]
+            case (
+                FrameVariablesUpdatedEvent()
+                | NodeEvent()
+                | GraphEdgeTakenEvent()
+                | GraphEdgeSkippedEvent()
+            ):
+                if session := self._frame_sessions.get(event.frame_id):
+                    return session.on_event(event)
+                if isinstance(
+                    event,
+                    (
+                        FrameVariablesUpdatedEvent,
+                        GraphEdgeTakenEvent,
+                        GraphEdgeSkippedEvent,
+                        NodeRunReasoningChunkEvent,
+                    ),
+                ):
+                    return []
+                if (
+                    isinstance(event, NodeRunStreamChunkEvent)
+                    and not self._pass_unmatched_chunks
+                ):
+                    return []
+        return [event]
+
+    def _start_frame_session(self, event: FrameStartedEvent) -> list[EngineEvent]:
+        # Full-value observations are consumed here, never forwarded to the host.
+        if event.frame_id == ROOT_FRAME_ID:
+            self._awaiting_root_baseline = False
+            return self._initialized_root_session.start(event)
+        graph = build_child_graph(self._graph_config, event)
+        if graph is None:
+            return []
+        session = _FrameSession(
+            graph,
+            None,
+            frame_id=event.frame_id,
+            container_id=event.container_id,
+            pass_unmatched_chunks=self._pass_unmatched_chunks,
+        )
+        session.register_responses()
+        if session.has_responses:
+            if event.reason == WorkflowStartReason.RESUMPTION:
+                msg = "Resuming child response progress is not supported yet"
+                raise ValueError(msg)
+            self._has_child_progress = True
+        self._frame_sessions[event.frame_id] = session
+        return session.start(event)
 
     def flush(self) -> Iterable[EngineEvent]:
         self._ensure_initialized()
         with use_workflow_file_runtime(self._file_runtime):
-            return self._try_flush()
+            return [
+                event
+                for session in self._frame_sessions.values()
+                for event in session.flush()
+            ]
 
     def dumps(self) -> str:
+        self._check_snapshot_scope()
         if self._pending_state is not None:
             return snapshot.dumps(self._pending_state)
         self._ensure_initialized()
-
-        state = v3.Snapshot(
-            response_nodes=sorted(self._response_nodes),
-            active_session=self._serialize_session(self._active_session),
-            waiting_sessions=[
-                session_state
-                for session in list(self._waiting_sessions)
-                if (session_state := self._serialize_session(session)) is not None
-            ],
-            pending_sessions=[
-                session_state
-                for _, session in sorted(self._response_sessions.items())
-                if (session_state := self._serialize_session(session)) is not None
-            ],
-            node_execution_ids=dict(
-                sorted(self._template_stream.node_execution_ids.items())
-            ),
-            taken_edges=sorted(self._taken_edge_ids),
-            legacy_paths_map=(
-                {
-                    node_id: [path.edges.copy() for path in paths]
-                    for node_id, paths in sorted(self._legacy_paths_by_response.items())
-                }
-                if self._legacy_paths_by_response is not None
-                else None
-            ),
-            stream_buffers=self._template_stream.stream_buffers.dump_buffers(),
-            stream_positions=self._template_stream.stream_buffers.dump_positions(),
-            closed_streams=self._template_stream.stream_buffers.dump_closed_selectors(),
-        )
-        return snapshot.dumps(state)
+        return snapshot.dumps(self._initialized_root_session.dump_state())
 
     def loads(self, data: str) -> None:
+        self._check_snapshot_scope()
         with use_workflow_file_runtime(self._file_runtime):
             state = snapshot.loads(data)
-            if self._graph is None or self._pending_state is not None:
+            if self._root_session is None or self._pending_state is not None:
                 self._pending_state = state
                 return
+            self._root_session.load_state(state)
 
-            self._apply_state(state)
-
-    def _apply_state(self, state: ResponseStreamFilterSnapshot) -> None:
-        state = snapshot.for_graph(state, self._bound_graph)
-        if not isinstance(state, v3.Snapshot):
-            msg = "Expected migrated version 3 ResponseStreamFilter state"
-            raise TypeError(msg)
-
-        response_nodes = set(state.response_nodes)
-        legacy_paths_by_response = (
-            {
-                node_id: [_Path(edges=list(path_edges)) for path_edges in paths]
-                for node_id, paths in state.legacy_paths_map.items()
-            }
-            if state.legacy_paths_map is not None
-            else None
-        )
-        taken_edge_ids = set(state.taken_edges)
-        node_execution_ids = dict(state.node_execution_ids)
-
-        stream_buffers = _StreamBuffers.from_state(
-            buffers=state.stream_buffers,
-            positions=state.stream_positions,
-            closed_selectors=state.closed_streams,
-        )
-        waiting_sessions = deque(
-            self._session_from_state(session_state)
-            for session_state in state.waiting_sessions
-        )
-        response_sessions = {
-            session_state.node_id: self._session_from_state(session_state)
-            for session_state in state.pending_sessions
-        }
-        active_session = (
-            self._session_from_state(state.active_session)
-            if state.active_session
-            else None
-        )
-
-        referenced_selectors: set[_Selector] = set()
-        for response_node_id in response_nodes:
-            referenced_selectors.update(
-                self._get_referenced_selectors(response_node_id)
-            )
-        reachability = (
-            {
-                node_id: self._build_reachability(node_id, taken_edge_ids)
-                for node_id in response_nodes
-            }
-            if legacy_paths_by_response is None
-            else {}
-        )
-
-        self._active_session = active_session
-        self._waiting_sessions = waiting_sessions
-        self._template_stream = _TemplateStream(
-            stream_buffers=stream_buffers, node_execution_ids=node_execution_ids
-        )
-        self._response_nodes = response_nodes
-        self._reachability = reachability
-        self._taken_edge_ids = taken_edge_ids
-        self._legacy_paths_by_response = legacy_paths_by_response
-        self._response_sessions = response_sessions
-        self._referenced_selectors = referenced_selectors
-        self._pending_state = None
-
-    def _ensure_initialized(self) -> None:
-        if (
-            self._graph is None
-            or self._runtime_state is None
-            or self._pending_state is not None
-        ):
-            msg = "ResponseStreamFilter must be initialized before use."
-            raise RuntimeError(msg)
-
-    @property
-    def _bound_graph(self) -> GraphProtocol:
-        if self._graph is None:
-            msg = "ResponseStreamFilter must be initialized before use."
-            raise RuntimeError(msg)
-        return self._graph
-
-    @property
-    def _bound_runtime_state(self) -> ReadOnlyRuntimeState:
-        if self._runtime_state is None:
-            msg = "ResponseStreamFilter must be initialized before use."
-            raise RuntimeError(msg)
-        return self._runtime_state
-
-    def _register(self, response_node_id: _NodeID) -> None:
-        if response_node_id in self._response_nodes:
-            return
-        self._response_nodes.add(response_node_id)
-        self._reachability[response_node_id] = self._build_reachability(
-            response_node_id, self._taken_edge_ids
-        )
-
-        response_node = self._bound_graph.nodes[response_node_id]
-        self._response_sessions[response_node_id] = _ResponseSession.from_node(
-            response_node,
-        )
-        self._record_referenced_selectors(response_node_id)
-
-    def _record_referenced_selectors(self, response_node_id: _NodeID) -> None:
-        self._referenced_selectors.update(
-            self._get_referenced_selectors(response_node_id)
-        )
-
-    def _get_referenced_selectors(
-        self,
-        response_node_id: _NodeID,
-    ) -> set[_Selector]:
-        response_node = self._bound_graph.nodes.get(response_node_id)
-        if response_node is None:
-            return set()
-
-        response_session = _ResponseSession.from_node(response_node)
-        return {
-            tuple(segment.selector)
-            for segment in response_session.template.segments
-            if isinstance(segment, VariableSegment)
-        }
-
-    def _build_reachability(
-        self, response_node_id: _NodeID, taken_edge_ids: set[str]
-    ) -> _ResponseReachability:
-        variable_selectors = self._get_response_variable_selectors(response_node_id)
-        blocking_edge_ids = {
-            edge_id
-            for edge_id in self._bound_graph.edges
-            if self._is_blocking_edge(edge_id, variable_selectors)
-        }
-        return _ResponseReachability(
-            self._bound_graph, response_node_id, blocking_edge_ids, taken_edge_ids
-        )
-
-    def _get_response_variable_selectors(
-        self,
-        response_node_id: _NodeID,
-    ) -> set[_Selector]:
-        response_node = self._bound_graph.nodes[response_node_id]
-        response_session = _ResponseSession.from_node(response_node)
-        return {
-            tuple(segment.selector[:2])
-            for segment in response_session.template.segments
-            if isinstance(segment, VariableSegment)
-        }
-
-    def _is_blocking_edge(
-        self,
-        edge_id: _EdgeID,
-        variable_selectors: set[_Selector],
-    ) -> bool:
-        edge = self._bound_graph.edges[edge_id]
-        source_node = self._bound_graph.nodes[edge.tail]
-        return source_node.execution_type in frozenset((
-            NodeExecutionType.BRANCH,
-            NodeExecutionType.CONTAINER,
-            NodeExecutionType.RESPONSE,
-        )) or source_node.blocks_variable_output(variable_selectors)
-
-    def _activate_initial_sessions(self) -> list[EngineEvent]:
-        events: list[EngineEvent] = []
-        for response_node_id in sorted(self._response_nodes):
-            if self._is_response_ready(response_node_id):
-                events.extend(self._active_or_queue_session(response_node_id))
-        return events
-
-    def _is_response_ready(self, response_node_id: str) -> bool:
-        if self._legacy_paths_by_response is not None:
-            return any(
-                path.is_empty()
-                for path in self._legacy_paths_by_response.get(response_node_id, [])
-            )
-        return self._reachability[response_node_id].is_ready()
-
-    def _handle_edge_taken(self, edge_id: _EdgeID) -> list[EngineEvent]:
-        events: list[EngineEvent] = []
-        if (
-            self._legacy_paths_by_response is None
-            and edge_id in self._bound_graph.edges
-        ):
-            self._taken_edge_ids.add(edge_id)
-        for response_node_id in sorted(self._response_nodes):
-            if self._legacy_paths_by_response is not None:
-                for path in self._legacy_paths_by_response.get(response_node_id, []):
-                    path.remove_edge(edge_id)
-                is_ready = self._is_response_ready(response_node_id)
-            else:
-                is_ready = self._reachability[response_node_id].record_taken_edge(
-                    edge_id
-                )
-            if is_ready:
-                events.extend(self._active_or_queue_session(response_node_id))
-        return events
-
-    def _active_or_queue_session(
-        self,
-        node_id: _NodeID,
-    ) -> list[EngineEvent]:
-        session = self._response_sessions.pop(node_id, None)
-        if session is None:
-            return []
-
-        if self._active_session is None:
-            self._active_session = session
-            return self._try_flush()
-
-        self._waiting_sessions.append(session)
-        return []
-
-    def _handle_stream_chunk(
-        self,
-        event: NodeRunStreamChunkEvent,
-    ) -> list[EngineEvent]:
-        selector_key = tuple(event.selector)
-        if selector_key in self._referenced_selectors:
-            self._template_stream.stream_buffers.append(event.selector, event)
-            if event.is_final:
-                self._template_stream.stream_buffers.close(event.selector)
-            return self._try_flush()
-        if self._pass_unmatched_chunks:
-            return [event]
-        return []
-
-    def _handle_reasoning_chunk(
-        self,
-        event: NodeRunReasoningChunkEvent,
-    ) -> list[EngineEvent]:
-        if self._is_reasoning_visible(event):
-            return [event]
-        return []
-
-    def _is_reasoning_visible(self, event: NodeRunReasoningChunkEvent) -> bool:
-        return (
-            self._has_valid_reasoning_selector(event)
-            and self._has_runnable_reasoning_source(event.node_id)
-            and self._is_reasoning_referenced_by_reached_session(event)
-        )
-
-    @staticmethod
-    def _has_valid_reasoning_selector(event: NodeRunReasoningChunkEvent) -> bool:
-        return tuple(event.selector) == (event.node_id, "reasoning_content")
-
-    def _has_runnable_reasoning_source(self, node_id: _NodeID) -> bool:
-        source_node = self._bound_graph.nodes.get(node_id)
-        return bool(source_node and source_node.state != NodeState.SKIPPED)
-
-    def _is_reasoning_referenced_by_reached_session(
-        self,
-        event: NodeRunReasoningChunkEvent,
-    ) -> bool:
-        reasoning_key = tuple(event.selector)
-        companion_text_key = (event.node_id, "text")
-        return any(
-            self._session_references_reasoning_source(
-                session,
-                selector_prefixes={reasoning_key, companion_text_key},
-            )
-            for session in self._reached_sessions()
-        )
-
-    def _reached_sessions(self) -> tuple[_ResponseSession, ...]:
-        sessions: list[_ResponseSession] = []
-        if self._active_session is not None:
-            sessions.append(self._active_session)
-        sessions.extend(self._waiting_sessions)
-        return tuple(sessions)
-
-    @staticmethod
-    def _session_references_reasoning_source(
-        session: _ResponseSession,
-        selector_prefixes: set[_Selector],
-    ) -> bool:
-        return any(
-            isinstance(segment, VariableSegment)
-            and tuple(segment.selector[:2]) in selector_prefixes
-            for segment in session.template.segments
-        )
-
-    def _try_flush(self) -> list[EngineEvent]:
-        if not self._active_session:
-            return []
-
-        response_node_id = self._active_session.node_id
-        events: list[EngineEvent] = []
-        events.extend(
-            self._template_stream.flush(
-                self._active_session,
-                graph=self._bound_graph,
-                variable_pool=self._bound_runtime_state.variable_pool,
-            )
-        )
-        if self._active_session.is_complete():
-            events.extend(self._end_session(response_node_id))
-
-        return events
-
-    def _end_session(self, node_id: _NodeID) -> list[EngineEvent]:
-        if not self._active_session or self._active_session.node_id != node_id:
-            return []
-
-        self._active_session = None
-        if not self._waiting_sessions:
-            return []
-
-        self._active_session = self._waiting_sessions.popleft()
-        return self._try_flush()
-
-    def _serialize_session(
-        self,
-        session: _ResponseSession | None,
-    ) -> ResponseSessionState | None:
-        if session is None:
-            return None
-        return ResponseSessionState(node_id=session.node_id, index=session.index)
-
-    def _session_from_state(
-        self,
-        session_state: ResponseSessionState,
-    ) -> _ResponseSession:
-        node = self._bound_graph.nodes.get(session_state.node_id)
-        if node is None:
-            msg = f"Unknown response node '{session_state.node_id}' in serialized state"
+    def _check_snapshot_scope(self) -> None:
+        # Root checkpoints do not yet include child response progress.
+        if self._has_child_progress:
+            msg = "Snapshots containing child response progress are not supported yet"
             raise ValueError(msg)
 
-        session = _ResponseSession.from_node(node)
-        session.index = session_state.index
-        return session
+    def _ensure_initialized(self) -> None:
+        if self._root_session is None or self._pending_state is not None:
+            msg = "ResponseStreamFilter must be initialized before use."
+            raise RuntimeError(msg)
+
+    @property
+    def _initialized_root_session(self) -> _FrameSession:
+        if self._root_session is None:
+            msg = "ResponseStreamFilter must be initialized before use."
+            raise RuntimeError(msg)
+        return self._root_session

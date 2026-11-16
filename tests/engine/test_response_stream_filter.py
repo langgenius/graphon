@@ -13,6 +13,7 @@ from graphon.engine.filter import (
     ResponseStreamFilter,
     filter_engine_events,
 )
+from graphon.engine_events.frame import FrameStartedEvent
 from graphon.engine_events.graph import GraphRunStartedEvent
 from graphon.engine_events.node import (
     NodeRunReasoningChunkEvent,
@@ -20,7 +21,7 @@ from graphon.engine_events.node import (
     NodeRunStartedEvent,
     NodeRunStreamChunkEvent,
 )
-from graphon.engine_events.traversal import GraphEdgeTakenEvent
+from graphon.engine_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTakenEvent
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType, NodeState, NodeType
 from graphon.graph.graph import Graph
 from graphon.nodes.base.template import (
@@ -421,8 +422,10 @@ def test_response_stream_filter_passes_answer_visible_reasoning_chunk() -> None:
 
     assert output == [reasoning]
     assert output[0] is reasoning
-    assert not event_filter._template_stream.stream_buffers.has_events(
-        reasoning.selector
+    assert not (
+        event_filter._initialized_root_session._template_stream.stream_buffers.has_events(
+            reasoning.selector
+        )
     )
 
 
@@ -437,8 +440,10 @@ def test_response_stream_filter_passes_reasoning_for_text_selector_prefix() -> N
 
     assert output == [reasoning]
     assert output[0] is reasoning
-    assert not event_filter._template_stream.stream_buffers.has_events(
-        reasoning.selector
+    assert not (
+        event_filter._initialized_root_session._template_stream.stream_buffers.has_events(
+            reasoning.selector
+        )
     )
 
 
@@ -453,8 +458,10 @@ def test_response_stream_filter_passes_explicit_reasoning_reference() -> None:
 
     assert output == [reasoning]
     assert output[0] is reasoning
-    assert not event_filter._template_stream.stream_buffers.has_events(
-        reasoning.selector
+    assert not (
+        event_filter._initialized_root_session._template_stream.stream_buffers.has_events(
+            reasoning.selector
+        )
     )
 
 
@@ -488,7 +495,11 @@ def test_response_stream_filter_passes_visible_final_reasoning_marker() -> None:
 
     assert output == [marker]
     assert marker.is_final is True
-    assert not event_filter._template_stream.stream_buffers.has_events(marker.selector)
+    assert not (
+        event_filter._initialized_root_session._template_stream.stream_buffers.has_events(
+            marker.selector
+        )
+    )
 
 
 def test_response_stream_filter_filters_reasoning_before_branch_is_reached() -> None:
@@ -762,6 +773,38 @@ def test_response_stream_filter_waits_for_consumed_edge_event(
     assert output == [chunk]
 
 
+@pytest.mark.parametrize("skip_first", [False, True])
+@pytest.mark.parametrize("restore", [False, True], ids=["direct", "checkpoint"])
+def test_response_stream_filter_respects_first_edge_decision(
+    skip_first: bool, restore: bool
+) -> None:
+    graph = _variable_response_graph()
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    chunk = _stream_chunk("saved", is_final=False)
+    assert list(event_filter.on_event(chunk)) == []
+    skipped = GraphEdgeSkippedEvent(
+        frame_id=ROOT_FRAME_ID,
+        edge_id="edge-1",
+        source_node_id="source",
+        target_node_id="answer",
+        source_handle="success",
+    )
+    first, second = (skipped, _edge_taken()) if skip_first else (_edge_taken(), skipped)
+    assert list(event_filter.on_event(first)) == ([] if skip_first else [chunk])
+    if restore:
+        restored_filter = ResponseStreamFilter()
+        restored_filter.loads(event_filter.dumps())
+        restored_filter.initialize(_context(graph))
+        event_filter = restored_filter
+    assert list(event_filter.on_event(second)) == []
+    final_chunk = _stream_chunk(" end")
+    assert list(event_filter.on_event(final_chunk)) == (
+        [] if skip_first else [final_chunk]
+    )
+
+
 def test_response_stream_filter_reads_scalar_variable_values() -> None:
     graph = _variable_response_graph()
     variable_pool = VariablePool()
@@ -804,7 +847,21 @@ def test_response_stream_filter_assembles_builtin_response_values(
     event_filter = ResponseStreamFilter()
     event_filter.initialize(EngineEventFilterContext.from_engine(engine))
 
-    output = list(event_filter.on_event(GraphRunStartedEvent()))
+    variables = engine.runtime_state.variable_pool.variable_dictionary
+    output = [
+        *event_filter.on_event(GraphRunStartedEvent()),
+        *event_filter.on_event(
+            FrameStartedEvent(
+                frame_id="root",
+                node_execution_ids={"response": "response-run"},
+                variables=tuple(
+                    variable
+                    for values in variables.values()
+                    for variable in values.values()
+                ),
+            )
+        ),
+    ]
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     separator = " / " if node_type == BuiltinNodeTypes.ANSWER else "\n"

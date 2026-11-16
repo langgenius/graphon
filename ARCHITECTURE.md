@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-12T01:14:36Z"
+last_checked: "2026-11-16T03:43:28Z"
 -->
 # Architecture
 
@@ -80,34 +80,13 @@ flowchart LR
    and notifies layers. `Engine.run()` emits terminal status and stops execution
    resources. A failed graph emits `GraphRunFailedEvent` and raises its error.
 
-## Response streaming
-
 Response presentation is a consumer concern. `Engine.run()` yields raw engine
 events; hosts use [filter_engine_events](src/graphon/engine/filter/chain.py) with
 [ResponseStreamFilter](src/graphon/engine/filter/builtin/response_stream/filter.py)
-for root-response selection, template assembly, buffering, and presentation order.
+for response selection, template assembly, buffering, and presentation order.
 Producer chunks remain immediate, including across parallel container items.
 See [raw-event tests](tests/engine/test_raw_engine_events.py) and
 [filter tests](tests/engine/test_event_filters.py).
-
-The filter tracks [reachability](src/graphon/engine/filter/builtin/response_stream/reachability.py)
-separately for each response. Nonblocking edges are open before traversal, allowing
-early output. Edges leaving branches, containers, or responses, and edges whose
-source blocks the response's variable selectors, open only after the filter consumes
-their root-frame `GraphEdgeTakenEvent`. Any open route from the root suffices;
-this does not change scheduler join rules. Reachability expands without enumerating
-complete paths or reading live edge states, which may be ahead of the consumer.
-Child-frame traversal events do not open root edges.
-
-Filter checkpoints preserve consumer progress separately from runtime snapshots.
-The [current snapshot model](src/graphon/engine/filter/builtin/response_stream/v3.py)
-records consumed edge IDs; the [v1](src/graphon/engine/filter/builtin/response_stream/v1.py)
-and [v2](src/graphon/engine/filter/builtin/response_stream/v2.py) readers retain
-already-materialized residual paths when binding legacy state. Sessions, buffered
-chunks, and cursors resume together. See [response-filter tests](tests/engine/test_response_stream_filter.py)
-for activation, instance isolation, and restoration, and
-[version-isolation tests](tests/test_snapshot_version_isolation.py) for operation
-without legacy readers.
 
 ## Raw frame observations
 
@@ -151,8 +130,66 @@ commits, detached values, and raw chunk delivery, and the
 [frame failure tests](tests/engine/test_frame_failures.py) for pause/restore and
 consumer exceptions.
 
-Baselines and commits contain full variable values.
-`ResponseStreamFilter` suppresses those events from its output after the engine has constructed and copied them; this compatibility guard does not add child response assembly.
+Baselines and commits contain full variable values. `ResponseStreamFilter`
+consumes those events without forwarding them to its output. The engine
+still constructs the events and copies their values.
+
+## Response sessions
+
+[ResponseStreamFilter](src/graphon/engine/filter/builtin/response_stream/filter.py)
+owns independent root and child [frame sessions](src/graphon/engine/filter/builtin/response_stream/frame_session.py).
+Root templates use the existing Python node interfaces. Child Answer and End
+templates come from [retained definitions](src/graphon/engine/filter/builtin/response_stream/frame_graph.py),
+without constructing nodes or calling factories. Frame starts activate initially
+eligible templates. Fresh sessions maintain [reachability](src/graphon/engine/filter/builtin/response_stream/reachability.py)
+per response through nonblocking edges and consumed traversal events. Branches,
+containers, responses, and nodes that block referenced variables gate their
+outgoing edges until taken; a blocking edge skipped before it is taken remains
+rejected. Shared suffixes are visited once per response instead of expanding into
+complete paths, and activation does not read live edge states. A reserved
+execution ID alone does not make a reply reachable. Custom frames without enough
+declarative context get no response session; ordinary node and completion events
+still pass through.
+
+Keep `emit_frame_events=True` when using a context from `from_engine()`: the
+filter waits for the root baseline before resolving values. Each observed frame keeps a detached value pool and applies
+committed replacements in publication order, including when events are consumed
+after engine frames have been removed. Result and variable-request events do not
+apply values again. Direct contexts without `run_id` retain the legacy manual
+event-stream behavior until a frame baseline is supplied.
+
+[Template assembly](src/graphon/engine/filter/builtin/response_stream/template_stream.py)
+feeds the filter output for both scopes. Child sources are keyed by execution,
+attempt, and selector within their frame; each response and template occurrence
+has its own cursor. An occurrence that has started reading a source remains on
+that source through retries and overwrites. Retries replace undisplayed attempts;
+committed replacements supply later occurrences. Successful and handled-failure
+results close unfinished child sources without replaying their final values.
+Child Answer chunks use the reserved Answer ID and `[answer_id, "answer"]`, with
+one final marker after the complete template, including empty replies. Source
+final markers close only their source. Ordinary Answer `answer` and `files`
+outputs and host-bound file formatting remain unchanged.
+
+Failed or aborted frames close displayed child Answers and discard their remaining
+templates. Graph termination also settles frames before `flush()` is needed.
+Completed frames release captured values and source buffers. Root chunks retain
+their existing event shapes and shared source cursors. Filter persistence supports
+only root response state. Fresh checkpoints use v3, storing consumed taken edges
+and edges skipped before they were taken alongside response and stream progress.
+Restoring v1 or v2 retains its residual blocking paths explicitly in v3; v1
+migration also discards child response state. Sessions started from an initial
+frame baseline additionally record observed skipped edges, so resumed templates
+do not consult future live node states. Snapshots without this optional metadata
+retain the paired graph's skip lookup. See the [response filter tests](tests/engine/test_response_stream_filter.py)
+for native and legacy restoration, and [performance regressions](tests/engine/test_response_stream_filter_performance.py)
+for traversal bounds and agreement with an independent path oracle.
+After a child frame containing an Answer or End starts, `dumps()` and `loads()`
+reject that filter instance's state, including after the frame finishes. Resuming
+such a child frame is also rejected. Child pause/resume support and ordering
+across parallel or nested response groups remain follow-up stages of
+[#356](https://github.com/langgenius/graphon/issues/356).
+Current sequential Loop/Iteration behavior, source policies, and these boundaries
+are exercised by the [container response tests](tests/engine/test_container_response_streaming.py).
 
 ## State and execution invariants
 

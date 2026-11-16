@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-12T01:14:36Z"
+last_checked: "2026-11-16T06:25:48Z"
 -->
 # Technical debt
 
@@ -86,15 +86,16 @@ successful node order. Keep the example small enough to serve as a reproduction.
 The [benchmark](../benchmarks/test_engine_performance.py) does not isolate the
 response-filter initialization cost, leaving a gap in performance feedback.
 
-Continue [PR #271](https://github.com/langgenius/graphon/pull/271) for the known
-response-filter initialization path and
+[Response-filter regressions](../tests/engine/test_response_stream_filter_performance.py)
+cover bounded graph traversal, selector-dependent readiness, and agreement with
+an independent path oracle. Continue
 [PR #266](https://github.com/langgenius/graphon/pull/266) for benchmark instructions.
 Prefer deterministic complexity checks for that path and identify which phase a
 measurement covers. Add timing workloads only for a specific performance question.
 
-**Completion:** a runnable filter regression preserves output correctness, the
-command is discoverable, and results distinguish construction, initialization,
-and execution. Preserve existing benchmarks and
+**Completion:** performance commands are discoverable, and results distinguish
+construction, initialization, and execution. Preserve output correctness,
+existing benchmarks, and
 [response-filter tests](../tests/engine/test_response_stream_filter.py).
 
 ## TD-10 — Decision records

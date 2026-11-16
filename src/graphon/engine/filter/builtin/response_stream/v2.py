@@ -15,6 +15,7 @@ class Snapshot(ResponseStreamFilterSnapshot[Literal["2.0"]]):
 
     version: Literal["2.0"] = "2.0"
     paths_map: dict[str, list[list[str]]] = Field(default_factory=dict)
+    skipped_edges: list[str] | None = None
 
 
 def loads(data: str) -> Snapshot:
@@ -30,7 +31,7 @@ def loads(data: str) -> Snapshot:
 
 
 def dumps(snapshot: ResponseStreamFilterSnapshot) -> str:
-    """Serialize native version 2 state without compatibility metadata.
+    """Serialize state using the exact legacy version 2 schema.
 
     Args:
         snapshot: State that must be an instance of this module's exact model.
@@ -44,7 +45,9 @@ def dumps(snapshot: ResponseStreamFilterSnapshot) -> str:
     if not isinstance(snapshot, Snapshot):
         msg = "Expected a version 2 ResponseStreamFilter snapshot"
         raise TypeError(msg)
-    return snapshot.model_dump_json()
+    return snapshot.model_dump_json(
+        exclude={"skipped_edges"} if snapshot.skipped_edges is None else set()
+    )
 
 
 def for_graph(

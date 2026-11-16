@@ -5,12 +5,13 @@ from graphon.runtime.runtime_state import GraphProtocol
 
 
 class _ResponseReachability:
-    """Reachability through nonblocking edges and consumed root-edge events.
+    """Reachability through nonblocking edges and one frame's consumed events.
 
     Each node becomes reachable once, so shared suffixes never expand into
     separate complete paths. Remember consumed events even when their sources
-    are not yet reachable. Live edge states are deliberately ignored: the engine
-    may be ahead of the event consumer.
+    are not yet reachable. A blocking edge skipped before it is taken remains
+    rejected. Live edge states are deliberately ignored: the engine may be ahead
+    of the event consumer.
     """
 
     def __init__(
@@ -19,11 +20,13 @@ class _ResponseReachability:
         response_node_id: str,
         blocking_edge_ids: set[str],
         taken_edge_ids: Iterable[str],
+        rejected_edge_ids: Iterable[str] = (),
     ) -> None:
         self._graph = graph
         self._response_node_id = response_node_id
         self._blocking_edge_ids = blocking_edge_ids
         self._taken_edge_ids = set(taken_edge_ids)
+        self._rejected_edge_ids = set(rejected_edge_ids)
         self._reachable_node_ids: set[str] = set()
         self._add_reachable_nodes(graph.root_node.id)
 
@@ -34,9 +37,16 @@ class _ResponseReachability:
         edge = self._graph.edges.get(edge_id)
         if edge is not None:
             self._taken_edge_ids.add(edge_id)
-            if edge.tail in self._reachable_node_ids:
+            if edge.tail in self._reachable_node_ids and (
+                edge_id not in self._rejected_edge_ids
+                or edge_id not in self._blocking_edge_ids
+            ):
                 self._add_reachable_nodes(edge.head)
         return self.is_ready()
+
+    def record_skipped_edge(self, edge_id: str) -> None:
+        if edge_id in self._graph.edges and edge_id not in self._taken_edge_ids:
+            self._rejected_edge_ids.add(edge_id)
 
     def _add_reachable_nodes(self, node_id: str) -> None:
         if node_id in self._reachable_node_ids:
@@ -48,9 +58,9 @@ class _ResponseReachability:
             if current_node_id == self._response_node_id:
                 continue
             for edge in self._graph.get_outgoing_edges(current_node_id):
-                if (
-                    edge.id in self._blocking_edge_ids
-                    and edge.id not in self._taken_edge_ids
+                if edge.id in self._blocking_edge_ids and (
+                    edge.id not in self._taken_edge_ids
+                    or edge.id in self._rejected_edge_ids
                 ):
                     continue
                 if edge.head not in self._reachable_node_ids:
