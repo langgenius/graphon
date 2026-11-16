@@ -7,6 +7,7 @@ from pydantic import Field
 from graphon.runtime.runtime_state import GraphProtocol
 
 from . import v3
+from .ids import EdgeID, NodeID
 from .snapshot import ResponseStreamFilterSnapshot
 
 
@@ -76,5 +77,8 @@ def for_graph(
         raise TypeError(msg)
     return v3.Snapshot(
         **snapshot.model_dump(exclude={"version", "paths_map"}),
-        legacy_paths_map=snapshot.paths_map,
+        legacy_paths_map={
+            NodeID(node_id): [[EdgeID(edge_id) for edge_id in path] for path in paths]
+            for node_id, paths in snapshot.paths_map.items()
+        },
     )

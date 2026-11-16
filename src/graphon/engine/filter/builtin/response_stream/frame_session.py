@@ -31,12 +31,11 @@ from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.variables import Variable
 
 from . import snapshot, v3
+from .ids import EdgeID, NodeID
 from .reachability import _EdgeDecision, _ResponseReachability
 from .snapshot import ResponseSessionState, ResponseStreamFilterSnapshot, Selector
 from .template_stream import _ResponseSession, _StreamBuffers, _TemplateStream
 
-type _NodeID = str
-type _EdgeID = str
 type _Selector = Selector
 
 
@@ -44,9 +43,9 @@ type _Selector = Selector
 class _BlockingPath:
     """Blocking traversal edges that must be taken before a response can stream."""
 
-    edge_ids: list[_EdgeID] = field(default_factory=list)
+    edge_ids: list[EdgeID] = field(default_factory=list)
 
-    def remove_edge(self, edge_id: _EdgeID) -> None:
+    def remove_edge(self, edge_id: EdgeID) -> None:
         if edge_id in self.edge_ids:
             self.edge_ids.remove(edge_id)
 
@@ -58,8 +57,8 @@ class _BlockingPath:
 class _ReachabilityState:
     """Frame-owned first decisions and response-local reachability caches."""
 
-    first_edge_decisions: dict[str, _EdgeDecision] = field(default_factory=dict)
-    reachability_by_response: dict[str, _ResponseReachability] = field(
+    first_edge_decisions: dict[EdgeID, _EdgeDecision] = field(default_factory=dict)
+    reachability_by_response: dict[NodeID, _ResponseReachability] = field(
         default_factory=dict
     )
 
@@ -68,7 +67,7 @@ class _ReachabilityState:
 class _LegacyPathState:
     """Residual conditions retained from an imported legacy checkpoint."""
 
-    paths_by_response: dict[str, list[_BlockingPath]]
+    paths_by_response: dict[NodeID, list[_BlockingPath]]
 
 
 class _FrameSession:
@@ -88,15 +87,15 @@ class _FrameSession:
         self.frame_id = frame_id
         self._pass_unmatched_chunks = pass_unmatched_chunks
         self._observed_values: VariablePool | None = None
-        self._skipped_edge_ids: set[str] | None = None
+        self._skipped_edge_ids: set[EdgeID] | None = None
         self._active_session: _ResponseSession | None = None
         self._waiting_sessions: deque[_ResponseSession] = deque()
         self._template_stream = _TemplateStream(
             frame_id=frame_id, container_id=container_id
         )
-        self._response_node_ids: set[str] = set()
+        self._response_node_ids: set[NodeID] = set()
         self._gating_state: _ReachabilityState | _LegacyPathState = _ReachabilityState()
-        self._response_sessions: dict[str, _ResponseSession] = {}
+        self._response_sessions: dict[NodeID, _ResponseSession] = {}
         self._referenced_selectors: set[_Selector] = set()
 
     @property
@@ -113,7 +112,7 @@ class _FrameSession:
                 self.frame_id == ROOT_FRAME_ID
                 or node.node_type in {BuiltinNodeTypes.ANSWER, BuiltinNodeTypes.END}
             ):
-                self._register_response(node.id, gating_state)
+                self._register_response(NodeID(node.id), gating_state)
 
     def start(self, event: FrameStartedEvent) -> list[EngineEvent]:
         self._observed_values = VariablePool()
@@ -149,7 +148,7 @@ class _FrameSession:
             case NodeRunReasoningChunkEvent():
                 return self._handle_reasoning_chunk(event)
             case GraphEdgeTakenEvent():
-                return self._handle_edge_taken(event.edge_id)
+                return self._handle_edge_taken(EdgeID(event.edge_id))
             case GraphEdgeSkippedEvent():
                 return self._handle_edge_skipped(event)
             case NodeRunSucceededEvent() | NodeRunExceptionEvent():
@@ -193,24 +192,23 @@ class _FrameSession:
             pending.extend(
                 edge.head
                 for edge in self.graph.get_outgoing_edges(node_id)
-                if edge.id not in self._skipped_edge_ids
+                if EdgeID(edge.id) not in self._skipped_edge_ids
             )
         return set(self.graph.nodes) - reachable
 
     def _handle_edge_skipped(self, event: GraphEdgeSkippedEvent) -> list[EngineEvent]:
+        edge_id = EdgeID(event.edge_id)
         if self._skipped_edge_ids is not None:
-            self._skipped_edge_ids.add(event.edge_id)
+            self._skipped_edge_ids.add(edge_id)
             self._template_stream.skipped_node_ids = self._find_skipped_node_ids()
         gating_state = self._gating_state
         if isinstance(gating_state, _LegacyPathState):
             for node_id, paths in gating_state.paths_by_response.items():
                 gating_state.paths_by_response[node_id] = [
-                    path for path in paths if event.edge_id not in path.edge_ids
+                    path for path in paths if edge_id not in path.edge_ids
                 ]
-        elif event.edge_id in self.graph.edges:
-            gating_state.first_edge_decisions.setdefault(
-                event.edge_id, _EdgeDecision.SKIPPED
-            )
+        elif edge_id in self.graph.edges:
+            gating_state.first_edge_decisions.setdefault(edge_id, _EdgeDecision.SKIPPED)
         return self._try_flush()
 
     def dump_state(self) -> v3.Snapshot:
@@ -238,7 +236,9 @@ class _FrameSession:
             skipped_edges=sorted(self._skipped_edge_ids)
             if self._skipped_edge_ids is not None
             else None,
-            response_nodes=sorted(self._response_node_ids),
+            response_nodes=[
+                str(node_id) for node_id in sorted(self._response_node_ids)
+            ],
             active_session=self._serialize_session(self._active_session),
             waiting_sessions=[
                 session_state
@@ -267,7 +267,7 @@ class _FrameSession:
             msg = "Expected migrated version 3 ResponseStreamFilter state"
             raise TypeError(msg)
 
-        response_node_ids = set(state.response_nodes)
+        response_node_ids = {NodeID(node_id) for node_id in state.response_nodes}
         node_execution_ids = dict(state.node_execution_ids)
 
         stream_buffers = _StreamBuffers.from_state(
@@ -280,7 +280,7 @@ class _FrameSession:
             for session_state in state.waiting_sessions
         )
         response_sessions = {
-            session_state.node_id: self._session_from_state(session_state)
+            NodeID(session_state.node_id): self._session_from_state(session_state)
             for session_state in state.pending_sessions
         }
         active_session = (
@@ -334,7 +334,7 @@ class _FrameSession:
         self._referenced_selectors = referenced_selectors
 
     def _register_response(
-        self, response_node_id: _NodeID, gating_state: _ReachabilityState
+        self, response_node_id: NodeID, gating_state: _ReachabilityState
     ) -> None:
         if response_node_id in self._response_node_ids:
             return
@@ -351,14 +351,14 @@ class _FrameSession:
         )
         self._record_referenced_selectors(response_node_id)
 
-    def _record_referenced_selectors(self, response_node_id: _NodeID) -> None:
+    def _record_referenced_selectors(self, response_node_id: NodeID) -> None:
         self._referenced_selectors.update(
             self._get_referenced_selectors(response_node_id)
         )
 
     def _get_referenced_selectors(
         self,
-        response_node_id: _NodeID,
+        response_node_id: NodeID,
     ) -> set[_Selector]:
         response_node = self.graph.nodes.get(response_node_id)
         if response_node is None:
@@ -373,13 +373,13 @@ class _FrameSession:
 
     def _build_reachability(
         self,
-        response_node_id: str,
-        first_edge_decisions: Mapping[str, _EdgeDecision],
+        response_node_id: NodeID,
+        first_edge_decisions: Mapping[EdgeID, _EdgeDecision],
     ) -> _ResponseReachability:
         variable_selectors = self._get_response_variable_selectors(response_node_id)
         blocking_edge_ids = {
             edge_id
-            for edge_id in self.graph.edges
+            for edge_id in map(EdgeID, self.graph.edges)
             if self._is_blocking_edge(edge_id, variable_selectors)
         }
         return _ResponseReachability(
@@ -391,7 +391,7 @@ class _FrameSession:
 
     def _get_response_variable_selectors(
         self,
-        response_node_id: _NodeID,
+        response_node_id: NodeID,
     ) -> set[_Selector]:
         response_node = self.graph.nodes[response_node_id]
         response_session = _ResponseSession.from_node(response_node)
@@ -403,7 +403,7 @@ class _FrameSession:
 
     def _is_blocking_edge(
         self,
-        edge_id: _EdgeID,
+        edge_id: EdgeID,
         variable_selectors: set[_Selector],
     ) -> bool:
         edge = self.graph.edges[edge_id]
@@ -421,7 +421,7 @@ class _FrameSession:
                 events.extend(self._activate_or_queue_session(response_node_id))
         return events
 
-    def _is_response_ready(self, response_node_id: str) -> bool:
+    def _is_response_ready(self, response_node_id: NodeID) -> bool:
         gating_state = self._gating_state
         if isinstance(gating_state, _LegacyPathState):
             return any(
@@ -430,7 +430,7 @@ class _FrameSession:
             )
         return gating_state.reachability_by_response[response_node_id].is_ready()
 
-    def _handle_edge_taken(self, edge_id: _EdgeID) -> list[EngineEvent]:
+    def _handle_edge_taken(self, edge_id: EdgeID) -> list[EngineEvent]:
         events: list[EngineEvent] = []
         gating_state = self._gating_state
         if isinstance(gating_state, _ReachabilityState) and edge_id in self.graph.edges:
@@ -450,7 +450,7 @@ class _FrameSession:
 
     def _activate_or_queue_session(
         self,
-        node_id: _NodeID,
+        node_id: NodeID,
     ) -> list[EngineEvent]:
         session = self._response_sessions.pop(node_id, None)
         if session is None:
@@ -486,7 +486,7 @@ class _FrameSession:
     def _is_reasoning_visible(self, event: NodeRunReasoningChunkEvent) -> bool:
         return (
             self._has_valid_reasoning_selector(event)
-            and self._has_runnable_reasoning_source(event.node_id)
+            and self._has_runnable_reasoning_source(NodeID(event.node_id))
             and self._is_reasoning_referenced_by_reached_session(event)
         )
 
@@ -494,7 +494,7 @@ class _FrameSession:
     def _has_valid_reasoning_selector(event: NodeRunReasoningChunkEvent) -> bool:
         return tuple(event.selector) == (event.node_id, "reasoning_content")
 
-    def _has_runnable_reasoning_source(self, node_id: _NodeID) -> bool:
+    def _has_runnable_reasoning_source(self, node_id: NodeID) -> bool:
         source_node = self.graph.nodes.get(node_id)
         return bool(
             source_node
@@ -537,7 +537,7 @@ class _FrameSession:
         if not self._active_session or self.variable_pool is None:
             return []
 
-        response_node_id = self._active_session.node_id
+        response_node_id = NodeID(self._active_session.node_id)
         events: list[EngineEvent] = []
         events.extend(
             self._template_stream.flush(
@@ -553,7 +553,7 @@ class _FrameSession:
 
         return events
 
-    def _end_session(self, node_id: _NodeID) -> list[EngineEvent]:
+    def _end_session(self, node_id: NodeID) -> list[EngineEvent]:
         if not self._active_session or self._active_session.node_id != node_id:
             return []
 

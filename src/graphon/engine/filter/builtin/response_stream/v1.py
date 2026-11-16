@@ -10,6 +10,7 @@ from graphon.nodes.base.template import VariableSegment
 from graphon.runtime.runtime_state import GraphProtocol, NodeProtocol
 
 from . import v3
+from .ids import EdgeID, NodeID
 from .snapshot import ResponseStreamFilterSnapshot, Selector
 
 
@@ -90,7 +91,9 @@ def for_graph(
 
     try:
         paths_map = {
-            node_id: [[legacy_edge_ids[edge_id] for edge_id in path] for path in paths]
+            NodeID(node_id): [
+                [EdgeID(legacy_edge_ids[edge_id]) for edge_id in path] for path in paths
+            ]
             for node_id, paths in snapshot.paths_map.items()
             if node_id in root_response_nodes
         }

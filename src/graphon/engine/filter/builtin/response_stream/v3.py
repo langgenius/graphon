@@ -6,6 +6,7 @@ from pydantic import Field, model_validator
 
 from graphon.runtime.runtime_state import GraphProtocol
 
+from .ids import EdgeID, NodeID
 from .snapshot import ResponseStreamFilterSnapshot
 
 
@@ -23,10 +24,18 @@ class Snapshot(ResponseStreamFilterSnapshot[Literal["3.0"]]):
     """
 
     version: Literal["3.0"] = "3.0"
-    taken_edges: list[str] = Field(default_factory=list)
-    rejected_edges: list[str] = Field(default_factory=list)
-    skipped_edges: list[str] | None = None
-    legacy_paths_map: dict[str, list[list[str]]] | None = None
+    # Edge IDs whose first consumed decision was TAKEN. Older inputs may also
+    # include takes after a skip; rejected_edges takes precedence for overlaps.
+    taken_edges: list[EdgeID] = Field(default_factory=list)
+    # Edge IDs whose first consumed decision was SKIPPED. They remain closed
+    # when a response treats the edge as blocking.
+    rejected_edges: list[EdgeID] = Field(default_factory=list)
+    # All observed skipped edge IDs for template selection, including late skips.
+    # None retains the paired graph's skip lookup for older checkpoints.
+    skipped_edges: list[EdgeID] | None = None
+    # Response node ID -> alternative residual paths (OR). Each path contains
+    # the remaining blocking edge IDs that must all be taken (AND).
+    legacy_paths_map: dict[NodeID, list[list[EdgeID]]] | None = None
 
     @model_validator(mode="after")
     def _reject_mixed_gating_modes(self) -> Self:
