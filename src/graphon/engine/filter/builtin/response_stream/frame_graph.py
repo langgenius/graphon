@@ -59,9 +59,20 @@ class _GraphDefinition:
     nodes: dict[str, _NodeDefinition]
     edges: dict[str, _EdgeDefinition]
     root_node: _NodeDefinition
+    _outgoing_by_node: dict[str, tuple[_EdgeDefinition, ...]] = field(
+        init=False, repr=False
+    )
+
+    def __post_init__(self) -> None:
+        grouped: dict[str, list[_EdgeDefinition]] = {}
+        for edge in self.edges.values():
+            grouped.setdefault(edge.tail, []).append(edge)
+        self._outgoing_by_node = {
+            node_id: tuple(edges) for node_id, edges in grouped.items()
+        }
 
     def get_outgoing_edges(self, node_id: str) -> Sequence[_EdgeDefinition]:
-        return [edge for edge in self.edges.values() if edge.tail == node_id]
+        return self._outgoing_by_node.get(node_id, ())
 
 
 def _build_node_definition(node_id: str, data: Mapping[str, Any]) -> _NodeDefinition:

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field
-
 from graphon.runtime.runtime_state import GraphProtocol
 
 from .snapshot import ResponseStreamFilterSnapshot
@@ -15,7 +13,6 @@ class Snapshot(ResponseStreamFilterSnapshot[Literal["2.0"]]):
     version: Literal["2.0"] = "2.0"
     # Missing metadata retains the historical paired-graph skip lookup.
     skipped_edges: list[str] | None = None
-    taken_edges: list[str] = Field(default_factory=list)
 
 
 def loads(data: str) -> Snapshot:
@@ -45,12 +42,9 @@ def dumps(snapshot: ResponseStreamFilterSnapshot) -> str:
     if not isinstance(snapshot, Snapshot):
         msg = "Expected a version 2 ResponseStreamFilter snapshot"
         raise TypeError(msg)
-    exclude_fields: set[str] = set()
-    if snapshot.skipped_edges is None:
-        exclude_fields.add("skipped_edges")
-    if not snapshot.taken_edges:
-        exclude_fields.add("taken_edges")
-    return snapshot.model_dump_json(exclude=exclude_fields)
+    return snapshot.model_dump_json(
+        exclude={"skipped_edges"} if snapshot.skipped_edges is None else set()
+    )
 
 
 def for_graph(

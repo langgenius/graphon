@@ -12,6 +12,7 @@ from graphon.engine.filter import (
     ResponseStreamFilter,
     filter_engine_events,
 )
+from graphon.engine.filter.builtin.response_stream import v2
 from graphon.engine_events.frame import FrameStartedEvent
 from graphon.engine_events.graph import GraphRunStartedEvent
 from graphon.engine_events.node import (
@@ -730,14 +731,34 @@ def test_response_stream_filter_initialize_resets_run_state() -> None:
     assert [event.chunk for event in second_chunks] == ["second"]
 
 
-def test_response_stream_filter_writes_version_2_snapshot() -> None:
+def test_response_stream_filter_writes_version_3_snapshot() -> None:
     graph = _variable_response_graph()
     event_filter = ResponseStreamFilter()
     event_filter.initialize(_context(graph))
 
     snapshot = json.loads(event_filter.dumps())
 
-    assert snapshot["version"] == "2.0"
+    assert snapshot["version"] == "3.0"
+    assert "paths_map" not in snapshot
+    assert snapshot["taken_edges"] == []
+
+
+def test_response_stream_filter_v2_loader_rejects_version_3_snapshot() -> None:
+    graph = _variable_response_graph()
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+    raw_v3 = event_filter.dumps()
+
+    with pytest.raises(ValueError, match=r"2\.0"):
+        v2.loads(raw_v3)
+
+    unsupported = json.loads(raw_v3)
+    unsupported["version"] = "99.0"
+    with pytest.raises(
+        ValueError,
+        match=r"Unsupported ResponseStreamFilter snapshot version: 99\.0",
+    ):
+        event_filter.loads(json.dumps(unsupported))
 
 
 def test_response_stream_filter_migrates_v1_root_state_after_graph_binding() -> None:
@@ -822,6 +843,8 @@ def test_response_stream_filter_does_not_migrate_version_2_edge_ids() -> None:
     event_filter = ResponseStreamFilter()
     event_filter.initialize(_context(graph))
     snapshot = json.loads(event_filter.dumps())
+    snapshot["version"] = "2.0"
+    snapshot.pop("taken_edges", None)
     snapshot["paths_map"] = {"answer": [["edge_0"]]}
 
     restored_filter = ResponseStreamFilter()

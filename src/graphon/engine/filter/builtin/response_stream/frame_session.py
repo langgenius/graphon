@@ -31,7 +31,7 @@ from graphon.runtime.runtime_state_protocol import ReadOnlyVariablePool
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.variables import Variable
 
-from . import snapshot, v2
+from . import snapshot, v2, v3
 from .snapshot import ResponseSessionState, ResponseStreamFilterSnapshot, Selector
 from .template_stream import _ResponseSession, _StreamBuffers, _TemplateStream
 
@@ -52,6 +52,22 @@ class _BlockingPath:
 
     def is_empty(self) -> bool:
         return len(self.edge_ids) == 0
+
+
+@dataclass
+class _ResponseGate:
+    """Incremental reachability state from the frame root to one response node."""
+
+    target_node_id: _NodeID
+    backward_reachable: set[_NodeID]
+    blocking_edges: set[_EdgeID]
+    unblocked_nodes: set[_NodeID] = field(default_factory=set)
+    frontier_edges: dict[_EdgeID, _NodeID] = field(default_factory=dict)
+    traversed_edges: set[_EdgeID] = field(default_factory=set)
+
+    @property
+    def is_unblocked(self) -> bool:
+        return self.target_node_id in self.unblocked_nodes
 
 
 class _FrameSession:
@@ -80,6 +96,8 @@ class _FrameSession:
         self._response_node_ids: set[str] = set()
         self._blocking_paths: dict[str, list[_BlockingPath]] = {}
         self._blocking_edges_by_response: dict[str, set[str]] = {}
+        self._response_gates: dict[str, _ResponseGate] = {}
+        self._reverse_adjacency: dict[_NodeID, list[_NodeID]] | None = None
         self._taken_edges: set[str] = set()
         self._response_sessions: dict[str, _ResponseSession] = {}
         self._referenced_selectors: set[_Selector] = set()
@@ -186,64 +204,113 @@ class _FrameSession:
             self._blocking_paths[node_id] = [
                 path for path in paths if event.edge_id not in path.edge_ids
             ]
+        for response_node_id in list(self._response_sessions):
+            gate = self._response_gates.get(response_node_id)
+            if gate is None:
+                continue
+            gate.frontier_edges.pop(event.edge_id, None)
+            if event.edge_id in gate.traversed_edges:
+                self._rebuild_gate(gate)
         return self._try_flush()
 
-    def dump_state(self) -> v2.Snapshot:
-        return v2.Snapshot(
-            skipped_edges=sorted(self._skipped_edge_ids)
+    def dump_state(self) -> v2.Snapshot | v3.Snapshot:
+        skipped_edges = (
+            sorted(self._skipped_edge_ids)
             if self._skipped_edge_ids is not None
-            else None,
-            response_nodes=sorted(self._response_node_ids),
-            active_session=self._serialize_session(self._active_session),
-            waiting_sessions=[
-                session_state
-                for session in list(self._waiting_sessions)
-                if (session_state := self._serialize_session(session)) is not None
-            ],
-            pending_sessions=[
-                session_state
-                for _, session in sorted(self._response_sessions.items())
-                if (session_state := self._serialize_session(session)) is not None
-            ],
-            node_execution_ids=dict(
-                sorted(self._template_stream.node_execution_ids.items())
-            ),
-            paths_map={
-                node_id: [path.edge_ids.copy() for path in paths]
-                for node_id, paths in sorted(self._blocking_paths.items())
-            },
+            else None
+        )
+        response_nodes = sorted(self._response_node_ids)
+        active_session = self._serialize_session(self._active_session)
+        waiting_sessions = [
+            session_state
+            for session in list(self._waiting_sessions)
+            if (session_state := self._serialize_session(session)) is not None
+        ]
+        pending_sessions = [
+            session_state
+            for _, session in sorted(self._response_sessions.items())
+            if (session_state := self._serialize_session(session)) is not None
+        ]
+        node_execution_ids = dict(
+            sorted(self._template_stream.node_execution_ids.items())
+        )
+        stream_buffers = self._template_stream.stream_buffers.dump_buffers()
+        stream_positions = self._template_stream.stream_buffers.dump_positions()
+        closed_streams = self._template_stream.stream_buffers.dump_closed_selectors()
+
+        if self._blocking_paths:
+            return v2.Snapshot(
+                skipped_edges=skipped_edges,
+                response_nodes=response_nodes,
+                active_session=active_session,
+                waiting_sessions=waiting_sessions,
+                pending_sessions=pending_sessions,
+                node_execution_ids=node_execution_ids,
+                paths_map={
+                    node_id: [path.edge_ids.copy() for path in paths]
+                    for node_id, paths in sorted(self._blocking_paths.items())
+                },
+                stream_buffers=stream_buffers,
+                stream_positions=stream_positions,
+                closed_streams=closed_streams,
+            )
+        return v3.Snapshot(
+            skipped_edges=skipped_edges,
+            response_nodes=response_nodes,
+            active_session=active_session,
+            waiting_sessions=waiting_sessions,
+            pending_sessions=pending_sessions,
+            node_execution_ids=node_execution_ids,
             taken_edges=sorted(self._taken_edges),
-            stream_buffers=self._template_stream.stream_buffers.dump_buffers(),
-            stream_positions=self._template_stream.stream_buffers.dump_positions(),
-            closed_streams=self._template_stream.stream_buffers.dump_closed_selectors(),
+            stream_buffers=stream_buffers,
+            stream_positions=stream_positions,
+            closed_streams=closed_streams,
         )
 
     def load_state(self, state: ResponseStreamFilterSnapshot) -> None:
-        state = cast(v2.Snapshot, snapshot.for_graph(state, self.graph))
+        bound_state = snapshot.for_graph(state, self.graph)
+        if isinstance(bound_state, v3.Snapshot):
+            blocking_paths: dict[str, list[_BlockingPath]] = {}
+            taken_edges = set(bound_state.taken_edges)
+            skipped_edges = (
+                set(bound_state.skipped_edges)
+                if bound_state.skipped_edges is not None
+                else None
+            )
+        else:
+            v2_state = cast(v2.Snapshot, bound_state)
+            blocking_paths = {
+                node_id: [
+                    _BlockingPath(edge_ids=list(path_edges)) for path_edges in paths
+                ]
+                for node_id, paths in v2_state.paths_map.items()
+            }
+            taken_edges = set()
+            skipped_edges = (
+                set(v2_state.skipped_edges)
+                if v2_state.skipped_edges is not None
+                else None
+            )
 
-        response_node_ids = set(state.response_nodes)
-        blocking_paths = {
-            node_id: [_BlockingPath(edge_ids=list(path_edges)) for path_edges in paths]
-            for node_id, paths in state.paths_map.items()
-        }
-        node_execution_ids = dict(state.node_execution_ids)
+        response_node_ids = set(bound_state.response_nodes)
+        node_execution_ids = dict(bound_state.node_execution_ids)
 
         stream_buffers = _StreamBuffers.from_state(
-            buffers=state.stream_buffers,
-            positions=state.stream_positions,
-            closed_selectors=state.closed_streams,
+            buffers=bound_state.stream_buffers,
+            positions=bound_state.stream_positions,
+            closed_selectors=bound_state.closed_streams,
         )
         waiting_sessions = deque(
             self._session_from_state(session_state)
-            for session_state in state.waiting_sessions
+            for session_state in bound_state.waiting_sessions
         )
         response_sessions = {
             session_state.node_id: self._session_from_state(session_state)
-            for session_state in state.pending_sessions
+            for session_state in bound_state.pending_sessions
         }
         active_session = (
-            self._session_from_state(state.active_session)
-            if state.active_session
+            self._session_from_state(bound_state.active_session)
+            if bound_state.active_session
             else None
         )
 
@@ -253,9 +320,7 @@ class _FrameSession:
                 self._get_referenced_selectors(response_node_id)
             )
 
-        self._skipped_edge_ids = (
-            set(state.skipped_edges) if state.skipped_edges is not None else None
-        )
+        self._skipped_edge_ids = skipped_edges
         self._active_session = active_session
         self._waiting_sessions = waiting_sessions
         self._template_stream = _TemplateStream(
@@ -265,9 +330,10 @@ class _FrameSession:
         )
         self._response_node_ids = response_node_ids
         self._blocking_paths = blocking_paths
-        self._taken_edges = set(state.taken_edges)
-        self._blocking_edges_by_response = {
-            node_id: self._compute_blocking_edges(node_id)
+        self._taken_edges = taken_edges
+        self._blocking_edges_by_response = {}
+        self._response_gates = {
+            node_id: self._build_response_gate(node_id)
             for node_id in response_sessions
             if node_id not in blocking_paths
         }
@@ -278,8 +344,8 @@ class _FrameSession:
         if response_node_id in self._response_node_ids:
             return
         self._response_node_ids.add(response_node_id)
-        self._blocking_edges_by_response[response_node_id] = (
-            self._compute_blocking_edges(response_node_id)
+        self._response_gates[response_node_id] = self._build_response_gate(
+            response_node_id
         )
 
         response_node = self.graph.nodes[response_node_id]
@@ -422,48 +488,120 @@ class _FrameSession:
             NodeExecutionType.RESPONSE,
         )) or source_node.blocks_variable_output(variable_selectors)
 
-    def _compute_blocking_edges(self, response_node_id: _NodeID) -> set[_EdgeID]:
-        if self.graph.root_node.id == response_node_id:
-            return set()
+    def _build_response_gate(self, response_node_id: _NodeID) -> _ResponseGate:
+        root_node_id = self.graph.root_node.id
+        if root_node_id == response_node_id:
+            self._blocking_edges_by_response[response_node_id] = set()
+            return _ResponseGate(
+                target_node_id=response_node_id,
+                backward_reachable={root_node_id},
+                blocking_edges=set(),
+                unblocked_nodes={root_node_id},
+            )
+
+        if self._reverse_adjacency is None:
+            reverse: dict[_NodeID, list[_NodeID]] = {}
+            for edge in self.graph.edges.values():
+                reverse.setdefault(edge.head, []).append(edge.tail)
+            self._reverse_adjacency = reverse
+
+        backward_reachable: set[_NodeID] = {response_node_id}
+        pending: list[_NodeID] = [response_node_id]
+        while pending:
+            node_id = pending.pop()
+            for pred in self._reverse_adjacency.get(node_id, ()):
+                if pred not in backward_reachable:
+                    backward_reachable.add(pred)
+                    pending.append(pred)
+
+        if root_node_id not in backward_reachable:
+            self._blocking_edges_by_response[response_node_id] = set()
+            return _ResponseGate(
+                target_node_id=response_node_id,
+                backward_reachable=set(),
+                blocking_edges=set(),
+            )
+
         variable_selectors = self._get_response_variable_selectors(response_node_id)
-        return {
-            edge_id
-            for edge_id in self.graph.edges
-            if self._is_blocking_edge(edge_id, variable_selectors)
+        blocking_edges = {
+            edge.id
+            for edge in self.graph.edges.values()
+            if edge.tail in backward_reachable
+            and edge.head in backward_reachable
+            and self._is_blocking_edge(edge.id, variable_selectors)
         }
+        self._blocking_edges_by_response[response_node_id] = blocking_edges
+        gate = _ResponseGate(
+            target_node_id=response_node_id,
+            backward_reachable=backward_reachable,
+            blocking_edges=blocking_edges,
+        )
+        self._rebuild_gate(gate)
+        return gate
+
+    def _rebuild_gate(self, gate: _ResponseGate) -> None:
+        gate.unblocked_nodes.clear()
+        gate.frontier_edges.clear()
+        gate.traversed_edges.clear()
+        root_node_id = self.graph.root_node.id
+        if root_node_id == gate.target_node_id:
+            gate.unblocked_nodes.add(root_node_id)
+            return
+        self._expand_gate(gate, (root_node_id,))
+
+    def _enqueue_gate_node(
+        self,
+        gate: _ResponseGate,
+        node_id: _NodeID,
+        queue: deque[_NodeID],
+    ) -> bool:
+        if node_id not in gate.backward_reachable or node_id in gate.unblocked_nodes:
+            return False
+        gate.unblocked_nodes.add(node_id)
+        if node_id == gate.target_node_id:
+            gate.frontier_edges.clear()
+            return True
+        queue.append(node_id)
+        return False
+
+    def _expand_gate(
+        self,
+        gate: _ResponseGate,
+        start_nodes: Iterable[_NodeID],
+    ) -> None:
+        if gate.is_unblocked:
+            return
+        queue: deque[_NodeID] = deque()
+        for node_id in start_nodes:
+            if self._enqueue_gate_node(gate, node_id, queue):
+                return
+
+        skipped_edges = self._skipped_edge_ids
+        taken_edges = self._taken_edges
+        while queue:
+            node_id = queue.popleft()
+            for edge in self.graph.get_outgoing_edges(node_id):
+                if edge.head not in gate.backward_reachable or (
+                    skipped_edges is not None and edge.id in skipped_edges
+                ):
+                    continue
+                if edge.id in gate.blocking_edges and edge.id not in taken_edges:
+                    gate.frontier_edges[edge.id] = edge.head
+                    continue
+                gate.traversed_edges.add(edge.id)
+                if self._enqueue_gate_node(gate, edge.head, queue):
+                    return
 
     def _is_response_unblocked(self, response_node_id: _NodeID) -> bool:
         if response_node_id in self._blocking_paths:
             return any(
                 path.is_empty() for path in self._blocking_paths[response_node_id]
             )
-
-        root_node_id = self.graph.root_node.id
-        if root_node_id == response_node_id:
-            return True
-
-        blocking_edges = self._blocking_edges_by_response.get(response_node_id)
-        if blocking_edges is None:
-            blocking_edges = self._compute_blocking_edges(response_node_id)
-            self._blocking_edges_by_response[response_node_id] = blocking_edges
-
-        visited: set[_NodeID] = {root_node_id}
-        queue: deque[_NodeID] = deque([root_node_id])
-        skipped_edges = self._skipped_edge_ids
-        taken_edges = self._taken_edges
-        while queue:
-            node_id = queue.popleft()
-            for edge in self.graph.get_outgoing_edges(node_id):
-                if skipped_edges is not None and edge.id in skipped_edges:
-                    continue
-                if edge.id in blocking_edges and edge.id not in taken_edges:
-                    continue
-                if edge.head == response_node_id:
-                    return True
-                if edge.head not in visited:
-                    visited.add(edge.head)
-                    queue.append(edge.head)
-        return False
+        gate = self._response_gates.get(response_node_id)
+        if gate is None:
+            gate = self._build_response_gate(response_node_id)
+            self._response_gates[response_node_id] = gate
+        return gate.is_unblocked
 
     def activate_initial_sessions(self) -> list[EngineEvent]:
         events: list[EngineEvent] = []
@@ -487,7 +625,15 @@ class _FrameSession:
                     events.extend(self._activate_or_queue_session(response_node_id))
                 continue
 
-            if self._is_response_unblocked(response_node_id):
+            gate = self._response_gates.get(response_node_id)
+            if gate is None:
+                continue
+            target_head = gate.frontier_edges.pop(edge_id, None)
+            if target_head is None:
+                continue
+            gate.traversed_edges.add(edge_id)
+            self._expand_gate(gate, (target_head,))
+            if gate.is_unblocked:
                 events.extend(self._activate_or_queue_session(response_node_id))
         return events
 

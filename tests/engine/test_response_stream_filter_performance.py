@@ -447,7 +447,9 @@ def test_response_filter_handles_diamond_dag_without_path_enumeration() -> None:
     # 14 nodes, 25 edges, 4,096 paths: initialization must stay O(V + E), not O(2^12).
     assert len(graph.outgoing_calls) <= len(nodes) * 2
     dumped_initial = json.loads(event_filter.dumps())
-    assert dumped_initial["paths_map"] == {}
+    assert dumped_initial["version"] == "3.0"
+    assert "paths_map" not in dumped_initial
+    assert dumped_initial["taken_edges"] == []
     assert len(event_filter.dumps()) < 2048
 
     assert (
@@ -477,15 +479,87 @@ def test_response_filter_handles_diamond_dag_without_path_enumeration() -> None:
     restored_filter.initialize(_context(graph))
     restored_filter.loads(mid_snapshot)
 
-    for index in range(6, stages - 1):
+    for index in range(6, 9):
         assert (
             list(restored_filter.on_event(_edge_taken(edge_id=f"gate-{index}-false")))
             == []
         )
 
+    second_snapshot = restored_filter.dumps()
+    assert len(second_snapshot) < 2048
+
+    second_restored = ResponseStreamFilter()
+    second_restored.initialize(_context(graph))
+    second_restored.loads(second_snapshot)
+
+    for index in range(9, stages - 1):
+        assert (
+            list(second_restored.on_event(_edge_taken(edge_id=f"gate-{index}-false")))
+            == []
+        )
+
     output = list(
-        restored_filter.on_event(_edge_taken(edge_id=f"gate-{stages - 1}-true"))
+        second_restored.on_event(_edge_taken(edge_id=f"gate-{stages - 1}-true"))
     )
     chunks = [e for e in output if isinstance(e, NodeRunStreamChunkEvent)]
     assert [e.chunk for e in chunks] == ["hello"]
     assert len(graph.outgoing_calls) < 500
+
+
+def test_response_filter_nonblocking_prefix_before_blocking_branch_is_incremental() -> (
+    None
+):
+    prefix_len = 100
+    nodes: dict[str, _TestNode] = {"root": _TestNode("root")}
+    edges: dict[str, _TestEdge] = {}
+    prev_id = "root"
+    for index in range(prefix_len - 1):
+        node_id = f"step-{index}"
+        nodes[node_id] = _TestNode(node_id)
+        edge_id = f"edge-{index}"
+        edges[edge_id] = _TestEdge(edge_id, prev_id, node_id)
+        prev_id = node_id
+
+    nodes["branch"] = _TestNode("branch", execution_type=NodeExecutionType.BRANCH)
+    edges["edge-to-branch"] = _TestEdge("edge-to-branch", prev_id, "branch")
+    nodes["answer"] = _TestNode(
+        "answer",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template(
+            segments=[VariableSegment(selector=["root", "answer"])],
+        ),
+    )
+    edges["branch-to-answer"] = _TestEdge("branch-to-answer", "branch", "answer")
+
+    graph = _CountingGraph(nodes=nodes, edges=edges, root_node_id="root")
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+
+    assert (
+        list(
+            event_filter.on_event(
+                NodeRunStreamChunkEvent(
+                    id="exec-1",
+                    node_id="root",
+                    node_type=NodeExecutionType.ROOT,
+                    selector=["root", "answer"],
+                    chunk="ok",
+                )
+            )
+        )
+        == []
+    )
+    assert list(event_filter.on_event(_edge_taken(edge_id="edge-0"))) == []
+    # Advancing past the root variable-producer edge sweeps the nonblocking chain once.
+    assert len(graph.outgoing_calls) == prefix_len + 1
+
+    graph.outgoing_calls.clear()
+    for index in range(1, prefix_len - 1):
+        assert list(event_filter.on_event(_edge_taken(edge_id=f"edge-{index}"))) == []
+    assert list(event_filter.on_event(_edge_taken(edge_id="edge-to-branch"))) == []
+    assert graph.outgoing_calls == []
+
+    output = list(event_filter.on_event(_edge_taken(edge_id="branch-to-answer")))
+    chunks = [e for e in output if isinstance(e, NodeRunStreamChunkEvent)]
+    assert [e.chunk for e in chunks] == ["ok"]
+    assert graph.outgoing_calls == []
