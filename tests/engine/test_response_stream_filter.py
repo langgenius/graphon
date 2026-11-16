@@ -1,4 +1,5 @@
 import json
+import sys
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -153,6 +154,24 @@ class _TestGraph(GraphProtocol):
         return [edge for edge in self.edges.values() if edge.head == node_id]
 
 
+class _EdgeReadLimitGraph(_TestGraph):
+    def __init__(self, graph: _TestGraph) -> None:
+        super().__init__(
+            nodes=graph.nodes,
+            edges=graph.edges,
+            root_node_id=graph.root_node.id,
+        )
+        self._outgoing_edge_reads = 0
+        self._edge_read_limit = 8 * (len(self.nodes) + len(self.edges))
+
+    def get_outgoing_edges(self, node_id: str) -> Sequence[_TestEdge]:
+        self._outgoing_edge_reads += 1
+        assert self._outgoing_edge_reads <= self._edge_read_limit, (
+            "Response initialization exceeded the linear graph traversal budget"
+        )
+        return super().get_outgoing_edges(node_id)
+
+
 def _context(
     graph: GraphProtocol,
     variable_pool: VariablePool | None = None,
@@ -248,6 +267,147 @@ def _reasoning_chunk(
         chunk=chunk,
         is_final=is_final,
     )
+
+
+def test_response_stream_filter_handles_exponential_paths_with_bounded_work() -> None:
+    stage_count = 12
+    nodes = {
+        "start": _TestNode("start", execution_type=NodeExecutionType.ROOT),
+        "answer": _TestNode(
+            "answer",
+            execution_type=NodeExecutionType.RESPONSE,
+            template=Template(segments=[TextSegment(text="done")]),
+        ),
+    }
+    edges = {"start-gate": _TestEdge("start-gate", "start", "gate-0")}
+    for index in range(stage_count):
+        node_id = f"gate-{index}"
+        nodes[node_id] = _TestNode(node_id, execution_type=NodeExecutionType.BRANCH)
+        target_node_id = f"gate-{index + 1}" if index + 1 < stage_count else "answer"
+        for handle in ("true", "false"):
+            edge_id = f"{node_id}-{handle}"
+            edge = _TestEdge(edge_id, node_id, target_node_id)
+            edge.source_handle = handle
+            edges[edge_id] = edge
+    # Both handles converge at every stage: 2**12 paths in a 14-node DAG.
+    graph = _EdgeReadLimitGraph(
+        _TestGraph(nodes=nodes, edges=edges, root_node_id="start")
+    )
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+    snapshot_size_limit = 1024 * (len(nodes) + len(edges))
+    assert len(event_filter.dumps()) <= snapshot_size_limit
+    started = GraphRunStartedEvent()
+    assert list(event_filter.on_event(started)) == [started]
+
+    for index in range(stage_count // 2):
+        edge = edges[f"gate-{index}-true"]
+        assert (
+            list(
+                event_filter.on_event(
+                    _edge_taken(
+                        edge_id=edge.id, source_id=edge.tail, answer_id=edge.head
+                    )
+                )
+            )
+            == []
+        )
+    saved_state = event_filter.dumps()
+    assert len(saved_state) <= snapshot_size_limit
+    restored_filter = ResponseStreamFilter()
+    restored_filter.loads(saved_state)
+    restored_filter.initialize(_context(graph))
+
+    for index in range(stage_count // 2, stage_count):
+        edge = edges[f"gate-{index}-true"]
+        output = list(
+            restored_filter.on_event(
+                _edge_taken(edge_id=edge.id, source_id=edge.tail, answer_id=edge.head)
+            )
+        )
+        if index + 1 < stage_count:
+            assert output == []
+        else:
+            chunks = [
+                event for event in output if isinstance(event, NodeRunStreamChunkEvent)
+            ]
+            assert [event.chunk for event in chunks] == ["done"]
+
+
+@pytest.mark.parametrize("downstream_first", [False, True])
+def test_response_stream_filter_waits_for_every_blocking_edge_on_one_path(
+    downstream_first: bool,
+) -> None:
+    graph = _TestGraph(
+        nodes={
+            "start": _TestNode("start", execution_type=NodeExecutionType.BRANCH),
+            "branch": _TestNode("branch", execution_type=NodeExecutionType.BRANCH),
+            "answer": _TestNode(
+                "answer",
+                execution_type=NodeExecutionType.RESPONSE,
+                template=Template(segments=[TextSegment(text="ready")]),
+            ),
+        },
+        edges={
+            "upstream": _TestEdge("upstream", "start", "branch"),
+            "downstream": _TestEdge("downstream", "branch", "answer"),
+        },
+        root_node_id="start",
+    )
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    edge_ids = (
+        ["downstream", "upstream"] if downstream_first else ["upstream", "downstream"]
+    )
+    first, second = (graph.edges[edge_id] for edge_id in edge_ids)
+    first_event = _edge_taken(
+        edge_id=first.id, source_id=first.tail, answer_id=first.head
+    )
+    second_event = _edge_taken(
+        edge_id=second.id, source_id=second.tail, answer_id=second.head
+    )
+
+    assert list(event_filter.on_event(first_event)) == []
+    assert list(event_filter.on_event(first_event)) == []
+    output = list(event_filter.on_event(second_event))
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert [event.chunk for event in chunks] == ["ready"]
+    assert list(event_filter.on_event(second_event)) == []
+
+
+def test_response_stream_filter_blocks_each_response_for_its_own_selectors() -> None:
+    source = _TestNode("source")
+    first = _TestNode(
+        "first",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template(segments=[VariableSegment(selector=["source", "text"])]),
+    )
+    second = _TestNode(
+        "second",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template(segments=[VariableSegment(selector=["source", "answer"])]),
+    )
+    graph = _TestGraph(
+        nodes={node.id: node for node in (source, first, second)},
+        edges={
+            "first-edge": _TestEdge("first-edge", source.id, first.id),
+            "second-edge": _TestEdge("second-edge", source.id, second.id),
+        },
+        root_node_id=source.id,
+    )
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    blocked_chunk = _stream_chunk("blocked")
+    streaming_chunk = _stream_chunk("streaming", selector=["source", "text"])
+
+    assert list(event_filter.on_event(blocked_chunk)) == []
+    assert list(event_filter.on_event(streaming_chunk)) == [streaming_chunk]
+    output = list(
+        event_filter.on_event(_edge_taken(edge_id="second-edge", answer_id=second.id))
+    )
+    assert output == [blocked_chunk]
 
 
 def test_response_stream_filter_passes_answer_visible_reasoning_chunk() -> None:
@@ -727,14 +887,14 @@ def test_response_stream_filter_initialize_resets_run_state() -> None:
     assert [event.chunk for event in second_chunks] == ["second"]
 
 
-def test_response_stream_filter_writes_version_2_snapshot() -> None:
+def test_response_stream_filter_writes_version_3_snapshot() -> None:
     graph = _variable_response_graph()
     event_filter = ResponseStreamFilter()
     event_filter.initialize(_context(graph))
 
     snapshot = json.loads(event_filter.dumps())
 
-    assert snapshot["version"] == "2.0"
+    assert snapshot["version"] == "3.0"
 
 
 def test_response_stream_filter_migrates_v1_root_state_after_graph_binding() -> None:
@@ -761,13 +921,14 @@ def test_response_stream_filter_migrates_v1_root_state_after_graph_binding() -> 
 
     assert json.loads(restored_filter.dumps()) == {
         "type": "ResponseStreamFilter",
-        "version": "2.0",
+        "version": "3.0",
         "response_nodes": ["answer"],
         "active_session": None,
         "waiting_sessions": [],
         "pending_sessions": [{"node_id": "answer", "index": 0}],
         "node_execution_ids": {},
-        "paths_map": {"answer": [["edge_0"]]},
+        "legacy_paths_map": {"answer": [["edge_0"]]},
+        "taken_edges": [],
         "stream_buffers": [],
         "stream_positions": [],
         "closed_streams": [],
@@ -795,7 +956,9 @@ def test_response_stream_filter_migrates_v1_graph_builder_state() -> None:
     restored_filter.loads(_V1_SIMPLE_SNAPSHOT)
     restored_filter.initialize(_context(graph))
 
-    assert json.loads(restored_filter.dumps())["paths_map"] == {"answer": [["edge_0"]]}
+    assert json.loads(restored_filter.dumps())["legacy_paths_map"] == {
+        "answer": [["edge_0"]]
+    }
 
     assert list(restored_filter.on_event(_stream_chunk("value"))) == []
     output = list(restored_filter.on_event(_edge_taken(edge_id="edge_0")))
@@ -816,10 +979,13 @@ def test_response_stream_filter_rejects_v1_graph_without_stable_legacy_ids() -> 
 
 def test_response_stream_filter_does_not_migrate_version_2_edge_ids() -> None:
     graph = _variable_response_graph(edge_id="public-edge")
-    event_filter = ResponseStreamFilter()
-    event_filter.initialize(_context(graph))
-    snapshot = json.loads(event_filter.dumps())
-    snapshot["paths_map"] = {"answer": [["edge_0"]]}
+    snapshot = {
+        "type": "ResponseStreamFilter",
+        "version": "2.0",
+        "response_nodes": ["answer"],
+        "pending_sessions": [{"node_id": "answer", "index": 0}],
+        "paths_map": {"answer": [["edge_0"]]},
+    }
 
     restored_filter = ResponseStreamFilter()
     restored_filter.initialize(_context(graph))
@@ -853,6 +1019,7 @@ def test_response_stream_filter_round_trips_resume_state() -> None:
 @pytest.mark.parametrize("version", ["1.0", "2.0"])
 def test_response_stream_filter_restores_partly_consumed_legacy_path(
     version: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     response_graph = _variable_response_graph(edge_id="edge_1")
     graph = _TestGraph(
@@ -889,6 +1056,24 @@ def test_response_stream_filter_restores_partly_consumed_legacy_path(
 
     list(event_filter.on_event(GraphRunStartedEvent()))
     assert list(event_filter.on_event(chunk)) == []
+
+    # An upgraded checkpoint must remain usable after retiring its legacy readers.
+    upgraded_snapshot = event_filter.dumps()
+    monkeypatch.setitem(
+        sys.modules, "graphon.engine.filter.builtin.response_stream.v1", None
+    )
+    monkeypatch.setitem(
+        sys.modules, "graphon.engine.filter.builtin.response_stream.v2", None
+    )
+    response_stream_package = sys.modules[
+        "graphon.engine.filter.builtin.response_stream"
+    ]
+    monkeypatch.delattr(response_stream_package, "v1", raising=False)
+    monkeypatch.delattr(response_stream_package, "v2", raising=False)
+    restored_filter = ResponseStreamFilter()
+    restored_filter.loads(upgraded_snapshot)
+    restored_filter.initialize(_context(graph))
+    event_filter = restored_filter
 
     remaining_edge_event = _edge_taken(edge_id="edge_1")
     assert list(event_filter.on_event(remaining_edge_event)) == [chunk]
