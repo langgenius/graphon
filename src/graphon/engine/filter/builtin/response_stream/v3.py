@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from graphon.runtime.runtime_state import GraphProtocol
 
@@ -17,6 +17,9 @@ class Snapshot(ResponseStreamFilterSnapshot[Literal["3.0"]]):
     Legacy residual paths cannot be reconstructed from live graph state. Retain
     those already-materialized conditions when reading an older checkpoint;
     fresh runs never enumerate or serialize complete paths.
+
+    The unchanged flat wire fields encode either native decisions or legacy
+    residual paths. Mixed modes are rejected before binding state to a graph.
     """
 
     version: Literal["3.0"] = "3.0"
@@ -24,6 +27,15 @@ class Snapshot(ResponseStreamFilterSnapshot[Literal["3.0"]]):
     rejected_edges: list[str] = Field(default_factory=list)
     skipped_edges: list[str] | None = None
     legacy_paths_map: dict[str, list[list[str]]] | None = None
+
+    @model_validator(mode="after")
+    def _reject_mixed_gating_modes(self) -> Self:
+        if self.legacy_paths_map is not None and (
+            self.taken_edges or self.rejected_edges
+        ):
+            msg = "Legacy paths cannot be combined with native edge decisions"
+            raise ValueError(msg)
+        return self
 
 
 def loads(data: str) -> Snapshot:

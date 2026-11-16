@@ -1,17 +1,23 @@
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Mapping
+from enum import Enum, auto
 
 from graphon.runtime.runtime_state import GraphProtocol
+
+
+class _EdgeDecision(Enum):
+    TAKEN = auto()
+    SKIPPED = auto()
 
 
 class _ResponseReachability:
     """Reachability through nonblocking edges and one frame's consumed events.
 
     Each node becomes reachable once, so shared suffixes never expand into
-    separate complete paths. Remember consumed events even when their sources
-    are not yet reachable. A blocking edge skipped before it is taken remains
-    rejected. Live edge states are deliberately ignored: the engine may be ahead
-    of the event consumer.
+    separate complete paths. The frame remembers first decisions even when their
+    sources are not yet reachable; this cache only reads those decisions. A
+    blocking edge skipped before it is taken remains rejected. Live edge states
+    are deliberately ignored: the engine may be ahead of the event consumer.
     """
 
     def __init__(
@@ -19,34 +25,31 @@ class _ResponseReachability:
         graph: GraphProtocol,
         response_node_id: str,
         blocking_edge_ids: set[str],
-        taken_edge_ids: Iterable[str],
-        rejected_edge_ids: Iterable[str] = (),
+        first_edge_decisions: Mapping[str, _EdgeDecision],
     ) -> None:
         self._graph = graph
         self._response_node_id = response_node_id
         self._blocking_edge_ids = blocking_edge_ids
-        self._taken_edge_ids = set(taken_edge_ids)
-        self._rejected_edge_ids = set(rejected_edge_ids)
+        # The frame owns and updates this map; each response only reads it.
+        self._first_edge_decisions = first_edge_decisions
         self._reachable_node_ids: set[str] = set()
         self._add_reachable_nodes(graph.root_node.id)
 
     def is_ready(self) -> bool:
         return self._response_node_id in self._reachable_node_ids
 
-    def record_taken_edge(self, edge_id: str) -> bool:
+    def advance_from_edge(self, edge_id: str) -> bool:
         edge = self._graph.edges.get(edge_id)
-        if edge is not None:
-            self._taken_edge_ids.add(edge_id)
-            if edge.tail in self._reachable_node_ids and (
-                edge_id not in self._rejected_edge_ids
-                or edge_id not in self._blocking_edge_ids
-            ):
-                self._add_reachable_nodes(edge.head)
+        if (
+            edge is not None
+            and edge.tail in self._reachable_node_ids
+            and (
+                edge_id not in self._blocking_edge_ids
+                or self._first_edge_decisions.get(edge_id) is _EdgeDecision.TAKEN
+            )
+        ):
+            self._add_reachable_nodes(edge.head)
         return self.is_ready()
-
-    def record_skipped_edge(self, edge_id: str) -> None:
-        if edge_id in self._graph.edges and edge_id not in self._taken_edge_ids:
-            self._rejected_edge_ids.add(edge_id)
 
     def _add_reachable_nodes(self, node_id: str) -> None:
         if node_id in self._reachable_node_ids:
@@ -58,9 +61,10 @@ class _ResponseReachability:
             if current_node_id == self._response_node_id:
                 continue
             for edge in self._graph.get_outgoing_edges(current_node_id):
-                if edge.id in self._blocking_edge_ids and (
-                    edge.id not in self._taken_edge_ids
-                    or edge.id in self._rejected_edge_ids
+                if (
+                    edge.id in self._blocking_edge_ids
+                    and self._first_edge_decisions.get(edge.id)
+                    is not _EdgeDecision.TAKEN
                 ):
                     continue
                 if edge.head not in self._reachable_node_ids:

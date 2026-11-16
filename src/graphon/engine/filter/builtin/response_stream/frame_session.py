@@ -7,7 +7,7 @@ It retains observed values independently of the engine's live frame registry.
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
 from graphon.engine_events.base import EngineEvent
@@ -31,7 +31,7 @@ from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.variables import Variable
 
 from . import snapshot, v3
-from .reachability import _ResponseReachability
+from .reachability import _EdgeDecision, _ResponseReachability
 from .snapshot import ResponseSessionState, ResponseStreamFilterSnapshot, Selector
 from .template_stream import _ResponseSession, _StreamBuffers, _TemplateStream
 
@@ -52,6 +52,23 @@ class _BlockingPath:
 
     def is_empty(self) -> bool:
         return len(self.edge_ids) == 0
+
+
+@dataclass
+class _ReachabilityState:
+    """Frame-owned first decisions and response-local reachability caches."""
+
+    first_edge_decisions: dict[str, _EdgeDecision] = field(default_factory=dict)
+    reachability_by_response: dict[str, _ResponseReachability] = field(
+        default_factory=dict
+    )
+
+
+@dataclass
+class _LegacyPathState:
+    """Residual conditions retained from an imported legacy checkpoint."""
+
+    paths_by_response: dict[str, list[_BlockingPath]]
 
 
 class _FrameSession:
@@ -78,10 +95,7 @@ class _FrameSession:
             frame_id=frame_id, container_id=container_id
         )
         self._response_node_ids: set[str] = set()
-        self._reachability_by_response: dict[str, _ResponseReachability] = {}
-        self._taken_edge_ids: set[str] = set()
-        self._rejected_edge_ids: set[str] = set()
-        self._legacy_paths_by_response: dict[str, list[_BlockingPath]] | None = None
+        self._gating_state: _ReachabilityState | _LegacyPathState = _ReachabilityState()
         self._response_sessions: dict[str, _ResponseSession] = {}
         self._referenced_selectors: set[_Selector] = set()
 
@@ -90,12 +104,16 @@ class _FrameSession:
         return bool(self._response_node_ids)
 
     def register_responses(self) -> None:
+        gating_state = self._gating_state
+        if not isinstance(gating_state, _ReachabilityState):
+            msg = "Cannot register fresh responses in legacy path state"
+            raise TypeError(msg)
         for node in self.graph.nodes.values():
             if node.execution_type == NodeExecutionType.RESPONSE and (
                 self.frame_id == ROOT_FRAME_ID
                 or node.node_type in {BuiltinNodeTypes.ANSWER, BuiltinNodeTypes.END}
             ):
-                self._register_response(node.id)
+                self._register_response(node.id, gating_state)
 
     def start(self, event: FrameStartedEvent) -> list[EngineEvent]:
         self._observed_values = VariablePool()
@@ -183,22 +201,39 @@ class _FrameSession:
         if self._skipped_edge_ids is not None:
             self._skipped_edge_ids.add(event.edge_id)
             self._template_stream.skipped_node_ids = self._find_skipped_node_ids()
-        if self._legacy_paths_by_response is not None:
-            for node_id, paths in self._legacy_paths_by_response.items():
-                self._legacy_paths_by_response[node_id] = [
+        gating_state = self._gating_state
+        if isinstance(gating_state, _LegacyPathState):
+            for node_id, paths in gating_state.paths_by_response.items():
+                gating_state.paths_by_response[node_id] = [
                     path for path in paths if event.edge_id not in path.edge_ids
                 ]
-        else:
-            if (
-                event.edge_id in self.graph.edges
-                and event.edge_id not in self._taken_edge_ids
-            ):
-                self._rejected_edge_ids.add(event.edge_id)
-            for reachability in self._reachability_by_response.values():
-                reachability.record_skipped_edge(event.edge_id)
+        elif event.edge_id in self.graph.edges:
+            gating_state.first_edge_decisions.setdefault(
+                event.edge_id, _EdgeDecision.SKIPPED
+            )
         return self._try_flush()
 
     def dump_state(self) -> v3.Snapshot:
+        gating_state = self._gating_state
+        if isinstance(gating_state, _ReachabilityState):
+            taken_edges = sorted(
+                edge_id
+                for edge_id, decision in gating_state.first_edge_decisions.items()
+                if decision is _EdgeDecision.TAKEN
+            )
+            rejected_edges = sorted(
+                edge_id
+                for edge_id, decision in gating_state.first_edge_decisions.items()
+                if decision is _EdgeDecision.SKIPPED
+            )
+            legacy_paths_map = None
+        else:
+            taken_edges = []
+            rejected_edges = []
+            legacy_paths_map = {
+                node_id: [path.edge_ids.copy() for path in paths]
+                for node_id, paths in sorted(gating_state.paths_by_response.items())
+            }
         return v3.Snapshot(
             skipped_edges=sorted(self._skipped_edge_ids)
             if self._skipped_edge_ids is not None
@@ -218,16 +253,9 @@ class _FrameSession:
             node_execution_ids=dict(
                 sorted(self._template_stream.node_execution_ids.items())
             ),
-            taken_edges=sorted(self._taken_edge_ids),
-            rejected_edges=sorted(self._rejected_edge_ids),
-            legacy_paths_map=(
-                {
-                    node_id: [path.edge_ids.copy() for path in paths]
-                    for node_id, paths in sorted(self._legacy_paths_by_response.items())
-                }
-                if self._legacy_paths_by_response is not None
-                else None
-            ),
+            taken_edges=taken_edges,
+            rejected_edges=rejected_edges,
+            legacy_paths_map=legacy_paths_map,
             stream_buffers=self._template_stream.stream_buffers.dump_buffers(),
             stream_positions=self._template_stream.stream_buffers.dump_positions(),
             closed_streams=self._template_stream.stream_buffers.dump_closed_selectors(),
@@ -240,18 +268,6 @@ class _FrameSession:
             raise TypeError(msg)
 
         response_node_ids = set(state.response_nodes)
-        legacy_paths_by_response = (
-            {
-                node_id: [
-                    _BlockingPath(edge_ids=list(path_edges)) for path_edges in paths
-                ]
-                for node_id, paths in state.legacy_paths_map.items()
-            }
-            if state.legacy_paths_map is not None
-            else None
-        )
-        taken_edge_ids = set(state.taken_edges)
-        rejected_edge_ids = set(state.rejected_edges)
         node_execution_ids = dict(state.node_execution_ids)
 
         stream_buffers = _StreamBuffers.from_state(
@@ -279,16 +295,29 @@ class _FrameSession:
                 self._get_referenced_selectors(response_node_id)
             )
 
-        reachability_by_response = (
-            {
-                node_id: self._build_reachability(
-                    node_id, taken_edge_ids, rejected_edge_ids
-                )
-                for node_id in response_node_ids
-            }
-            if legacy_paths_by_response is None
-            else {}
-        )
+        gating_state: _ReachabilityState | _LegacyPathState
+        if state.legacy_paths_map is not None:
+            gating_state = _LegacyPathState({
+                node_id: [
+                    _BlockingPath(edge_ids=list(path_edges)) for path_edges in paths
+                ]
+                for node_id, paths in state.legacy_paths_map.items()
+            })
+        else:
+            first_edge_decisions = dict.fromkeys(state.taken_edges, _EdgeDecision.TAKEN)
+            # Earlier v3 writers also recorded takes after a first skip. Preserve
+            # that input: rejection wins when an edge occurs in both wire lists.
+            first_edge_decisions.update(
+                dict.fromkeys(state.rejected_edges, _EdgeDecision.SKIPPED)
+            )
+            gating_state = _ReachabilityState(
+                first_edge_decisions=first_edge_decisions,
+                reachability_by_response={
+                    node_id: self._build_reachability(node_id, first_edge_decisions)
+                    for node_id in response_node_ids
+                },
+            )
+
         self._skipped_edge_ids = (
             set(state.skipped_edges) if state.skipped_edges is not None else None
         )
@@ -300,19 +329,20 @@ class _FrameSession:
             skipped_node_ids=self._find_skipped_node_ids(),
         )
         self._response_node_ids = response_node_ids
-        self._reachability_by_response = reachability_by_response
-        self._taken_edge_ids = taken_edge_ids
-        self._rejected_edge_ids = rejected_edge_ids
-        self._legacy_paths_by_response = legacy_paths_by_response
+        self._gating_state = gating_state
         self._response_sessions = response_sessions
         self._referenced_selectors = referenced_selectors
 
-    def _register_response(self, response_node_id: _NodeID) -> None:
+    def _register_response(
+        self, response_node_id: _NodeID, gating_state: _ReachabilityState
+    ) -> None:
         if response_node_id in self._response_node_ids:
             return
         self._response_node_ids.add(response_node_id)
-        self._reachability_by_response[response_node_id] = self._build_reachability(
-            response_node_id, self._taken_edge_ids, self._rejected_edge_ids
+        gating_state.reachability_by_response[response_node_id] = (
+            self._build_reachability(
+                response_node_id, gating_state.first_edge_decisions
+            )
         )
 
         response_node = self.graph.nodes[response_node_id]
@@ -344,8 +374,7 @@ class _FrameSession:
     def _build_reachability(
         self,
         response_node_id: str,
-        taken_edge_ids: set[str],
-        rejected_edge_ids: set[str],
+        first_edge_decisions: Mapping[str, _EdgeDecision],
     ) -> _ResponseReachability:
         variable_selectors = self._get_response_variable_selectors(response_node_id)
         blocking_edge_ids = {
@@ -357,8 +386,7 @@ class _FrameSession:
             self.graph,
             response_node_id,
             blocking_edge_ids,
-            taken_edge_ids,
-            rejected_edge_ids,
+            first_edge_decisions,
         )
 
     def _get_response_variable_selectors(
@@ -394,26 +422,28 @@ class _FrameSession:
         return events
 
     def _is_response_ready(self, response_node_id: str) -> bool:
-        if self._legacy_paths_by_response is not None:
+        gating_state = self._gating_state
+        if isinstance(gating_state, _LegacyPathState):
             return any(
                 path.is_empty()
-                for path in self._legacy_paths_by_response.get(response_node_id, [])
+                for path in gating_state.paths_by_response.get(response_node_id, [])
             )
-        return self._reachability_by_response[response_node_id].is_ready()
+        return gating_state.reachability_by_response[response_node_id].is_ready()
 
     def _handle_edge_taken(self, edge_id: _EdgeID) -> list[EngineEvent]:
         events: list[EngineEvent] = []
-        if self._legacy_paths_by_response is None and edge_id in self.graph.edges:
-            self._taken_edge_ids.add(edge_id)
+        gating_state = self._gating_state
+        if isinstance(gating_state, _ReachabilityState) and edge_id in self.graph.edges:
+            gating_state.first_edge_decisions.setdefault(edge_id, _EdgeDecision.TAKEN)
         for response_node_id in sorted(self._response_node_ids):
-            if self._legacy_paths_by_response is not None:
-                for path in self._legacy_paths_by_response.get(response_node_id, []):
+            if isinstance(gating_state, _LegacyPathState):
+                for path in gating_state.paths_by_response.get(response_node_id, []):
                     path.remove_edge(edge_id)
                 ready = self._is_response_ready(response_node_id)
             else:
-                ready = self._reachability_by_response[
+                ready = gating_state.reachability_by_response[
                     response_node_id
-                ].record_taken_edge(edge_id)
+                ].advance_from_edge(edge_id)
             if ready:
                 events.extend(self._activate_or_queue_session(response_node_id))
         return events

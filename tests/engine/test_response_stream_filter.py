@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, ClassVar, cast
 
 import pytest
+from pydantic import ValidationError
 
 from graphon.dsl import loads
 from graphon.engine.filter import (
@@ -988,6 +989,114 @@ def test_response_stream_filter_round_trips_resume_state() -> None:
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     assert [event.chunk for event in chunks] == ["resumed"]
+
+
+@pytest.mark.parametrize("initialize_before_load", [False, True])
+def test_response_stream_filter_restores_partly_consumed_v3_gates(
+    initialize_before_load: bool,
+) -> None:
+    response_graph = _variable_response_graph()
+    graph = _TestGraph(
+        nodes={
+            "branch": _TestNode("branch", execution_type=NodeExecutionType.BRANCH),
+            **response_graph.nodes,
+        },
+        edges={
+            "upstream": _TestEdge("upstream", "branch", "source"),
+            **response_graph.edges,
+        },
+        root_node_id="branch",
+    )
+    context = _context(graph)
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(context)
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    chunk = _stream_chunk("saved", is_final=False)
+    assert list(event_filter.on_event(chunk)) == []
+    assert (
+        list(
+            event_filter.on_event(
+                _edge_taken(edge_id="upstream", source_id="branch", answer_id="source")
+            )
+        )
+        == []
+    )
+
+    saved_state = event_filter.dumps()
+    restored_filter = ResponseStreamFilter()
+    if initialize_before_load:
+        restored_filter.initialize(context)
+        restored_filter.loads(saved_state)
+    else:
+        restored_filter.loads(saved_state)
+        restored_filter.initialize(context)
+    assert list(restored_filter.flush()) == []
+    assert list(restored_filter.on_event(_edge_taken())) == [chunk]
+    assert list(restored_filter.on_event(_edge_taken())) == []
+    final_chunk = _stream_chunk(" end")
+    assert list(restored_filter.on_event(final_chunk)) == [final_chunk]
+    assert list(restored_filter.flush()) == []
+
+
+@pytest.mark.parametrize("decision_field", ["taken_edges", "rejected_edges"])
+@pytest.mark.parametrize("legacy_paths", [{}, {"answer": [["edge-1"]]}])
+@pytest.mark.parametrize("initialize_before_load", [False, True])
+def test_response_stream_filter_rejects_mixed_v3_gating_modes(
+    decision_field: str,
+    legacy_paths: dict[str, list[list[str]]],
+    initialize_before_load: bool,
+) -> None:
+    context = _context(_variable_response_graph())
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(context)
+    chunk = _stream_chunk("preserved")
+    assert list(event_filter.on_event(chunk)) == []
+    if not initialize_before_load:
+        pending_filter = ResponseStreamFilter()
+        pending_filter.loads(event_filter.dumps())
+        event_filter = pending_filter
+    mixed_snapshot = json.dumps({
+        "type": "ResponseStreamFilter",
+        "version": "3.0",
+        "legacy_paths_map": legacy_paths,
+        decision_field: ["edge-1"],
+    })
+
+    with pytest.raises(ValidationError):
+        event_filter.loads(mixed_snapshot)
+
+    if not initialize_before_load:
+        event_filter.initialize(context)
+    assert list(event_filter.on_event(_edge_taken())) == [chunk]
+
+
+@pytest.mark.parametrize("skip_first", [False, True])
+def test_response_stream_filter_reads_existing_v3_edge_decision_fields(
+    skip_first: bool,
+) -> None:
+    # Earlier v3 writers recorded all taken events, including a take after skip.
+    # That overlap means SKIPPED won. A later observed skip is separate metadata.
+    saved_state = json.dumps({
+        "type": "ResponseStreamFilter",
+        "version": "3.0",
+        "response_nodes": ["answer"],
+        "pending_sessions": [{"node_id": "answer", "index": 0}],
+        "taken_edges": ["edge-1"],
+        "rejected_edges": ["edge-1"] if skip_first else [],
+        "skipped_edges": ["edge-1"],
+    })
+    event_filter = ResponseStreamFilter()
+    event_filter.loads(saved_state)
+    event_filter.initialize(_context(_variable_response_graph()))
+    # Round-trip through the current writer before testing the saved decision.
+    restored_filter = ResponseStreamFilter()
+    restored_filter.loads(event_filter.dumps())
+    restored_filter.initialize(_context(_variable_response_graph()))
+    chunk = _stream_chunk("saved")
+    assert list(restored_filter.on_event(chunk)) == []
+    output = list(restored_filter.on_event(_edge_taken()))
+    assert output == ([] if skip_first else [chunk])
+    assert list(restored_filter.on_event(_edge_taken())) == []
 
 
 @pytest.mark.parametrize("version", ["1.0", "2.0"])

@@ -146,10 +146,13 @@ per response through nonblocking edges and consumed traversal events. Branches,
 containers, responses, and nodes that block referenced variables gate their
 outgoing edges until taken; a blocking edge skipped before it is taken remains
 rejected. Shared suffixes are visited once per response instead of expanding into
-complete paths, and activation does not read live edge states. A reserved
-execution ID alone does not make a reply reachable. Custom frames without enough
-declarative context get no response session; ordinary node and completion events
-still pass through.
+complete paths. Each native frame session owns the first consumed taken/skipped
+decision for each edge; response caches read that map while keeping their own
+selector-dependent blocking edges. Observed skips used for template selection
+remain separate from these first decisions. Activation does not read live edge
+states. A reserved execution ID alone does not make a reply reachable. Custom
+frames without enough declarative context get no response session; ordinary node
+and completion events still pass through.
 
 Keep `emit_frame_events=True` when using a context from `from_engine()`: the
 filter waits for the root baseline before resolving values. Each observed frame keeps a detached value pool and applies
@@ -177,8 +180,12 @@ their existing event shapes and shared source cursors. Filter persistence suppor
 only root response state. Fresh checkpoints use v3, storing consumed taken edges
 and edges skipped before they were taken alongside response and stream progress.
 Restoring v1 or v2 retains its residual blocking paths explicitly in v3; v1
-migration also discards child response state. Sessions started from an initial
-frame baseline additionally record observed skipped edges, so resumed templates
+migration also discards child response state. Native decisions and legacy paths
+are mutually exclusive runtime states. The flat v3 wire format rejects legacy
+paths combined with nonempty native decision lists. Earlier v3 inputs with an
+edge in both taken and rejected lists remain readable: rejection represents a
+first skip and wins during restoration. Sessions started from an initial frame
+baseline additionally record observed skipped edges, so resumed templates
 do not consult future live node states. Snapshots without this optional metadata
 retain the paired graph's skip lookup. See the [response filter tests](tests/engine/test_response_stream_filter.py)
 for native and legacy restoration, [traversal and selector tests](tests/engine/test_response_stream_filter_performance.py)
