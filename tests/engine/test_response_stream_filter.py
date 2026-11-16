@@ -155,24 +155,6 @@ class _TestGraph(GraphProtocol):
         return [edge for edge in self.edges.values() if edge.head == node_id]
 
 
-class _EdgeReadLimitGraph(_TestGraph):
-    def __init__(self, graph: _TestGraph) -> None:
-        super().__init__(
-            nodes=graph.nodes,
-            edges=graph.edges,
-            root_node_id=graph.root_node.id,
-        )
-        self._outgoing_edge_reads = 0
-        self._edge_read_limit = 8 * (len(self.nodes) + len(self.edges))
-
-    def get_outgoing_edges(self, node_id: str) -> Sequence[_TestEdge]:
-        self._outgoing_edge_reads += 1
-        assert self._outgoing_edge_reads <= self._edge_read_limit, (
-            "Response initialization exceeded the linear graph traversal budget"
-        )
-        return super().get_outgoing_edges(node_id)
-
-
 def _context(
     graph: GraphProtocol,
     variable_pool: VariablePool | None = None,
@@ -268,71 +250,6 @@ def _reasoning_chunk(
         chunk=chunk,
         is_final=is_final,
     )
-
-
-def test_response_stream_filter_handles_exponential_paths_with_bounded_work() -> None:
-    stage_count = 12
-    nodes = {
-        "start": _TestNode("start", execution_type=NodeExecutionType.ROOT),
-        "answer": _TestNode(
-            "answer",
-            execution_type=NodeExecutionType.RESPONSE,
-            template=Template(segments=[TextSegment(text="done")]),
-        ),
-    }
-    edges = {"start-gate": _TestEdge("start-gate", "start", "gate-0")}
-    for index in range(stage_count):
-        node_id = f"gate-{index}"
-        nodes[node_id] = _TestNode(node_id, execution_type=NodeExecutionType.BRANCH)
-        target_node_id = f"gate-{index + 1}" if index + 1 < stage_count else "answer"
-        for handle in ("true", "false"):
-            edge_id = f"{node_id}-{handle}"
-            edge = _TestEdge(edge_id, node_id, target_node_id)
-            edge.source_handle = handle
-            edges[edge_id] = edge
-    # Both handles converge at every stage: 2**12 paths in a 14-node DAG.
-    graph = _EdgeReadLimitGraph(
-        _TestGraph(nodes=nodes, edges=edges, root_node_id="start")
-    )
-    event_filter = ResponseStreamFilter()
-    event_filter.initialize(_context(graph))
-    snapshot_size_limit = 1024 * (len(nodes) + len(edges))
-    assert len(event_filter.dumps()) <= snapshot_size_limit
-    started = GraphRunStartedEvent()
-    assert list(event_filter.on_event(started)) == [started]
-
-    for index in range(stage_count // 2):
-        edge = edges[f"gate-{index}-true"]
-        assert (
-            list(
-                event_filter.on_event(
-                    _edge_taken(
-                        edge_id=edge.id, source_id=edge.tail, answer_id=edge.head
-                    )
-                )
-            )
-            == []
-        )
-    saved_state = event_filter.dumps()
-    assert len(saved_state) <= snapshot_size_limit
-    restored_filter = ResponseStreamFilter()
-    restored_filter.loads(saved_state)
-    restored_filter.initialize(_context(graph))
-
-    for index in range(stage_count // 2, stage_count):
-        edge = edges[f"gate-{index}-true"]
-        output = list(
-            restored_filter.on_event(
-                _edge_taken(edge_id=edge.id, source_id=edge.tail, answer_id=edge.head)
-            )
-        )
-        if index + 1 < stage_count:
-            assert output == []
-        else:
-            chunks = [
-                event for event in output if isinstance(event, NodeRunStreamChunkEvent)
-            ]
-            assert [event.chunk for event in chunks] == ["done"]
 
 
 @pytest.mark.parametrize("downstream_first", [False, True])

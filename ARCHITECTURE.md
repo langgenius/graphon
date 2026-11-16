@@ -181,8 +181,9 @@ migration also discards child response state. Sessions started from an initial
 frame baseline additionally record observed skipped edges, so resumed templates
 do not consult future live node states. Snapshots without this optional metadata
 retain the paired graph's skip lookup. See the [response filter tests](tests/engine/test_response_stream_filter.py)
-for native and legacy restoration, and [performance regressions](tests/engine/test_response_stream_filter_performance.py)
-for traversal bounds and agreement with an independent path oracle.
+for native and legacy restoration, [traversal and selector tests](tests/engine/test_response_stream_filter_performance.py)
+for selector-dependent and live-state behavior, and [gating regressions](docs/development.md#response-gating-regressions)
+for resource bounds, path equivalence, and ordered output.
 After a child frame containing an Answer or End starts, `dumps()` and `loads()`
 reject that filter instance's state, including after the frame finishes. Resuming
 such a child frame is also rejected. Child pause/resume support and ordering
