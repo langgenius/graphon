@@ -573,6 +573,28 @@ def test_response_stream_filter_ignores_child_frame_edge_id_collision() -> None:
     assert [event.chunk for event in chunks] == ["root response"]
 
 
+@pytest.mark.parametrize("edge_taken_before_initialize", [False, True])
+def test_response_stream_filter_waits_for_consumed_edge_event(
+    edge_taken_before_initialize: bool,
+) -> None:
+    graph = _variable_response_graph()
+    event_filter = ResponseStreamFilter()
+    if edge_taken_before_initialize:
+        graph.edges["edge-1"].state = NodeState.TAKEN
+    event_filter.initialize(_context(graph))
+    if not edge_taken_before_initialize:
+        graph.edges["edge-1"].state = NodeState.TAKEN
+    chunk = _stream_chunk("buffered")
+
+    # The engine can advance while its events are still waiting for the consumer.
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    assert list(event_filter.on_event(chunk)) == []
+
+    output = list(event_filter.on_event(_edge_taken()))
+
+    assert output == [chunk]
+
+
 def test_response_stream_filter_reads_scalar_variable_values() -> None:
     graph = _variable_response_graph()
     variable_pool = VariablePool()
@@ -773,6 +795,175 @@ def test_response_stream_filter_round_trips_resume_state() -> None:
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     assert [event.chunk for event in chunks] == ["resumed"]
+
+
+@pytest.mark.parametrize("version", ["1.0", "2.0"])
+def test_response_stream_filter_restores_partly_consumed_legacy_path(
+    version: str,
+) -> None:
+    response_graph = _variable_response_graph(edge_id="edge_1")
+    graph = _TestGraph(
+        nodes={
+            "branch": _TestNode("branch", execution_type=NodeExecutionType.BRANCH),
+            **response_graph.nodes,
+        },
+        edges={
+            "edge_0": _TestEdge("edge_0", "branch", "source"),
+            **response_graph.edges,
+        },
+        root_node_id="branch",
+    )
+    for edge in graph.edges.values():
+        edge.state = NodeState.TAKEN
+    # The filter consumed edge_0 before pausing, but not the engine's edge_1 event.
+    legacy_snapshot = json.dumps({
+        "type": "ResponseStreamFilter",
+        "version": version,
+        "response_nodes": ["answer"],
+        "active_session": None,
+        "waiting_sessions": [],
+        "pending_sessions": [{"node_id": "answer", "index": 0}],
+        "node_execution_ids": {},
+        "paths_map": {"answer": [["edge_1"]]},
+        "stream_buffers": [],
+        "stream_positions": [],
+        "closed_streams": [],
+    })
+    event_filter = ResponseStreamFilter()
+    event_filter.loads(legacy_snapshot)
+    event_filter.initialize(_context(graph))
+    chunk = _stream_chunk("saved", is_final=False)
+
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    assert list(event_filter.on_event(chunk)) == []
+
+    remaining_edge_event = _edge_taken(edge_id="edge_1")
+    assert list(event_filter.on_event(remaining_edge_event)) == [chunk]
+    assert list(event_filter.on_event(remaining_edge_event)) == []
+    final_chunk = _stream_chunk(" end")
+    assert list(event_filter.on_event(final_chunk)) == [final_chunk]
+
+
+@pytest.mark.parametrize("version", ["1.0", "2.0"])
+def test_response_stream_filter_restores_legacy_stream_progress(version: str) -> None:
+    response_graph = _variable_response_graph(
+        segments=[
+            TextSegment(text="prefix "),
+            VariableSegment(selector=["source", "first"]),
+            TextSegment(text=" / "),
+            VariableSegment(selector=["source", "second"]),
+            TextSegment(text=" suffix"),
+        ],
+        edge_id="edge_0",
+    )
+    waiting_answer = _TestNode(
+        "waiting-answer",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template(segments=[TextSegment(text="next")]),
+    )
+    later_answer = _TestNode(
+        "later-answer",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template(segments=[TextSegment(text="last")]),
+    )
+    graph = _TestGraph(
+        nodes={
+            **response_graph.nodes,
+            "start": _TestNode("start"),
+            "branch": _TestNode("branch", execution_type=NodeExecutionType.BRANCH),
+            waiting_answer.id: waiting_answer,
+            later_answer.id: later_answer,
+        },
+        edges={
+            **response_graph.edges,
+            "edge_1": _TestEdge("edge_1", "start", "source"),
+            "edge_2": _TestEdge("edge_2", "start", "branch"),
+            "edge_3": _TestEdge("edge_3", "branch", waiting_answer.id),
+            "edge_4": _TestEdge("edge_4", "branch", later_answer.id),
+        },
+        root_node_id="start",
+    )
+    # Pin event fields to c3870df (v1) and 1821d48 (v2), before frame/retry metadata.
+    chunk_fields: dict[str, Any] = {
+        "id": "source-run",
+        "node_id": "source",
+        "node_type": "code",
+        "node_version": "1",
+    }
+    if version == "1.0":
+        chunk_fields.update({"in_iteration_id": None, "in_loop_id": None})
+    else:
+        chunk_fields["container_id"] = ""
+    # The prefix and first chunk were emitted; the second selector is still buffered.
+    legacy_snapshot = json.dumps({
+        "type": "ResponseStreamFilter",
+        "version": version,
+        "response_nodes": ["answer", "later-answer", "waiting-answer"],
+        "active_session": {"node_id": "answer", "index": 1},
+        "waiting_sessions": [
+            {"node_id": "waiting-answer", "index": 0},
+            {"node_id": "later-answer", "index": 0},
+        ],
+        "pending_sessions": [],
+        "node_execution_ids": {
+            "answer": "answer-run",
+            "source": "source-run",
+            "waiting-answer": "waiting-run",
+            "later-answer": "later-run",
+        },
+        "paths_map": {
+            "answer": [[]],
+            "waiting-answer": [[]],
+            "later-answer": [[]],
+        },
+        "stream_buffers": [
+            {
+                "selector": ["source", "first"],
+                "events": [
+                    {
+                        **chunk_fields,
+                        "selector": ["source", "first"],
+                        "chunk": "fi",
+                        "is_final": False,
+                    }
+                ],
+            },
+            {
+                "selector": ["source", "second"],
+                "events": [
+                    {
+                        **chunk_fields,
+                        "selector": ["source", "second"],
+                        "chunk": "second",
+                        "is_final": True,
+                    }
+                ],
+            },
+        ],
+        "stream_positions": [{"selector": ["source", "first"], "position": 1}],
+        "closed_streams": [["source", "second"]],
+    })
+    event_filter = ResponseStreamFilter()
+    event_filter.loads(legacy_snapshot)
+    event_filter.initialize(_context(graph))
+
+    assert list(event_filter.flush()) == []
+    output = list(
+        event_filter.on_event(_stream_chunk("rst", selector=["source", "first"]))
+    )
+
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert [(event.id, event.chunk) for event in chunks] == [
+        ("source-run", "rst"),
+        ("answer-run", " / "),
+        ("source-run", "second"),
+        ("answer-run", " suffix"),
+        ("waiting-run", "next"),
+        ("later-run", "last"),
+    ]
+    assert chunks[-1].selector == ["later-answer", "answer"]
+    assert chunks[-1].is_final is True
+    assert list(event_filter.flush()) == []
 
 
 def test_response_stream_filter_can_load_before_filter_chain_initializes() -> None:
