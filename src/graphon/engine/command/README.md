@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-10-15T00:58:08Z"
+last_checked: "2026-11-12T01:12:24Z"
 -->
 # Commands
 
@@ -10,15 +10,23 @@ literals, [CommandProcessor](processor.py) for dispatch, and the channel
 implementations for [in-memory](builtin/in_memory.py) or
 [Redis](builtin/redis.py) delivery. The
 [dispatch tests](../../../../tests/engine/test_dispatch_patterns.py) cover
-workflow control behavior.
+workflow control behavior. With frame observations enabled, successful variable
+writes produce
+[frame commit observations](../../../../ARCHITECTURE.md#raw-frame-observations),
+including writes completed before a later command update fails.
 
 ## Usage
 
+Pass the channel to [Engine](../engine.py) through `command_channel`; each
+channel belongs to one workflow execution.
+
 ```python
+from graphon.engine import Engine
 from graphon.engine.command import AbortCommand, InMemoryChannel, RedisChannel
 
 # Local execution
 channel = InMemoryChannel()
+engine = Engine(graph=graph, runtime_state=runtime_state, command_channel=channel)
 channel.send_command(AbortCommand(reason="stop"))
 
 # Distributed execution

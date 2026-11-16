@@ -60,6 +60,8 @@ class EventStream:
             event: The event to collect
 
         """
+        # Delayed consumers must not see subsequent mutations of runtime values.
+        event = event.model_copy(deep=True)
         self._events.put(event)
         self.notify_layers(event)
 

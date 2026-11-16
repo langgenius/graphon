@@ -3,6 +3,7 @@ from .agent import NodeRunAgentLogEvent
 
 # Base events
 from .base import EngineEvent, NodeEvent
+from .frame import FrameFinishedEvent, FrameStartedEvent, FrameVariablesUpdatedEvent
 
 # Graph events
 from .graph import (
@@ -54,6 +55,9 @@ from .traversal import (
 
 __all__ = [
     "EngineEvent",
+    "FrameFinishedEvent",
+    "FrameStartedEvent",
+    "FrameVariablesUpdatedEvent",
     "GraphEdgeSkippedEvent",
     "GraphEdgeTakenEvent",
     "GraphRunAbortedEvent",

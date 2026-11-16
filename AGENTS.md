@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-10-15T00:57:04Z"
+last_checked: "2026-11-12T01:11:40Z"
 -->
 # AGENTS
 

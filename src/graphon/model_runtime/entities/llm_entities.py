@@ -264,7 +264,12 @@ class LLMPollingConfig(BaseModel):
 
 
 class LLMResultChunkDelta(BaseModel):
-    """Model class for llm result chunk delta."""
+    """Stream content with tool-call updates and cumulative usage snapshots.
+
+    A tool call with a function name carries its current argument snapshot.
+    Repeating its ID replaces that snapshot. Argument fragments omit the
+    function name and append to their ID, or to the latest call without an ID.
+    """
 
     index: int
     message: AssistantPromptMessage

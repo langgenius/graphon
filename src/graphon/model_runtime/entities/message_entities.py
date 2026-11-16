@@ -55,21 +55,25 @@ class PromptMessageContentType(StrEnum):
     DOCUMENT = auto()
 
 
-class PromptMessageContent(ABC, BaseModel):
+class PromptMessageContent[ContentTypeT: PromptMessageContentType](ABC, BaseModel):
     """Model class for prompt message content."""
 
-    type: PromptMessageContentType
+    type: ContentTypeT
     opaque_body: JsonValue | None = None
 
 
-class TextPromptMessageContent(PromptMessageContent):
+class TextPromptMessageContent(
+    PromptMessageContent[Literal[PromptMessageContentType.TEXT]]
+):
     """Model class for text prompt message content."""
 
     type: Literal[PromptMessageContentType.TEXT] = PromptMessageContentType.TEXT
     data: str
 
 
-class MultiModalPromptMessageContent(PromptMessageContent):
+class MultiModalPromptMessageContent[ContentTypeT: PromptMessageContentType](
+    PromptMessageContent[ContentTypeT],
+):
     """Model class for multi-modal prompt message content."""
 
     format: str = Field(default=..., description="the format of multi-modal file")
@@ -86,15 +90,21 @@ class MultiModalPromptMessageContent(PromptMessageContent):
         return self.url or f"data:{self.mime_type};base64,{self.base64_data}"
 
 
-class VideoPromptMessageContent(MultiModalPromptMessageContent):
+class VideoPromptMessageContent(
+    MultiModalPromptMessageContent[Literal[PromptMessageContentType.VIDEO]],
+):
     type: Literal[PromptMessageContentType.VIDEO] = PromptMessageContentType.VIDEO
 
 
-class AudioPromptMessageContent(MultiModalPromptMessageContent):
+class AudioPromptMessageContent(
+    MultiModalPromptMessageContent[Literal[PromptMessageContentType.AUDIO]],
+):
     type: Literal[PromptMessageContentType.AUDIO] = PromptMessageContentType.AUDIO
 
 
-class ImagePromptMessageContent(MultiModalPromptMessageContent):
+class ImagePromptMessageContent(
+    MultiModalPromptMessageContent[Literal[PromptMessageContentType.IMAGE]],
+):
     """Model class for image prompt message content."""
 
     class DETAIL(StrEnum):
@@ -107,7 +117,9 @@ class ImagePromptMessageContent(MultiModalPromptMessageContent):
     detail: DETAIL = DETAIL.LOW
 
 
-class DocumentPromptMessageContent(MultiModalPromptMessageContent):
+class DocumentPromptMessageContent(
+    MultiModalPromptMessageContent[Literal[PromptMessageContentType.DOCUMENT]],
+):
     type: Literal[PromptMessageContentType.DOCUMENT] = PromptMessageContentType.DOCUMENT
 
 

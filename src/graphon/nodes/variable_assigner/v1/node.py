@@ -107,9 +107,7 @@ class VariableAssignerNode(Node[VariableAssignerData]):
                 if not income_value:
                     msg = "input value not found"
                     raise VariableOperatorNodeError(msg)
-                updated_variable = original_variable.model_copy(
-                    update={"value": income_value.value},
-                )
+                updated_value = income_value.value
 
             case WriteMode.APPEND:
                 income_value = self.runtime_state.variable_pool.get(
@@ -131,18 +129,13 @@ class VariableAssignerNode(Node[VariableAssignerData]):
                     case _:
                         msg = "append mode requires an array variable"
                         raise VariableOperatorNodeError(msg)
-                updated_variable = original_variable.model_copy(
-                    update={"value": updated_value},
-                )
-
             case WriteMode.CLEAR:
                 income_value = SegmentType.get_zero_value(original_variable.value_type)
-                updated_variable = original_variable.model_copy(
-                    update={"value": income_value.to_object()},
-                )
+                updated_value = income_value.to_object()
             case _:
                 assert_never(write_mode)
 
+        updated_variable = original_variable.copy_with_value(updated_value)
         updated_variables = [
             common_helpers.variable_to_processed_data(
                 assigned_variable_selector,

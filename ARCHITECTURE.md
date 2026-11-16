@@ -1,10 +1,10 @@
 <!-- knowledge
-last_checked: "2026-10-15T00:58:38Z"
+last_checked: "2026-11-12T01:14:36Z"
 -->
 # Architecture
 
-Current implementation; the metadata records the latest source and test review.
-This is a navigation map, not a record of historical design decisions.
+This navigation map describes the current implementation, not historical design
+decisions.
 Contributor commands and contribution rules live in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Public entry points
@@ -19,7 +19,7 @@ them from the packages below.
 | YAML import and inspection | `graphon.dsl.inspect`, `graphon.dsl.loads` | [Importer](src/graphon/dsl/importer.py), [DSL tests](tests/dsl/) |
 | Graph construction | `graphon.graph.Graph`, `GraphBuilder`, `NodeFactory` | [Graph implementation](src/graphon/graph/graph.py), [graph tests](tests/graph/test_graph.py) |
 | Execution | `graphon.engine.Engine` | [Engine](src/graphon/engine/engine.py), [workflow tests](tests/workflows/test_full_engine_events.py) |
-| Mutable execution data | `graphon.runtime.RuntimeState`, `VariablePool`, `InitParams` | [Runtime exports](src/graphon/runtime/__init__.py), [runtime tests](tests/runtime/) |
+| Execution setup and state | `graphon.runtime.RuntimeState`, `VariablePool`, `InitParams` | [Runtime exports](src/graphon/runtime/__init__.py), [runtime tests](tests/runtime/) |
 | Integration contracts | `graphon.protocols` | [Protocol exports](src/graphon/protocols/__init__.py), [export tests](tests/test_protocols_exports.py) |
 
 The [Python example](examples/slim_llm/code.py) constructs nodes and an engine
@@ -34,16 +34,9 @@ The [Import Linter configuration](pyproject.toml) is the source of truth for
 allowed package dependencies. [Layer regression tests](tests/test_import_layers.py)
 exercise enforcement in CI.
 
-The execution model shares graph/node schemas and
-[container state](src/graphon/runtime/container_state.py);
-[legacy snapshot migration](src/graphon/runtime/runtime_state/v2.py) uses graph
-scoping, and [condition utilities](src/graphon/utils/condition/processor.py)
-consume runtime interfaces. The public facade sits above this layer because it
-re-exports `NodeFactory` and consumer contracts. These layers permit imports of
-concrete node implementations from the facade; fresh-process tests below enforce
-its node-registration guarantee.
-
-Import isolation and lazy registration are enforced by
+The public runtime package can restore snapshots without importing the engine.
+Importing `graphon.protocols` does not register built-in nodes; importing a concrete
+node implementation registers its type and version. These guarantees are enforced by
 [runtime import tests](tests/runtime/test_runtime_imports.py) and
 [public-contract import tests](tests/test_protocols_exports.py). Use the public
 runtime paths for new integrations; engine queue aliases exist for compatibility.
@@ -70,8 +63,8 @@ flowchart LR
    instantiated nodes; see the [Python example](examples/slim_llm/code.py).
 2. [Engine](src/graphon/engine/engine.py) binds a root frame, command processor,
    event stream, fixed worker pool, and dispatcher. Calling `run()` starts or
-   resumes execution and yields graph lifecycle events plus processed node and
-   traversal events.
+   resumes execution and yields graph and frame lifecycle events, committed
+   variable observations, and processed node and traversal events.
 3. [Scheduler](src/graphon/engine/scheduler.py) queues frame-qualified `StartTask`
    values. [Workers](src/graphon/engine/worker/worker.py) bind execution IDs,
    execute node generators inside [layer task contexts](src/graphon/engine/layer/README.md),
@@ -88,10 +81,58 @@ flowchart LR
    resources. A failed graph emits `GraphRunFailedEvent` and raises its error.
 
 Response presentation is a consumer concern. `Engine.run()` yields raw engine
-events; [filter_engine_events](src/graphon/engine/filter/chain.py) and
+events; hosts use [filter_engine_events](src/graphon/engine/filter/chain.py) with
 [ResponseStreamFilter](src/graphon/engine/filter/builtin/response_stream/filter.py)
-can transform that stream separately. See [raw-event tests](tests/engine/test_raw_engine_events.py)
-and [filter tests](tests/engine/test_event_filters.py).
+for response selection, template assembly, buffering, and presentation order.
+Producer chunks remain immediate, including across parallel container items.
+See [raw-event tests](tests/engine/test_raw_engine_events.py) and
+[filter tests](tests/engine/test_event_filters.py).
+
+## Raw frame observations
+
+By default, [Engine](src/graphon/engine/engine.py) emits [frame events](src/graphon/engine_events/frame.py) that expose execution state for consumers that may read events after a child frame has been removed:
+
+| Event | Meaning |
+| --- | --- |
+| `FrameStartedEvent` | A detached, typed variable baseline and reserved node execution IDs, published after setup and before body scheduling. Child frames also identify their parent and owning container invocation. |
+| `FrameVariablesUpdatedEvent` | Detached replacements at the written selectors, published after successful commits. Empty and `None` values are retained; partial failures report only writes that succeeded. |
+| `FrameFinishedEvent` | The frame has emitted its last node, traversal, and variable observations, with a succeeded, failed, or aborted outcome. Child completion is published before registry removal. |
+
+Set `Engine(..., emit_frame_events=False)` to skip these events and their detached value copies for both event consumers and layers while execution and variable commits continue.
+This engine option is not persisted; supply it again when rebuilding from a snapshot.
+
+[FrameRegistry](src/graphon/engine/frame.py) publishes commits for node outputs
+and handled-failure defaults, variable requests, Loop initialization, Loop and
+Iteration ancestor write-back, and external commands. Every frame sharing an
+updated pool receives the observation; private Iteration writes do not produce
+ancestor commits. Output commits precede dependent traversal; existing node
+request/result events remain available and must not be applied again when
+maintaining a view from commit events.
+
+[NodeEvent](src/graphon/engine_events/base.py) carries `frame_id` and
+`retry_index`; `id` remains the reserved execution ID across retries.
+`NodeRunRetryEvent.retry_index` identifies the next attempt.
+[EngineEventFilterContext.from_engine](src/graphon/engine/filter/protocol.py)
+sets `run_id` to the persisted root entry execution ID, so it survives
+pause/restore and distinguishes separate runs with the same `workflow_id`.
+
+Pause leaves unfinished frames open. Resume publishes new baselines with the
+resumption reason and existing execution IDs before resumed body events.
+[Persisted container state](src/graphon/runtime/container_state.py) preserves pending frame failures across pause and snapshot restore even when frame events are disabled.
+Terminal failure or abort closes each remaining frame once, before the graph's terminal event.
+An `Exception` thrown into `Engine.run()` during execution or at the paused event
+follows the same failure ordering; continued consumption re-raises the exception.
+
+Root has no owning invocation. Custom containers may omit optional item index
+and root metadata. See the
+[frame observation tests](tests/engine/test_frame_observations.py) for baselines,
+commits, detached values, and raw chunk delivery, and the
+[frame failure tests](tests/engine/test_frame_failures.py) for pause/restore and
+consumer exceptions.
+
+Baselines and commits contain full variable values.
+`ResponseStreamFilter` suppresses those events from its output after the engine has constructed and copied them; this compatibility guard does not add child response assembly.
+Response buffers and presentation state remain in the filter, separate from runtime snapshots.
 
 ## State and execution invariants
 
@@ -99,6 +140,10 @@ Execution state is owned by frames; shared queues and workflow execution connect
 those frames without requiring nested worker pools. File adapters are host
 resources owned by the engine, while snapshots contain portable state. These
 boundaries let the host rebuild an execution with its own integrations.
+
+[Variable pools](src/graphon/runtime/variable_pool.py) preserve node ownership through copies and serialization for both configured graphs and `Graph.new()` graphs.
+Iteration writes host variables already present in the parent pool back to that parent, while keeping inherited node variables private to each round.
+Independent workflows with fresh pools have separate ownership even when ancestor or sibling graphs reuse the same node IDs.
 
 The executable contracts below are authoritative for validation, lifecycle, and
 compatibility details:
@@ -109,14 +154,50 @@ compatibility details:
 | File adapter binding and isolation | [File runtime](src/graphon/file/runtime.py), [engine](src/graphon/engine/engine.py) | [Execution file isolation](tests/engine/test_file_runtime.py), [file scopes](tests/file/test_runtime.py) |
 | Container ownership and factory preflight | [Graph and NodeFactory](src/graphon/graph/graph.py), [scoping](src/graphon/graph/scoping.py), [validation](src/graphon/graph/validation.py) | [Graph scoping and validation](tests/graph/test_graph_scoping.py) |
 | Branch joins and readiness | [Scheduler](src/graphon/engine/scheduler.py) | [Scheduling](tests/engine/test_scheduler.py) |
-| Container suspension and variable propagation | [Container effects](src/graphon/nodes/container_effects.py), [handlers](src/graphon/engine/container_handler/builtin/) | [Cooperative execution](tests/engine/test_cooperative_container_execution.py), [nested workflow isolation](tests/workflows/test_full_engine_events.py) |
+| Container suspension and variable propagation | [Container effects](src/graphon/nodes/container_effects.py), [handlers](src/graphon/engine/container_handler/builtin/) | [Container values](tests/nodes/test_container_effects.py), [cooperative execution](tests/engine/test_cooperative_container_execution.py), [container variable scoping](tests/workflows/test_full_engine_events.py), [Iteration variable ownership](tests/engine/test_iteration_variable_scopes.py) |
 | Pause, resume, and snapshot quiescence | [Dispatcher](src/graphon/engine/dispatcher.py), [execution guard](src/graphon/runtime/execution.py) | [Serialization](tests/engine/test_runtime_state_serialization.py) |
 | Snapshot versions and migrations | [Snapshot loading](src/graphon/runtime/runtime_state/snapshot.py) | [Runtime snapshots](tests/runtime/test_runtime_state.py), [version isolation](tests/test_snapshot_version_isolation.py) |
+
+[Concrete segment models](src/graphon/variables/segments.py) own fixed
+`value_type` tags and value validation. [Factories](src/graphon/variables/factory.py)
+infer raw value types or validate explicit declarations; preserve declared types
+when transferring values, especially empty arrays and secrets. Assignment uses
+[copy_with_value](src/graphon/variables/variables.py) to validate replacements
+while retaining variable identity and metadata. See [factory tests](tests/variables/test_factory.py)
+and [assignment tests](tests/nodes/variable_assigner/).
+
+Complete `array[any]` snapshots use
+[file paths](src/graphon/variables/file_snapshot.py) to distinguish actual
+[File](src/graphon/file/models.py) objects from ordinary JSON dictionaries.
+Nested models become plain data, while recorded files restore as `File` objects.
+Dictionaries containing files require string keys. Exports using `include` or
+`exclude` omit this restoration metadata; historical snapshots without it retain
+dictionaries as data. See [file snapshot tests](tests/variables/test_file_snapshots.py)
+and [container restoration tests](tests/nodes/test_container_effects.py).
+
+[Container values](src/graphon/nodes/container_effects.py) preserve declared
+segment types through snapshots and completion. Converting a variable with
+`to_segment()` removes its source identity so the parent pool binds completed
+outputs to the container's selectors. Storing an existing variable under a new
+selector also assigns a new identity; see [variable pool tests](tests/runtime/test_variable_pool.py).
+Iteration keeps matching array types when flattening outputs and uses
+`array[any]` for mixed array types. See [workflow tests](tests/workflows/test_full_engine_events.py)
+for empty, serial, and parallel container behavior.
+
+Stored outputs remain typed; container node-result inputs and Loop/Iteration
+presentation events expose plain values. The
+[runtime JSON converter](src/graphon/workflow_type_encoder.py) masks typed
+secrets using their log representation. Hosts must redact plain values separately,
+including exports from [dumps_with_segments](src/graphon/variables/utils.py).
+See [container secret tests](tests/nodes/test_container_effects.py) and
+[plain value export tests](tests/utils/test_variable_utils.py).
 
 For host rendering, bind the engine's adapter with
 [use_workflow_file_runtime](src/graphon/file/runtime.py); use
 [EngineEventFilterContext.from_engine](src/graphon/engine/filter/protocol.py) to
 wire response filters. Supply host adapters again when rebuilding from snapshots.
+See [host file conversion tests](tests/variables/test_workflow_type_encoder.py)
+for rendering within that adapter scope.
 
 Persist after fully consuming the run iterator or from a quiescent `on_graph_end`
 hook. Hosts must also coordinate direct mutation of exposed runtime objects: the
@@ -130,7 +211,7 @@ snapshot guard tracks engine activity, so it cannot protect arbitrary host write
 | Add lifecycle observation or limits | [Layer API and usage](src/graphon/engine/layer/README.md); runtime access is read-only, controls use commands | [Layer context tests](tests/engine/test_layer_node_run_context.py) |
 | Pause, abort, or update variables externally | [Command API and channels](src/graphon/engine/command/README.md) | [Dispatch tests](tests/engine/test_dispatch_patterns.py) |
 | Adapt the consumer event stream | [Filter protocol](src/graphon/engine/filter/protocol.py) | [Filter tests](tests/engine/test_event_filters.py) |
-| Add a container kind | [ContainerHandler](src/graphon/engine/container_handler/protocol.py), `Engine(container_handler_factories=...)`, [persisted container state](src/graphon/runtime/container_state.py) | [Custom-container tests](tests/runtime/test_custom_container_state.py) |
+| Add a container kind | [ContainerHandler](src/graphon/engine/container_handler/protocol.py), `Engine(container_handler_factories=...)`, [persisted container state](src/graphon/runtime/container_state.py) | [Custom-container tests](tests/runtime/test_custom_container_state.py), [tool-workflow variable scoping](tests/engine/test_dispatch_patterns.py) |
 | Replace model, code, HTTP, file, or tool integration | [Public protocols](src/graphon/protocols/__init__.py), concrete node constructors, [DSL adapters](src/graphon/dsl/) | [Protocol exports](tests/test_protocols_exports.py), matching node/adapter tests |
 
 Use the [host integration guide](docs/development.md#integrate-host-services)

@@ -5,13 +5,21 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any, assert_never
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    SerializationInfo,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 from graphon.model_runtime.entities.message_entities import ImagePromptMessageContent
 
 from . import helpers
 from .constants import FILE_MODEL_IDENTITY
 from .enums import FileTransferMethod, FileType
+from .serialization import SerializedFile, file_markers_enabled
 
 _FILE_REFERENCE_PREFIX = "dify-file-ref:"
 
@@ -111,6 +119,14 @@ class File(BaseModel):
     mime_type: str | None = None
     size: int = -1
     _storage_key: str
+
+    @model_serializer(mode="wrap")
+    def _serialize_file(  # ruff: ignore[missing-return-type-private-function] - Keep the declared File JSON Schema.
+        self, handler: SerializerFunctionWrapHandler, info: SerializationInfo
+    ):
+        if info.mode == "python" and file_markers_enabled():
+            return SerializedFile(handler(self))
+        return handler(self)
 
     def __init__(
         self,

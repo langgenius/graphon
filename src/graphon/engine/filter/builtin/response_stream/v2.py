@@ -7,7 +7,7 @@ from graphon.runtime.runtime_state import GraphProtocol
 from .snapshot import ResponseStreamFilterSnapshot
 
 
-class Snapshot(ResponseStreamFilterSnapshot):
+class Snapshot(ResponseStreamFilterSnapshot[Literal["2.0"]]):
     """ResponseStreamFilter snapshot written by Graphon 0.8."""
 
     version: Literal["2.0"] = "2.0"

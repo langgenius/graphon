@@ -113,12 +113,15 @@ def _merge_tool_call_delta(
         tool_call.type = delta.type
     if delta.function.name:
         tool_call.function.name = delta.function.name
-    if delta.function.arguments:
+        tool_call.function.arguments = delta.function.arguments
+    elif delta.function.arguments:
         tool_call.function.arguments += delta.function.arguments
 
 
 @dataclass(slots=True)
-class _LLMChunkAccumulator:
+class LLMResultAccumulator:
+    """Retain a complete result while a caller consumes and displays each chunk."""
+
     content: str = ""
     content_list: list[PromptMessageContentUnionTypes] = field(default_factory=list)
     usage: LLMUsage = field(default_factory=LLMUsage.empty_usage)
@@ -179,12 +182,15 @@ class _LLMChunkAccumulator:
 class _StreamingInvokeAccumulator:
     real_model: str
     message_content: list[PromptMessageContentUnionTypes] = field(default_factory=list)
+    tool_calls: list[AssistantPromptMessage.ToolCall] = field(default_factory=list)
     usage: LLMUsage | None = None
     system_fingerprint: str | None = None
     opaque_body: JsonValue = None
 
     def consume(self, chunk: LLMResultChunk) -> None:
         self._consume_content(chunk.delta.message.content)
+        if chunk.delta.message.tool_calls:
+            merge_tool_call_deltas(chunk.delta.message.tool_calls, self.tool_calls)
         self.real_model = chunk.model
         if chunk.delta.usage:
             self.usage = chunk.delta.usage
@@ -215,6 +221,7 @@ class _StreamingInvokeAccumulator:
             prompt_messages=prompt_messages,
             message=AssistantPromptMessage(
                 content=self.message_content,
+                tool_calls=self.tool_calls,
                 opaque_body=self.opaque_body,
             ),
             usage=self.usage or LLMUsage.empty_usage(),
@@ -242,7 +249,7 @@ def _build_llm_result_from_chunks(
         A normalized `LLMResult` assembled from the consumed chunks.
 
     """
-    accumulator = _LLMChunkAccumulator()
+    accumulator = LLMResultAccumulator()
     try:
         accumulator.consume_all(chunks)
     except Exception:
@@ -277,9 +284,13 @@ def merge_tool_call_deltas(
     *,
     id_generator: Callable[[], str] | None = None,
 ) -> None:
-    """Merge incremental tool call deltas into existing tool calls.
+    """Merge tool-call snapshots and argument fragments in first-seen order.
 
-    :param new_tool_calls: List of new tool call deltas to be merged.
+    Named calls carry the current argument snapshot and replace the previous
+    snapshot for their ID. Unnamed calls append an argument fragment to their
+    ID, or to the latest call when the ID is empty. Inputs are not retained.
+
+    :param new_tool_calls: Named snapshots or unnamed argument fragments.
     :param existing_tools_calls: List of existing tool calls modified in place.
     :param id_generator: Optional callable for generating IDs in tests/callers.
     """
@@ -328,7 +339,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
         self,
         model: str,
         credentials: dict,
-        prompt_messages: list[PromptMessage],
+        prompt_messages: Sequence[PromptMessage],
         model_parameters: dict | None = None,
         tools: list[PromptMessageTool] | None = None,
         stop: list[str] | None = None,
@@ -449,7 +460,9 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
     ) -> Generator[LLMResultChunk, None, None]:
         """Stream runtime result chunks through callbacks and bookkeeping hooks."""
         callbacks = callbacks or []
-        accumulator = _StreamingInvokeAccumulator(real_model=model)
+        accumulator = (
+            _StreamingInvokeAccumulator(real_model=model) if callbacks else None
+        )
 
         try:
             yield from self._stream_invoke_result_chunks(
@@ -466,28 +479,41 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
                 callbacks=callbacks,
             )
         except Exception as e:
+            self._trigger_invoke_error_callbacks(
+                model=model,
+                ex=e,
+                credentials=credentials,
+                prompt_messages=prompt_messages,
+                model_parameters=model_parameters,
+                tools=tools,
+                stop=stop,
+                stream=stream,
+                request_metadata=request_metadata,
+                callbacks=callbacks,
+            )
             raise self._transform_invoke_error(e) from e
 
-        self._trigger_after_invoke_callbacks(
-            model=model,
-            result=accumulator.to_result(
+        if accumulator is not None:
+            self._trigger_after_invoke_callbacks(
+                model=model,
+                result=accumulator.to_result(
+                    prompt_messages=prompt_messages,
+                ),
+                credentials=credentials,
                 prompt_messages=prompt_messages,
-            ),
-            credentials=credentials,
-            prompt_messages=prompt_messages,
-            model_parameters=model_parameters,
-            tools=tools,
-            stop=stop,
-            stream=stream,
-            request_metadata=request_metadata,
-            callbacks=callbacks,
-        )
+                model_parameters=model_parameters,
+                tools=tools,
+                stop=stop,
+                stream=stream,
+                request_metadata=request_metadata,
+                callbacks=callbacks,
+            )
 
     def _stream_invoke_result_chunks(
         self,
         *,
         result: Generator[LLMResultChunk, None, None],
-        accumulator: _StreamingInvokeAccumulator,
+        accumulator: _StreamingInvokeAccumulator | None,
         model: str,
         credentials: dict,
         prompt_messages: Sequence[PromptMessage],
@@ -518,13 +544,14 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
                 request_metadata=request_metadata,
                 callbacks=callbacks,
             )
-            accumulator.consume(chunk)
+            if accumulator is not None:
+                accumulator.consume(chunk)
 
     def get_num_tokens(
         self,
         model: str,
         credentials: dict,
-        prompt_messages: list[PromptMessage],
+        prompt_messages: Sequence[PromptMessage],
         tools: list[PromptMessageTool] | None = None,
     ) -> int:
         """Count prompt tokens for the given messages and optional tools."""
@@ -582,7 +609,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
         self,
         model: str,
         credentials: dict,
-        prompt_messages: list[PromptMessage],
+        prompt_messages: Sequence[PromptMessage],
         model_parameters: dict,
         tools: list[PromptMessageTool] | None = None,
         stop: Sequence[str] | None = None,
@@ -708,7 +735,7 @@ class LargeLanguageModel(AIModel[LLMModelRuntime]):
         model: str,
         ex: Exception,
         credentials: dict,
-        prompt_messages: list[PromptMessage],
+        prompt_messages: Sequence[PromptMessage],
         model_parameters: dict,
         tools: list[PromptMessageTool] | None = None,
         stop: Sequence[str] | None = None,

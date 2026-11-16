@@ -1052,7 +1052,9 @@ def test_polling_llm_fails_when_response_arrives_after_deadline(
     def perf_counter() -> float:
         return next(ticks, 1.1)
 
-    monkeypatch.setattr("graphon.nodes.llm.node.time.perf_counter", perf_counter)
+    monkeypatch.setattr(
+        "graphon.nodes.llm.node.time", SimpleNamespace(perf_counter=perf_counter)
+    )
 
     events = list(node._run())
 
@@ -1066,7 +1068,9 @@ def test_polling_llm_fails_when_response_arrives_after_deadline(
 def test_polling_progress_event_omits_next_check_when_deadline_wins(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("graphon.nodes.llm.node.time.perf_counter", lambda: 10.0)
+    monkeypatch.setattr(
+        "graphon.nodes.llm.node.time", SimpleNamespace(perf_counter=lambda: 10.0)
+    )
 
     event = LLMNode._build_polling_progress_event(
         attempt=0,
@@ -1080,7 +1084,9 @@ def test_polling_progress_event_omits_next_check_when_deadline_wins(
 def test_polling_progress_event_keeps_next_check_when_delay_wins(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("graphon.nodes.llm.node.time.perf_counter", lambda: 10.0)
+    monkeypatch.setattr(
+        "graphon.nodes.llm.node.time", SimpleNamespace(perf_counter=lambda: 10.0)
+    )
 
     event = LLMNode._build_polling_progress_event(
         attempt=0,

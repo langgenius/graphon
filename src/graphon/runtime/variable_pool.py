@@ -32,6 +32,9 @@ class VariablePool(BaseModel):
     _RAG_PIPELINE_VARIABLE_NODE_ID = "rag"
     model_config = ConfigDict(extra="forbid")
 
+    # Node namespaces retain their ownership across pool copies and snapshots.
+    node_ids: frozenset[str] = Field(default_factory=frozenset)
+
     # Variable dictionary is a dictionary for looking up variables by their selector.
     # The first element of the selector is the node id.
     # It's the first-level key in the dictionary.

@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-10-15T00:57:04Z"
+last_checked: "2026-11-12T01:11:40Z"
 -->
 # Contributing to Graphon
 
@@ -145,6 +145,11 @@ requirements; the reusable [test workflow](.github/workflows/test.yml) defines
 the Python matrix. Local checks help catch failures before pushing; review CI
 results for checks that depend on GitHub events or other Python versions.
 
+When a pull request changes a knowledge page, the
+[autofix.ci workflow](.github/workflows/autofix.yml) may commit a
+[review timestamp](docs/maintenance.md#document-metadata-and-review-deadline)
+update to the pull request branch. Pull that commit before pushing again.
+
 ## Repository Knowledge
 
 Use the [knowledge index](docs/README.md) to find architecture, component guides,
@@ -178,9 +183,9 @@ Rules:
 
 ## Pull Requests
 
-Follow the [PR template](.github/pull_request_template.md) when preparing the
-body. The [body check](.github/scripts/check_pr.py) enforces its structure and
-issue reference. Use the [commit guidance](#git-commits) for the title.
+Follow the [PR template](.github/pull_request_template.md) when preparing the body.
+The [PR workflow](.github/workflows/pr.yml) controls when the [body check](.github/scripts/check_pr.py) enforces the template structure and issue reference.
+Use the [commit guidance](#git-commits) for the title.
 
 Before opening a PR, follow the [issue search](#issues),
 [validation](#testing-and-validation), and

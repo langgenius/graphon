@@ -17,6 +17,8 @@ class NodeEvent(EngineEvent):
     id: str = Field(..., description="node execution id")
     node_id: str
     node_type: NodeType
+    frame_id: str = "root"
+    retry_index: int = Field(default=0, ge=0)
 
     # The version of the node, or "1" if not specified.
     node_version: str = "1"
