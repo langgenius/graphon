@@ -1,3 +1,4 @@
+import json
 import random
 from collections.abc import Sequence
 from typing import Any
@@ -6,10 +7,12 @@ import pytest
 
 from graphon.engine.filter import ResponseStreamFilter
 from graphon.engine.filter.builtin.response_stream.frame_session import _FrameSession
+from graphon.engine_events.node import NodeRunStreamChunkEvent
 from graphon.enums import NodeExecutionType, NodeState
 from graphon.nodes.base.template import Template, VariableSegment
 from tests.engine.test_response_stream_filter import (
     _context,
+    _edge_taken,
     _TestEdge,
     _TestGraph,
     _TestNode,
@@ -215,19 +218,11 @@ def test_response_filter_builds_selector_specific_blocking_paths_per_response() 
     event_filter = ResponseStreamFilter()
     event_filter.initialize(_context(graph))
 
-    assert [
-        path.edge_ids
-        for path in event_filter._initialized_root_session._blocking_paths["answer-a"]
-    ] == [
-        ["shared-merge"],
-    ]
-    assert [
-        path.edge_ids
-        for path in event_filter._initialized_root_session._blocking_paths["answer-b"]
-    ] == [
-        [],
-        ["other-answer-b"],
-    ]
+    session = event_filter._initialized_root_session
+    assert session._blocking_edges_by_response["answer-a"] == {"shared-merge"}
+    assert not session._is_response_unblocked("answer-a")
+    assert session._blocking_edges_by_response["answer-b"] == {"other-answer-b"}
+    assert session._is_response_unblocked("answer-b")
 
 
 def test_response_filter_reinitialization_recomputes_selector_dependent_blocking() -> (
@@ -238,16 +233,17 @@ def test_response_filter_reinitialization_recomputes_selector_dependent_blocking
     event_filter = ResponseStreamFilter()
 
     event_filter.initialize(_context(first_graph))
-    assert [
-        path.edge_ids
-        for path in event_filter._initialized_root_session._blocking_paths["answer"]
-    ] == [["edge-1"]]
+    assert event_filter._initialized_root_session._blocking_edges_by_response[
+        "answer"
+    ] == {"edge-1"}
+    assert not event_filter._initialized_root_session._is_response_unblocked("answer")
 
     event_filter.initialize(_context(second_graph))
-    assert [
-        path.edge_ids
-        for path in event_filter._initialized_root_session._blocking_paths["answer"]
-    ] == [[]]
+    assert (
+        event_filter._initialized_root_session._blocking_edges_by_response["answer"]
+        == set()
+    )
+    assert event_filter._initialized_root_session._is_response_unblocked("answer")
 
 
 def test_response_filter_find_all_paths_handles_root_target_with_backedge() -> None:
@@ -329,12 +325,12 @@ def test_response_filter_classifies_each_path_edge_once_per_response(
 
     event_filter.initialize(_context(graph))
 
-    assert calls == [
-        "root-left",
+    assert sorted(calls) == [
         "left-merge",
         "merge-answer",
-        "root-right",
         "right-merge",
+        "root-left",
+        "root-right",
     ]
 
 
@@ -420,3 +416,76 @@ def test_response_filter_preserves_seed_path_and_visited_nodes() -> None:
         == expected
         == [["seed-edge", "root-cycle", "cycle-branch", "branch-answer"]]
     )
+
+
+def test_response_filter_handles_diamond_dag_without_path_enumeration() -> None:
+    stages = 12
+    nodes: dict[str, _TestNode] = {"root": _TestNode("root")}
+    edges: dict[str, _TestEdge] = {"entry": _TestEdge("entry", "root", "gate-0")}
+    for index in range(stages):
+        source = f"gate-{index}"
+        target = f"gate-{index + 1}" if index + 1 < stages else "answer"
+        nodes[source] = _TestNode(
+            source,
+            execution_type=NodeExecutionType.BRANCH,
+        )
+        for handle in ("true", "false"):
+            edge_id = f"{source}-{handle}"
+            edges[edge_id] = _TestEdge(edge_id, source, target)
+    nodes["answer"] = _TestNode(
+        "answer",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template(
+            segments=[VariableSegment(selector=["root", "answer"])],
+        ),
+    )
+    graph = _CountingGraph(nodes=nodes, edges=edges, root_node_id="root")
+
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+
+    # 14 nodes, 25 edges, 4,096 paths: initialization must stay O(V + E), not O(2^12).
+    assert len(graph.outgoing_calls) <= len(nodes) * 2
+    dumped_initial = json.loads(event_filter.dumps())
+    assert dumped_initial["paths_map"] == {}
+    assert len(event_filter.dumps()) < 2048
+
+    assert (
+        list(
+            event_filter.on_event(
+                NodeRunStreamChunkEvent(
+                    id="exec-1",
+                    node_id="root",
+                    node_type=NodeExecutionType.ROOT,
+                    selector=["root", "answer"],
+                    chunk="hello",
+                )
+            )
+        )
+        == []
+    )
+    assert list(event_filter.on_event(_edge_taken(edge_id="entry"))) == []
+    for index in range(6):
+        assert (
+            list(event_filter.on_event(_edge_taken(edge_id=f"gate-{index}-true"))) == []
+        )
+
+    mid_snapshot = event_filter.dumps()
+    assert len(mid_snapshot) < 2048
+
+    restored_filter = ResponseStreamFilter()
+    restored_filter.initialize(_context(graph))
+    restored_filter.loads(mid_snapshot)
+
+    for index in range(6, stages - 1):
+        assert (
+            list(restored_filter.on_event(_edge_taken(edge_id=f"gate-{index}-false")))
+            == []
+        )
+
+    output = list(
+        restored_filter.on_event(_edge_taken(edge_id=f"gate-{stages - 1}-true"))
+    )
+    chunks = [e for e in output if isinstance(e, NodeRunStreamChunkEvent)]
+    assert [e.chunk for e in chunks] == ["hello"]
+    assert len(graph.outgoing_calls) < 500

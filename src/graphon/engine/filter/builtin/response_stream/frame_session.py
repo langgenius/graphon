@@ -79,6 +79,8 @@ class _FrameSession:
         )
         self._response_node_ids: set[str] = set()
         self._blocking_paths: dict[str, list[_BlockingPath]] = {}
+        self._blocking_edges_by_response: dict[str, set[str]] = {}
+        self._taken_edges: set[str] = set()
         self._response_sessions: dict[str, _ResponseSession] = {}
         self._referenced_selectors: set[_Selector] = set()
 
@@ -210,6 +212,7 @@ class _FrameSession:
                 node_id: [path.edge_ids.copy() for path in paths]
                 for node_id, paths in sorted(self._blocking_paths.items())
             },
+            taken_edges=sorted(self._taken_edges),
             stream_buffers=self._template_stream.stream_buffers.dump_buffers(),
             stream_positions=self._template_stream.stream_buffers.dump_positions(),
             closed_streams=self._template_stream.stream_buffers.dump_closed_selectors(),
@@ -262,6 +265,12 @@ class _FrameSession:
         )
         self._response_node_ids = response_node_ids
         self._blocking_paths = blocking_paths
+        self._taken_edges = set(state.taken_edges)
+        self._blocking_edges_by_response = {
+            node_id: self._compute_blocking_edges(node_id)
+            for node_id in response_sessions
+            if node_id not in blocking_paths
+        }
         self._response_sessions = response_sessions
         self._referenced_selectors = referenced_selectors
 
@@ -269,8 +278,8 @@ class _FrameSession:
         if response_node_id in self._response_node_ids:
             return
         self._response_node_ids.add(response_node_id)
-        self._blocking_paths[response_node_id] = self._build_blocking_paths(
-            response_node_id
+        self._blocking_edges_by_response[response_node_id] = (
+            self._compute_blocking_edges(response_node_id)
         )
 
         response_node = self.graph.nodes[response_node_id]
@@ -413,28 +422,72 @@ class _FrameSession:
             NodeExecutionType.RESPONSE,
         )) or source_node.blocks_variable_output(variable_selectors)
 
+    def _compute_blocking_edges(self, response_node_id: _NodeID) -> set[_EdgeID]:
+        if self.graph.root_node.id == response_node_id:
+            return set()
+        variable_selectors = self._get_response_variable_selectors(response_node_id)
+        return {
+            edge_id
+            for edge_id in self.graph.edges
+            if self._is_blocking_edge(edge_id, variable_selectors)
+        }
+
+    def _is_response_unblocked(self, response_node_id: _NodeID) -> bool:
+        if response_node_id in self._blocking_paths:
+            return any(
+                path.is_empty() for path in self._blocking_paths[response_node_id]
+            )
+
+        root_node_id = self.graph.root_node.id
+        if root_node_id == response_node_id:
+            return True
+
+        blocking_edges = self._blocking_edges_by_response.get(response_node_id)
+        if blocking_edges is None:
+            blocking_edges = self._compute_blocking_edges(response_node_id)
+            self._blocking_edges_by_response[response_node_id] = blocking_edges
+
+        visited: set[_NodeID] = {root_node_id}
+        queue: deque[_NodeID] = deque([root_node_id])
+        skipped_edges = self._skipped_edge_ids
+        taken_edges = self._taken_edges
+        while queue:
+            node_id = queue.popleft()
+            for edge in self.graph.get_outgoing_edges(node_id):
+                if skipped_edges is not None and edge.id in skipped_edges:
+                    continue
+                if edge.id in blocking_edges and edge.id not in taken_edges:
+                    continue
+                if edge.head == response_node_id:
+                    return True
+                if edge.head not in visited:
+                    visited.add(edge.head)
+                    queue.append(edge.head)
+        return False
+
     def activate_initial_sessions(self) -> list[EngineEvent]:
         events: list[EngineEvent] = []
         for response_node_id in sorted(self._response_node_ids):
-            paths = self._blocking_paths.get(response_node_id, [])
-            if any(path.is_empty() for path in paths):
+            if self._is_response_unblocked(response_node_id):
                 events.extend(self._activate_or_queue_session(response_node_id))
         return events
 
     def _handle_edge_taken(self, edge_id: _EdgeID) -> list[EngineEvent]:
+        self._taken_edges.add(edge_id)
         events: list[EngineEvent] = []
-        for response_node_id in sorted(self._response_node_ids):
+        for response_node_id in sorted(self._response_sessions):
             paths = self._blocking_paths.get(response_node_id)
-            if paths is None:
+            if paths is not None:
+                has_reachable_path = False
+                for path in paths:
+                    path.remove_edge(edge_id)
+                    if path.is_empty():
+                        has_reachable_path = True
+                if has_reachable_path:
+                    events.extend(self._activate_or_queue_session(response_node_id))
                 continue
 
-            has_reachable_path = False
-            for path in paths:
-                path.remove_edge(edge_id)
-                if path.is_empty():
-                    has_reachable_path = True
-
-            if has_reachable_path:
+            if self._is_response_unblocked(response_node_id):
                 events.extend(self._activate_or_queue_session(response_node_id))
         return events
 
