@@ -12,7 +12,12 @@ from json_repair import repair_json
 from graphon.file.enums import FileTransferMethod
 from graphon.http import HttpClientProtocol, HttpResponse
 from graphon.runtime.variable_pool import VariablePool
-from graphon.variables.segments import ArrayFileSegment, FileSegment, StringSegment
+from graphon.variables.segments import (
+    ArrayFileSegment,
+    FileSegment,
+    SecretSegment,
+    StringSegment,
+)
 from graphon.variables.template_resolution import VARIABLE_PATTERN, convert_template
 
 from ..protocols import FileManagerProtocol
@@ -35,24 +40,17 @@ from .exc import (
 )
 
 
-def _json_string_open_after(literal: str, inside: bool) -> bool:
-    """Whether a JSON string literal is still open after scanning ``literal``.
-
-    Only backslash escapes inside a string are honoured, matching JSON's own
-    lexing rules, so an escaped quote does not close the string.
-
-    Returns:
-        True when a string literal is still open at the end of ``literal``.
-    """
+def _ends_inside_json_string(literal: str, inside_string: bool) -> bool:
+    """Track JSON string boundaries, ignoring escaped quotes inside strings."""
     escaped = False
     for char in literal:
         if escaped:
             escaped = False
-        elif inside and char == "\\":
+        elif inside_string and char == "\\":
             escaped = True
         elif char == '"':
-            inside = not inside
-    return inside
+            inside_string = not inside_string
+    return inside_string
 
 
 BODY_TYPE_TO_CONTENT_TYPE = {
@@ -296,15 +294,12 @@ class Executor:
     def _init_json_body(self, data: Sequence[BodyData]) -> None:
         item = self._require_single_body_item(data, body_type="json")
         json_string = self._render_json_template(item.value)
-        # Raw masked template text (not re-normalized via json.dumps); self.json
-        # holds the parsed plaintext, so _log_json_text must never fall back to it.
+        # Render logs from masked segments; self.json contains plaintext secrets.
         self._log_json_text = self._render_json_template(item.value, masked=True)
         try:
             self.json = json.loads(json_string, strict=False)
         except json.JSONDecodeError:
-            # The template itself was malformed before any substitution, which
-            # escaping cannot fix. Fall back to the historical repair path so
-            # workflows that relied on it keep working.
+            # Retain the existing repair path for nonstandard JSON input.
             try:
                 self.json = json.loads(repair_json(json_string), strict=False)
             except json.JSONDecodeError as e:
@@ -312,49 +307,37 @@ class Executor:
                 raise RequestBodyError(msg) from e
 
     def _render_json_template(self, template: str, *, masked: bool = False) -> str:
-        """Substitute variables into a JSON body template, encoding as we go.
+        """Encode strings and secrets according to the template's quote state.
 
-        ``convert_template(...).text`` concatenates raw values, so a string
-        holding a quote, backslash or newline breaks the surrounding JSON and
-        ``repair_json`` then silently discards it. Encoding each string value
-        with :func:`json.dumps` at the point of substitution keeps the document
-        valid, so no repair is needed and the value round-trips byte for byte.
-
-        A variable already sitting inside a string literal (``"{{#x#}}"``, or
-        ``"a{{#x#}}b"``) gets the escaped body without the quotes ``json.dumps``
-        would add. Quote state is tracked across the literal parts rather than
-        sniffed from the adjacent characters, so a variable embedded partway
-        through a string is handled the same as one standing alone.
+        Inside a JSON string, insert only the encoded contents. ``masked`` uses
+        each segment's log value; unresolved selectors keep their selector text.
 
         Returns:
-            The rendered JSON document. Secret values are obfuscated when
-            ``masked`` is set, for the log-safe copy.
+            The rendered template, which may still require JSON repair.
         """
         # VARIABLE_PATTERN captures the selector, so splitting yields
         # [literal, selector, literal, selector, ..., literal].
         parts = VARIABLE_PATTERN.split(template)
-        rendered: list[str] = []
+        rendered_parts: list[str] = []
         inside_string = False
         for index, part in enumerate(parts):
             if index % 2 == 0:
-                inside_string = _json_string_open_after(part, inside_string)
-                rendered.append(part)
+                inside_string = _ends_inside_json_string(part, inside_string)
+                rendered_parts.append(part)
                 continue
 
             segment = self.variable_pool.get(part.split("."))
             if segment is None:
-                # Unresolved selector: preserve the historical behaviour of
-                # dropping it rather than failing the request.
-                rendered.append("")
-            elif isinstance(segment, StringSegment):
+                # Match convert_template's unresolved selector text.
+                rendered_parts.append(part)
+            elif isinstance(segment, StringSegment | SecretSegment):
                 value = segment.log if masked else segment.text
                 encoded = json.dumps(value, ensure_ascii=False)
-                rendered.append(encoded[1:-1] if inside_string else encoded)
+                rendered_parts.append(encoded[1:-1] if inside_string else encoded)
             else:
-                # Numbers, booleans, objects and arrays already render as valid
-                # JSON tokens.
-                rendered.append(segment.log if masked else segment.text)
-        return "".join(rendered)
+                # Keep the existing rendering for non-string values.
+                rendered_parts.append(segment.log if masked else segment.text)
+        return "".join(rendered_parts)
 
     def _init_binary_body(self, data: Sequence[BodyData]) -> None:
         item = self._require_single_body_item(data, body_type="binary")
