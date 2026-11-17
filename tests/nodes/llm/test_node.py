@@ -361,12 +361,30 @@ def test_blocking_structured_output_is_validated_against_schema() -> None:
         )
 
 
-def test_blocking_result_preserves_explicit_reasoning_content() -> None:
+@pytest.mark.parametrize(
+    ("content", "reasoning_content", "expected_reasoning"),
+    [
+        ("final answer", "provider reasoning", "provider reasoning"),
+        (
+            "<think>tag reasoning</think>final answer",
+            "provider reasoning",
+            "provider reasoning",
+        ),
+        ("<think>tag reasoning</think>final answer", None, "tag reasoning"),
+        ("<think>tag reasoning</think>final answer", "", "tag reasoning"),
+    ],
+    ids=["explicit-field", "explicit-field-over-tags", "missing-field", "empty-field"],
+)
+def test_blocking_result_separates_reasoning(
+    content: str,
+    reasoning_content: str | None,
+    expected_reasoning: str,
+) -> None:
     result = LLMResult(
         model="gpt-4o",
-        message=AssistantPromptMessage(content="final answer"),
+        message=AssistantPromptMessage(content=content),
         usage=LLMUsage.empty_usage(),
-        reasoning_content="private reasoning",
+        reasoning_content=reasoning_content,
     )
 
     event = LLMNode.handle_blocking_result(
@@ -377,7 +395,7 @@ def test_blocking_result_preserves_explicit_reasoning_content() -> None:
     )
 
     assert event.text == "final answer"
-    assert event.reasoning_content == "private reasoning"
+    assert event.reasoning_content == expected_reasoning
 
 
 @pytest.mark.parametrize(
