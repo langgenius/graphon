@@ -279,15 +279,18 @@ class NodeEventProcessor:
             event: The node failed event
 
         """
-        # Update domain model
-        self._graph_execution.record_node_failure()
-
         frame.state.add_llm_usage(event.node_run_result.llm_usage)
 
         result = frame.failure_handler.handle(
             frame_id=frame.frame_id,
             event=event,
         )
+
+        if not isinstance(result, NodeRunRetryEvent):
+            # A failure that is about to be retried is not an exception of the
+            # run yet. Counting it here made a node that later succeeds on
+            # retry leave the run as GraphRunPartialSucceeded (#403).
+            self._graph_execution.record_node_failure()
 
         if result is not None:
             # Process the resulting event (retry, exception, etc.)
