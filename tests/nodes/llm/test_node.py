@@ -362,6 +362,43 @@ def test_blocking_structured_output_is_validated_against_schema() -> None:
 
 
 @pytest.mark.parametrize(
+    ("content", "reasoning_content", "expected_reasoning"),
+    [
+        ("final answer", "provider reasoning", "provider reasoning"),
+        (
+            "<think>tag reasoning</think>final answer",
+            "provider reasoning",
+            "provider reasoning",
+        ),
+        ("<think>tag reasoning</think>final answer", None, "tag reasoning"),
+        ("<think>tag reasoning</think>final answer", "", "tag reasoning"),
+    ],
+    ids=["explicit-field", "explicit-field-over-tags", "missing-field", "empty-field"],
+)
+def test_blocking_result_separates_reasoning(
+    content: str,
+    reasoning_content: str | None,
+    expected_reasoning: str,
+) -> None:
+    result = LLMResult(
+        model="gpt-4o",
+        message=AssistantPromptMessage(content=content),
+        usage=LLMUsage.empty_usage(),
+        reasoning_content=reasoning_content,
+    )
+
+    event = LLMNode.handle_blocking_result(
+        invoke_result=result,
+        saver=MagicMock(),
+        file_outputs=[],
+        reasoning_format="separated",
+    )
+
+    assert event.text == "final answer"
+    assert event.reasoning_content == expected_reasoning
+
+
+@pytest.mark.parametrize(
     ("features", "should_invoke"),
     [
         ([ModelFeature.STRUCTURED_OUTPUT], True),

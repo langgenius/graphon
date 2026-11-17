@@ -32,6 +32,10 @@ The adapter owns its meaning; `None` means no state, and any other value keeps
 an assistant message nonempty. See the
 [message tests](../../../tests/model_runtime/test_message_entities.py).
 
+The LLM node uses a nonempty `LLMResult.reasoning_content` for complete results in `separated` mode, including completed polling requests.
+When the field is `None` or `""`, it falls back to reasoning parsed from `<think>` tags; tagged reasoning is removed from the visible text in either case.
+See the [LLM node tests](../../../tests/nodes/llm/test_node.py).
+
 [LargeLanguageModel](model_providers/base/large_language_model.py) keeps the last
 non-`None` assistant state per invocation for blocking results and `on_after_invoke`.
 Emit complete snapshots: each replaces the previous state. Mixed text and content
