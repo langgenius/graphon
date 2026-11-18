@@ -84,18 +84,19 @@ Response presentation is a consumer concern. `Engine.run()` yields raw engine
 events; hosts use [filter_engine_events](src/graphon/engine/filter/chain.py) with
 [ResponseStreamFilter](src/graphon/engine/filter/builtin/response_stream/filter.py)
 for response selection, template assembly, buffering, and presentation order.
-Producer chunks remain immediate, including across parallel container items.
-See [raw-event tests](tests/engine/test_raw_engine_events.py) and
-[filter tests](tests/engine/test_event_filters.py).
+Producer chunks remain immediate, including across parallel container items. [Raw event tests](tests/engine/test_raw_engine_events.py) · [Filter tests](tests/engine/test_event_filters.py)
+When a polling or ordinary LLM call supplies no text deltas, its final `[node_id, "text"]` chunk carries the node's `text` output.
+An attempt that sent any text delta, even an empty one, closes with an empty final chunk. [LLM node](src/graphon/nodes/llm/node.py) · [LLM tests](tests/nodes/llm/test_node.py)
 
 ## Raw frame observations
 
-By default, [Engine](src/graphon/engine/engine.py) emits [frame events](src/graphon/engine_events/frame.py) that expose execution state for consumers that may read events after a child frame has been removed:
+By default, the engine emits the following observations so consumers can read them even after a child frame has been removed. [Frame events](src/graphon/engine_events/frame.py) · [Node events](src/graphon/engine_events/node.py)
 
 | Event | Meaning |
 | --- | --- |
 | `FrameStartedEvent` | A detached, typed variable baseline and reserved node execution IDs, published after setup and before body scheduling. Child frames also identify their parent and owning container invocation. |
 | `FrameVariablesUpdatedEvent` | Detached replacements at the written selectors, published after successful commits. Empty and `None` values are retained; partial failures report only writes that succeeded. |
+| `NodeRunResponseReadEvent` | A built-in Answer or End with explicit `[node_id, "text"]` lookups produces this observation before its success event. Each lookup has a template position and carries Answer's rendered Markdown, End's detached segment, or `None` for a missing value. |
 | `FrameFinishedEvent` | The frame has emitted its last node, traversal, and variable observations, with a succeeded, failed, or aborted outcome. Child completion is published before registry removal. |
 
 Set `Engine(..., emit_frame_events=False)` to skip these events and their detached value copies for both event consumers and layers while execution and variable commits continue.
@@ -118,6 +119,9 @@ pause/restore and distinguishes separate runs with the same `workflow_id`.
 
 Pause leaves unfinished frames open. Resume publishes new baselines with the
 resumption reason and existing execution IDs before resumed body events.
+Only the resumed root baseline supplies `completed_node_ids`.
+It includes nodes marked `TAKEN` at the pause after excluding queued or deferred starts and suspended containers.
+This distinguishes a completed leaf response from one that was already scheduled. [Frame registry](src/graphon/engine/frame.py) · [Paired resume tests](tests/engine/test_llm_reply_resume.py)
 [Persisted container state](src/graphon/runtime/container_state.py) preserves pending frame failures across pause and snapshot restore even when frame events are disabled.
 Terminal failure or abort closes each remaining frame once, before the graph's terminal event.
 An `Exception` thrown into `Engine.run()` during execution or at the paused event
@@ -130,9 +134,9 @@ commits, detached values, and raw chunk delivery, and the
 [frame failure tests](tests/engine/test_frame_failures.py) for pause/restore and
 consumer exceptions.
 
-Baselines and commits contain full variable values. `ResponseStreamFilter`
-consumes those events without forwarding them to its output. The engine
-still constructs the events and copies their values.
+Baselines, commits, and response reads can carry full variable values.
+`ResponseStreamFilter` consumes these observations and forwards ordinary node results, including Answer's `answer` and `files` outputs.
+The read event shares the response's frame, execution ID, and retry index and preserves repeated lookups and End fields with the same output name. [Response read tests](tests/engine/test_response_read_observations.py)
 
 ## Response sessions
 
@@ -161,19 +165,24 @@ after engine frames have been removed. Result and variable-request events do not
 apply values again. Direct contexts without `run_id` retain the legacy manual
 event-stream behavior until a frame baseline is supplied.
 
-[Template assembly](src/graphon/engine/filter/builtin/response_stream/template_stream.py)
-feeds the filter output for both scopes. Child sources are keyed by execution,
-attempt, and selector within their frame; each response and template occurrence
-has its own cursor. Read occurrences retain their source versions across committed
-replacements, which supply later occurrences. Retries rebuild wholly undisplayed
-child replies using the new attempt without rereading unrelated captured values;
-once a reply is displayed, occurrences already reading a source stay on that attempt.
-Successful and handled-failure results close unfinished child sources without
-replaying their final values. Child Answer chunks use the reserved execution ID and
-`[answer_node_id, "answer"]` selector, with one final marker after the complete
-template, including empty replies. Source final markers close only their source.
-Ordinary Answer `answer` and `files`
-outputs and host-bound file formatting remain unchanged.
+Native frames advertise `observes_response_reads` in their baseline.
+A built-in Answer or End that references a whole LLM result supplies the value it read at each template position, including when the model was skipped or inherited.
+A queued reply keeps those reads across later edits.
+The filter renders files in End's captured segments with its file adapter.
+A missing value contributes no text, though a local model that can still run may stream deltas at that position.
+Tokens, literals, and ordinary variables can stream as soon as earlier template positions allow.
+Ordinary variables and older streams without the baseline flag use the committed pool for value lookups. [Template assembly](src/graphon/engine/filter/builtin/response_stream/template_stream.py) · [Live token tests](tests/engine/test_llm_answer_streaming.py) · [Queued reply tests](tests/engine/test_llm_reply_values.py)
+
+Root responses share one cursor per streamed selector, including across repeated references.
+If a retry returns a whole result after the root cursor consumed text from the failed attempt, an empty marker closes that stream.
+If the cursor consumed no text, the response can display the value it read.
+In a child frame, each template occurrence keeps a cursor for its source execution and attempt.
+A committed replacement can supply later occurrences.
+A retry rebuilds a child reply still waiting for display and keeps unrelated values it already read.
+Once a child reply displays text from a source, that occurrence stays on the same attempt.
+In either scope a failed attempt that emitted only empty text deltas leaves the reference available for a retry, even after the reply displayed its prefix.
+Successful and handled failure results close unfinished child sources.
+Child Answer chunks use the reserved Answer execution ID and `[answer_node_id, "answer"]` selector, with one final marker after the template, including for empty replies.
 
 The filter's [reply order](src/graphon/engine/filter/builtin/response_stream/reply_order.py)
 reserves container groups at node start, before their first child reply. Frames
@@ -190,12 +199,15 @@ a successful or handled result; a failed container discards them. Graph success,
 including partial success, drains eligible replies before its terminal event. Graph
 failure or abort discards pending replies before `flush()` is needed. Completed
 frames release captured values and source buffers; queued text is released as it
-drains or is discarded. Root chunks retain their existing event shapes and shared
-source cursors.
+drains or is discarded.
 
-Filter persistence supports
-only root response state. Fresh checkpoints use v3, storing consumed taken edges
-and edges skipped before they were taken alongside response and stream progress.
+Version 3.1 root filter checkpoints store values a response read at LLM references that the filter has yet to display.
+They record each read's template position alongside stream cursors, execution IDs, retry indices, and edge decisions.
+Restore the runtime and filter checkpoints from the same drained pause.
+A response scheduled to run after resumption supplies fresh reads when it executes.
+Versions 1.0 through 3.0 can lack a completed reply's reads.
+When its remaining text cannot be reconstructed, the filter follows the old cursor, including any omission from an empty final marker.
+A root marker consumed before the pause stays consumed across repeated references. [Root codec](src/graphon/engine/filter/builtin/response_stream/v3.py) · [Paired LLM pause tests](tests/engine/test_llm_reply_resume.py) · [Retry and marker tests](tests/nodes/llm/test_node.py)
 Restoring v1 or v2 retains its residual blocking paths explicitly in v3; v1
 migration also discards child response state. Native decisions and legacy paths
 are mutually exclusive runtime states. The flat v3 wire format rejects legacy

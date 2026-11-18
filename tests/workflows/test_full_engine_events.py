@@ -2027,6 +2027,7 @@ def test_full_llm_graph_uses_mocked_slim_runtime(
         _event("GraphEdgeTakenEvent", "llm->end"),
         _event("NodeRunSucceededEvent", "llm"),
         _event("NodeRunStartedEvent", "end"),
+        _event("NodeRunResponseReadEvent", "end"),
         _event("NodeRunSucceededEvent", "end"),
         _event("GraphRunSucceededEvent"),
     ]

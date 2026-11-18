@@ -10,11 +10,12 @@ from collections import deque
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
-from graphon.engine_events.base import EngineEvent
+from graphon.engine_events.base import EngineEvent, NodeEvent
 from graphon.engine_events.frame import FrameStartedEvent, FrameVariablesUpdatedEvent
 from graphon.engine_events.node import (
     NodeRunExceptionEvent,
     NodeRunReasoningChunkEvent,
+    NodeRunResponseReadEvent,
     NodeRunRetryEvent,
     NodeRunStartedEvent,
     NodeRunStreamChunkEvent,
@@ -35,7 +36,12 @@ from .ids import EdgeID, NodeID
 from .reachability import _EdgeDecision, _ResponseReachability
 from .reply_order import _Reply, _ReplyOrder
 from .snapshot import ResponseSessionState, ResponseStreamFilterSnapshot, Selector
-from .template_stream import _ResponseSession, _StreamBuffers, _TemplateStream
+from .template_stream import (
+    _only_empty_llm_deltas_before_retry,
+    _ResponseSession,
+    _StreamBuffers,
+    _TemplateStream,
+)
 
 type _Selector = Selector
 
@@ -83,8 +89,14 @@ class _FrameSession:
         frame_id: str = ROOT_FRAME_ID,
         container_id: str = "",
         pass_unmatched_chunks: bool = False,
+        parent_llm_text_selectors: frozenset[Selector] = frozenset(),
     ) -> None:
         self.graph = graph
+        self.llm_text_selectors = parent_llm_text_selectors.union(
+            (node.id, "text")
+            for node in graph.nodes.values()
+            if node.node_type == BuiltinNodeTypes.LLM
+        )
         self.variable_pool = variable_pool
         self.frame_id = frame_id
         self._reply_order = reply_order
@@ -127,6 +139,16 @@ class _FrameSession:
         self._template_stream.skipped_node_ids = self._find_skipped_node_ids()
         self._template_stream.node_execution_ids.update(event.node_execution_ids)
         self._replace_values(event.variables)
+        self._template_stream.llm_text_selectors = (
+            self.llm_text_selectors if event.observes_response_reads else frozenset()
+        )
+        if event.completed_node_ids is not None:
+            self._template_stream.finished_node_ids.update(event.completed_node_ids)
+            for session in self._response_sessions.values():
+                if session.completed_without_saved_reads is not False:
+                    session.completed_without_saved_reads = (
+                        session.node_id in event.completed_node_ids
+                    )
         return [*self.activate_initial_sessions(), *self._try_flush()]
 
     def _replace_values(self, variables: Iterable[Variable]) -> None:
@@ -144,12 +166,15 @@ class _FrameSession:
                 self._replace_values(event.variables)
                 return self._try_flush()
             case NodeRunRetryEvent():
-                self._template_stream.close_previous_attempts(event)
-                self._restart_hidden_replies(event)
-                self._template_stream.node_execution_ids[event.node_id] = event.id
+                self._record_attempt(event)
+                self._template_stream.prepare_streams_for_retry(event)
+                self._reset_reply_segments_for_retry(event)
                 return [*self._try_flush(), event]
             case NodeRunStartedEvent():
-                self._template_stream.node_execution_ids[event.node_id] = event.id
+                self._record_attempt(event)
+            case NodeRunResponseReadEvent():
+                self._record_response_reads(event)
+                return self._try_flush()
             case NodeRunStreamChunkEvent():
                 return self._handle_stream_chunk(event)
             case NodeRunReasoningChunkEvent():
@@ -159,9 +184,62 @@ class _FrameSession:
             case GraphEdgeSkippedEvent():
                 return self._handle_edge_skipped(event)
             case NodeRunSucceededEvent() | NodeRunExceptionEvent():
-                self._template_stream.finish_source(event)
-                return [*self._try_flush(), event]
+                return self._finish_node(event)
         return [event]
+
+    def _record_attempt(self, event: NodeEvent) -> None:
+        self._template_stream.record_attempt(event)
+        if session := self._response_sessions.get(NodeID(event.node_id)):
+            session.completed_without_saved_reads = False
+
+    def _record_response_reads(self, event: NodeRunResponseReadEvent) -> None:
+        session = self._response_sessions.get(NodeID(event.node_id))
+        if (
+            session is not None
+            and self._template_stream.node_execution_ids.get(event.node_id) == event.id
+            and self._template_stream.node_retry_indices.get(event.node_id, 0)
+            == event.retry_index
+        ):
+            session.completed_without_saved_reads = False
+            session.store_llm_text_reads(
+                event.reads, self._template_stream.llm_text_selectors
+            )
+
+    def _finish_node(
+        self, event: NodeRunSucceededEvent | NodeRunExceptionEvent
+    ) -> list[EngineEvent]:
+        self._template_stream.finish_source(event)
+        if isinstance(event, NodeRunExceptionEvent) and event.node_type in {
+            BuiltinNodeTypes.ANSWER,
+            BuiltinNodeTypes.END,
+        }:
+            self._discard_failed_response(NodeID(event.node_id))
+        return [*self._try_flush(), event]
+
+    def _discard_failed_response(self, node_id: NodeID) -> None:
+        session = self._response_sessions.get(node_id)
+        if session is None or not self._template_stream.llm_text_selectors.intersection(
+            session.selectors
+        ):
+            return
+        # A handled failure has no successful reads. Release the next reply.
+        del self._response_sessions[node_id]
+        reply = self._replies.pop(node_id, None)
+        if reply is None:
+            return
+        if reply.displayed:
+            reply.events.extend(
+                self._template_stream.finish_response(session, graph=self.graph)
+            )
+        else:
+            reply.events.clear()
+        reply.finished = True
+        if self._active_session is session:
+            self._active_session = (
+                self._waiting_sessions.popleft() if self._waiting_sessions else None
+            )
+        else:
+            self._waiting_sessions.remove(session)
 
     def flush(self) -> list[EngineEvent]:
         return self._try_flush()
@@ -169,6 +247,9 @@ class _FrameSession:
     def finish(self, *, succeeded: bool) -> list[EngineEvent]:
         events: list[EngineEvent] = []
         if succeeded:
+            for session in self._response_sessions.values():
+                if session.completed_without_saved_reads is None:
+                    session.completed_without_saved_reads = True
             self._template_stream.finish_sources(self.graph.nodes)
             events.extend(self._try_flush())
         if self._active_session is not None and self._active_session.emitted:
@@ -258,11 +339,18 @@ class _FrameSession:
             ],
             pending_sessions=[
                 session_state
-                for _, session in sorted(self._response_sessions.items())
-                if (session_state := self._serialize_session(session)) is not None
+                for node_id, session in sorted(self._response_sessions.items())
+                if node_id not in self._replies
+                and (session_state := self._serialize_session(session)) is not None
             ],
             node_execution_ids=dict(
                 sorted(self._template_stream.node_execution_ids.items())
+            ),
+            node_retry_indices=dict(
+                sorted(self._template_stream.node_retry_indices.items())
+            ),
+            legacy_whole_streams=sorted(
+                self._template_stream.stream_buffers.legacy_complete_result_selectors
             ),
             taken_edges=taken_edges,
             rejected_edges=rejected_edges,
@@ -274,7 +362,7 @@ class _FrameSession:
 
     def load_state(self, state: ResponseStreamFilterSnapshot) -> None:
         state = snapshot.for_graph(state, self.graph)
-        if not isinstance(state, v3.Snapshot):
+        if not isinstance(state, (v3.SnapshotWithoutReads, v3.Snapshot)):
             msg = "Expected migrated version 3 ResponseStreamFilter state"
             raise TypeError(msg)
 
@@ -285,6 +373,12 @@ class _FrameSession:
             buffers=state.stream_buffers,
             positions=state.stream_positions,
             closed_selectors=state.closed_streams,
+        )
+        node_retry_indices = dict(state.node_retry_indices)
+        stream_buffers.read_saved_llm_markers(
+            node_execution_ids,
+            node_retry_indices,
+            state.legacy_whole_streams if isinstance(state, v3.Snapshot) else None,
         )
         waiting_sessions = deque(
             self._session_from_state(session_state)
@@ -299,6 +393,22 @@ class _FrameSession:
             if state.active_session
             else None
         )
+        for session in waiting_sessions:
+            response_sessions[NodeID(session.node_id)] = session
+        if active_session is not None:
+            response_sessions[NodeID(active_session.node_id)] = active_session
+        if isinstance(state, v3.SnapshotWithoutReads):
+            # A consumed outgoing take proves a response completed before the pause.
+            completed_node_ids = {
+                self.graph.edges[edge_id].tail
+                for edge_id in state.taken_edges
+                if edge_id in self.graph.edges
+            }
+            for session in response_sessions.values():
+                if self.llm_text_selectors.intersection(session.selectors):
+                    session.completed_without_saved_reads = (
+                        True if session.node_id in completed_node_ids else None
+                    )
 
         referenced_selectors: set[_Selector] = set()
         for response_node_id in response_node_ids:
@@ -337,7 +447,9 @@ class _FrameSession:
         self._template_stream = _TemplateStream(
             stream_buffers=stream_buffers,
             node_execution_ids=node_execution_ids,
+            node_retry_indices=node_retry_indices,
             skipped_node_ids=self._find_skipped_node_ids(),
+            llm_text_selectors=self._template_stream.llm_text_selectors,
         )
         self._response_node_ids = response_node_ids
         self._gating_state = gating_state
@@ -362,16 +474,9 @@ class _FrameSession:
             )
         )
 
-        response_node = self.graph.nodes[response_node_id]
-        self._response_sessions[response_node_id] = _ResponseSession.from_node(
-            response_node,
-        )
-        self._record_referenced_selectors(response_node_id)
-
-    def _record_referenced_selectors(self, response_node_id: NodeID) -> None:
-        self._referenced_selectors.update(
-            self._get_referenced_selectors(response_node_id)
-        )
+        session = _ResponseSession.from_node(self.graph.nodes[response_node_id])
+        self._response_sessions[response_node_id] = session
+        self._referenced_selectors.update(session.selectors)
 
     def _get_referenced_selectors(
         self,
@@ -381,19 +486,15 @@ class _FrameSession:
         if response_node is None:
             return set()
 
-        response_session = _ResponseSession.from_node(response_node)
-        return {
-            tuple(segment.selector)
-            for segment in response_session.template.segments
-            if isinstance(segment, VariableSegment)
-        }
+        return _ResponseSession.from_node(response_node).selectors
 
     def _build_reachability(
         self,
         response_node_id: NodeID,
         first_edge_decisions: Mapping[EdgeID, _EdgeDecision],
     ) -> _ResponseReachability:
-        variable_selectors = self._get_response_variable_selectors(response_node_id)
+        session = _ResponseSession.from_node(self.graph.nodes[response_node_id])
+        variable_selectors = {selector[:2] for selector in session.selectors}
         blocking_edge_ids = {
             edge_id
             for edge_id in map(EdgeID, self.graph.edges)
@@ -405,18 +506,6 @@ class _FrameSession:
             blocking_edge_ids,
             first_edge_decisions,
         )
-
-    def _get_response_variable_selectors(
-        self,
-        response_node_id: NodeID,
-    ) -> set[_Selector]:
-        response_node = self.graph.nodes[response_node_id]
-        response_session = _ResponseSession.from_node(response_node)
-        return {
-            tuple(segment.selector[:2])
-            for segment in response_session.template.segments
-            if isinstance(segment, VariableSegment)
-        }
 
     def _is_blocking_edge(
         self,
@@ -469,8 +558,8 @@ class _FrameSession:
         self,
         node_id: NodeID,
     ) -> list[EngineEvent]:
-        session = self._response_sessions.pop(node_id, None)
-        if session is None:
+        session = self._response_sessions.get(node_id)
+        if session is None or node_id in self._replies:
             return []
 
         self._replies[node_id] = self._reply_order.add_reply(self.frame_id)
@@ -573,6 +662,7 @@ class _FrameSession:
         if not self._active_session or self._active_session.node_id != node_id:
             return
 
+        self._response_sessions.pop(node_id, None)
         reply = self._replies[node_id]
         reply.events.extend(
             self._template_stream.finish_response(
@@ -595,7 +685,7 @@ class _FrameSession:
                 del self._completed_sessions[node_id]
                 del self._replies[node_id]
 
-    def _restart_hidden_replies(self, event: NodeRunRetryEvent) -> None:
+    def _reset_reply_segments_for_retry(self, event: NodeRunRetryEvent) -> None:
         if self.frame_id == ROOT_FRAME_ID:
             return
         previous_attempt_streams = [
@@ -621,7 +711,18 @@ class _FrameSession:
                     for previous_stream in previous_attempt_streams
                 )
             ]
-            if reply.displayed or not replaced_segment_indices:
+            if not replaced_segment_indices:
+                continue
+            if reply.displayed:
+                # A visible prefix does not pin an empty LLM attempt.
+                if (
+                    session.index in replaced_segment_indices
+                    and _only_empty_llm_deltas_before_retry(
+                        session.segment_streams[session.index].events, event
+                    )
+                ):
+                    del session.segment_streams[session.index]
+                    session.segment_positions.pop(session.index, None)
                 continue
             for index in replaced_segment_indices:
                 del session.segment_streams[index]
@@ -632,6 +733,7 @@ class _FrameSession:
             reply.finished = False
             self._completed_sessions.pop(node_id, None)
             pending_sessions[node_id] = session
+            self._response_sessions[NodeID(node_id)] = session
         ordered_sessions = [
             pending_sessions[node_id]
             for node_id in self._replies
@@ -643,10 +745,18 @@ class _FrameSession:
     def _serialize_session(
         self,
         session: _ResponseSession | None,
-    ) -> ResponseSessionState | None:
+    ) -> v3.SessionStateWithReads | None:
         if session is None:
             return None
-        return ResponseSessionState(node_id=session.node_id, index=session.index)
+        return v3.SessionStateWithReads(
+            node_id=session.node_id,
+            index=session.index,
+            reads=[
+                session.llm_text_reads[index]
+                for index in sorted(session.llm_text_reads)
+            ],
+            legacy_reads=session.completed_without_saved_reads,
+        )
 
     def _session_from_state(
         self,
@@ -659,4 +769,10 @@ class _FrameSession:
 
         session = _ResponseSession.from_node(node)
         session.index = session_state.index
+        if isinstance(session_state, v3.SessionStateWithReads):
+            session.completed_without_saved_reads = session_state.legacy_reads
+            session.store_llm_text_reads(session_state.reads, self.llm_text_selectors)
+            if len(session.llm_text_reads) != len(session_state.reads):
+                msg = f"Invalid saved response reads for {node.id}"
+                raise ValueError(msg)
         return session

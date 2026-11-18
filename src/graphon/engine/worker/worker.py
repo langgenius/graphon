@@ -20,14 +20,18 @@ from graphon.engine.layer import Layer
 from graphon.engine_events.base import NodeEvent
 from graphon.engine_events.node import (
     NodeRunFailedEvent,
+    NodeRunResponseReadEvent,
     NodeRunStartedEvent,
+    NodeRunSucceededEvent,
+    ResponseRead,
     is_node_result_event,
 )
-from graphon.enums import WorkflowNodeExecutionStatus
+from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
 from graphon.file.protocols import WorkflowFileRuntimeProtocol
 from graphon.file.runtime import use_workflow_file_runtime
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.node import Node
+from graphon.nodes.base.response_reads import collect_response_reads
 from graphon.nodes.container_effects import (
     ContainerAwaitRequest,
 )
@@ -242,11 +246,19 @@ class Worker(threading.Thread):
             if invocation_id is None:
                 self._invoke_node_run_start_hooks(node)
             try:
-                result_event, suspended = self._consume_node_events(
-                    invocation_id=invocation_id,
-                    node=node,
-                    node_events=node_events,
-                )
+                with (
+                    collect_response_reads()
+                    if self._frame_registry.observes_response_reads
+                    and node.node_type
+                    in {BuiltinNodeTypes.ANSWER, BuiltinNodeTypes.END}
+                    else nullcontext()
+                ) as reads:
+                    result_event, suspended = self._consume_node_events(
+                        invocation_id=invocation_id,
+                        node=node,
+                        node_events=node_events,
+                        response_reads=reads,
+                    )
             except Exception as exc:
                 error = exc
                 raise
@@ -307,6 +319,7 @@ class Worker(threading.Thread):
         invocation_id: str | None,
         node: Node,
         node_events: Iterator[NodeEvent | ContainerAwaitRequest],
+        response_reads: list[ResponseRead] | None,
     ) -> tuple[NodeEvent | None, bool]:
         result_event: NodeEvent | None = None
         for event in node_events:
@@ -336,6 +349,19 @@ class Worker(threading.Thread):
                 return None, True
             if isinstance(event, NodeRunStartedEvent) and event.id == node.execution_id:
                 self._current_node_started_at = event.start_at
+            if response_reads and isinstance(event, NodeRunSucceededEvent):
+                self._dispatch_queue.put(
+                    NodeEventTask(
+                        frame_id=self._current_frame_id,
+                        event=NodeRunResponseReadEvent(
+                            id=event.id,
+                            node_id=event.node_id,
+                            node_type=event.node_type,
+                            node_version=event.node_version,
+                            reads=tuple(response_reads),
+                        ),
+                    )
+                )
             self._dispatch_queue.put(
                 NodeEventTask(frame_id=self._current_frame_id, event=event)
             )

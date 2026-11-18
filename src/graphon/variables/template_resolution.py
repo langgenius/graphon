@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from abc import abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Protocol
 
 from graphon.variables.factory import build_segment
@@ -23,11 +23,19 @@ def convert_template(
     pool: _TemplateLookupPool,
     template: str,
     /,
+    *,
+    on_reference: Callable[[int, Sequence[str], Segment | None], None] | None = None,
 ) -> SegmentGroup:
+    """Resolve the template and report explicit lookups at their segment positions."""
     segments: list[Segment] = []
-    for part in filter(None, VARIABLE_PATTERN.split(template)):
-        if "." in part and (variable := pool.get(part.split("."))) is not None:
-            segments.append(variable)
-        else:
-            segments.append(build_segment(part))
+    for index, part in enumerate(VARIABLE_PATTERN.split(template)):
+        if not part:
+            continue
+        variable = None
+        if "." in part:
+            selector = part.split(".")
+            variable = pool.get(selector)
+            if on_reference is not None and index % 2:
+                on_reference(len(segments), selector, variable)
+        segments.append(variable if variable is not None else build_segment(part))
     return SegmentGroup(value=segments)

@@ -815,6 +815,26 @@ def test_response_stream_filter_does_not_mix_buffered_chunks_with_final_value() 
     assert [event.chunk for event in chunks] == ["Quiet", " Night", " Thought"]
 
 
+def test_response_stream_filter_closes_empty_code_node_text_without_a_commit() -> None:
+    graph = _variable_response_graph(
+        segments=[
+            VariableSegment(selector=["source", "text"]),
+            TextSegment(text="!"),
+        ],
+    )
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+    list(event_filter.on_event(GraphRunStartedEvent()))
+
+    output = list(
+        event_filter.on_event(_stream_chunk("", selector=["source", "text"])),
+    )
+
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert "".join(event.chunk for event in chunks) == "!"
+    assert chunks[-1].is_final
+
+
 def test_response_stream_filter_uses_retry_execution_id_for_scalar_value() -> None:
     graph = _variable_response_graph()
     variable_pool = VariablePool()
@@ -862,14 +882,14 @@ def test_response_stream_filter_initialize_resets_run_state() -> None:
     assert [event.chunk for event in second_chunks] == ["second"]
 
 
-def test_response_stream_filter_writes_version_3_snapshot() -> None:
+def test_response_stream_filter_writes_version_3_1_snapshot() -> None:
     graph = _variable_response_graph()
     event_filter = ResponseStreamFilter()
     event_filter.initialize(_context(graph))
 
     snapshot = json.loads(event_filter.dumps())
 
-    assert snapshot["version"] == "3.0"
+    assert snapshot["version"] == "3.1"
 
 
 def test_response_stream_filter_migrates_v1_root_state_after_graph_binding() -> None:
@@ -896,7 +916,7 @@ def test_response_stream_filter_migrates_v1_root_state_after_graph_binding() -> 
 
     assert json.loads(restored_filter.dumps()) == {
         "type": "ResponseStreamFilter",
-        "version": "3.0",
+        "version": "3.1",
         "response_nodes": ["answer"],
         "active_session": None,
         "waiting_sessions": [],

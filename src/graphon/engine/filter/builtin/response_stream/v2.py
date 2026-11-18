@@ -2,21 +2,22 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, NonNegativeInt
 
 from graphon.runtime.runtime_state import GraphProtocol
 
 from . import v3
 from .ids import EdgeID, NodeID
-from .snapshot import ResponseStreamFilterSnapshot
+from .snapshot import ResponseSessionState, ResponseStreamFilterSnapshot
 
 
-class Snapshot(ResponseStreamFilterSnapshot[Literal["2.0"]]):
+class Snapshot(ResponseStreamFilterSnapshot[Literal["2.0"], ResponseSessionState]):
     """Legacy root-scoped snapshot with explicit residual blocking paths."""
 
     version: Literal["2.0"] = "2.0"
     paths_map: dict[str, list[list[str]]] = Field(default_factory=dict)
     skipped_edges: list[str] | None = None
+    node_retry_indices: dict[str, NonNegativeInt] = Field(default_factory=dict)
 
 
 def loads(data: str) -> Snapshot:
@@ -46,15 +47,16 @@ def dumps(snapshot: ResponseStreamFilterSnapshot) -> str:
     if not isinstance(snapshot, Snapshot):
         msg = "Expected a version 2 ResponseStreamFilter snapshot"
         raise TypeError(msg)
-    return snapshot.model_dump_json(
-        exclude={"skipped_edges"} if snapshot.skipped_edges is None else set()
-    )
+    excluded_fields = {"skipped_edges"} if snapshot.skipped_edges is None else set()
+    if not snapshot.node_retry_indices:
+        excluded_fields.add("node_retry_indices")
+    return snapshot.model_dump_json(exclude=excluded_fields)
 
 
 def for_graph(
     snapshot: ResponseStreamFilterSnapshot,
     graph: GraphProtocol,
-) -> v3.Snapshot:
+) -> v3.SnapshotWithoutReads:
     """Preserve version 2 residual paths while upgrading the checkpoint version.
 
     Residual paths describe the filter's event consumption, which cannot be
@@ -75,7 +77,7 @@ def for_graph(
     if not isinstance(snapshot, Snapshot):
         msg = "Expected a version 2 ResponseStreamFilter snapshot"
         raise TypeError(msg)
-    return v3.Snapshot(
+    return v3.SnapshotWithoutReads(
         **snapshot.model_dump(exclude={"version", "paths_map"}),
         legacy_paths_map={
             NodeID(node_id): [[EdgeID(edge_id) for edge_id in path] for path in paths]
