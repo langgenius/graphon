@@ -1,10 +1,11 @@
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+from typing import Literal
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from graphon.entities.pause_reason import PauseReason
-from graphon.variables.segments import Segment
+from graphon.variables.segments import Segment, SerializableSegment
 from graphon.variables.variables import Variable
 
 from .base import NodeEvent
@@ -79,6 +80,21 @@ class NodeRunRetrieverResourceEvent(NodeEvent):
 class NodeRunSucceededEvent(NodeEvent):
     start_at: datetime = Field(..., description="node start time")
     finished_at: datetime | None = Field(default=None, description="node finish time")
+
+
+class ResponseRead(BaseModel, frozen=True):
+    """One explicit text lookup at a position in the response's streaming template."""
+
+    position: int = Field(ge=0)
+    selector: tuple[str, Literal["text"]]
+    # Answer supplies rendered Markdown, End supplies its segment, and absence is None.
+    value: str | SerializableSegment | None = Field(repr=False)
+
+
+class NodeRunResponseReadEvent(NodeEvent):
+    """Detached reads from a completed Answer or End, before its success event."""
+
+    reads: tuple[ResponseRead, ...]
 
 
 class NodeRunVariableUpdatedEvent(NodeEvent):

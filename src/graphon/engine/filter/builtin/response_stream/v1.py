@@ -11,10 +11,10 @@ from graphon.runtime.runtime_state import GraphProtocol, NodeProtocol
 
 from . import v3
 from .ids import EdgeID, NodeID
-from .snapshot import ResponseStreamFilterSnapshot, Selector
+from .snapshot import ResponseSessionState, ResponseStreamFilterSnapshot, Selector
 
 
-class Snapshot(ResponseStreamFilterSnapshot[Literal["1.0"]]):
+class Snapshot(ResponseStreamFilterSnapshot[Literal["1.0"], ResponseSessionState]):
     """Legacy ResponseStreamFilter snapshot written before scoped graphs."""
 
     version: Literal["1.0"] = "1.0"
@@ -55,7 +55,7 @@ def dumps(snapshot: ResponseStreamFilterSnapshot) -> str:
 def for_graph(
     snapshot: ResponseStreamFilterSnapshot,
     graph: GraphProtocol,
-) -> v3.Snapshot:
+) -> v3.SnapshotWithoutReads:
     """Migrate a version 1 full-graph snapshot to current root-scoped state.
 
     Version 1 stored generated ``edge_N`` IDs over the complete workflow. Later
@@ -117,7 +117,7 @@ def for_graph(
         for node_id in root_response_nodes
         for selector in _referenced_selectors(graph.nodes[node_id])
     }
-    return v3.Snapshot(
+    return v3.SnapshotWithoutReads(
         response_nodes=[
             node_id
             for node_id in snapshot.response_nodes

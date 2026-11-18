@@ -34,15 +34,17 @@ class StreamPositionState(BaseModel):
     position: int = Field(default=0, ge=0)
 
 
-class ResponseStreamFilterSnapshot[VersionT: str](BaseModel):
+class ResponseStreamFilterSnapshot[VersionT: str, SessionT: ResponseSessionState](
+    BaseModel
+):
     """Fields shared by every persisted ResponseStreamFilter version."""
 
     type: Literal["ResponseStreamFilter"] = "ResponseStreamFilter"
     version: VersionT
     response_nodes: list[str] = Field(default_factory=list)
-    active_session: ResponseSessionState | None = None
-    waiting_sessions: list[ResponseSessionState] = Field(default_factory=list)
-    pending_sessions: list[ResponseSessionState] = Field(default_factory=list)
+    active_session: SessionT | None = None
+    waiting_sessions: list[SessionT] = Field(default_factory=list)
+    pending_sessions: list[SessionT] = Field(default_factory=list)
     node_execution_ids: dict[str, str] = Field(default_factory=dict)
     stream_buffers: list[StreamBufferState] = Field(default_factory=list)
     stream_positions: list[StreamPositionState] = Field(default_factory=list)

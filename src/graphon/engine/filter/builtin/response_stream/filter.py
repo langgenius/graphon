@@ -21,6 +21,7 @@ from graphon.engine_events.node import (
     NodeRunExceptionEvent,
     NodeRunFailedEvent,
     NodeRunReasoningChunkEvent,
+    NodeRunResponseReadEvent,
     NodeRunRetryEvent,
     NodeRunStartedEvent,
     NodeRunStreamChunkEvent,
@@ -163,6 +164,7 @@ class ResponseStreamFilter:
                         GraphEdgeTakenEvent,
                         GraphEdgeSkippedEvent,
                         NodeRunReasoningChunkEvent,
+                        NodeRunResponseReadEvent,
                     ),
                 ):
                     return []
@@ -205,12 +207,16 @@ class ResponseStreamFilter:
         graph = build_child_graph(self._graph_config, event)
         if graph is None:
             return []
+        parent = self._frame_sessions.get(
+            event.parent_frame_id or ROOT_FRAME_ID, self._initialized_root_session
+        )
         session = _FrameSession(
             graph,
             None,
             reply_order=self._reply_order,
             frame_id=event.frame_id,
             container_id=event.container_id,
+            parent_llm_text_selectors=parent.llm_text_selectors,
             pass_unmatched_chunks=self._pass_unmatched_chunks,
         )
         session.register_responses()

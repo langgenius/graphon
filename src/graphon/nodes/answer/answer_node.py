@@ -1,6 +1,7 @@
 from collections.abc import Mapping, Sequence
 from typing import Any, override
 
+from graphon.engine_events.node import ResponseRead
 from graphon.enums import (
     BuiltinNodeTypes,
     NodeExecutionType,
@@ -10,6 +11,7 @@ from graphon.file.models import File
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.answer.entities import AnswerNodeData
 from graphon.nodes.base.node import Node
+from graphon.nodes.base.response_reads import current_response_reads
 from graphon.nodes.base.template import Template
 from graphon.nodes.base.variable_template_parser import VariableTemplateParser
 from graphon.variables.segments import (
@@ -31,15 +33,36 @@ class AnswerNode(Node[AnswerNodeData]):
 
     @override
     def _run(self) -> NodeRunResult:
+        reads = current_response_reads()
+        text_references: list[tuple[int, str, bool]] = []
+
+        def record_text_reference(
+            position: int, selector: Sequence[str], variable: Segment | None
+        ) -> None:
+            match selector:
+                case [node_id, "text"]:
+                    text_references.append((position, node_id, variable is not None))
+
         segments = convert_template(
             self.runtime_state.variable_pool,
             self.node_data.answer,
+            on_reference=record_text_reference if reads is not None else None,
         )
         files = self._extract_files_from_segments(segments.value)
+        rendered_segments = [segment.markdown for segment in segments.value]
+        if reads is not None:
+            reads.extend(
+                ResponseRead(
+                    position=position,
+                    selector=(node_id, "text"),
+                    value=rendered_segments[position] if found else None,
+                )
+                for position, node_id, found in text_references
+            )
         return NodeRunResult(
             status=WorkflowNodeExecutionStatus.SUCCEEDED,
             outputs={
-                "answer": segments.markdown,
+                "answer": "".join(rendered_segments),
                 "files": ArrayFileSegment(value=files),
             },
         )

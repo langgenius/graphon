@@ -1,16 +1,26 @@
 from __future__ import annotations
 
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
-from pydantic import Field, model_validator
+from pydantic import (
+    Field,
+    NonNegativeInt,
+    SerializerFunctionWrapHandler,
+    TypeAdapter,
+    model_serializer,
+    model_validator,
+)
 
+from graphon.engine_events.node import ResponseRead
 from graphon.runtime.runtime_state import GraphProtocol
 
 from .ids import EdgeID, NodeID
-from .snapshot import ResponseStreamFilterSnapshot
+from .snapshot import ResponseSessionState, ResponseStreamFilterSnapshot, Selector
 
 
-class Snapshot(ResponseStreamFilterSnapshot[Literal["3.0"]]):
+class _RootSnapshot[Version: str, Session: ResponseSessionState](
+    ResponseStreamFilterSnapshot[Version, Session]
+):
     """Consumed root-edge decisions plus response and stream progress.
 
     Taken edges and edges skipped before they were taken preserve activation.
@@ -23,7 +33,7 @@ class Snapshot(ResponseStreamFilterSnapshot[Literal["3.0"]]):
     residual paths. Mixed modes are rejected before binding state to a graph.
     """
 
-    version: Literal["3.0"] = "3.0"
+    node_retry_indices: dict[str, NonNegativeInt] = Field(default_factory=dict)
     # Edge IDs whose first consumed decision was TAKEN. Older inputs may also
     # include takes after a skip; rejected_edges takes precedence for overlaps.
     taken_edges: list[EdgeID] = Field(default_factory=list)
@@ -47,26 +57,63 @@ class Snapshot(ResponseStreamFilterSnapshot[Literal["3.0"]]):
         return self
 
 
-def loads(data: str) -> Snapshot:
-    return Snapshot.model_validate_json(data)
+class SnapshotWithoutReads(_RootSnapshot[Literal["3.0"], ResponseSessionState]):
+    version: Literal["3.0"] = "3.0"
+    started_responses: list[str] = Field(default_factory=list)
+
+
+class SessionStateWithReads(ResponseSessionState):
+    reads: list[ResponseRead] = Field(default_factory=list)
+    legacy_reads: bool | None = False
+
+    @model_serializer(mode="wrap")
+    def _omit_default_read_fields(
+        self, serialize: SerializerFunctionWrapHandler
+    ) -> dict[str, object]:
+        fields = serialize(self)
+        if not self.reads:
+            fields.pop("reads", None)
+        if self.legacy_reads is False:
+            fields.pop("legacy_reads", None)
+        return fields
+
+
+class Snapshot(_RootSnapshot[Literal["3.1"], SessionStateWithReads]):
+    version: Literal["3.1"] = "3.1"
+    legacy_whole_streams: list[Selector] = Field(default_factory=list)
+
+
+_SNAPSHOT_ADAPTER = TypeAdapter(
+    Annotated[SnapshotWithoutReads | Snapshot, Field(discriminator="version")]
+)
+
+
+def loads(data: str) -> SnapshotWithoutReads | Snapshot:
+    return _SNAPSHOT_ADAPTER.validate_json(data)
 
 
 def dumps(snapshot: ResponseStreamFilterSnapshot) -> str:
-    if not isinstance(snapshot, Snapshot):
+    if not isinstance(snapshot, (SnapshotWithoutReads, Snapshot)):
         msg = "Expected a version 3 ResponseStreamFilter snapshot"
         raise TypeError(msg)
     excluded_fields = {"skipped_edges"} if snapshot.skipped_edges is None else set()
     if not snapshot.rejected_edges:
         excluded_fields.add("rejected_edges")
+    if not snapshot.node_retry_indices:
+        excluded_fields.add("node_retry_indices")
+    if isinstance(snapshot, SnapshotWithoutReads) and not snapshot.started_responses:
+        excluded_fields.add("started_responses")
+    if isinstance(snapshot, Snapshot) and not snapshot.legacy_whole_streams:
+        excluded_fields.add("legacy_whole_streams")
     return snapshot.model_dump_json(exclude=excluded_fields)
 
 
 def for_graph(
     snapshot: ResponseStreamFilterSnapshot,
     graph: GraphProtocol,
-) -> Snapshot:
+) -> SnapshotWithoutReads | Snapshot:
     del graph
-    if not isinstance(snapshot, Snapshot):
+    if not isinstance(snapshot, (SnapshotWithoutReads, Snapshot)):
         msg = "Expected a version 3 ResponseStreamFilter snapshot"
         raise TypeError(msg)
     return snapshot

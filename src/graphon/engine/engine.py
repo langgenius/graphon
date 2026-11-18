@@ -27,7 +27,7 @@ from graphon.file.runtime import (
 from graphon.graph.graph import Graph
 from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
-from graphon.runtime.ready_queue import ResumeTask, StartTask
+from graphon.runtime.ready_queue import ReadyTask, ResumeTask, StartTask
 from graphon.runtime.runtime_state import RuntimeState
 
 from .command.builtin.in_memory import InMemoryChannel
@@ -357,52 +357,24 @@ class Engine:
                     layer.__class__.__name__,
                 )
 
-    def _start_execution(self, *, resume: bool) -> None:  # ruff:ignore[complex-structure]
+    def _start_execution(self, *, resume: bool) -> None:
         """Start execution subsystems."""
         ready_tasks = []
         self._frame_registry.reset_observations()
-        self._frame_registry.start_frame(
-            ROOT_FRAME_ID,
-            reason=WorkflowStartReason.RESUMPTION
-            if resume
-            else WorkflowStartReason.INITIAL,
-        )
         if resume:
-            for frame_state in self._runtime_state.container_frames():
-                run_state = self._runtime_state.get_container_run(
-                    frame_state.parent_invocation_id,
-                )
-                parent_node = self._frame_registry[run_state.frame_id].graph.nodes[
-                    run_state.node_id
-                ]
-                self._container_handlers[parent_node.node_type].restore_frame(
-                    frame_state,
-                )
-                self._frame_registry.start_frame(
-                    frame_state.frame_id,
-                    reason=WorkflowStartReason.RESUMPTION,
-                )
-            for run_state in self._runtime_state.container_runs():
-                self._frame_registry[run_state.frame_id].scheduler.track_unfinished(
-                    run_state.node_id
-                )
             queued_tasks = self._runtime_state.ready_queue.take_all()
             deferred_tasks = self._runtime_state.take_deferred_ready_tasks()
             ready_tasks = [*queued_tasks, *deferred_tasks]
             try:
-                for task in ready_tasks:
-                    if isinstance(task, StartTask):
-                        self._frame_registry[task.frame_id].scheduler.track_unfinished(
-                            task.node_id,
-                        )
-                    elif isinstance(task, ResumeTask):
-                        self._runtime_state.get_container_run(task.invocation_id)
+                self._resume_frames(ready_tasks)
             except Exception:
                 for task in queued_tasks:
                     self._runtime_state.ready_queue.put(task)
                 for task in deferred_tasks:
                     self._runtime_state.defer_ready_task(task)
                 raise
+        else:
+            self._frame_registry.start_frame(ROOT_FRAME_ID)
 
         # ReadyQueue.put() may block, so consumers must exist before scheduling.
         self._worker_pool.start()
@@ -415,6 +387,38 @@ class Engine:
             self._scheduler.enqueue_node(root_node.id)
 
         self._dispatcher.start()
+
+    def _resume_frames(self, ready_tasks: Sequence[ReadyTask]) -> None:
+        self._frame_registry.start_frame(
+            ROOT_FRAME_ID,
+            reason=WorkflowStartReason.RESUMPTION,
+            ready_tasks=ready_tasks,
+        )
+        for frame_state in self._runtime_state.container_frames():
+            run_state = self._runtime_state.get_container_run(
+                frame_state.parent_invocation_id,
+            )
+            parent_node = self._frame_registry[run_state.frame_id].graph.nodes[
+                run_state.node_id
+            ]
+            self._container_handlers[parent_node.node_type].restore_frame(
+                frame_state,
+            )
+            self._frame_registry.start_frame(
+                frame_state.frame_id,
+                reason=WorkflowStartReason.RESUMPTION,
+            )
+        for run_state in self._runtime_state.container_runs():
+            self._frame_registry[run_state.frame_id].scheduler.track_unfinished(
+                run_state.node_id
+            )
+        for task in ready_tasks:
+            if isinstance(task, StartTask):
+                self._frame_registry[task.frame_id].scheduler.track_unfinished(
+                    task.node_id,
+                )
+            elif isinstance(task, ResumeTask):
+                self._runtime_state.get_container_run(task.invocation_id)
 
     def _stop_execution(self) -> None:
         """Stop execution subsystems."""

@@ -25,6 +25,7 @@ from graphon.engine_events.node import (
     NodeRunModelPollingProgressEvent,
     NodeRunPauseRequestedEvent,
     NodeRunReasoningChunkEvent,
+    NodeRunResponseReadEvent,
     NodeRunRetrieverResourceEvent,
     NodeRunRetryEvent,
     NodeRunStartedEvent,
@@ -198,6 +199,7 @@ class NodeEventProcessor:
             | NodeRunModelPollingProgressEvent
             | NodeRunRetrieverResourceEvent
             | NodeRunReasoningChunkEvent
+            | NodeRunResponseReadEvent
             | NodeRunStreamChunkEvent
         ),
         *,

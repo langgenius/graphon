@@ -12,9 +12,11 @@ from graphon.engine_events.frame import (
     FrameVariablesUpdatedEvent,
 )
 from graphon.entities.workflow_start_reason import WorkflowStartReason
+from graphon.enums import NodeState
 from graphon.graph.graph import Graph
 from graphon.runtime.container_state import CustomContainerFrameState, FrameRuntimeData
 from graphon.runtime.execution import ROOT_FRAME_ID
+from graphon.runtime.ready_queue import ReadyTask, StartTask
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.variables import Variable
@@ -42,6 +44,10 @@ class FrameRegistry:
         self._open_frame_ids: set[str] = set()
         self._frame_errors: dict[str, str] = {}
 
+    @property
+    def observes_response_reads(self) -> bool:
+        return self._event_stream is not None
+
     def register(self, frame: ExecutionFrame) -> None:
         graph_config = frame.graph.graph_config or {}
         frame.state.variable_pool.node_ids |= frame.graph.nodes.keys() | {
@@ -57,6 +63,7 @@ class FrameRegistry:
         frame_id: str,
         *,
         reason: WorkflowStartReason = WorkflowStartReason.INITIAL,
+        ready_tasks: Sequence[ReadyTask] | None = None,
     ) -> None:
         """Publish setup once, including for handlers using the existing scheduler."""
         if self._event_stream is None or frame_id in self._open_frame_ids:
@@ -84,6 +91,25 @@ class FrameRegistry:
                 self.record_failure(frame_id, errors[0])
         self._open_frame_ids.add(frame_id)
         variables_by_node = frame.state.variable_pool.variable_dictionary
+        completed_node_ids = None
+        if ready_tasks is not None:
+            # Scheduling marks a node TAKEN before execution. At a quiescent
+            # pause, queued starts and suspended containers still have work.
+            unfinished_node_ids = {
+                task.node_id
+                for task in ready_tasks
+                if isinstance(task, StartTask) and task.frame_id == frame_id
+            }
+            unfinished_node_ids.update(
+                run.node_id
+                for run in root_state.container_runs()
+                if run.frame_id == frame_id
+            )
+            completed_node_ids = frozenset(
+                node_id
+                for node_id, node in frame.graph.nodes.items()
+                if node.state == NodeState.TAKEN and node_id not in unfinished_node_ids
+            )
         self._event_stream.collect(
             FrameStartedEvent(
                 frame_id=frame_id,
@@ -94,6 +120,8 @@ class FrameRegistry:
                 root_node_id=root_node_id,
                 index=index,
                 reason=reason,
+                observes_response_reads=True,
+                completed_node_ids=completed_node_ids,
                 node_execution_ids={
                     node_id: execution.get_or_create_node_execution(
                         frame_id=frame_id,

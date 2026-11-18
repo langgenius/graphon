@@ -1,22 +1,43 @@
 import base64
+import json
 import re
-from collections.abc import Generator, Sequence
+from collections.abc import Generator, Iterable, Sequence
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal, Never, cast
 from unittest.mock import MagicMock
 
 import pytest
 
+from graphon.engine import Engine
+from graphon.engine.filter import (
+    EngineEventFilterContext,
+    ResponseStreamFilter,
+    filter_engine_events,
+)
+from graphon.engine_events.base import EngineEvent
+from graphon.engine_events.frame import FrameStartedEvent
+from graphon.engine_events.graph import (
+    GraphRunPartialSucceededEvent,
+    GraphRunPausedEvent,
+    GraphRunSucceededEvent,
+)
 from graphon.engine_events.node import (
     NodeRunModelPollingProgressEvent,
     NodeRunReasoningChunkEvent,
+    NodeRunRetryEvent,
+    NodeRunStartedEvent,
+    NodeRunStreamChunkEvent,
 )
-from graphon.entities.base_node_data import BaseNodeData
+from graphon.entities.base_node_data import BaseNodeData, RetryConfig
+from graphon.entities.workflow_start_reason import WorkflowStartReason
 from graphon.enums import WorkflowNodeExecutionStatus
 from graphon.file import helpers as file_helpers
 from graphon.file.enums import FileTransferMethod, FileType
 from graphon.file.models import File
+from graphon.graph.graph import Graph
+from graphon.model_runtime.entities.common_entities import I18nObject
 from graphon.model_runtime.entities.llm_entities import (
     LLMPollingConfig,
     LLMPollingResult,
@@ -34,7 +55,12 @@ from graphon.model_runtime.entities.message_entities import (
     PromptMessageContentUnionTypes,
     VideoPromptMessageContent,
 )
-from graphon.model_runtime.entities.model_entities import ModelFeature
+from graphon.model_runtime.entities.model_entities import (
+    AIModelEntity,
+    FetchFrom,
+    ModelFeature,
+    ModelType,
+)
 from graphon.node_events.base import NodeEventPayload
 from graphon.node_events.node import (
     ModelInvokeCompletedEvent,
@@ -43,11 +69,24 @@ from graphon.node_events.node import (
     StreamCompletedEvent,
     StreamReasoningEvent,
 )
+from graphon.nodes.answer.answer_node import AnswerNode
+from graphon.nodes.answer.entities import AnswerNodeData
+from graphon.nodes.human_input.entities import Completed, HITLCallback, PauseRequested
+from graphon.nodes.human_input.human_input_node import HumanInputNode
 from graphon.nodes.llm import LLMNode, LLMNodeData
 from graphon.nodes.llm.exc import LLMNodeError
 from graphon.nodes.llm.reasoning import split_reasoning
 from graphon.nodes.llm.runtime_protocols import LLMPollingCapableProtocol, LLMProtocol
+from graphon.nodes.start import StartNode
+from graphon.nodes.start.entities import StartNodeData
+from graphon.nodes.variable_assigner.v2.entities import (
+    VariableAssignerNodeData,
+    VariableOperationItem,
+)
+from graphon.nodes.variable_assigner.v2.enums import InputType, Operation
+from graphon.nodes.variable_assigner.v2.node import VariableAssignerNode
 from graphon.runtime.runtime_state import RuntimeState
+from graphon.variables.segments import StringSegment
 
 from ...helpers import build_init_params, build_variable_pool
 
@@ -69,6 +108,16 @@ class _PollingLLM(LLMPollingCapableProtocol):
         self._responses = list(responses)
         self.start_calls: list[dict[str, Any]] = []
         self.check_calls: list[dict[str, Any]] = []
+
+    def get_model_schema(self) -> AIModelEntity:
+        return AIModelEntity(
+            model=self.model_name,
+            label=I18nObject(en_US=self.model_name),
+            model_type=ModelType.LLM,
+            features=[ModelFeature.POLLING],
+            fetch_from=FetchFrom.PREDEFINED_MODEL,
+            model_properties={},
+        )
 
     def start_llm_polling(self, **kwargs: Any) -> Any:
         self.start_calls.append(kwargs)
@@ -130,6 +179,7 @@ def _build_llm_node(
     workflow_run_id: str | None = "wr-test",
     run_context: dict[str, Any] | None = None,
     llm_file_saver: Any | None = None,
+    runtime_state: RuntimeState | None = None,
 ) -> LLMNode:
     prepared_model = model_instance
     if prepared_model is None:
@@ -166,7 +216,8 @@ def _build_llm_node(
             graph_config={"nodes": [], "edges": []},
             run_context=run_context,
         ),
-        runtime_state=RuntimeState(
+        runtime_state=runtime_state
+        or RuntimeState(
             workflow_id="workflow",
             variable_pool=build_variable_pool(variables=prepared_variables),
             start_at=0.0,
@@ -702,6 +753,11 @@ def test_polling_llm_saves_video_output_file(
     assert completed_event.node_run_result.outputs["text"] == (
         "[video.mp4](https://files.example.com/video.mp4)"
     )
+    assert [
+        (event.chunk, event.is_final)
+        for event in events
+        if isinstance(event, StreamChunkEvent) and event.selector == ["llm", "text"]
+    ] == [(completed_event.node_run_result.outputs["text"], True)]
     assert completed_event.node_run_result.outputs["files"].value == [saved_file]
     file_saver.save_remote_url.assert_called_once_with(
         "https://example.com/video.mp4",
@@ -1422,3 +1478,388 @@ def test_separated_stream_matches_split_reasoning(full_text: str) -> None:
     expected, _ = split_reasoning(full_text, "separated")
 
     assert _normalize_like_split_reasoning("".join(chunks)) == expected
+
+
+@pytest.fixture
+def text_model() -> MagicMock:
+    model = MagicMock(
+        spec=LLMProtocol, provider="openai", model_name="gpt-4o", parameters={}, stop=()
+    )
+    model.get_model_schema.return_value = _PollingLLM([]).get_model_schema()
+    return model
+
+
+def _build_llm_answer_engine(
+    llm: LLMNode,
+    template: str,
+    *,
+    replacement: str | None = None,
+    approval: HITLCallback | None = None,
+    connect_llm_to_answer: bool = False,
+) -> Engine:
+    args = {"init_params": build_init_params(), "runtime_state": llm.runtime_state}
+    start = StartNode(node_id="start", data=StartNodeData(title="Start"), **args)
+    graph = Graph.new().add_root(start).add_node(llm)
+    if approval is not None:
+        graph.add_node(
+            HumanInputNode(
+                node_id="human",
+                data=HumanInputNode.validate_node_data({
+                    "type": "human-input",
+                    "title": "Approve",
+                }),
+                hitl_callback=approval,
+                **args,
+            )
+        )
+    if replacement is not None:
+        edit = VariableOperationItem(
+            variable_selector=["llm", "text"],
+            input_type=InputType.CONSTANT,
+            operation=Operation.OVER_WRITE,
+            value=replacement,
+        )
+        graph.add_node(
+            VariableAssignerNode(
+                node_id="edit",
+                data=VariableAssignerNodeData(title="Edit", items=[edit]),
+                **args,
+            )
+        )
+    graph.add_node(
+        AnswerNode(node_id="answer", data=AnswerNodeData(answer=template), **args)
+    )
+    if connect_llm_to_answer:
+        graph.connect(tail="llm", head="answer")
+    return Engine(graph=graph.build(), runtime_state=llm.runtime_state, workers=1)
+
+
+def _select_stream_chunks(
+    events: Iterable[EngineEvent],
+) -> list[NodeRunStreamChunkEvent]:
+    return [event for event in events if isinstance(event, NodeRunStreamChunkEvent)]
+
+
+def _restore_filter_after_first_llm_chunk(
+    engine: Engine,
+) -> tuple[list[NodeRunStreamChunkEvent], list[NodeRunStreamChunkEvent]]:
+    context = EngineEventFilterContext.from_engine(engine)
+    events = list(engine.run())
+    baseline = next(event for event in events if isinstance(event, FrameStartedEvent))
+    first_chunk_index = next(
+        i
+        for i, event in enumerate(events)
+        if isinstance(event, NodeRunStreamChunkEvent)
+        and event.selector == ["llm", "text"]
+    )
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(context)
+    before = _select_stream_chunks(
+        filtered_event
+        for event in events[: first_chunk_index + 1]
+        for filtered_event in event_filter.on_event(event)
+    )
+    restored = ResponseStreamFilter()
+    restored.loads(event_filter.dumps())
+    resumed = baseline.model_copy(update={"reason": WorkflowStartReason.RESUMPTION})
+    after = filter_engine_events(
+        [resumed, *events[first_chunk_index + 1 :]], context=context, filters=[restored]
+    )
+    return before, _select_stream_chunks(after)
+
+
+@pytest.mark.parametrize("text", ["done", "", " \n "])
+def test_complete_polling_response_keeps_retry_index_after_restore(text: str) -> None:
+    model = _PollingLLM([
+        LLMPollingResult(status=LLMPollingStatus.FAILED, error="try again"),
+        LLMPollingResult(status=LLMPollingStatus.SUCCEEDED, result=_llm_result(text)),
+    ])
+    llm = _build_llm_node(model_instance=model)
+    llm.node_data.retry_config = RetryConfig(
+        retry_enabled=True, max_retries=1, retry_interval=0
+    )
+    engine = _build_llm_answer_engine(llm, "Reply: {{#llm.text#}}/{{#llm.text#}}")
+
+    before, after = _restore_filter_after_first_llm_chunk(engine)
+
+    assert [chunk.chunk for chunk in before] == ["Reply: "]
+    assert "".join(chunk.chunk for chunk in after) == f"{text}/{text}"
+    assert [
+        (chunk.chunk, chunk.retry_index, chunk.is_final)
+        for chunk in after
+        if chunk.selector == ["llm", "text"]
+    ] == [(text, 1, False), (text, 1, True)]
+
+
+@pytest.mark.parametrize("text", ["Hello", ""])
+def test_answer_streams_llm_text_across_restore(
+    text_model: MagicMock, text: str
+) -> None:
+    text_model.invoke_llm.return_value = _stream_results(_stream_chunk(text))
+    engine = _build_llm_answer_engine(
+        _build_llm_node(model_instance=text_model), "Reply: {{#llm.text#}}!"
+    )
+
+    before, after = _restore_filter_after_first_llm_chunk(engine)
+
+    assert [chunk.chunk for chunk in before] == ["Reply: ", text]
+    assert [
+        (chunk.chunk, chunk.is_final)
+        for chunk in after
+        if chunk.selector == ["llm", "text"]
+    ] == [("", True)]
+    assert "".join(chunk.chunk for chunk in after) == "!"
+    assert after[-1].is_final
+
+
+def test_answer_reads_reassigned_llm_text(text_model: MagicMock) -> None:
+    # Removing the inner reasoning block exposes the outer tag.
+    text_model.invoke_llm.return_value = _llm_result(
+        "<th<think>note</think>ink>private</think>draft"
+    )
+    llm = _build_llm_node(model_instance=text_model)
+    llm.node_data.reasoning_format = "separated"
+    engine = _build_llm_answer_engine(
+        llm, "{{#llm.text#}}/{{#llm.text#}}", replacement="edited"
+    )
+    context = EngineEventFilterContext.from_engine(engine)
+    raw = list(engine.run())
+
+    assert [(chunk.chunk, chunk.is_final) for chunk in _select_stream_chunks(raw)] == [
+        ("draft", True)
+    ]
+    filtered = filter_engine_events(
+        raw, context=context, filters=[ResponseStreamFilter()]
+    )
+    assert (
+        "".join(chunk.chunk for chunk in _select_stream_chunks(filtered))
+        == "edited/edited"
+    )
+
+
+@pytest.mark.parametrize(
+    ("failed_text", "retry", "can_stream", "expected"),
+    [
+        ("", _stream_chunk(None), False, "edited/edited"),
+        (" \n ", _stream_chunk(None), True, " \n /"),
+        ("", _stream_chunk(""), False, "/"),
+        ("hel", _llm_result("hello"), True, "hel/"),
+        ("hel", _llm_result("hello"), False, "edited/edited"),
+        ("first", _stream_chunk("next"), False, "firstnext/"),
+    ],
+    ids=[
+        "empty-failed-attempt",
+        "visible-whitespace",
+        "empty-successful-attempt",
+        "visible-before-whole-retry",
+        "gated-before-whole-retry",
+        "gated-before-token-retry",
+    ],
+)
+def test_answer_stream_after_a_failed_attempt(
+    text_model: MagicMock,
+    failed_text: str,
+    retry: LLMResultChunk | LLMResult,
+    can_stream: bool,
+    expected: str,
+) -> None:
+    def failed_stream() -> Generator[LLMResultChunk, None, None]:
+        yield _stream_chunk(failed_text)
+        yield _stream_chunk("")
+        msg = "retry after text delta"
+        raise ValueError(msg)
+
+    text_model.invoke_llm.side_effect = [
+        failed_stream(),
+        _stream_results(retry) if isinstance(retry, LLMResultChunk) else retry,
+    ]
+    llm = _build_llm_node(model_instance=text_model)
+    llm.node_data.retry_config = RetryConfig(
+        retry_enabled=True, max_retries=1, retry_interval=0
+    )
+    engine = _build_llm_answer_engine(
+        llm,
+        "{{#llm.text#}}/{{#llm.text#}}",
+        replacement="edited",
+        connect_llm_to_answer=can_stream,
+    )
+    context = EngineEventFilterContext.from_engine(engine)
+    filtered = list(
+        filter_engine_events(
+            engine.run(), context=context, filters=[ResponseStreamFilter()]
+        )
+    )
+    final = next(
+        event
+        for event in filtered
+        if isinstance(event, (GraphRunSucceededEvent, GraphRunPartialSucceededEvent))
+    )
+    assert final.outputs["answer"] == "edited/edited"
+    retry_event_index = next(
+        i for i, e in enumerate(filtered) if isinstance(e, NodeRunRetryEvent)
+    )
+    before = _select_stream_chunks(filtered[:retry_event_index])
+    assert "".join(chunk.chunk for chunk in before) == (
+        failed_text if can_stream else ""
+    )
+    chunks = _select_stream_chunks(filtered)
+    assert "".join(chunk.chunk for chunk in chunks) == expected
+    if can_stream:
+        assert [
+            (chunk.chunk, chunk.retry_index)
+            for chunk in chunks
+            if chunk.is_final and chunk.selector == ["llm", "text"]
+        ] == [("", 1)]
+
+
+def test_complete_result_waits_for_approval_across_pause(text_model: MagicMock) -> None:
+    text_model.invoke_llm.return_value = _llm_result("approved text")
+    template = "{{#llm.text#}}/{{#llm.text#}}"
+    engine = _build_llm_answer_engine(
+        _build_llm_node(model_instance=text_model),
+        template,
+        connect_llm_to_answer=True,
+        approval=lambda _: PauseRequested(session_id="approve"),
+    )
+    stream = ResponseStreamFilter()
+    events = list(
+        filter_engine_events(
+            engine.run(),
+            filters=[stream],
+            context=EngineEventFilterContext.from_engine(engine),
+        )
+    )
+    assert isinstance(events[-1], GraphRunPausedEvent)
+    assert not _select_stream_chunks(events)
+
+    restored = ResponseStreamFilter()
+    restored.loads(stream.dumps())
+    llm = _build_llm_node(
+        model_instance=text_model,
+        runtime_state=RuntimeState.from_snapshot(engine.runtime_state.dumps()),
+    )
+    resumed = _build_llm_answer_engine(
+        llm,
+        template,
+        connect_llm_to_answer=True,
+        approval=lambda _: Completed(selected_handle="source", inputs={}, outputs={}),
+    )
+    restored.initialize(EngineEventFilterContext.from_engine(resumed))
+    chunks = []
+    for event in resumed.run():
+        if isinstance(event, NodeRunStartedEvent) and event.node_id == "answer":
+            assert not chunks
+        chunks.extend(_select_stream_chunks(restored.on_event(event)))
+    assert "".join(c.chunk for c in chunks) == "approved text/approved text"
+    text_model.invoke_llm.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "checkpoint_id",
+    ["803dcac", "eb75e38", "eb75e38-consumed"],
+    ids=["v2", "v3", "v3-after-prefix"],
+)
+def test_resume_old_llm_final_marker(checkpoint_id: str, text_model: MagicMock) -> None:
+    # Both revisions paused after the third polling attempt, before the edit.
+    path = Path(__file__).parents[2] / "engine" / "fixtures" / "llm_answer_pauses.json"
+    checkpoint = json.loads(path.read_text())[checkpoint_id]
+    restored = ResponseStreamFilter()
+    restored.loads(checkpoint["filter"])
+    llm = _build_llm_node(
+        model_instance=text_model,
+        runtime_state=RuntimeState.from_snapshot(checkpoint["runtime"]),
+    )
+    marker_consumed = checkpoint_id == "eb75e38-consumed"
+    template = (
+        "prefix{{#llm.text#}}|{{#human.answer#}}[{{#llm.text#}}]/{{#llm.reasoning_content#}}!"
+        if marker_consumed
+        else "{{#llm.text#}}/{{#llm.text#}}"
+    )
+    engine = _build_llm_answer_engine(
+        llm,
+        template,
+        replacement="edited",
+        connect_llm_to_answer=marker_consumed,
+        approval=lambda _: Completed(
+            selected_handle="source",
+            inputs={},
+            outputs={"answer": StringSegment(value="approved")},
+        ),
+    )
+    events = list(
+        filter_engine_events(
+            engine.run(),
+            filters=[restored],
+            context=EngineEventFilterContext.from_engine(engine),
+        )
+    )
+    chunks = _select_stream_chunks(events)
+    assert "".join(c.chunk for c in chunks) == (
+        "approved[]/why!" if marker_consumed else "edited/edited"
+    )
+    assert [c.retry_index for c in chunks if c.node_id == "llm"] == (
+        [2] if marker_consumed else [2, 2]
+    )
+    text_model.invoke_llm.assert_not_called()
+
+
+def test_retry_index_for_reasoning_without_a_text_reference() -> None:
+    model = _PollingLLM([
+        LLMPollingResult(status=LLMPollingStatus.FAILED, error="retry"),
+        LLMPollingResult(
+            status=LLMPollingStatus.SUCCEEDED,
+            result=_llm_result("<think>why</think>draft"),
+        ),
+    ])
+    llm = _build_llm_node(model_instance=model)
+    llm.node_data.reasoning_format = "separated"
+    llm.node_data.retry_config = RetryConfig(
+        retry_enabled=True, max_retries=1, retry_interval=0
+    )
+    engine = _build_llm_answer_engine(llm, "{{#llm.reasoning_content#}}")
+    chunks = _select_stream_chunks(
+        filter_engine_events(
+            engine.run(),
+            filters=[ResponseStreamFilter()],
+            context=EngineEventFilterContext.from_engine(engine),
+        )
+    )
+    assert [(c.chunk, c.retry_index) for c in chunks] == [("why", 1)]
+
+
+def test_complete_result_waits_for_an_opaque_host_node(
+    monkeypatch: pytest.MonkeyPatch, text_model: MagicMock
+) -> None:
+    text_model.invoke_llm.return_value = _llm_result("draft")
+    engine = _build_llm_answer_engine(
+        _build_llm_node(model_instance=text_model),
+        "{{#llm.text#}}",
+        replacement="edited",
+        connect_llm_to_answer=True,
+    )
+    # The host writes through the engine but cannot describe that write in advance.
+    writer = engine.graph.nodes["edit"]
+    monkeypatch.setattr(writer, "node_type", "host-edit")
+    monkeypatch.setattr(writer, "blocks_variable_output", lambda _selectors: False)
+    events = filter_engine_events(
+        engine.run(),
+        filters=[ResponseStreamFilter()],
+        context=EngineEventFilterContext.from_engine(engine),
+    )
+    assert "".join(c.chunk for c in _select_stream_chunks(events)) == "edited"
+
+
+def test_answer_uses_current_llm_text_when_the_baseline_has_a_value(
+    text_model: MagicMock,
+) -> None:
+    text_model.invoke_llm.return_value = _llm_result("current")
+    llm = _build_llm_node(
+        model_instance=text_model, variables=[(("llm", "text"), "previous")]
+    )
+    engine = _build_llm_answer_engine(llm, "{{#llm.text#}}/{{#llm.text#}}")
+    events = filter_engine_events(
+        engine.run(),
+        filters=[ResponseStreamFilter()],
+        context=EngineEventFilterContext.from_engine(engine),
+    )
+    assert "".join(c.chunk for c in _select_stream_chunks(events)) == "current/current"

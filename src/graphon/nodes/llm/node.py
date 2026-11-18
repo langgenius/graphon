@@ -370,12 +370,14 @@ class LLMNode(Node[LLMNodeData]):
         )
         completed_event: ModelInvokeCompletedEvent | None = None
         structured_output: LLMStructuredOutput | None = None
+        has_text_chunks = False
 
         for event in generator:
             if isinstance(
                 event,
                 StreamChunkEvent | StreamReasoningEvent | ModelPollingProgressEvent,
             ):
+                has_text_chunks = has_text_chunks or isinstance(event, StreamChunkEvent)
                 yield event
                 continue
 
@@ -426,7 +428,7 @@ class LLMNode(Node[LLMNodeData]):
         )
         yield StreamChunkEvent(
             selector=[self._node_id, "text"],
-            chunk="",
+            chunk="" if has_text_chunks else clean_text,
             is_final=True,
         )
         yield StreamCompletedEvent(

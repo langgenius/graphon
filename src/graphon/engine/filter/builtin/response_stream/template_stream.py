@@ -9,10 +9,15 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from itertools import islice
 from uuid import uuid4
 
 from graphon.engine_events.base import NodeEvent
-from graphon.engine_events.node import NodeRunRetryEvent, NodeRunStreamChunkEvent
+from graphon.engine_events.node import (
+    NodeRunRetryEvent,
+    NodeRunStreamChunkEvent,
+    ResponseRead,
+)
 from graphon.enums import BuiltinNodeTypes, NodeState
 from graphon.nodes.base.template import Template, TextSegment, VariableSegment
 from graphon.runtime.execution import ROOT_FRAME_ID
@@ -20,6 +25,35 @@ from graphon.runtime.runtime_state import GraphProtocol, NodeProtocol
 from graphon.runtime.runtime_state_protocol import ReadOnlyVariablePool
 
 from .snapshot import Selector, StreamBufferState, StreamPositionState
+
+
+def _is_llm_text_chunk(event: NodeRunStreamChunkEvent) -> bool:
+    return event.node_type == BuiltinNodeTypes.LLM and tuple(event.selector) == (
+        event.node_id,
+        "text",
+    )
+
+
+def _only_empty_llm_deltas_before_retry(
+    chunks: Sequence[NodeRunStreamChunkEvent], next_attempt: NodeEvent
+) -> bool:
+    return all(
+        not chunk.chunk and _is_delta_before_retry(chunk, next_attempt)
+        for chunk in chunks
+    )
+
+
+def _is_delta_before_retry(
+    chunk: NodeRunStreamChunkEvent, next_attempt: NodeEvent
+) -> bool:
+    return (
+        _is_llm_text_chunk(chunk)
+        and chunk.id == next_attempt.id
+        and chunk.frame_id == next_attempt.frame_id
+        and chunk.node_id == next_attempt.node_id
+        and chunk.retry_index < next_attempt.retry_index
+        and not chunk.is_final
+    )
 
 
 @dataclass
@@ -38,6 +72,9 @@ class _ResponseSession:
     segment_streams: dict[int, _SourceStream] = field(default_factory=dict)
     segment_positions: dict[int, int] = field(default_factory=dict)
     emitted: bool = False
+    llm_text_reads: dict[int, ResponseRead] = field(default_factory=dict)
+    # A resumed frame resolves None to its saved execution status.
+    completed_without_saved_reads: bool | None = False
 
     @classmethod
     def from_node(cls, node: NodeProtocol) -> _ResponseSession:
@@ -49,8 +86,32 @@ class _ResponseSession:
             raise TypeError(msg)
         return cls(node_id=node.id, template=get_streaming_template())
 
+    @property
+    def selectors(self) -> set[Selector]:
+        return {
+            tuple(segment.selector)
+            for segment in self.template.segments
+            if isinstance(segment, VariableSegment)
+        }
+
     def is_complete(self) -> bool:
         return self.index >= len(self.template.segments)
+
+    def store_llm_text_reads(
+        self, reads: Sequence[ResponseRead], llm_text_selectors: frozenset[Selector]
+    ) -> None:
+        for read in reads:
+            if (
+                read.selector not in llm_text_selectors
+                or not self.index <= read.position < len(self.template.segments)
+            ):
+                continue
+            segment = self.template.segments[read.position]
+            if (
+                isinstance(segment, VariableSegment)
+                and tuple(segment.selector) == read.selector
+            ):
+                self.llm_text_reads[read.position] = read
 
 
 @dataclass
@@ -60,6 +121,7 @@ class _StreamBuffers:
     events: dict[Selector, list[NodeRunStreamChunkEvent]] = field(default_factory=dict)
     positions: dict[Selector, int] = field(default_factory=dict)
     closed_selectors: set[Selector] = field(default_factory=set)
+    legacy_complete_result_selectors: set[Selector] = field(default_factory=set)
 
     @classmethod
     def from_state(
@@ -85,21 +147,33 @@ class _StreamBuffers:
             stream_buffers.positions.setdefault(selector, 0)
         return stream_buffers
 
-    def append(
-        self,
-        selector: Sequence[str],
-        event: NodeRunStreamChunkEvent,
-    ) -> None:
-        key = tuple(selector)
+    def append(self, event: NodeRunStreamChunkEvent) -> None:
+        key = tuple(event.selector)
         if key in self.closed_selectors:
-            msg = f"Stream {'.'.join(selector)} is already closed"
+            msg = f"Stream {'.'.join(key)} is already closed"
             raise ValueError(msg)
+
+        if event.is_final and _is_llm_text_chunk(event):
+            previous = self.events.get(key)
+            if not previous:
+                return
+            last = previous[-1]
+            if last.id != event.id or last.retry_index != event.retry_index:
+                if not any(
+                    chunk.chunk for chunk in islice(previous, self.positions[key])
+                ):
+                    self.discard(key)
+                    return
+                # A whole retry closes the consumed stream with an empty marker.
+                event = event.model_copy(update={"chunk": ""})
 
         if key not in self.events:
             self.events[key] = []
             self.positions[key] = 0
 
         self.events[key].append(event)
+        if event.is_final:
+            self.closed_selectors.add(key)
 
     def pop(
         self,
@@ -129,11 +203,64 @@ class _StreamBuffers:
     def has_events(self, selector: Sequence[str]) -> bool:
         return tuple(selector) in self.events
 
-    def close(self, selector: Sequence[str]) -> None:
-        self.closed_selectors.add(tuple(selector))
+    def overrides_response_read(self, selector: Sequence[str]) -> bool:
+        key = tuple(selector)
+        return key not in self.legacy_complete_result_selectors and (
+            key in self.events or key in self.closed_selectors
+        )
 
     def is_closed(self, selector: Sequence[str]) -> bool:
         return tuple(selector) in self.closed_selectors
+
+    def discard(self, selector: Selector) -> None:
+        del self.events[selector]
+        self.positions.pop(selector, None)
+        self.closed_selectors.discard(selector)
+        self.legacy_complete_result_selectors.discard(selector)
+
+    def read_saved_llm_markers(
+        self,
+        execution_ids: dict[str, str],
+        retry_indices: dict[str, int],
+        saved_result_selectors: Sequence[Selector] | None,
+    ) -> None:
+        # Older writers buffered a final event even when an attempt returned whole.
+        selectors = (
+            self.closed_selectors
+            if saved_result_selectors is None
+            else saved_result_selectors
+        )
+        for selector in selectors:
+            chunks = self.events.get(selector)
+            if not chunks:
+                continue
+            final = chunks[-1]
+            if not (
+                _is_llm_text_chunk(final)
+                and tuple(final.selector) == selector
+                and final.frame_id == ROOT_FRAME_ID
+                and final.id == execution_ids.get(final.node_id)
+                and final.is_final
+                and selector in self.closed_selectors
+            ):
+                continue
+            if final.retry_index:
+                retry_indices.setdefault(final.node_id, final.retry_index)
+            position = self.positions.get(selector, 0)
+            if (
+                saved_result_selectors is not None
+                or (
+                    position < len(chunks)
+                    and not any(chunk.chunk for chunk in islice(chunks, position))
+                )
+            ) and all(_is_delta_before_retry(chunk, final) for chunk in chunks[:-1]):
+                # A restored reply with no recoverable read still uses this marker.
+                self.legacy_complete_result_selectors.add(selector)
+        if saved_result_selectors is not None and len(
+            self.legacy_complete_result_selectors
+        ) != len(saved_result_selectors):
+            msg = "Invalid saved whole LLM stream"
+            raise ValueError(msg)
 
     def dump_buffers(self) -> list[StreamBufferState]:
         return [
@@ -160,6 +287,8 @@ class _TemplateStream:
 
     stream_buffers: _StreamBuffers = field(default_factory=_StreamBuffers)
     node_execution_ids: dict[str, str] = field(default_factory=dict)
+    node_retry_indices: dict[str, int] = field(default_factory=dict)
+    llm_text_selectors: frozenset[Selector] = frozenset()
     frame_id: str = ROOT_FRAME_ID
     container_id: str = ""
     skipped_node_ids: set[str] | None = None
@@ -169,15 +298,22 @@ class _TemplateStream:
     latest_streams: dict[Selector, _SourceStream] = field(default_factory=dict)
     finished_node_ids: set[str] = field(default_factory=set)
 
+    def record_attempt(self, event: NodeEvent) -> None:
+        self.node_execution_ids[event.node_id] = event.id
+        if event.retry_index:
+            self.node_retry_indices[event.node_id] = event.retry_index
+        else:
+            self.node_retry_indices.pop(event.node_id, None)
+
     def append(self, event: NodeRunStreamChunkEvent) -> None:
         if self.frame_id == ROOT_FRAME_ID:
-            self.stream_buffers.append(event.selector, event)
-            if event.is_final:
-                self.stream_buffers.close(event.selector)
+            self.stream_buffers.append(event)
             return
         selector = tuple(event.selector)
         key = (event.id, event.retry_index, selector)
         if key not in self.source_streams:
+            if event.is_final and _is_llm_text_chunk(event):
+                return
             self.source_streams[key] = _SourceStream()
             self.latest_streams[selector] = self.source_streams[key]
         source = self.source_streams[key]
@@ -191,7 +327,13 @@ class _TemplateStream:
             if key[:2] == tuple(selector):
                 del self.latest_streams[key]
 
-    def close_previous_attempts(self, event: NodeRunRetryEvent) -> None:
+    def prepare_streams_for_retry(self, event: NodeRunRetryEvent) -> None:
+        if self.frame_id == ROOT_FRAME_ID:
+            selector = (event.node_id, "text")
+            chunks = self.stream_buffers.events.get(selector)
+            if chunks and _only_empty_llm_deltas_before_retry(chunks, event):
+                self.stream_buffers.discard(selector)
+            return
         for (execution_id, attempt, selector), source in self.source_streams.items():
             if execution_id == event.id and attempt < event.retry_index:
                 source.closed = True
@@ -251,22 +393,13 @@ class _TemplateStream:
             segment = session.template.segments[session.index]
 
             if isinstance(segment, VariableSegment):
-                source_selector_prefix = segment.selector[0] if segment.selector else ""
-                if self.is_skipped(source_selector_prefix, graph=graph):
-                    session.index += 1
-                    continue
-
-                read_chunks = (
-                    self._read_root_variable_chunks
-                    if self.frame_id == ROOT_FRAME_ID
-                    else self._read_child_variable_chunks
-                )
-                segment_events, is_complete = read_chunks(
+                segment_events, is_complete = self._read_variable_chunks(
                     segment, session, graph=graph, variable_pool=variable_pool
                 )
                 events.extend(segment_events)
 
                 if is_complete:
+                    session.llm_text_reads.pop(session.index, None)
                     session.index += 1
                 else:
                     break
@@ -303,12 +436,13 @@ class _TemplateStream:
             container_id=self.container_id,
             node_id=node.id,
             node_type=node.node_type,
+            retry_index=self.node_retry_indices.get(node_id, 0),
             selector=list(selector),
             chunk=chunk,
             is_final=is_final,
         )
 
-    def _read_child_variable_chunks(
+    def _read_variable_chunks(
         self,
         segment: VariableSegment,
         session: _ResponseSession,
@@ -316,45 +450,96 @@ class _TemplateStream:
         graph: GraphProtocol,
         variable_pool: ReadOnlyVariablePool,
     ) -> tuple[list[NodeRunStreamChunkEvent], bool]:
-        source = session.segment_streams.get(session.index)
-        if source is None:
-            source = self.latest_streams.get(tuple(segment.selector))
-            if source is not None:
-                session.segment_streams[session.index] = source
-        if source is not None:
-            position = session.segment_positions.get(session.index, 0)
-            events = [
-                self._create_child_response_chunk(event, session, graph=graph)
-                for event in source.events[position:]
-            ]
-            session.segment_positions[session.index] = len(source.events)
-            return events, source.closed
-        value = variable_pool.get(segment.selector)
-        if value is not None:
-            node_id = (
-                segment.selector[0]
-                if segment.selector[0] in graph.nodes
-                else session.node_id
-            )
-            event = self._create_stream_chunk_event(
-                node_id,
-                self._get_or_create_execution_id(node_id),
-                segment.selector,
-                value.markdown,
-                session.index == len(session.template.segments) - 1,
-                graph=graph,
-            )
-            # Rebuilding a hidden retry must preserve other already-read values.
-            session.segment_streams[session.index] = _SourceStream(
-                events=[event], closed=True
-            )
-            session.segment_positions[session.index] = 1
-            return [
-                self._create_child_response_chunk(event, session, graph=graph)
-            ], True
-        return [], bool(
-            segment.selector and segment.selector[0] in self.finished_node_ids
+        selector = tuple(segment.selector)
+        source_id = selector[0] if selector else ""
+        use_response_read = session.index in session.llm_text_reads or (
+            selector in self.llm_text_selectors
+            and not session.completed_without_saved_reads
+            and graph.nodes[session.node_id].node_type
+            in {BuiltinNodeTypes.ANSWER, BuiltinNodeTypes.END}
         )
+        if not use_response_read and self.is_skipped(source_id, graph=graph):
+            return [], True
+
+        if self.frame_id == ROOT_FRAME_ID:
+            has_stream = (
+                self.stream_buffers.overrides_response_read(selector)
+                if use_response_read
+                else self.stream_buffers.has_events(selector)
+                or self.stream_buffers.is_closed(selector)
+            )
+            if has_stream:
+                return self._read_root_stream(segment, session, graph=graph)
+        else:
+            source = session.segment_streams.get(
+                session.index
+            ) or self.latest_streams.get(selector)
+            if source is not None:
+                return self._read_child_stream(source, session, graph=graph)
+
+        if use_response_read:
+            read = session.llm_text_reads.get(session.index)
+            if read is None:
+                return [], False
+            value = read.value
+        else:
+            value = variable_pool.get(selector)
+        if value is None:
+            finished = source_id in self.finished_node_ids
+            if use_response_read:
+                # A parallel model may still send genuine tokens after this lookup.
+                finished = (
+                    finished
+                    or source_id not in graph.nodes
+                    or self.is_skipped(source_id, graph=graph)
+                )
+            return [], finished and (
+                use_response_read or self.frame_id != ROOT_FRAME_ID
+            )
+
+        return self._emit_value(
+            segment,
+            session,
+            value if isinstance(value, str) else value.markdown,
+            graph=graph,
+        )
+
+    def _emit_value(
+        self,
+        segment: VariableSegment,
+        session: _ResponseSession,
+        text: str,
+        *,
+        graph: GraphProtocol,
+    ) -> tuple[list[NodeRunStreamChunkEvent], bool]:
+        source_id = segment.selector[0] if segment.selector else ""
+        node_id = source_id if source_id in graph.nodes else session.node_id
+        chunk = self._create_stream_chunk_event(
+            node_id,
+            self._get_or_create_execution_id(node_id),
+            segment.selector,
+            text,
+            session.index == len(session.template.segments) - 1,
+            graph=graph,
+        )
+        if self.frame_id == ROOT_FRAME_ID:
+            return [chunk], True
+        # A hidden reply can restart after a retry. Pin values it already read.
+        return self._read_child_stream(
+            _SourceStream([chunk], closed=True), session, graph=graph
+        )
+
+    def _read_child_stream(
+        self, source: _SourceStream, session: _ResponseSession, *, graph: GraphProtocol
+    ) -> tuple[list[NodeRunStreamChunkEvent], bool]:
+        session.segment_streams[session.index] = source
+        position = session.segment_positions.get(session.index, 0)
+        events = [
+            self._create_child_response_chunk(event, session, graph=graph)
+            for event in source.events[position:]
+        ]
+        session.segment_positions[session.index] = len(source.events)
+        return events, source.closed
 
     def _create_child_response_chunk(
         self,
@@ -373,36 +558,25 @@ class _TemplateStream:
             graph=graph,
         )
 
-    def _read_root_variable_chunks(
+    def _read_root_stream(
         self,
         segment: VariableSegment,
         session: _ResponseSession,
         *,
         graph: GraphProtocol,
-        variable_pool: ReadOnlyVariablePool,
     ) -> tuple[list[NodeRunStreamChunkEvent], bool]:
         events: list[NodeRunStreamChunkEvent] = []
-        source_selector_prefix = segment.selector[0] if segment.selector else ""
-        is_complete = False
-
-        is_non_node_selector = source_selector_prefix not in graph.nodes
-        if is_non_node_selector:
-            output_node_id = session.node_id
-        else:
-            output_node_id = source_selector_prefix
-        execution_id = self._get_or_create_execution_id(output_node_id)
-        has_stream_events = self.stream_buffers.has_events(segment.selector)
-
         while self.stream_buffers.has_unread(segment.selector):
             event = self.stream_buffers.pop(segment.selector)
             if event is None:
                 continue
-
-            if is_non_node_selector:
+            if segment.selector and segment.selector[0] in graph.nodes:
+                events.append(event)
+            else:
                 response_node = graph.nodes[session.node_id]
                 events.append(
                     NodeRunStreamChunkEvent(
-                        id=execution_id,
+                        id=self._get_or_create_execution_id(response_node.id),
                         node_id=response_node.id,
                         node_type=response_node.node_type,
                         container_id=event.container_id,
@@ -411,26 +585,7 @@ class _TemplateStream:
                         is_final=event.is_final,
                     )
                 )
-            else:
-                events.append(event)
-
-        if self.stream_buffers.is_closed(segment.selector):
-            is_complete = True
-        elif not has_stream_events and (value := variable_pool.get(segment.selector)):
-            is_last_segment = session.index == len(session.template.segments) - 1
-            events.append(
-                self._create_stream_chunk_event(
-                    node_id=output_node_id,
-                    execution_id=execution_id,
-                    selector=segment.selector,
-                    chunk=value.markdown,
-                    is_final=is_last_segment,
-                    graph=graph,
-                ),
-            )
-            is_complete = True
-
-        return events, is_complete
+        return events, self.stream_buffers.is_closed(segment.selector)
 
     def _create_text_chunks(
         self,

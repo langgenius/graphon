@@ -21,6 +21,9 @@ class FrameStartedEvent(EngineEvent):
     root_node_id: str | None = None
     index: int | None = None
     reason: WorkflowStartReason = WorkflowStartReason.INITIAL
+    observes_response_reads: bool = False
+    # Present on a quiescent root resumption, before any ready task starts.
+    completed_node_ids: frozenset[str] | None = None
     node_execution_ids: Mapping[str, str] = Field(default_factory=dict)
     variables: tuple[Variable, ...] = ()
 
