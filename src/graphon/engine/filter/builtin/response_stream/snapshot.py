@@ -44,7 +44,6 @@ class ResponseStreamFilterSnapshot[VersionT: str](BaseModel):
     waiting_sessions: list[ResponseSessionState] = Field(default_factory=list)
     pending_sessions: list[ResponseSessionState] = Field(default_factory=list)
     node_execution_ids: dict[str, str] = Field(default_factory=dict)
-    paths_map: dict[str, list[list[str]]] = Field(default_factory=dict)
     stream_buffers: list[StreamBufferState] = Field(default_factory=list)
     stream_positions: list[StreamPositionState] = Field(default_factory=list)
     closed_streams: list[Selector] = Field(default_factory=list)

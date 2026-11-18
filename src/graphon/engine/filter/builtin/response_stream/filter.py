@@ -246,7 +246,7 @@ class ResponseStreamFilter:
             self._root_session.load_state(state)
 
     def _check_snapshot_scope(self) -> None:
-        # shortcut: v1/v2 store root progress only; add child snapshots in stage F.
+        # Root checkpoints do not yet include child response progress.
         if self._has_child_progress or self._reply_order.has_pending_containers:
             msg = "Snapshots containing child response progress are not supported yet"
             raise ValueError(msg)

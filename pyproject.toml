@@ -47,6 +47,7 @@ dev = [
     'ty',
     'gevent>=26.8.0',
     "import-linter>=2.15",
+    "hypothesis>=6.170.15",
 ]
 
 [build-system]

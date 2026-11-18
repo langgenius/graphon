@@ -87,7 +87,8 @@ The [benchmark](../benchmarks/test_engine_performance.py) does not isolate the
 response-filter initialization cost, leaving a gap in performance feedback.
 
 [Response-filter regressions](../tests/engine/test_response_stream_filter_performance.py)
-cover unreachable-path pruning and per-response blocking-edge caching. Continue
+cover bounded graph traversal, selector-dependent readiness, and agreement with
+an independent path oracle. Continue
 [PR #266](https://github.com/langgenius/graphon/pull/266) for benchmark instructions.
 Prefer deterministic complexity checks for that path and identify which phase a
 measurement covers. Add timing workloads only for a specific performance question.
