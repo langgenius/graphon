@@ -187,7 +187,9 @@ edge in both taken and rejected lists remain readable: rejection represents a
 first skip and wins during restoration. Sessions started from an initial frame
 baseline additionally record observed skipped edges, so resumed templates
 do not consult future live node states. Snapshots without this optional metadata
-retain the paired graph's skip lookup. See the [response filter tests](tests/engine/test_response_stream_filter.py)
+retain the paired graph's skip lookup. See the [paired pause checkpoints](tests/engine/test_response_stream_pause.py)
+for old runtime/filter snapshots resumed through HITL and host pause commands,
+the [response filter tests](tests/engine/test_response_stream_filter.py)
 for native and legacy restoration, [traversal and selector tests](tests/engine/test_response_stream_filter_performance.py)
 for selector-dependent and live-state behavior, and [gating regressions](docs/development.md#response-gating-regressions)
 for resource bounds, path equivalence, and ordered output.

@@ -1,0 +1,115 @@
+{
+  "writer_commit": "069cd554021e2da203bd17956849e41dcd0b7cde",
+  "first": {
+    "runtime": "{\"start_at\":0.0,\"node_run_steps\":2,\"llm_usage\":{\"prompt_tokens\":0,\"prompt_unit_price\":\"0.0\",\"prompt_price_unit\":\"0.0\",\"prompt_price\":\"0.0\",\"completion_tokens\":0,\"completion_unit_price\":\"0.0\",\"completion_price_unit\":\"0.0\",\"completion_price\":\"0.0\",\"total_tokens\":0,\"total_price\":\"0.0\",\"currency\":\"USD\",\"latency\":0.0,\"time_to_first_token\":null,\"time_to_generate\":null},\"outputs\":{},\"variable_pool\":{\"node_ids\":[\"first\",\"tail\",\"second\",\"start\",\"reply\"],\"variable_dictionary\":{\"sys\":{\"workflow_execution_id\":{\"value_type\":\"string\",\"value\":\"workflow-execution\",\"id\":\"fedb3aa7-5568-47cc-9abd-60fd84f4fb83\",\"name\":\"workflow_execution_id\",\"description\":\"\",\"selector\":[\"sys\",\"workflow_execution_id\"]}},\"start\":{\"sys.workflow_execution_id\":{\"value_type\":\"string\",\"value\":\"workflow-execution\",\"id\":\"b4c885d3-8635-46be-9358-5a18fe6fd308\",\"name\":\"sys.workflow_execution_id\",\"description\":\"\",\"selector\":[\"start\",\"sys.workflow_execution_id\"]}}}},\"ready_queue\":\"{\\\"version\\\":\\\"2.0\\\",\\\"items\\\":[]}\",\"graph_execution\":\"{\\\"version\\\":\\\"2.0\\\",\\\"workflow_id\\\":\\\"workflow\\\",\\\"started\\\":true,\\\"completed\\\":false,\\\"aborted\\\":false,\\\"paused\\\":true,\\\"pause_reasons\\\":[{\\\"TYPE\\\":\\\"hitl_required\\\",\\\"session_id\\\":\\\"session-first\\\",\\\"node_id\\\":\\\"first\\\",\\\"node_title\\\":\\\"First approval\\\"}],\\\"error\\\":null,\\\"exceptions_count\\\":0,\\\"node_executions\\\":[{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"first\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"e069b141-f33f-4029-bd0a-d4f922b0b04f\\\"},{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"reply\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"51e500c2-1335-4b87-a609-17d5a5c32aaf\\\"},{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"second\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"b15b17b1-5c46-4f68-868f-05875d2d8b60\\\"},{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"start\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"f5821d40-ae04-44fc-9244-525f1392d815\\\"},{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"tail\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"f1430151-7a2f-4a8c-9100-c2aabc5cf155\\\"}]}\",\"deferred_ready_tasks\":\"{\\\"version\\\":\\\"2.0\\\",\\\"items\\\":[{\\\"kind\\\":\\\"start\\\",\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"first\\\"}]}\",\"container_runs\":[],\"container_frames\":[],\"graph_node_states\":{\"start\":\"taken\",\"first\":\"unknown\",\"second\":\"unknown\",\"reply\":\"unknown\",\"tail\":\"unknown\"},\"graph_edge_states\":{\"start-first\":\"taken\",\"first-second\":\"unknown\",\"second-reply\":\"unknown\",\"start-reply\":\"taken\",\"reply-tail\":\"unknown\"},\"version\":\"3.0\"}",
+    "response_filter": "{\"type\":\"ResponseStreamFilter\",\"version\":\"2.0\",\"response_nodes\":[\"reply\",\"tail\"],\"active_session\":{\"node_id\":\"reply\",\"index\":1},\"waiting_sessions\":[],\"pending_sessions\":[{\"node_id\":\"tail\",\"index\":0}],\"node_execution_ids\":{\"first\":\"e069b141-f33f-4029-bd0a-d4f922b0b04f\",\"reply\":\"51e500c2-1335-4b87-a609-17d5a5c32aaf\",\"second\":\"b15b17b1-5c46-4f68-868f-05875d2d8b60\",\"start\":\"f5821d40-ae04-44fc-9244-525f1392d815\",\"tail\":\"f1430151-7a2f-4a8c-9100-c2aabc5cf155\"},\"paths_map\":{\"reply\":[[\"first-second\",\"second-reply\"],[]],\"tail\":[[\"first-second\",\"second-reply\",\"reply-tail\"],[\"reply-tail\"]]},\"stream_buffers\":[],\"stream_positions\":[],\"closed_streams\":[],\"skipped_edges\":[]}",
+    "chunks": [
+      {
+        "id": "51e500c2-1335-4b87-a609-17d5a5c32aaf",
+        "node_id": "reply",
+        "selector": [
+          "reply",
+          "answer"
+        ],
+        "chunk": "before|",
+        "is_final": false
+      }
+    ],
+    "pause": {
+      "container_id": "",
+      "reasons": [
+        {
+          "TYPE": "hitl_required",
+          "session_id": "session-first",
+          "node_id": "first",
+          "node_title": "First approval"
+        }
+      ],
+      "outputs": {}
+    },
+    "completed_nodes": [
+      "start"
+    ],
+    "started_nodes": {
+      "start": "f5821d40-ae04-44fc-9244-525f1392d815",
+      "first": "e069b141-f33f-4029-bd0a-d4f922b0b04f"
+    }
+  },
+  "second": {
+    "runtime": "{\"start_at\":0.0,\"node_run_steps\":4,\"llm_usage\":{\"prompt_tokens\":0,\"prompt_unit_price\":\"0.0\",\"prompt_price_unit\":\"0.0\",\"prompt_price\":\"0.0\",\"completion_tokens\":0,\"completion_unit_price\":\"0.0\",\"completion_price_unit\":\"0.0\",\"completion_price\":\"0.0\",\"total_tokens\":0,\"total_price\":\"0.0\",\"currency\":\"USD\",\"latency\":0.0,\"time_to_first_token\":null,\"time_to_generate\":null},\"outputs\":{},\"variable_pool\":{\"node_ids\":[\"tail\",\"first\",\"second\",\"start\",\"reply\"],\"variable_dictionary\":{\"sys\":{\"workflow_execution_id\":{\"value_type\":\"string\",\"value\":\"workflow-execution\",\"id\":\"fedb3aa7-5568-47cc-9abd-60fd84f4fb83\",\"name\":\"workflow_execution_id\",\"description\":\"\",\"selector\":[\"sys\",\"workflow_execution_id\"]}},\"start\":{\"sys.workflow_execution_id\":{\"value_type\":\"string\",\"value\":\"workflow-execution\",\"id\":\"b4c885d3-8635-46be-9358-5a18fe6fd308\",\"name\":\"sys.workflow_execution_id\",\"description\":\"\",\"selector\":[\"start\",\"sys.workflow_execution_id\"]}},\"first\":{\"answer\":{\"value_type\":\"string\",\"value\":\"alpha\",\"id\":\"457e5eed-bbd0-4844-a2ce-8a1a3b1d5390\",\"name\":\"answer\",\"description\":\"\",\"selector\":[\"first\",\"answer\"]}}}},\"ready_queue\":\"{\\\"version\\\":\\\"2.0\\\",\\\"items\\\":[]}\",\"graph_execution\":\"{\\\"version\\\":\\\"2.0\\\",\\\"workflow_id\\\":\\\"workflow\\\",\\\"started\\\":true,\\\"completed\\\":false,\\\"aborted\\\":false,\\\"paused\\\":true,\\\"pause_reasons\\\":[{\\\"TYPE\\\":\\\"hitl_required\\\",\\\"session_id\\\":\\\"session-second\\\",\\\"node_id\\\":\\\"second\\\",\\\"node_title\\\":\\\"Second approval\\\"}],\\\"error\\\":null,\\\"exceptions_count\\\":0,\\\"node_executions\\\":[{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"first\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"e069b141-f33f-4029-bd0a-d4f922b0b04f\\\"},{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"reply\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"51e500c2-1335-4b87-a609-17d5a5c32aaf\\\"},{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"second\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"b15b17b1-5c46-4f68-868f-05875d2d8b60\\\"},{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"start\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"f5821d40-ae04-44fc-9244-525f1392d815\\\"},{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"tail\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"f1430151-7a2f-4a8c-9100-c2aabc5cf155\\\"}]}\",\"deferred_ready_tasks\":\"{\\\"version\\\":\\\"2.0\\\",\\\"items\\\":[{\\\"kind\\\":\\\"start\\\",\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"second\\\"}]}\",\"container_runs\":[],\"container_frames\":[],\"graph_node_states\":{\"start\":\"taken\",\"first\":\"unknown\",\"second\":\"unknown\",\"reply\":\"unknown\",\"tail\":\"unknown\"},\"graph_edge_states\":{\"start-first\":\"taken\",\"first-second\":\"taken\",\"second-reply\":\"unknown\",\"start-reply\":\"taken\",\"reply-tail\":\"unknown\"},\"version\":\"3.0\"}",
+    "response_filter": "{\"type\":\"ResponseStreamFilter\",\"version\":\"2.0\",\"response_nodes\":[\"reply\",\"tail\"],\"active_session\":{\"node_id\":\"reply\",\"index\":3},\"waiting_sessions\":[],\"pending_sessions\":[{\"node_id\":\"tail\",\"index\":0}],\"node_execution_ids\":{\"first\":\"e069b141-f33f-4029-bd0a-d4f922b0b04f\",\"reply\":\"51e500c2-1335-4b87-a609-17d5a5c32aaf\",\"second\":\"b15b17b1-5c46-4f68-868f-05875d2d8b60\",\"start\":\"f5821d40-ae04-44fc-9244-525f1392d815\",\"tail\":\"f1430151-7a2f-4a8c-9100-c2aabc5cf155\"},\"paths_map\":{\"reply\":[[\"second-reply\"],[]],\"tail\":[[\"second-reply\",\"reply-tail\"],[\"reply-tail\"]]},\"stream_buffers\":[],\"stream_positions\":[],\"closed_streams\":[],\"skipped_edges\":[]}",
+    "chunks": [
+      {
+        "id": "e069b141-f33f-4029-bd0a-d4f922b0b04f",
+        "node_id": "first",
+        "selector": [
+          "first",
+          "answer"
+        ],
+        "chunk": "alpha",
+        "is_final": false
+      },
+      {
+        "id": "51e500c2-1335-4b87-a609-17d5a5c32aaf",
+        "node_id": "reply",
+        "selector": [
+          "reply",
+          "answer"
+        ],
+        "chunk": "|middle|",
+        "is_final": false
+      }
+    ],
+    "pause": {
+      "container_id": "",
+      "reasons": [
+        {
+          "TYPE": "hitl_required",
+          "session_id": "session-second",
+          "node_id": "second",
+          "node_title": "Second approval"
+        }
+      ],
+      "outputs": {}
+    },
+    "completed_nodes": [
+      "first"
+    ],
+    "started_nodes": {
+      "first": "e069b141-f33f-4029-bd0a-d4f922b0b04f",
+      "second": "b15b17b1-5c46-4f68-868f-05875d2d8b60"
+    }
+  },
+  "command": {
+    "runtime": "{\"start_at\":0.0,\"node_run_steps\":1,\"llm_usage\":{\"prompt_tokens\":0,\"prompt_unit_price\":\"0.0\",\"prompt_price_unit\":\"0.0\",\"prompt_price\":\"0.0\",\"completion_tokens\":0,\"completion_unit_price\":\"0.0\",\"completion_price_unit\":\"0.0\",\"completion_price\":\"0.0\",\"total_tokens\":0,\"total_price\":\"0.0\",\"currency\":\"USD\",\"latency\":0.0,\"time_to_first_token\":null,\"time_to_generate\":null},\"outputs\":{},\"variable_pool\":{\"node_ids\":[\"tail\",\"first\",\"second\",\"start\",\"reply\"],\"variable_dictionary\":{\"sys\":{\"workflow_execution_id\":{\"value_type\":\"string\",\"value\":\"workflow-execution\",\"id\":\"2a39e39c-0b5f-407b-8250-e2d2307c3537\",\"name\":\"workflow_execution_id\",\"description\":\"\",\"selector\":[\"sys\",\"workflow_execution_id\"]}},\"start\":{\"sys.workflow_execution_id\":{\"value_type\":\"string\",\"value\":\"workflow-execution\",\"id\":\"1f1b00e7-9dac-4a1e-94b7-dd203f6893df\",\"name\":\"sys.workflow_execution_id\",\"description\":\"\",\"selector\":[\"start\",\"sys.workflow_execution_id\"]}}}},\"ready_queue\":\"{\\\"version\\\":\\\"2.0\\\",\\\"items\\\":[]}\",\"graph_execution\":\"{\\\"version\\\":\\\"2.0\\\",\\\"workflow_id\\\":\\\"workflow\\\",\\\"started\\\":true,\\\"completed\\\":false,\\\"aborted\\\":false,\\\"paused\\\":true,\\\"pause_reasons\\\":[{\\\"TYPE\\\":\\\"scheduled_pause\\\",\\\"message\\\":\\\"host checkpoint\\\"}],\\\"error\\\":null,\\\"exceptions_count\\\":0,\\\"node_executions\\\":[{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"first\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"84d44d54-5d6a-4257-8a44-8556808b1e72\\\"},{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"reply\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"17bfff53-8469-47ff-ae17-ca2d159e5b5d\\\"},{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"second\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"d63e77fb-6621-4b47-b81a-218df288e881\\\"},{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"start\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"8e8cbc69-18b5-4826-a0bb-a04e4d2e2f83\\\"},{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"tail\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"57432aca-51a6-48ed-abe7-dc0034bd7aaf\\\"}]}\",\"deferred_ready_tasks\":\"{\\\"version\\\":\\\"2.0\\\",\\\"items\\\":[{\\\"kind\\\":\\\"start\\\",\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"first\\\"}]}\",\"container_runs\":[],\"container_frames\":[],\"graph_node_states\":{\"start\":\"taken\",\"first\":\"taken\",\"second\":\"unknown\",\"reply\":\"unknown\",\"tail\":\"unknown\"},\"graph_edge_states\":{\"start-first\":\"taken\",\"first-second\":\"unknown\",\"second-reply\":\"unknown\",\"start-reply\":\"taken\",\"reply-tail\":\"unknown\"},\"version\":\"3.0\"}",
+    "response_filter": "{\"type\":\"ResponseStreamFilter\",\"version\":\"2.0\",\"response_nodes\":[\"reply\",\"tail\"],\"active_session\":{\"node_id\":\"reply\",\"index\":1},\"waiting_sessions\":[],\"pending_sessions\":[{\"node_id\":\"tail\",\"index\":0}],\"node_execution_ids\":{\"first\":\"84d44d54-5d6a-4257-8a44-8556808b1e72\",\"reply\":\"17bfff53-8469-47ff-ae17-ca2d159e5b5d\",\"second\":\"d63e77fb-6621-4b47-b81a-218df288e881\",\"start\":\"8e8cbc69-18b5-4826-a0bb-a04e4d2e2f83\",\"tail\":\"57432aca-51a6-48ed-abe7-dc0034bd7aaf\"},\"paths_map\":{\"reply\":[[\"first-second\",\"second-reply\"],[]],\"tail\":[[\"first-second\",\"second-reply\",\"reply-tail\"],[\"reply-tail\"]]},\"stream_buffers\":[],\"stream_positions\":[],\"closed_streams\":[],\"skipped_edges\":[]}",
+    "chunks": [
+      {
+        "id": "17bfff53-8469-47ff-ae17-ca2d159e5b5d",
+        "node_id": "reply",
+        "selector": [
+          "reply",
+          "answer"
+        ],
+        "chunk": "before|",
+        "is_final": false
+      }
+    ],
+    "pause": {
+      "container_id": "",
+      "reasons": [
+        {
+          "TYPE": "scheduled_pause",
+          "message": "host checkpoint"
+        }
+      ],
+      "outputs": {}
+    },
+    "completed_nodes": [
+      "start"
+    ],
+    "started_nodes": {
+      "start": "8e8cbc69-18b5-4826-a0bb-a04e4d2e2f83"
+    }
+  }
+}
