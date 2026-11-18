@@ -730,14 +730,14 @@ def test_response_stream_filter_initialize_resets_run_state() -> None:
     assert [event.chunk for event in second_chunks] == ["second"]
 
 
-def test_response_stream_filter_writes_version_2_snapshot() -> None:
+def test_response_stream_filter_writes_version_4_snapshot() -> None:
     graph = _variable_response_graph()
     event_filter = ResponseStreamFilter()
     event_filter.initialize(_context(graph))
 
     snapshot = json.loads(event_filter.dumps())
 
-    assert snapshot["version"] == "2.0"
+    assert snapshot["version"] == "4.0"
 
 
 def test_response_stream_filter_migrates_v1_root_state_after_graph_binding() -> None:
@@ -762,19 +762,12 @@ def test_response_stream_filter_migrates_v1_root_state_after_graph_binding() -> 
         restored_filter.dumps()
     restored_filter.initialize(_context(graph))
 
-    assert json.loads(restored_filter.dumps()) == {
-        "type": "ResponseStreamFilter",
-        "version": "2.0",
-        "response_nodes": ["answer"],
-        "active_session": None,
-        "waiting_sessions": [],
-        "pending_sessions": [{"node_id": "answer", "index": 0}],
-        "node_execution_ids": {},
-        "paths_map": {"answer": [["edge_0"]]},
-        "stream_buffers": [],
-        "stream_positions": [],
-        "closed_streams": [],
-    }
+    state = json.loads(restored_filter.dumps())["frames"]["root"]
+    assert state["response_nodes"] == ["answer"]
+    assert state["active_session"] is None
+    assert [session["node_id"] for session in state["pending_sessions"]] == ["answer"]
+    assert state["paths_map"] == {"answer": [["edge_0"]]}
+    assert state["stream_buffers"] == []
 
     assert list(restored_filter.on_event(_stream_chunk("value"))) == []
     output = list(restored_filter.on_event(_edge_taken(edge_id="edge_0")))
@@ -798,7 +791,9 @@ def test_response_stream_filter_migrates_v1_graph_builder_state() -> None:
     restored_filter.loads(_V1_SIMPLE_SNAPSHOT)
     restored_filter.initialize(_context(graph))
 
-    assert json.loads(restored_filter.dumps())["paths_map"] == {"answer": [["edge_0"]]}
+    assert json.loads(restored_filter.dumps())["frames"]["root"]["paths_map"] == {
+        "answer": [["edge_0"]]
+    }
 
     assert list(restored_filter.on_event(_stream_chunk("value"))) == []
     output = list(restored_filter.on_event(_edge_taken(edge_id="edge_0")))
@@ -821,7 +816,12 @@ def test_response_stream_filter_does_not_migrate_version_2_edge_ids() -> None:
     graph = _variable_response_graph(edge_id="public-edge")
     event_filter = ResponseStreamFilter()
     event_filter.initialize(_context(graph))
-    snapshot = json.loads(event_filter.dumps())
+    snapshot = {
+        "type": "ResponseStreamFilter",
+        "version": "2.0",
+        "response_nodes": ["answer"],
+        "pending_sessions": [{"node_id": "answer", "index": 0}],
+    }
     snapshot["paths_map"] = {"answer": [["edge_0"]]}
 
     restored_filter = ResponseStreamFilter()

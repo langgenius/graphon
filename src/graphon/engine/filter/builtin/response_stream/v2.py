@@ -8,7 +8,7 @@ from .snapshot import ResponseStreamFilterSnapshot
 
 
 class Snapshot(ResponseStreamFilterSnapshot[Literal["2.0"]]):
-    """ResponseStreamFilter snapshot written by Graphon 0.8."""
+    """Historical root-only ResponseStreamFilter snapshot."""
 
     version: Literal["2.0"] = "2.0"
     # Missing metadata retains the historical paired-graph skip lookup.
@@ -16,7 +16,7 @@ class Snapshot(ResponseStreamFilterSnapshot[Literal["2.0"]]):
 
 
 def loads(data: str) -> Snapshot:
-    """Validate JSON against the exact current version 2 schema.
+    """Validate JSON against the exact historical version 2 schema.
 
     Args:
         data: Serialized ResponseStreamFilter state whose version must be ``2.0``.
@@ -54,7 +54,7 @@ def for_graph(
     """Confirm native version 2 state at graph-binding time.
 
     Version 2 already stores graph-scoped public IDs, so binding requires no graph
-    rewrite. This function exists as the version module's uniform dispatch target.
+    rewrite.
 
     Args:
         snapshot: State that must be an instance of this module's exact model.

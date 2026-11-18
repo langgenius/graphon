@@ -32,8 +32,8 @@ def loads(data: str) -> Snapshot:
 def dumps(snapshot: ResponseStreamFilterSnapshot) -> str:
     """Prevent unbound version 1 state from being emitted as current state.
 
-    Version 1 edge IDs can only be translated after graph binding. Callers must
-    initialize the filter first, which invokes ``for_graph`` and produces v2 state.
+    Version 1 edge IDs can only be translated after graph binding. Initialize the
+    filter first so ``for_graph`` can migrate them before the current writer runs.
 
     Args:
         snapshot: Unbound legacy state; it is intentionally not serialized.
@@ -57,7 +57,7 @@ def for_graph(
     Version 1 stored generated ``edge_N`` IDs over the complete workflow. Version 2
     stores public edge IDs from the root graph. The mapping therefore requires the
     graph that owns the restored filter. Migration discards child response state
-    because filter persistence supports only root response state.
+    because version 1 lacks frame-local display history and reply ordering.
 
     TODO: Delete this file when version 1 snapshots leave the migration window.
     Version dispatch derives this module from the persisted version, so no remaining

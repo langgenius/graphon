@@ -9,7 +9,6 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import cast
 
 from graphon.engine_events.base import EngineEvent
 from graphon.engine_events.frame import FrameStartedEvent, FrameVariablesUpdatedEvent
@@ -31,7 +30,7 @@ from graphon.runtime.runtime_state_protocol import ReadOnlyVariablePool
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.variables import Variable
 
-from . import snapshot, v2
+from . import snapshot
 from .reply_order import _Reply, _ReplyOrder
 from .snapshot import ResponseSessionState, ResponseStreamFilterSnapshot, Selector
 from .template_stream import _ResponseSession, _StreamBuffers, _TemplateStream
@@ -68,6 +67,7 @@ class _FrameSession:
         container_id: str = "",
         pass_unmatched_chunks: bool = False,
     ) -> None:
+        self.start_event: FrameStartedEvent | None = None
         self.graph = graph
         self.variable_pool = variable_pool
         self.frame_id = frame_id
@@ -87,10 +87,6 @@ class _FrameSession:
         self._response_sessions: dict[str, _ResponseSession] = {}
         self._referenced_selectors: set[_Selector] = set()
 
-    @property
-    def has_responses(self) -> bool:
-        return bool(self._response_node_ids)
-
     def register_responses(self) -> None:
         for node in self.graph.nodes.values():
             if node.execution_type == NodeExecutionType.RESPONSE and (
@@ -100,6 +96,25 @@ class _FrameSession:
                 self._register_response(node.id)
 
     def start(self, event: FrameStartedEvent) -> list[EngineEvent]:
+        if self.start_event is not None:
+            previous = self.start_event
+            if any(
+                getattr(previous, key) != getattr(event, key)
+                for key in (
+                    "frame_id",
+                    "parent_frame_id",
+                    "container_id",
+                    "invocation_id",
+                    "container_execution_id",
+                    "root_node_id",
+                    "index",
+                    "node_execution_ids",
+                )
+            ):
+                msg = f"Mismatched response progress for frame {event.frame_id}"
+                raise ValueError(msg)
+            return []
+        self.start_event = event.model_copy(update={"variables": ()}, deep=True)
         self._observed_values = VariablePool()
         self.variable_pool = self._observed_values
         if event.reason == WorkflowStartReason.INITIAL:
@@ -197,37 +212,8 @@ class _FrameSession:
             ]
         return self._try_flush()
 
-    def dump_state(self) -> v2.Snapshot:
-        return v2.Snapshot(
-            skipped_edges=sorted(self._skipped_edge_ids)
-            if self._skipped_edge_ids is not None
-            else None,
-            response_nodes=sorted(self._response_node_ids),
-            active_session=self._serialize_session(self._active_session),
-            waiting_sessions=[
-                session_state
-                for session in list(self._waiting_sessions)
-                if (session_state := self._serialize_session(session)) is not None
-            ],
-            pending_sessions=[
-                session_state
-                for _, session in sorted(self._response_sessions.items())
-                if (session_state := self._serialize_session(session)) is not None
-            ],
-            node_execution_ids=dict(
-                sorted(self._template_stream.node_execution_ids.items())
-            ),
-            paths_map={
-                node_id: [path.edge_ids.copy() for path in paths]
-                for node_id, paths in sorted(self._blocking_paths.items())
-            },
-            stream_buffers=self._template_stream.stream_buffers.dump_buffers(),
-            stream_positions=self._template_stream.stream_buffers.dump_positions(),
-            closed_streams=self._template_stream.stream_buffers.dump_closed_selectors(),
-        )
-
     def load_state(self, state: ResponseStreamFilterSnapshot) -> None:
-        state = cast(v2.Snapshot, snapshot.for_graph(state, self.graph))
+        state = snapshot.for_graph(state, self.graph)
 
         response_node_ids = set(state.response_nodes)
         blocking_paths = {
@@ -262,7 +248,9 @@ class _FrameSession:
             )
 
         self._skipped_edge_ids = (
-            set(state.skipped_edges) if state.skipped_edges is not None else None
+            set(skipped_edges)
+            if (skipped_edges := getattr(state, "skipped_edges", None)) is not None
+            else None
         )
         self._active_session = active_session
         self._waiting_sessions = waiting_sessions
@@ -629,14 +617,6 @@ class _FrameSession:
         ]
         self._active_session = ordered_sessions[0] if ordered_sessions else None
         self._waiting_sessions = deque(ordered_sessions[1:])
-
-    def _serialize_session(
-        self,
-        session: _ResponseSession | None,
-    ) -> ResponseSessionState | None:
-        if session is None:
-            return None
-        return ResponseSessionState(node_id=session.node_id, index=session.index)
 
     def _session_from_state(
         self,
