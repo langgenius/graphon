@@ -278,6 +278,8 @@ class ListOperatorNode(Node[ListOperatorNodeData]):
         return variable
 
     def _apply_slice(self, variable: _SUPPORTED_TYPES_ALIAS) -> _SUPPORTED_TYPES_ALIAS:
+        if self.node_data.limit.size < 0:
+            return variable
         result = variable.value[: self.node_data.limit.size]
         return variable.model_copy(update={"value": result})
 

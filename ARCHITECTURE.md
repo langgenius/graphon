@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-11T05:46:47Z"
+last_checked: "2026-11-16T03:43:28Z"
 -->
 # Architecture
 
@@ -34,16 +34,9 @@ The [Import Linter configuration](pyproject.toml) is the source of truth for
 allowed package dependencies. [Layer regression tests](tests/test_import_layers.py)
 exercise enforcement in CI.
 
-The execution model shares graph/node schemas and
-[container state](src/graphon/runtime/container_state.py);
-[legacy snapshot migration](src/graphon/runtime/runtime_state/v2.py) uses graph
-scoping, and [condition utilities](src/graphon/utils/condition/processor.py)
-consume runtime interfaces. The public facade sits above this layer because it
-re-exports `NodeFactory` and consumer contracts. These layers permit imports of
-concrete node implementations from the facade; fresh-process tests below enforce
-its node-registration guarantee.
-
-Import isolation and lazy registration are enforced by
+The public runtime package can restore snapshots without importing the engine.
+Importing `graphon.protocols` does not register built-in nodes; importing a concrete
+node implementation registers its type and version. These guarantees are enforced by
 [runtime import tests](tests/runtime/test_runtime_imports.py) and
 [public-contract import tests](tests/test_protocols_exports.py). Use the public
 runtime paths for new integrations; engine queue aliases exist for compatibility.
@@ -137,9 +130,77 @@ commits, detached values, and raw chunk delivery, and the
 [frame failure tests](tests/engine/test_frame_failures.py) for pause/restore and
 consumer exceptions.
 
-Baselines and commits contain full variable values.
-`ResponseStreamFilter` suppresses those events from its output after the engine has constructed and copied them; this compatibility guard does not add child response assembly.
-Response buffers and presentation state remain in the filter, separate from runtime snapshots.
+Baselines and commits contain full variable values. `ResponseStreamFilter`
+consumes those events without forwarding them to its output. The engine
+still constructs the events and copies their values.
+
+## Response sessions
+
+[ResponseStreamFilter](src/graphon/engine/filter/builtin/response_stream/filter.py)
+owns independent root and child [frame sessions](src/graphon/engine/filter/builtin/response_stream/frame_session.py).
+Root templates use the existing Python node interfaces. Child Answer and End
+templates come from [retained definitions](src/graphon/engine/filter/builtin/response_stream/frame_graph.py),
+without constructing nodes or calling factories. Frame starts activate initially
+eligible templates; taken and skipped edges control the remaining paths. A reserved
+execution ID alone does not make a reply reachable. Custom frames without enough
+declarative context get no response session; ordinary node and completion events
+still pass through.
+
+Keep `emit_frame_events=True` when using a context from `from_engine()`: the
+filter waits for the root baseline before resolving values. Each observed frame keeps a detached value pool and applies
+committed replacements in publication order, including when events are consumed
+after engine frames have been removed. Result and variable-request events do not
+apply values again. Direct contexts without `run_id` retain the legacy manual
+event-stream behavior until a frame baseline is supplied.
+
+[Template assembly](src/graphon/engine/filter/builtin/response_stream/template_stream.py)
+feeds the filter output for both scopes. Child sources are keyed by execution,
+attempt, and selector within their frame; each response and template occurrence
+has its own cursor. Read occurrences retain their source versions across committed
+replacements, which supply later occurrences. Retries rebuild wholly undisplayed
+child replies using the new attempt without rereading unrelated captured values;
+once a reply is displayed, occurrences already reading a source stay on that attempt.
+Successful and handled-failure results close unfinished child sources without
+replaying their final values. Child Answer chunks use the reserved execution ID and
+`[answer_node_id, "answer"]` selector, with one final marker after the complete
+template, including empty replies. Source final markers close only their source.
+Ordinary Answer `answer` and `files`
+outputs and host-bound file formatting remain unchanged.
+
+The filter's [reply order](src/graphon/engine/filter/builtin/response_stream/reply_order.py)
+reserves container groups at node start, before their first child reply. Frames
+with item indices drain in numeric order within an invocation; a frame keeps its
+place until it and its descendants finish and their replies drain. The current
+reply streams live from prefix through suffix without interruption by descendants
+or siblings.
+The filter keeps consuming raw events while later replies wait. Containers without
+descendant Answer or End definitions do not delay independent root responses.
+
+Failed or aborted frames close displayed child Answers and discard their remaining
+templates. After a failed item, pending siblings wait for container continuation or
+a successful or handled result; a failed container discards them. Graph success,
+including partial success, drains eligible replies before its terminal event. Graph
+failure or abort discards pending replies before `flush()` is needed. Completed
+frames release captured values and source buffers; queued text is released as it
+drains or is discarded. Root chunks retain their existing event shapes and shared
+source cursors.
+
+Filter persistence supports only root response state: v1 migration discards child
+response state, and v2 stores root state directly. Sessions started from an initial
+frame baseline record observed
+skipped edges in v2 snapshots, so resumed templates do not consult future live
+node states. Snapshots without this optional metadata retain the paired graph's
+skip lookup.
+After a child frame containing an Answer or End starts, `dumps()` and `loads()`
+reject that filter instance's state, including after the frame finishes. Pending
+container response reservations are also rejected, including before the first child
+frame starts. Resuming a frame in a container with descendant responses is rejected.
+Complete child pause/resume and ordering-state serialization remain stage F of
+[#356](https://github.com/langgenius/graphon/issues/356).
+The [container response tests](tests/engine/test_container_response_streaming.py)
+cover sequential Loop/Iteration, source policies, files, and snapshot boundaries;
+the [reply ordering tests](tests/engine/test_response_reply_ordering.py) cover parallel
+and nested replies, failure outcomes, and root compatibility.
 
 ## State and execution invariants
 
@@ -165,42 +226,46 @@ compatibility details:
 | Pause, resume, and snapshot quiescence | [Dispatcher](src/graphon/engine/dispatcher.py), [execution guard](src/graphon/runtime/execution.py) | [Serialization](tests/engine/test_runtime_state_serialization.py) |
 | Snapshot versions and migrations | [Snapshot loading](src/graphon/runtime/runtime_state/snapshot.py) | [Runtime snapshots](tests/runtime/test_runtime_state.py), [version isolation](tests/test_snapshot_version_isolation.py) |
 
-[Concrete segment models](src/graphon/variables/segments.py) own fixed `value_type` tags and value validation; serialized values select their model by that tag.
-[Factories](src/graphon/variables/factory.py) infer types for raw values or validate explicit declarations, preserving declared empty arrays and `array[any]` values.
-See [factory tests](tests/variables/test_factory.py) for declared types and serialized tag selection.
-`array[any]` keeps ordinary JSON dictionaries as data, including dictionaries with a file identity marker or the full set of file fields.
-Complete snapshots produced without `include` or `exclude` use [file snapshot serialization](src/graphon/variables/file_snapshot.py) to record actual [File](src/graphon/file/models.py) locations in `file_paths`.
-Paths follow Pydantic's Python serialization of nested values, honoring declared model fields, aliases, field exclusions, and caller context.
-Nested models become plain data; sequences, sets, and iterators become arrays, while recorded files restore as `File` objects through variable pool and container task restoration.
-[File serialization markers](src/graphon/file/serialization.py) are scoped to this projection and reset on exit, including serialization errors.
-These snapshots require string keys on dictionaries containing files; dictionaries without files follow ordinary JSON serialization.
-Exports using `include` or `exclude` omit file restoration metadata, as does [dumps_with_segments](src/graphon/variables/utils.py), which exports plain values without log redaction.
-Historical `array[any]` snapshots without `file_paths` retain dictionaries as data.
-Invalid declared paths or file payloads fail validation; see [snapshot tests](tests/variables/test_file_snapshots.py), [plain value export tests](tests/utils/test_variable_utils.py), and [container tests](tests/nodes/test_container_effects.py).
-[VariableBase.copy_with_value](src/graphon/variables/variables.py) validates replacements for assignment nodes, retaining identity and metadata and promoting integer variables when the new value is a float.
-The [v1 assignment tests](tests/nodes/variable_assigner/test_v1_node.py) and [v2 assignment tests](tests/nodes/variable_assigner/test_v2_node.py) cover invalid updates, fractional results, and clearing arrays while preserving their declared type, including `array[file]`.
+[Concrete segment models](src/graphon/variables/segments.py) own fixed
+`value_type` tags and value validation. [Factories](src/graphon/variables/factory.py)
+infer raw value types or validate explicit declarations; preserve declared types
+when transferring values, especially empty arrays and secrets. Assignment uses
+[copy_with_value](src/graphon/variables/variables.py) to validate replacements
+while retaining variable identity and metadata. See [factory tests](tests/variables/test_factory.py)
+and [assignment tests](tests/nodes/variable_assigner/).
 
-In [template interpolation](src/graphon/variables/template_resolution.py), nonempty object arrays render as JSON, including nested `File` and segment model data.
-Empty object arrays render as an empty string; see [template resolution tests](tests/variables/test_template_resolution.py).
+Complete `array[any]` snapshots use
+[file paths](src/graphon/variables/file_snapshot.py) to distinguish actual
+[File](src/graphon/file/models.py) objects from ordinary JSON dictionaries.
+Nested models become plain data, while recorded files restore as `File` objects.
+Dictionaries containing files require string keys. Exports using `include` or
+`exclude` omit this restoration metadata; historical snapshots without it retain
+dictionaries as data. See [file snapshot tests](tests/variables/test_file_snapshots.py)
+and [container restoration tests](tests/nodes/test_container_effects.py).
 
-[Container values](src/graphon/nodes/container_effects.py) preserve declared segment types through construction, snapshots, and completion, including secret tags.
-Explicit `to_segment()` conversion removes source variable identity so the parent pool binds completed outputs to the container's selectors.
-Snapshot restoration uses the `SerializableSegment` discriminated union directly.
-Pool conversion also assigns a new identity when storing an existing variable under a different selector; see [destination binding tests](tests/runtime/test_variable_pool.py).
-Stored outputs remain typed; container node-result inputs and Loop/Iteration presentation events expose plain values.
-The [runtime JSON converter](src/graphon/workflow_type_encoder.py) masks typed secrets using their log representation; hosts must apply redaction separately to plain values in logs and presentation.
-The [container secret tests](tests/nodes/test_container_effects.py) cover this boundary; [Loop workflow tests](tests/workflows/test_full_engine_events.py) also cover v2 variable-input `OVER_WRITE` and `CLEAR` preserving the secret tag and masking.
-[V2 input validation](src/graphon/nodes/variable_assigner/v2/helpers.py) rejects constant inputs for secret targets.
+[Container values](src/graphon/nodes/container_effects.py) preserve declared
+segment types through snapshots and completion. Converting a variable with
+`to_segment()` removes its source identity so the parent pool binds completed
+outputs to the container's selectors. Storing an existing variable under a new
+selector also assigns a new identity; see [variable pool tests](tests/runtime/test_variable_pool.py).
+Iteration keeps matching array types when flattening outputs and uses
+`array[any]` for mixed array types. See [workflow tests](tests/workflows/test_full_engine_events.py)
+for empty, serial, and parallel container behavior.
 
-[Iteration](src/graphon/nodes/iteration/iteration_node.py) accepts array sequences, including tuples.
-When its [handler](src/graphon/engine/container_handler/builtin/iteration.py) flattens outputs, matching declared array types survive in both serial and parallel runs; mixed array types become `array[any]`.
-Empty iterations preserve the input array type and bind a separate output variable; see [workflow tests](tests/workflows/test_full_engine_events.py).
+Stored outputs remain typed; container node-result inputs and Loop/Iteration
+presentation events expose plain values. The
+[runtime JSON converter](src/graphon/workflow_type_encoder.py) masks typed
+secrets using their log representation. Hosts must redact plain values separately,
+including exports from [dumps_with_segments](src/graphon/variables/utils.py).
+See [container secret tests](tests/nodes/test_container_effects.py) and
+[plain value export tests](tests/utils/test_variable_utils.py).
 
 For host rendering, bind the engine's adapter with
 [use_workflow_file_runtime](src/graphon/file/runtime.py); use
 [EngineEventFilterContext.from_engine](src/graphon/engine/filter/protocol.py) to
 wire response filters. Supply host adapters again when rebuilding from snapshots.
-Runtime JSON conversion renders tuple file arrays as JSON lists within the same adapter scope; see [host file conversion tests](tests/variables/test_workflow_type_encoder.py).
+See [host file conversion tests](tests/variables/test_workflow_type_encoder.py)
+for rendering within that adapter scope.
 
 Persist after fully consuming the run iterator or from a quiescent `on_graph_end`
 hook. Hosts must also coordinate direct mutation of exposed runtime objects: the

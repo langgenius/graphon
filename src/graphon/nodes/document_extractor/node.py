@@ -23,8 +23,12 @@ import webvtt
 import yaml
 from defusedxml import ElementTree
 from docx.document import Document
+from docx.opc.constants import CONTENT_TYPE
+from docx.opc.packuri import PackURI
 from docx.oxml.table import CT_Tbl
 from docx.oxml.text.paragraph import CT_P
+from docx.package import Package
+from docx.parts.document import DocumentPart
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 from odfdo import Document as OdfDocument
@@ -620,18 +624,19 @@ def _normalize_docx_zip(file_content: bytes) -> bytes:
 
     """
     try:
-        with zipfile.ZipFile(io.BytesIO(file_content), "r") as zin:
-            out_buf = io.BytesIO()
-            with zipfile.ZipFile(
-                out_buf,
-                "w",
-                compression=zipfile.ZIP_DEFLATED,
-            ) as zout:
-                _rewrite_docx_zip_entries(zin, zout)
-            return out_buf.getvalue()
+        zin = zipfile.ZipFile(io.BytesIO(file_content), "r")
     except zipfile.BadZipFile:
         # Not a valid zip — return as-is and let python-docx report the real error
         return file_content
+    with zin:
+        out_buf = io.BytesIO()
+        with zipfile.ZipFile(
+            out_buf,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+        ) as zout:
+            _rewrite_docx_zip_entries(zin, zout)
+        return out_buf.getvalue()
 
 
 def _rewrite_docx_zip_entries(
@@ -686,7 +691,39 @@ def _load_docx_document(file_content: bytes) -> Document:
             exc_info=e,
         )
         normalized_file_content = _normalize_docx_zip(file_content)
-        return docx.Document(io.BytesIO(normalized_file_content))
+        try:
+            return docx.Document(io.BytesIO(normalized_file_content))
+        except Exception:
+            logger.debug("Loading DOCX main part after package failure", exc_info=True)
+            return _load_docx_document_from_xml(normalized_file_content)
+
+
+def _load_docx_document_from_xml(file_content: bytes) -> Document:
+    """Load the main document when package relationships cannot be resolved."""
+    with zipfile.ZipFile(io.BytesIO(file_content)) as archive:
+        root = ElementTree.fromstring(archive.read("word/document.xml"))
+
+    namespace = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    strict_namespace = "{http://purl.oclc.org/ooxml/wordprocessingml/main}"
+    # Normalize names, preserving text and attribute values, for python-docx.
+    for element in root.iter():
+        element.tag = element.tag.replace(strict_namespace, namespace)
+        element.attrib = {
+            name.replace(strict_namespace, namespace): value
+            for name, value in element.attrib.items()
+        }
+    if root.tag != f"{namespace}document" or root.find(f"{namespace}body") is None:
+        msg = "Invalid Word document root or missing body"
+        raise ValueError(msg)
+
+    # XML reparsing normalizes literal CR, so retain its character reference.
+    document_xml = ElementTree.tostring(root).replace(b"\r", b"&#13;")
+    return DocumentPart.load(
+        PackURI("/word/document.xml"),
+        CONTENT_TYPE.WML_DOCUMENT_MAIN,
+        document_xml,
+        Package(),
+    ).document
 
 
 def _iter_docx_content_items(doc: Document) -> list[tuple[str, Table | Paragraph]]:
