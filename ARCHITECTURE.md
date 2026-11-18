@@ -164,19 +164,36 @@ event-stream behavior until a frame baseline is supplied.
 [Template assembly](src/graphon/engine/filter/builtin/response_stream/template_stream.py)
 feeds the filter output for both scopes. Child sources are keyed by execution,
 attempt, and selector within their frame; each response and template occurrence
-has its own cursor. An occurrence that has started reading a source remains on
-that source through retries and overwrites. Retries replace undisplayed attempts;
-committed replacements supply later occurrences. Successful and handled-failure
-results close unfinished child sources without replaying their final values.
-Child Answer chunks use the reserved Answer ID and `[answer_id, "answer"]`, with
-one final marker after the complete template, including empty replies. Source
-final markers close only their source. Ordinary Answer `answer` and `files`
+has its own cursor. Read occurrences retain their source versions across committed
+replacements, which supply later occurrences. Retries rebuild wholly undisplayed
+child replies using the new attempt without rereading unrelated captured values;
+once a reply is displayed, occurrences already reading a source stay on that attempt.
+Successful and handled-failure results close unfinished child sources without
+replaying their final values. Child Answer chunks use the reserved execution ID and
+`[answer_node_id, "answer"]` selector, with one final marker after the complete
+template, including empty replies. Source final markers close only their source.
+Ordinary Answer `answer` and `files`
 outputs and host-bound file formatting remain unchanged.
 
+The filter's [reply order](src/graphon/engine/filter/builtin/response_stream/reply_order.py)
+reserves container groups at node start, before their first child reply. Frames
+with item indices drain in numeric order within an invocation; a frame keeps its
+place until it and its descendants finish and their replies drain. The current
+reply streams live from prefix through suffix without interruption by descendants
+or siblings.
+The filter keeps consuming raw events while later replies wait. Containers without
+descendant Answer or End definitions do not delay independent root responses.
+
 Failed or aborted frames close displayed child Answers and discard their remaining
-templates. Graph termination also settles frames before `flush()` is needed.
-Completed frames release captured values and source buffers. Root chunks retain
-their existing event shapes and shared source cursors. Filter persistence supports
+templates. After a failed item, pending siblings wait for container continuation or
+a successful or handled result; a failed container discards them. Graph success,
+including partial success, drains eligible replies before its terminal event. Graph
+failure or abort discards pending replies before `flush()` is needed. Completed
+frames release captured values and source buffers; queued text is released as it
+drains or is discarded. Root chunks retain their existing event shapes and shared
+source cursors.
+
+Filter persistence supports
 only root response state. Fresh checkpoints use v3, storing consumed taken edges
 and edges skipped before they were taken alongside response and stream progress.
 Restoring v1 or v2 retains its residual blocking paths explicitly in v3; v1
@@ -194,12 +211,15 @@ for native and legacy restoration, [traversal and selector tests](tests/engine/t
 for selector-dependent and live-state behavior, and [gating regressions](docs/development.md#response-gating-regressions)
 for resource bounds, path equivalence, and ordered output.
 After a child frame containing an Answer or End starts, `dumps()` and `loads()`
-reject that filter instance's state, including after the frame finishes. Resuming
-such a child frame is also rejected. Child pause/resume support and ordering
-across parallel or nested response groups remain follow-up stages of
+reject that filter instance's state, including after the frame finishes. Pending
+container response reservations are also rejected, including before the first child
+frame starts. Resuming a frame in a container with descendant responses is rejected.
+Complete child pause/resume and ordering-state serialization remain stage F of
 [#356](https://github.com/langgenius/graphon/issues/356).
-Current sequential Loop/Iteration behavior, source policies, and these boundaries
-are exercised by the [container response tests](tests/engine/test_container_response_streaming.py).
+The [container response tests](tests/engine/test_container_response_streaming.py)
+cover sequential Loop/Iteration, source policies, files, and snapshot boundaries;
+the [reply ordering tests](tests/engine/test_response_reply_ordering.py) cover parallel
+and nested replies, failure outcomes, and root compatibility.
 
 ## State and execution invariants
 

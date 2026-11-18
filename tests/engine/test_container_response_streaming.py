@@ -732,6 +732,11 @@ def test_interleaved_children_keep_sources_attempts_and_reply_ids_separate() -> 
     output.extend(
         stream_filter.on_event(_make_source_chunk("replacement", attempt=1, final=True))
     )
+    output.extend(
+        stream_filter.on_event(
+            FrameFinishedEvent(frame_id="child", outcome="succeeded")
+        )
+    )
     for frame_id, expected, execution_id in [
         ("child", "[first]", "answer-run"),
         ("sibling", "[second]", "sibling-answer"),

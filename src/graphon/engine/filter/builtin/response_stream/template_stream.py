@@ -344,6 +344,11 @@ class _TemplateStream:
                 session.index == len(session.template.segments) - 1,
                 graph=graph,
             )
+            # Rebuilding a hidden retry must preserve other already-read values.
+            session.segment_streams[session.index] = _SourceStream(
+                events=[event], closed=True
+            )
+            session.segment_positions[session.index] = 1
             return [
                 self._create_child_response_chunk(event, session, graph=graph)
             ], True

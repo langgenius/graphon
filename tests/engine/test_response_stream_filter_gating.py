@@ -1,7 +1,7 @@
 """Ordered streaming before later gates, including interleaved frame targets."""
 
 from graphon.engine.filter import ResponseStreamFilter
-from graphon.engine_events.frame import FrameStartedEvent
+from graphon.engine_events.frame import FrameFinishedEvent, FrameStartedEvent
 from graphon.engine_events.graph import GraphRunStartedEvent
 from graphon.engine_events.node import NodeRunStreamChunkEvent
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType
@@ -130,6 +130,7 @@ def test_interleaved_frames_gate_distinct_response_targets_independently() -> No
                 stream_filter.on_event(
                     FrameStartedEvent(
                         frame_id=frame_id,
+                        index=0 if frame_id == "a" else 1,
                         parent_frame_id="root",
                         container_id="container",
                         root_node_id="start",
@@ -142,13 +143,8 @@ def test_interleaved_frames_gate_distinct_response_targets_independently() -> No
             )
             == []
         )
-    # Identical local edge IDs are independently consumed. B opens first;
-    # taking B's edge twice must neither open A nor replay B's reply.
-    for frame_id, reply_node_id in [("b", "reply-b"), ("a", "reply-a")]:
-        event = _edge_taken(
-            edge_id="open", source_id="gate", answer_id="tail", frame_id=frame_id
-        )
-        assert list(stream_filter.on_event(event)) == [
+    expected_chunks_by_frame = {
+        frame_id: [
             NodeRunStreamChunkEvent(
                 id=f"{frame_id}-{reply_node_id}",
                 frame_id=frame_id,
@@ -169,5 +165,28 @@ def test_interleaved_frames_gate_distinct_response_targets_independently() -> No
                 is_final=True,
             ),
         ]
-        assert list(stream_filter.on_event(event)) == []
+        for frame_id, reply_node_id in [("a", "reply-a"), ("b", "reply-b")]
+    }
+    # B's local gate opens first, without opening A's identically named gate.
+    # Its reply waits for frame A's place in the presentation order to finish.
+    frame_b_gate_event = _edge_taken(
+        edge_id="open", source_id="gate", answer_id="tail", frame_id="b"
+    )
+    assert list(stream_filter.on_event(frame_b_gate_event)) == []
+    assert list(stream_filter.on_event(frame_b_gate_event)) == []
+    frame_a_gate_event = frame_b_gate_event.model_copy(update={"frame_id": "a"})
+    assert (
+        list(stream_filter.on_event(frame_a_gate_event))
+        == expected_chunks_by_frame["a"]
+    )
+    assert list(stream_filter.on_event(frame_a_gate_event)) == []
+    frame_a_finished_event = FrameFinishedEvent(frame_id="a", outcome="succeeded")
+    assert list(stream_filter.on_event(frame_a_finished_event)) == [
+        *expected_chunks_by_frame["b"],
+        frame_a_finished_event,
+    ]
+    frame_b_finished_event = FrameFinishedEvent(frame_id="b", outcome="succeeded")
+    assert list(stream_filter.on_event(frame_b_finished_event)) == [
+        frame_b_finished_event
+    ]
     assert list(stream_filter.flush()) == []
