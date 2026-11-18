@@ -122,11 +122,27 @@ Keep performance and behavioral equivalence separate:
   response, bounded identifiers and no source buffers: the byte bound is not a
   bound on arbitrary templates, values, or imported legacy paths.
 - [Differential tests](../tests/engine/test_response_stream_filter_differential.py)
-  compare public response activation after every event prefix against the old
-  enumerate-then-project path conditions. Hypothesis varies DAGs up to ten nodes,
-  forward shortcuts, parallel handles, dead sinks, disconnected predecessors,
-  AND/OR gates, and reordered/repeated/opposite taken/skipped decisions. The law
-  is unchanged gating behavior; these tests make no performance claim.
+  compare emitted response chunks at the initial frame baseline and after every
+  event prefix against the old enumerate-then-project path oracle on DAGs with
+  fewer than ten nodes. Separate properties cover branch gates, preceding response
+  gates, ordinary node outputs, assigner dependencies, and distinct dependencies
+  across responses. Structural properties reorder, repeat, or contradict edge
+  decisions. Required-variable generators restrict referenced producers to
+  upstream nodes that dominate the response and use topological execution traces,
+  multiple selectors, and real
+  [assigners](../src/graphon/nodes/variable_assigner/v2/node.py). This restriction
+  defines a test subset, not a rule for Answer references. The properties
+  distinguish output ownership from selector-dependent blocking under the
+  [response session contract](../ARCHITECTURE.md#response-sessions).
+  Parallel edges are included; cycles and self-loops are excluded, matching
+  [workflow validation](../src/graphon/graph/validation.py). See the separate
+  [container response tests](../tests/engine/test_container_response_streaming.py)
+  for container behavior. These properties make no performance claim.
+- [Optional-branch tests](../tests/engine/test_response_stream_filter_optional_variables.py)
+  cover Answer references to both mutually exclusive arms after their merge.
+  Their small-DAG property compares old and new streamed chunks at each event
+  prefix, omitting skipped sources; real DSL/engine examples exercise both branch
+  choices.
 - [Ordered gating tests](../tests/engine/test_response_stream_filter_gating.py)
   assert whole emitted event sequences, early output before a later blocking
   edge, and interleaved frames with distinct response targets. Native and legacy
