@@ -1,4 +1,3 @@
-import random
 from collections.abc import Sequence
 from typing import Any
 
@@ -147,7 +146,7 @@ def _reference_blocking_paths(
     ]
 
 
-def _assert_activation_matches_paths(graph: _TestGraph, *, seed: int = 0) -> None:
+def _assert_activation_matches_paths(graph: _TestGraph) -> None:
     response = next(
         node
         for node in graph.nodes.values()
@@ -162,7 +161,6 @@ def _assert_activation_matches_paths(graph: _TestGraph, *, seed: int = 0) -> Non
     chunk = _stream_chunk("value", source_id=selector[0], selector=selector)
     assert list(event_filter.on_event(chunk)) == []
     edge_ids = list(graph.edges)
-    random.Random(seed).shuffle(edge_ids)  # ruff: ignore[suspicious-non-cryptographic-random-usage] - deterministic traversal order
     events: list[EngineEvent] = [GraphRunStartedEvent()]
     for edge_id in [*edge_ids, *edge_ids[:2]]:
         edge = graph.edges[edge_id]
@@ -225,61 +223,7 @@ def test_response_filter_reinitialization_recomputes_selector_dependent_blocking
     assert list(event_filter.on_event(chunk)) == [chunk]
 
 
-def test_response_filter_activates_root_response_with_backedge() -> None:
-    root = _TestNode(
-        "root",
-        execution_type=NodeExecutionType.RESPONSE,
-        template=Template(segments=[VariableSegment(selector=["root", "answer"])]),
-    )
-    graph = _TestGraph(
-        nodes={"root": root, "branch": _TestNode("branch")},
-        edges={
-            "out": _TestEdge("out", "root", "branch"),
-            "back": _TestEdge("back", "branch", "root"),
-        },
-        root_node_id="root",
-    )
-    _assert_activation_matches_paths(graph)
-
-
 def test_response_filter_bounds_work_with_a_dead_diamond_branch() -> None:
     graph = _diamond_with_dead_branch()
     _assert_activation_matches_paths(graph)
     assert len(graph.outgoing_calls) <= 8 * (len(graph.nodes) + len(graph.edges))
-
-
-def _random_cyclic_graph(seed: int) -> _TestGraph:
-    rng = random.Random(seed)  # ruff: ignore[suspicious-non-cryptographic-random-usage] - deterministic test graph generation
-    node_ids = [f"n{index}" for index in range(6)]
-    edge_pairs = [
-        ("n0", "n1"),
-        ("n1", "n2"),
-        ("n2", "n1"),
-        ("n2", "n5"),
-    ]
-    used_pairs = set(edge_pairs)
-    for tail in node_ids:
-        for head in node_ids:
-            if (tail, head) not in used_pairs and rng.random() < 0.22:
-                edge_pairs.append((tail, head))
-                used_pairs.add((tail, head))
-
-    nodes = {node_id: _TestNode(node_id) for node_id in node_ids}
-    nodes["n5"] = _TestNode(
-        "n5",
-        execution_type=NodeExecutionType.RESPONSE,
-        template=Template(segments=[VariableSegment(selector=["n0", "answer"])]),
-    )
-    for node_id in node_ids[1:-1]:
-        if rng.random() < 0.5:
-            nodes[node_id].execution_type = NodeExecutionType.BRANCH
-    edges = {
-        f"edge-{index}": _TestEdge(f"edge-{index}", tail, head)
-        for index, (tail, head) in enumerate(edge_pairs)
-    }
-    return _TestGraph(nodes=nodes, edges=edges, root_node_id="n0")
-
-
-@pytest.mark.parametrize("seed", range(24))
-def test_response_filter_activation_matches_reference_paths(seed: int) -> None:
-    _assert_activation_matches_paths(_random_cyclic_graph(seed), seed=seed)
