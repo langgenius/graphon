@@ -203,7 +203,12 @@ def _assert_optional_branch_chunks_match_old_paths(case: _OptionalBranchCase) ->
 @settings(derandomize=True, deadline=None)
 @given(case=_optional_branch_cases())
 def test_optional_branch_variables_match_old_paths(case: _OptionalBranchCase) -> None:
-    """Match legacy chunks for a merged reply referencing both branch outputs."""
+    """Skipped branch references must not prevent the merged reply from completing.
+
+    Only selected-arm producers commit values. Skipped-arm references produce
+    no chunks; selected values emit in template order, including repeated
+    references. The reply must end with exactly one final marker.
+    """
     _assert_optional_branch_chunks_match_old_paths(case)
 
 

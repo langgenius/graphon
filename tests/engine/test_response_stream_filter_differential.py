@@ -699,7 +699,12 @@ def _assert_response_chunks_match_old_paths(case: _GraphCase) -> None:
     )
 )
 def test_branch_gates_match_old_paths(case: _GraphCase) -> None:
-    """Match legacy chunks after each edge decision in branch-gate cases."""
+    """Open the reply once any root path has all its branch gates satisfied.
+
+    Ordinary edges need no taken event. If a branch edge's first decision is
+    skip, that path is rejected permanently; a first take survives later skips.
+    One surviving path is sufficient, and repeated events must not replay output.
+    """
     _assert_response_chunks_match_old_paths(case)
 
 
@@ -725,14 +730,25 @@ def test_branch_gates_match_old_paths(case: _GraphCase) -> None:
     )
 )
 def test_previous_response_gates_match_old_paths(case: _GraphCase) -> None:
-    """Match legacy chunks when earlier response nodes gate later responses."""
+    """A reply's outgoing edges gate later replies, not that reply itself.
+
+    The earlier reply can emit before its outgoing edges are taken. Each later
+    reply needs one root path whose preceding response edges were first observed
+    as taken; an edge first observed as skipped rejects only paths through it.
+    Repeated observations must not replay output.
+    """
     _assert_response_chunks_match_old_paths(case)
 
 
 @settings(derandomize=True, deadline=None)
 @given(case=_variable_dependency_cases(assignments=False))
 def test_node_output_dependencies_match_old_paths(case: _GraphCase) -> None:
-    """Match legacy chunks as nonblocking producers commit referenced outputs."""
+    """Ordinary executable producers do not gate replies merely by owning outputs.
+
+    Their variable-blocking hooks return false. The literal prefix emits before
+    outputs exist; variable occurrences wait for commits and emit in template
+    order. The closing literal and final marker wait for all required values.
+    """
     _assert_response_chunks_match_old_paths(case)
 
 
@@ -767,7 +783,13 @@ def test_node_output_dependencies_match_old_paths(case: _GraphCase) -> None:
     )
 )
 def test_assigner_dependencies_match_old_paths(case: _GraphCase) -> None:
-    """Match legacy chunks as assigners overwrite referenced conversation variables."""
+    """Gate each path on assigners that write selectors referenced by the reply.
+
+    The writer, not the selector's namespace, supplies the gate. A value commit
+    alone does not open its outgoing edge; a taken event does. Unreferenced
+    writers add no gates. Once a full path opens, the reply reads committed
+    updates in template order rather than initial conversation values.
+    """
     _assert_response_chunks_match_old_paths(case)
 
 
@@ -816,5 +838,11 @@ def test_assigner_dependencies_match_old_paths(case: _GraphCase) -> None:
     )
 )
 def test_responses_keep_distinct_assigner_dependencies(case: _GraphCase) -> None:
-    """Match legacy chunks for replies sharing a path but using different writers."""
+    """The early reply opens before the second writer; the late reply does not.
+
+    Taking first_writer -> second_writer opens early_reply, which reads only
+    first_writer. late_reply still waits for a taken edge leaving second_writer
+    and, when present, a preceding response edge. Sharing the path must not
+    merge the replies' different selector blockers.
+    """
     _assert_response_chunks_match_old_paths(case)
