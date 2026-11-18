@@ -702,6 +702,11 @@ def test_polling_llm_saves_video_output_file(
     assert completed_event.node_run_result.outputs["text"] == (
         "[video.mp4](https://files.example.com/video.mp4)"
     )
+    assert [
+        (event.chunk, event.is_final)
+        for event in events
+        if isinstance(event, StreamChunkEvent) and event.selector == ["llm", "text"]
+    ] == [(completed_event.node_run_result.outputs["text"], True)]
     assert completed_event.node_run_result.outputs["files"].value == [saved_file]
     file_saver.save_remote_url.assert_called_once_with(
         "https://example.com/video.mp4",
