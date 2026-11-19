@@ -12,8 +12,13 @@ from json_repair import repair_json
 from graphon.file.enums import FileTransferMethod
 from graphon.http import HttpClientProtocol, HttpResponse
 from graphon.runtime.variable_pool import VariablePool
-from graphon.variables.segments import ArrayFileSegment, FileSegment
-from graphon.variables.template_resolution import convert_template
+from graphon.variables.segments import (
+    ArrayFileSegment,
+    FileSegment,
+    SecretSegment,
+    StringSegment,
+)
+from graphon.variables.template_resolution import VARIABLE_PATTERN, convert_template
 
 from ..protocols import FileManagerProtocol
 from .entities import (
@@ -33,6 +38,20 @@ from .exc import (
     RequestBodyError,
     ResponseSizeError,
 )
+
+
+def _ends_inside_json_string(literal: str, inside_string: bool) -> bool:
+    """Track JSON string boundaries, ignoring escaped quotes inside strings."""
+    escaped = False
+    for char in literal:
+        if escaped:
+            escaped = False
+        elif inside_string and char == "\\":
+            escaped = True
+        elif char == '"':
+            inside_string = not inside_string
+    return inside_string
+
 
 BODY_TYPE_TO_CONTENT_TYPE = {
     "json": "application/json",
@@ -274,17 +293,51 @@ class Executor:
 
     def _init_json_body(self, data: Sequence[BodyData]) -> None:
         item = self._require_single_body_item(data, body_type="json")
-        group = convert_template(self.variable_pool, item.value)
-        json_string = group.text
-        # Raw masked template text (not re-normalized via json.dumps); self.json
-        # holds the parsed plaintext, so _log_json_text must never fall back to it.
-        self._log_json_text = group.log
+        json_string = self._render_json_template(item.value)
+        # Render logs from masked segments; self.json contains plaintext secrets.
+        self._log_json_text = self._render_json_template(item.value, masked=True)
         try:
-            repaired = repair_json(json_string)
-            self.json = json.loads(repaired, strict=False)
-        except json.JSONDecodeError as e:
-            msg = f"Failed to parse JSON: {json_string}"
-            raise RequestBodyError(msg) from e
+            self.json = json.loads(json_string, strict=False)
+        except json.JSONDecodeError:
+            # Retain the existing repair path for nonstandard JSON input.
+            try:
+                self.json = json.loads(repair_json(json_string), strict=False)
+            except json.JSONDecodeError as e:
+                msg = f"Failed to parse JSON: {json_string}"
+                raise RequestBodyError(msg) from e
+
+    def _render_json_template(self, template: str, *, masked: bool = False) -> str:
+        """Encode strings and secrets according to the template's quote state.
+
+        Inside a JSON string, insert only the encoded contents. ``masked`` uses
+        each segment's log value; unresolved selectors keep their selector text.
+
+        Returns:
+            The rendered template, which may still require JSON repair.
+        """
+        # VARIABLE_PATTERN captures the selector, so splitting yields
+        # [literal, selector, literal, selector, ..., literal].
+        parts = VARIABLE_PATTERN.split(template)
+        rendered_parts: list[str] = []
+        inside_string = False
+        for index, part in enumerate(parts):
+            if index % 2 == 0:
+                inside_string = _ends_inside_json_string(part, inside_string)
+                rendered_parts.append(part)
+                continue
+
+            segment = self.variable_pool.get(part.split("."))
+            if segment is None:
+                # Match convert_template's unresolved selector text.
+                rendered_parts.append(part)
+            elif isinstance(segment, StringSegment | SecretSegment):
+                value = segment.log if masked else segment.text
+                encoded = json.dumps(value, ensure_ascii=False)
+                rendered_parts.append(encoded[1:-1] if inside_string else encoded)
+            else:
+                # Keep the existing rendering for non-string values.
+                rendered_parts.append(segment.log if masked else segment.text)
+        return "".join(rendered_parts)
 
     def _init_binary_body(self, data: Sequence[BodyData]) -> None:
         item = self._require_single_body_item(data, body_type="binary")
