@@ -531,10 +531,18 @@ class Graph:
         """Promote nodes configured with FAIL_BRANCH error strategy
         to branch execution type.
 
+        Nodes that were not already branch nodes are marked with
+        ``promoted_to_branch``: they still stream their normal-path output
+        while they run, so consumers must not treat the promoted type as a
+        genuine branch decision.
+
         :param nodes: mapping of node ID to node instance
         """
         for node in nodes.values():
             if node.error_strategy == ErrorStrategy.FAIL_BRANCH:
+                node.promoted_to_branch = (
+                    node.execution_type is not NodeExecutionType.BRANCH
+                )
                 node.execution_type = NodeExecutionType.BRANCH
 
     @classmethod

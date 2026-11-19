@@ -11,6 +11,7 @@ class NodeProtocol(Protocol):
     id: str
     state: NodeState
     execution_type: NodeExecutionType
+    promoted_to_branch: bool
     node_type: ClassVar[NodeType]
 
     @abstractmethod
