@@ -18,6 +18,7 @@ from graphon.dsl import inspect
 from graphon.dsl.entities import DslCredentials
 from graphon.dsl.node_factory import SlimDslNodeFactory
 from graphon.engine import Engine
+from graphon.engine.command.protocol import CommandChannel
 from graphon.engine.container_handler import LoopContainerHandler
 from graphon.engine.frame import ExecutionFrame, FrameRegistry
 from graphon.engine.layer import Layer
@@ -267,6 +268,7 @@ def _hitl_engine(
     *,
     runtime_state: RuntimeState,
     callback: HITLCallback,
+    command_channel: CommandChannel | None = None,
 ) -> Engine:
     plan = inspect(dsl)
     graph_config = plan.document.graph_config
@@ -297,6 +299,7 @@ def _hitl_engine(
     return Engine(
         graph=graph,
         runtime_state=runtime_state,
+        command_channel=command_channel,
         workers=2,
     )
 

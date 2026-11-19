@@ -59,9 +59,40 @@ class _GraphDefinition:
     nodes: dict[str, _NodeDefinition]
     edges: dict[str, _EdgeDefinition]
     root_node: _NodeDefinition
+    _outgoing_edges_by_node: dict[str, list[_EdgeDefinition]] = field(
+        init=False, repr=False, compare=False
+    )
+
+    def __post_init__(self) -> None:
+        self._outgoing_edges_by_node = {}
+        for edge in self.edges.values():
+            self._outgoing_edges_by_node.setdefault(edge.tail, []).append(edge)
 
     def get_outgoing_edges(self, node_id: str) -> Sequence[_EdgeDefinition]:
-        return [edge for edge in self.edges.values() if edge.tail == node_id]
+        return self._outgoing_edges_by_node.get(node_id, ())
+
+
+def find_response_container_ids(graph_config: Mapping[str, Any] | None) -> set[str]:
+    if not graph_config:
+        return set()
+    node_configs = {config["id"]: config for config in graph_config.get("nodes", [])}
+    container_ids: set[str] = set()
+    for config in node_configs.values():
+        data = config["data"]
+        node_type = data.type if isinstance(data, BaseNodeData) else data["type"]
+        if node_type not in {BuiltinNodeTypes.ANSWER, BuiltinNodeTypes.END}:
+            continue
+        descendant_config = config
+        while container_id := resolve_container_id(
+            descendant_config, nodes_by_id=node_configs
+        ):
+            if container_id in container_ids:
+                break
+            container_ids.add(container_id)
+            if container_id not in node_configs:
+                break
+            descendant_config = node_configs[container_id]
+    return container_ids
 
 
 def _build_node_definition(node_id: str, data: Mapping[str, Any]) -> _NodeDefinition:
