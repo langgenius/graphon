@@ -28,7 +28,7 @@ Follow the [variable and container contracts](../ARCHITECTURE.md#state-and-execu
 | Import Dify DSL or wire node dependencies | [importer](../src/graphon/dsl/importer.py), [node factory](../src/graphon/dsl/node_factory.py) | [DSL tests](../tests/dsl/), especially importer, node factory, and app bootstrap |
 | Change a built-in node | [nodes](../src/graphon/nodes/), [base node](../src/graphon/nodes/base/node.py) | Matching [node tests](../tests/nodes/); [workflow events](../tests/workflows/test_full_engine_events.py) for graph-visible changes |
 | Change dispatch, scheduling, or containers | [engine](../src/graphon/engine/), [container effects](../src/graphon/nodes/container_effects.py) | [engine tests](../tests/engine/), [container values](../tests/nodes/test_container_effects.py), [container dispatch](../tests/nodes/test_container_dispatch.py), [workflow events](../tests/workflows/test_full_engine_events.py) |
-| Change event payloads or response streaming | [raw frame observations](../ARCHITECTURE.md#raw-frame-observations), [response sessions](../ARCHITECTURE.md#response-sessions), [node events](../src/graphon/node_events/), [engine events](../src/graphon/engine_events/), [filters](../src/graphon/engine/filter/) | [frame observation tests](../tests/engine/test_frame_observations.py), [frame failure tests](../tests/engine/test_frame_failures.py), [node event tests](../tests/node_events/), [engine event tests](../tests/engine_events/), [response filter tests](../tests/engine/test_response_stream_filter.py), [container response tests](../tests/engine/test_container_response_streaming.py), [reply ordering tests](../tests/engine/test_response_reply_ordering.py) |
+| Change event payloads or response streaming | [raw frame observations](../ARCHITECTURE.md#raw-frame-observations), [response sessions](../ARCHITECTURE.md#response-sessions), [node events](../src/graphon/node_events/), [engine events](../src/graphon/engine_events/), [filters](../src/graphon/engine/filter/) | [frame observation tests](../tests/engine/test_frame_observations.py), [frame failure tests](../tests/engine/test_frame_failures.py), [node event tests](../tests/node_events/), [engine event tests](../tests/engine_events/), [response filter tests](../tests/engine/test_response_stream_filter.py), [response traversal regressions](../tests/engine/test_response_stream_filter_performance.py), [gating regressions](#response-gating-regressions), [container response tests](../tests/engine/test_container_response_streaming.py), [reply ordering tests](../tests/engine/test_response_reply_ordering.py) |
 | Change variables or secrets | [variable pool](../src/graphon/runtime/variable_pool.py), [segment models](../src/graphon/variables/segments.py), [variable models](../src/graphon/variables/variables.py), [conversion](../src/graphon/variables/factory.py), [variable assignment](../src/graphon/nodes/variable_assigner/) | [variable pool tests](../tests/runtime/test_variable_pool.py), [Iteration variable ownership](../tests/engine/test_iteration_variable_scopes.py), [variable tests](../tests/variables/), [assignment tests](../tests/nodes/variable_assigner/), [HTTP secret masking](../tests/http/test_executor_secret_masking.py) |
 | Change persistence or resume | [response sessions](../ARCHITECTURE.md#response-sessions), [filter codecs](../src/graphon/engine/filter/builtin/response_stream/), [runtime state](../src/graphon/runtime/runtime_state/), [container state](../src/graphon/runtime/container_state.py), [nested file snapshots](../src/graphon/variables/file_snapshot.py) | [filter pause/resume](../tests/engine/test_response_stream_resume.py), [runtime tests](../tests/runtime/), [file snapshots](../tests/variables/test_file_snapshots.py), [engine serialization](../tests/engine/test_runtime_state_serialization.py), [frame failure restoration](../tests/engine/test_frame_failures.py), [version isolation](../tests/test_snapshot_version_isolation.py) |
 | Change model invocation | [graph-facing LLM protocol](../src/graphon/nodes/llm/runtime_protocols.py), [Slim adapter](../src/graphon/dsl/slim/llm.py), [model runtime](../src/graphon/model_runtime/) | [LLM node tests](../tests/nodes/llm/), [Slim tests](../tests/dsl/test_slim_llm.py), [model dispatch](../tests/model_runtime/test_model_dispatch.py) |
@@ -98,6 +98,40 @@ event paths, and final output assertions. For live integration setup, use the
 
 Before handoff, follow [validation](../CONTRIBUTING.md#testing-and-validation)
 and the [independent review sequence](../CONTRIBUTING.md#context-free-reviews).
+
+### Response gating regressions
+
+Keep performance and behavioral equivalence separate:
+
+- [Complexity tests](../tests/engine/test_response_stream_filter_complexity.py)
+  meter incoming/outgoing adjacency API invocations during `initialize()` on
+  6/12/24-stage diamond chains. For `n` stages, `V=n+2`, `E=2n+1`, and the
+  complete-path count is `2^n`; the middle case retains ENG-1501's
+  14-node/25-edge/4,096-path graph. The wrapper raises when its budget is exceeded,
+  avoiding a timing threshold or an unbounded exponential baseline run.
+  Two adjacency passes per response fit within `2RV <= 2V^2 <= 4VE`, since
+  `R <= V` and these connected fixtures have `E >= V-1`, `V >= 2`. The tests use
+  that `4VE` primitive-call budget and require each doubling of stages to stay
+  below a factor of four, with nonincreasing consecutive ratios. They measure
+  API invocations, not every Python operation or time inside adjacency accessors;
+  these finite-size checks do not prove an asymptotic bound.
+  Retained owned filter/session objects and UTF-8 snapshot bytes are checked
+  separately at initialization and after each chosen edge against `1024(V+E)`.
+  The caller-supplied context and its graph/runtime/value-pool objects, plus code,
+  are excluded from retained bytes; owned containers include their reference slots.
+  These fixtures have one response, bounded identifiers and no source buffers: the
+  byte bound is not a bound on arbitrary templates, values, or imported legacy paths.
+- [Differential tests](../tests/engine/test_response_stream_filter_differential.py)
+  compare public response activation after every event prefix against the old
+  enumerate-then-project path conditions. Hypothesis varies DAGs up to ten nodes,
+  forward shortcuts, parallel handles, dead sinks, disconnected predecessors,
+  AND/OR gates, and reordered/repeated/opposite taken/skipped decisions. The law
+  is unchanged gating behavior; these tests make no performance claim.
+- [Ordered gating tests](../tests/engine/test_response_stream_filter_gating.py)
+  assert whole emitted event sequences, early output before a later blocking
+  edge, and interleaved frames with distinct response targets. Native and legacy
+  checkpoint compatibility remains in the
+  [response filter tests](../tests/engine/test_response_stream_filter.py).
 
 ## Runtime pitfalls
 

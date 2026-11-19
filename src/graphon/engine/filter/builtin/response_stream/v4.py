@@ -1,13 +1,13 @@
-"""Complete filter progress; skips the incompatible v3 proposal in PR #400."""
+"""Complete frame, reachability, and reply progress for paired pause snapshots."""
 
 from __future__ import annotations
 
 # Version codecs own the wire format and intentionally serialize package internals.
 # ruff: file-ignore[private-member-access]
 from collections import deque
-from typing import TYPE_CHECKING, Annotated, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Literal, Self, cast
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from graphon.engine.filter.protocol import EngineEventFilterContext
 from graphon.engine_events.frame import FrameStartedEvent
@@ -18,7 +18,14 @@ from graphon.runtime.runtime_state import GraphProtocol
 from graphon.runtime.variable_pool import VariablePool
 
 from .frame_graph import build_child_graph
-from .frame_session import _BlockingPath, _FrameSession
+from .frame_session import (
+    _BlockingPath,
+    _FrameSession,
+    _LegacyPathState,
+    _ReachabilityState,
+)
+from .ids import EdgeID, NodeID
+from .reachability import _EdgeDecision
 from .reply_order import _ContainerReplies, _FrameReplies, _Reply, _ReplyOrder
 from .snapshot import Selector, SnapshotHeader, StreamBufferState, StreamPositionState
 from .template_stream import (
@@ -63,14 +70,16 @@ class ResponseSessionState(BaseModel):
 class FrameSessionState(BaseModel):
     start: FrameStartedEvent | None
     values: VariablePool | None
-    response_nodes: list[str]
+    response_nodes: list[NodeID]
     active_session: ResponseSessionState | None
     waiting_sessions: list[ResponseSessionState]
     pending_sessions: list[ResponseSessionState]
     completed_sessions: list[ResponseSessionState]
     replies: dict[str, Index]
-    paths_map: dict[str, list[list[str]]]
-    skipped_edges: list[str] | None
+    paths_map: dict[NodeID, list[list[EdgeID]]] | None = None
+    taken_edges: list[EdgeID] = Field(default_factory=list)
+    rejected_edges: list[EdgeID] = Field(default_factory=list)
+    skipped_edges: list[EdgeID] | None
     node_execution_ids: dict[str, str]
     stream_buffers: list[StreamBufferState]
     stream_positions: list[StreamPositionState]
@@ -79,6 +88,13 @@ class FrameSessionState(BaseModel):
     source_keys: list[SourceKey]
     latest_sources: list[LatestSource]
     finished_nodes: list[str]
+
+    @model_validator(mode="after")
+    def _reject_mixed_gating_modes(self) -> Self:
+        if self.paths_map is not None and (self.taken_edges or self.rejected_edges):
+            msg = "Legacy paths cannot be combined with native edge decisions"
+            raise ValueError(msg)
+        return self
 
 
 class ReplyState(BaseModel):
@@ -254,6 +270,26 @@ def _capture_frame_session(
         LatestSource(selector=selector, source=save_source(source))
         for selector, source in stream.latest_streams.items()
     ]
+    gating_state = session._gating_state
+    if isinstance(gating_state, _ReachabilityState):
+        paths_map = None
+        taken_edges = sorted(
+            edge_id
+            for edge_id, decision in gating_state.first_edge_decisions.items()
+            if decision is _EdgeDecision.TAKEN
+        )
+        rejected_edges = sorted(
+            edge_id
+            for edge_id, decision in gating_state.first_edge_decisions.items()
+            if decision is _EdgeDecision.SKIPPED
+        )
+    else:
+        paths_map = {
+            node_id: [path.edge_ids for path in paths]
+            for node_id, paths in gating_state.paths_by_response.items()
+        }
+        taken_edges = []
+        rejected_edges = []
     return FrameSessionState(
         start=session.start_event,
         values=session._observed_values,
@@ -263,10 +299,9 @@ def _capture_frame_session(
         pending_sessions=pending,
         completed_sessions=completed,
         replies=replies,
-        paths_map={
-            node_id: [path.edge_ids for path in paths]
-            for node_id, paths in session._blocking_paths.items()
-        },
+        paths_map=paths_map,
+        taken_edges=taken_edges,
+        rejected_edges=rejected_edges,
         skipped_edges=sorted(session._skipped_edge_ids)
         if session._skipped_edge_ids is not None
         else None,
@@ -402,10 +437,23 @@ def _restore_frame_session(
     session._skipped_edge_ids = (
         set(saved.skipped_edges) if saved.skipped_edges is not None else None
     )
-    session._blocking_paths = {
-        node_id: [_BlockingPath(path) for path in paths]
-        for node_id, paths in saved.paths_map.items()
-    }
+    if saved.paths_map is not None:
+        session._gating_state = _LegacyPathState({
+            node_id: [_BlockingPath(path) for path in paths]
+            for node_id, paths in saved.paths_map.items()
+        })
+    else:
+        first_edge_decisions = dict.fromkeys(saved.taken_edges, _EdgeDecision.TAKEN)
+        first_edge_decisions.update(
+            dict.fromkeys(saved.rejected_edges, _EdgeDecision.SKIPPED)
+        )
+        session._gating_state = _ReachabilityState(
+            first_edge_decisions=first_edge_decisions,
+            reachability_by_response={
+                node_id: session._build_reachability(node_id, first_edge_decisions)
+                for node_id in session._response_node_ids
+            },
+        )
     session._active_session = (
         _restore_response(saved.active_session, session.graph, sources)
         if saved.active_session
@@ -416,7 +464,7 @@ def _restore_frame_session(
         for response in saved.waiting_sessions
     )
     session._response_sessions = {
-        response.node_id: _restore_response(response, session.graph, sources)
+        NodeID(response.node_id): _restore_response(response, session.graph, sources)
         for response in saved.pending_sessions
     }
     session._completed_sessions = {

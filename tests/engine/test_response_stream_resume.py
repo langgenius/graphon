@@ -337,22 +337,22 @@ def test_reobserving_frames_and_initializing_keeps_progress_but_new_runs_reset()
     assert _join_stream_text(fresh) == "[new]"
 
 
-@pytest.mark.parametrize("version", ["1.0", "2.0"])
+@pytest.mark.parametrize("version", ["1.0", "2.0", "3.0"])
 def test_legacy_resume_suppresses_child_responses_but_preserves_root(
     version: str,
 ) -> None:
 
     engine = loads(_make_body_dsl())
     response_filter = ResponseStreamFilter()
-    response_filter.loads(
-        json.dumps({
-            "type": "ResponseStreamFilter",
-            "version": version,
-            "response_nodes": ["done"],
-            "pending_sessions": [{"node_id": "done", "index": 0}],
-            "paths_map": {"done": [["edge_1"]]},
-        })
-    )
+    saved_state = {
+        "type": "ResponseStreamFilter",
+        "version": version,
+        "response_nodes": ["done"],
+        "pending_sessions": [{"node_id": "done", "index": 0}],
+    }
+    if version != "3.0":
+        saved_state["paths_map"] = {"done": [["edge_1"]]}
+    response_filter.loads(json.dumps(saved_state))
     _, child = _make_filter_and_start()
     child = child.model_copy(update={"reason": WorkflowStartReason.RESUMPTION})
     next_child = child.model_copy(

@@ -20,8 +20,8 @@ def test_current_snapshots_do_not_import_legacy_version_modules() -> None:
         sys.modules["graphon.runtime.runtime_state.v1"] = None
         sys.modules["graphon.runtime.runtime_state.v2"] = None
         sys.modules["graphon.engine.filter.builtin.response_stream.v1"] = None
-
         sys.modules["graphon.engine.filter.builtin.response_stream.v2"] = None
+        sys.modules["graphon.engine.filter.builtin.response_stream.v3"] = None
 
         from graphon.dsl import loads
         from graphon.engine.filter import ResponseStreamFilter, EngineEventFilterContext

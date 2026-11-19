@@ -7,7 +7,7 @@ It retains observed values independently of the engine's live frame registry.
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
 from graphon.engine_events.base import EngineEvent
@@ -31,12 +31,12 @@ from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.variables import Variable
 
 from . import snapshot
+from .ids import EdgeID, NodeID
+from .reachability import _EdgeDecision, _ResponseReachability
 from .reply_order import _Reply, _ReplyOrder
 from .snapshot import ResponseSessionState, ResponseStreamFilterSnapshot, Selector
 from .template_stream import _ResponseSession, _StreamBuffers, _TemplateStream
 
-type _NodeID = str
-type _EdgeID = str
 type _Selector = Selector
 
 
@@ -44,14 +44,31 @@ type _Selector = Selector
 class _BlockingPath:
     """Blocking traversal edges that must be taken before a response can stream."""
 
-    edge_ids: list[_EdgeID] = field(default_factory=list)
+    edge_ids: list[EdgeID] = field(default_factory=list)
 
-    def remove_edge(self, edge_id: _EdgeID) -> None:
+    def remove_edge(self, edge_id: EdgeID) -> None:
         if edge_id in self.edge_ids:
             self.edge_ids.remove(edge_id)
 
     def is_empty(self) -> bool:
         return len(self.edge_ids) == 0
+
+
+@dataclass
+class _ReachabilityState:
+    """Frame-owned first decisions and response-local reachability caches."""
+
+    first_edge_decisions: dict[EdgeID, _EdgeDecision] = field(default_factory=dict)
+    reachability_by_response: dict[NodeID, _ResponseReachability] = field(
+        default_factory=dict
+    )
+
+
+@dataclass
+class _LegacyPathState:
+    """Residual conditions retained from an imported legacy checkpoint."""
+
+    paths_by_response: dict[NodeID, list[_BlockingPath]]
 
 
 class _FrameSession:
@@ -76,24 +93,28 @@ class _FrameSession:
         self._completed_sessions: dict[str, _ResponseSession] = {}
         self._pass_unmatched_chunks = pass_unmatched_chunks
         self._observed_values: VariablePool | None = None
-        self._skipped_edge_ids: set[str] | None = None
+        self._skipped_edge_ids: set[EdgeID] | None = None
         self._active_session: _ResponseSession | None = None
         self._waiting_sessions: deque[_ResponseSession] = deque()
         self._template_stream = _TemplateStream(
             frame_id=frame_id, container_id=container_id
         )
-        self._response_node_ids: set[str] = set()
-        self._blocking_paths: dict[str, list[_BlockingPath]] = {}
-        self._response_sessions: dict[str, _ResponseSession] = {}
+        self._response_node_ids: set[NodeID] = set()
+        self._gating_state: _ReachabilityState | _LegacyPathState = _ReachabilityState()
+        self._response_sessions: dict[NodeID, _ResponseSession] = {}
         self._referenced_selectors: set[_Selector] = set()
 
     def register_responses(self) -> None:
+        gating_state = self._gating_state
+        if not isinstance(gating_state, _ReachabilityState):
+            msg = "Cannot register fresh responses in legacy path state"
+            raise TypeError(msg)
         for node in self.graph.nodes.values():
             if node.execution_type == NodeExecutionType.RESPONSE and (
                 self.frame_id == ROOT_FRAME_ID
                 or node.node_type in {BuiltinNodeTypes.ANSWER, BuiltinNodeTypes.END}
             ):
-                self._register_response(node.id)
+                self._register_response(NodeID(node.id), gating_state)
 
     def start(self, event: FrameStartedEvent) -> list[EngineEvent]:
         if self.start_event is not None:
@@ -150,7 +171,7 @@ class _FrameSession:
             case NodeRunReasoningChunkEvent():
                 return self._handle_reasoning_chunk(event)
             case GraphEdgeTakenEvent():
-                return self._handle_edge_taken(event.edge_id)
+                return self._handle_edge_taken(EdgeID(event.edge_id))
             case GraphEdgeSkippedEvent():
                 return self._handle_edge_skipped(event)
             case NodeRunSucceededEvent() | NodeRunExceptionEvent():
@@ -198,28 +219,35 @@ class _FrameSession:
             pending.extend(
                 edge.head
                 for edge in self.graph.get_outgoing_edges(node_id)
-                if edge.id not in self._skipped_edge_ids
+                if EdgeID(edge.id) not in self._skipped_edge_ids
             )
         return set(self.graph.nodes) - reachable
 
     def _handle_edge_skipped(self, event: GraphEdgeSkippedEvent) -> list[EngineEvent]:
+        edge_id = EdgeID(event.edge_id)
         if self._skipped_edge_ids is not None:
-            self._skipped_edge_ids.add(event.edge_id)
+            self._skipped_edge_ids.add(edge_id)
             self._template_stream.skipped_node_ids = self._find_skipped_node_ids()
-        for node_id, paths in self._blocking_paths.items():
-            self._blocking_paths[node_id] = [
-                path for path in paths if event.edge_id not in path.edge_ids
-            ]
+        gating_state = self._gating_state
+        if isinstance(gating_state, _LegacyPathState):
+            for node_id, paths in gating_state.paths_by_response.items():
+                gating_state.paths_by_response[node_id] = [
+                    path for path in paths if edge_id not in path.edge_ids
+                ]
+        elif edge_id in self.graph.edges:
+            gating_state.first_edge_decisions.setdefault(edge_id, _EdgeDecision.SKIPPED)
         return self._try_flush()
 
     def load_state(self, state: ResponseStreamFilterSnapshot) -> None:
         state = snapshot.for_graph(state, self.graph)
+        # Current snapshots must remain usable after retiring legacy codecs.
+        from . import v3  # ruff: ignore[import-outside-top-level]
 
-        response_node_ids = set(state.response_nodes)
-        blocking_paths = {
-            node_id: [_BlockingPath(edge_ids=list(path_edges)) for path_edges in paths]
-            for node_id, paths in state.paths_map.items()
-        }
+        if not isinstance(state, v3.Snapshot):
+            msg = "Expected migrated version 3 ResponseStreamFilter state"
+            raise TypeError(msg)
+
+        response_node_ids = {NodeID(node_id) for node_id in state.response_nodes}
         node_execution_ids = dict(state.node_execution_ids)
 
         stream_buffers = _StreamBuffers.from_state(
@@ -232,7 +260,7 @@ class _FrameSession:
             for session_state in state.waiting_sessions
         )
         response_sessions = {
-            session_state.node_id: self._session_from_state(session_state)
+            NodeID(session_state.node_id): self._session_from_state(session_state)
             for session_state in state.pending_sessions
         }
         active_session = (
@@ -247,10 +275,31 @@ class _FrameSession:
                 self._get_referenced_selectors(response_node_id)
             )
 
+        gating_state: _ReachabilityState | _LegacyPathState
+        if state.legacy_paths_map is not None:
+            gating_state = _LegacyPathState({
+                node_id: [
+                    _BlockingPath(edge_ids=list(path_edges)) for path_edges in paths
+                ]
+                for node_id, paths in state.legacy_paths_map.items()
+            })
+        else:
+            first_edge_decisions = dict.fromkeys(state.taken_edges, _EdgeDecision.TAKEN)
+            # Earlier v3 writers also recorded takes after a first skip. Preserve
+            # that input: rejection wins when an edge occurs in both wire lists.
+            first_edge_decisions.update(
+                dict.fromkeys(state.rejected_edges, _EdgeDecision.SKIPPED)
+            )
+            gating_state = _ReachabilityState(
+                first_edge_decisions=first_edge_decisions,
+                reachability_by_response={
+                    node_id: self._build_reachability(node_id, first_edge_decisions)
+                    for node_id in response_node_ids
+                },
+            )
+
         self._skipped_edge_ids = (
-            set(skipped_edges)
-            if (skipped_edges := getattr(state, "skipped_edges", None)) is not None
-            else None
+            set(state.skipped_edges) if state.skipped_edges is not None else None
         )
         self._active_session = active_session
         self._waiting_sessions = waiting_sessions
@@ -260,7 +309,7 @@ class _FrameSession:
             skipped_node_ids=self._find_skipped_node_ids(),
         )
         self._response_node_ids = response_node_ids
-        self._blocking_paths = blocking_paths
+        self._gating_state = gating_state
         self._response_sessions = response_sessions
         self._referenced_selectors = referenced_selectors
         self._reply_order.clear()
@@ -270,12 +319,16 @@ class _FrameSession:
             for session in self._reached_sessions()
         }
 
-    def _register_response(self, response_node_id: _NodeID) -> None:
+    def _register_response(
+        self, response_node_id: NodeID, gating_state: _ReachabilityState
+    ) -> None:
         if response_node_id in self._response_node_ids:
             return
         self._response_node_ids.add(response_node_id)
-        self._blocking_paths[response_node_id] = self._build_blocking_paths(
-            response_node_id
+        gating_state.reachability_by_response[response_node_id] = (
+            self._build_reachability(
+                response_node_id, gating_state.first_edge_decisions
+            )
         )
 
         response_node = self.graph.nodes[response_node_id]
@@ -284,14 +337,14 @@ class _FrameSession:
         )
         self._record_referenced_selectors(response_node_id)
 
-    def _record_referenced_selectors(self, response_node_id: _NodeID) -> None:
+    def _record_referenced_selectors(self, response_node_id: NodeID) -> None:
         self._referenced_selectors.update(
             self._get_referenced_selectors(response_node_id)
         )
 
     def _get_referenced_selectors(
         self,
-        response_node_id: _NodeID,
+        response_node_id: NodeID,
     ) -> set[_Selector]:
         response_node = self.graph.nodes.get(response_node_id)
         if response_node is None:
@@ -304,29 +357,27 @@ class _FrameSession:
             if isinstance(segment, VariableSegment)
         }
 
-    def _build_blocking_paths(self, response_node_id: _NodeID) -> list[_BlockingPath]:
-        root_node_id = self.graph.root_node.id
-        if root_node_id == response_node_id:
-            return [_BlockingPath()]
-
+    def _build_reachability(
+        self,
+        response_node_id: NodeID,
+        first_edge_decisions: Mapping[EdgeID, _EdgeDecision],
+    ) -> _ResponseReachability:
         variable_selectors = self._get_response_variable_selectors(response_node_id)
-        all_complete_paths = self._find_all_paths(root_node_id, response_node_id)
-        # Selectors are fixed for this response; never share the cache across builds.
-        blocking_cache: dict[_EdgeID, bool] = {}
-        return [
-            _BlockingPath(
-                edge_ids=self._get_blocking_edges(
-                    path,
-                    variable_selectors,
-                    blocking_cache,
-                )
-            )
-            for path in all_complete_paths
-        ]
+        blocking_edge_ids = {
+            edge_id
+            for edge_id in map(EdgeID, self.graph.edges)
+            if self._is_blocking_edge(edge_id, variable_selectors)
+        }
+        return _ResponseReachability(
+            self.graph,
+            response_node_id,
+            blocking_edge_ids,
+            first_edge_decisions,
+        )
 
     def _get_response_variable_selectors(
         self,
-        response_node_id: _NodeID,
+        response_node_id: NodeID,
     ) -> set[_Selector]:
         response_node = self.graph.nodes[response_node_id]
         response_session = _ResponseSession.from_node(response_node)
@@ -336,78 +387,9 @@ class _FrameSession:
             if isinstance(segment, VariableSegment)
         }
 
-    def _find_all_paths(
-        self,
-        current_node_id: _NodeID,
-        target_node_id: _NodeID,
-        current_path: list[_EdgeID] | None = None,
-        visited: set[_NodeID] | None = None,
-    ) -> list[list[_EdgeID]]:
-        graph = self.graph
-        # Use the forward traversal's topology, without evaluating runtime conditions.
-        reverse: dict[_NodeID, list[_NodeID]] = {}
-        for node_id in graph.nodes:
-            for edge in graph.get_outgoing_edges(node_id):
-                reverse.setdefault(edge.head, []).append(node_id)
-
-        reachable = {target_node_id}
-        pending = [target_node_id]
-        while pending:
-            node_id = pending.pop()
-            predecessors = [
-                predecessor
-                for predecessor in reverse.get(node_id, ())
-                if predecessor not in reachable
-            ]
-            reachable.update(predecessors)
-            pending.extend(predecessors)
-
-        path_seed = [] if current_path is None else current_path
-        visited_seed = set() if visited is None else visited
-
-        def walk(
-            node_id: _NodeID,
-            path: list[_EdgeID],
-            seen: set[_NodeID],
-        ) -> list[list[_EdgeID]]:
-            if node_id == target_node_id:
-                return [path.copy()]
-            if node_id not in reachable:
-                return []
-
-            next_seen = {node_id, *seen}
-            return [
-                nested_path
-                for edge in graph.get_outgoing_edges(node_id)
-                if edge.head in reachable and edge.head not in next_seen
-                for nested_path in walk(edge.head, [*path, edge.id], next_seen)
-            ]
-
-        return walk(current_node_id, path_seed, visited_seed)
-
-    def _get_blocking_edges(
-        self,
-        path: list[_EdgeID],
-        variable_selectors: set[_Selector],
-        blocking_cache: dict[_EdgeID, bool] | None = None,
-    ) -> list[_EdgeID]:
-        if blocking_cache is None:
-            blocking_cache = {}
-
-        blocking_edges: list[_EdgeID] = []
-        for edge_id in path:
-            if edge_id not in blocking_cache:
-                blocking_cache[edge_id] = self._is_blocking_edge(
-                    edge_id,
-                    variable_selectors,
-                )
-            if blocking_cache[edge_id]:
-                blocking_edges.append(edge_id)
-        return blocking_edges
-
     def _is_blocking_edge(
         self,
-        edge_id: _EdgeID,
+        edge_id: EdgeID,
         variable_selectors: set[_Selector],
     ) -> bool:
         edge = self.graph.edges[edge_id]
@@ -421,31 +403,40 @@ class _FrameSession:
     def activate_initial_sessions(self) -> list[EngineEvent]:
         events: list[EngineEvent] = []
         for response_node_id in sorted(self._response_node_ids):
-            paths = self._blocking_paths.get(response_node_id, [])
-            if any(path.is_empty() for path in paths):
+            if self._is_response_ready(response_node_id):
                 events.extend(self._activate_or_queue_session(response_node_id))
         return events
 
-    def _handle_edge_taken(self, edge_id: _EdgeID) -> list[EngineEvent]:
+    def _is_response_ready(self, response_node_id: NodeID) -> bool:
+        gating_state = self._gating_state
+        if isinstance(gating_state, _LegacyPathState):
+            return any(
+                path.is_empty()
+                for path in gating_state.paths_by_response.get(response_node_id, [])
+            )
+        return gating_state.reachability_by_response[response_node_id].is_ready()
+
+    def _handle_edge_taken(self, edge_id: EdgeID) -> list[EngineEvent]:
         events: list[EngineEvent] = []
+        gating_state = self._gating_state
+        if isinstance(gating_state, _ReachabilityState) and edge_id in self.graph.edges:
+            gating_state.first_edge_decisions.setdefault(edge_id, _EdgeDecision.TAKEN)
         for response_node_id in sorted(self._response_node_ids):
-            paths = self._blocking_paths.get(response_node_id)
-            if paths is None:
-                continue
-
-            has_reachable_path = False
-            for path in paths:
-                path.remove_edge(edge_id)
-                if path.is_empty():
-                    has_reachable_path = True
-
-            if has_reachable_path:
+            if isinstance(gating_state, _LegacyPathState):
+                for path in gating_state.paths_by_response.get(response_node_id, []):
+                    path.remove_edge(edge_id)
+                ready = self._is_response_ready(response_node_id)
+            else:
+                ready = gating_state.reachability_by_response[
+                    response_node_id
+                ].advance_from_edge(edge_id)
+            if ready:
                 events.extend(self._activate_or_queue_session(response_node_id))
         return events
 
     def _activate_or_queue_session(
         self,
-        node_id: _NodeID,
+        node_id: NodeID,
     ) -> list[EngineEvent]:
         session = self._response_sessions.pop(node_id, None)
         if session is None:
@@ -482,7 +473,7 @@ class _FrameSession:
     def _is_reasoning_visible(self, event: NodeRunReasoningChunkEvent) -> bool:
         return (
             self._has_valid_reasoning_selector(event)
-            and self._has_runnable_reasoning_source(event.node_id)
+            and self._has_runnable_reasoning_source(NodeID(event.node_id))
             and self._is_reasoning_referenced_by_reached_session(event)
         )
 
@@ -490,7 +481,7 @@ class _FrameSession:
     def _has_valid_reasoning_selector(event: NodeRunReasoningChunkEvent) -> bool:
         return tuple(event.selector) == (event.node_id, "reasoning_content")
 
-    def _has_runnable_reasoning_source(self, node_id: _NodeID) -> bool:
+    def _has_runnable_reasoning_source(self, node_id: NodeID) -> bool:
         source_node = self.graph.nodes.get(node_id)
         return bool(
             source_node
@@ -533,7 +524,7 @@ class _FrameSession:
         if not self._active_session or self.variable_pool is None:
             return []
 
-        response_node_id = self._active_session.node_id
+        response_node_id = NodeID(self._active_session.node_id)
         events = self._template_stream.flush(
             self._active_session,
             graph=self.graph,
@@ -547,7 +538,7 @@ class _FrameSession:
 
         return []
 
-    def _end_session(self, node_id: _NodeID) -> None:
+    def _end_session(self, node_id: NodeID) -> None:
         if not self._active_session or self._active_session.node_id != node_id:
             return
 

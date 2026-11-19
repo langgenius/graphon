@@ -42,14 +42,13 @@ class SnapshotHeader[VersionT: str](BaseModel):
 
 
 class ResponseStreamFilterSnapshot[VersionT: str](SnapshotHeader[VersionT]):
-    """Response fields shared by historical versions 1 and 2."""
+    """Response fields shared by historical versions 1, 2, and 3."""
 
     response_nodes: list[str] = Field(default_factory=list)
     active_session: ResponseSessionState | None = None
     waiting_sessions: list[ResponseSessionState] = Field(default_factory=list)
     pending_sessions: list[ResponseSessionState] = Field(default_factory=list)
     node_execution_ids: dict[str, str] = Field(default_factory=dict)
-    paths_map: dict[str, list[list[str]]] = Field(default_factory=dict)
     stream_buffers: list[StreamBufferState] = Field(default_factory=list)
     stream_positions: list[StreamPositionState] = Field(default_factory=list)
     closed_streams: list[Selector] = Field(default_factory=list)
@@ -109,15 +108,16 @@ def for_graph(
 ) -> ResponseStreamFilterSnapshot:
     """Bind historical response state to the root graph.
 
-    Version 1 translates full-graph identifiers to scoped version 2 fields;
-    version 2 is already scoped. Current snapshots restore through their own codec.
+    Versions 1 and 2 migrate to version 3 root state, retaining residual paths;
+    version 1 also translates full-graph identifiers. Version 3 is already scoped.
+    Current version 4 snapshots restore complete frame state through their own codec.
 
     Args:
-        snapshot: Version 1 or 2 state previously returned by ``loads``.
+        snapshot: Version 1, 2, or 3 state previously returned by ``loads``.
         graph: Root graph that will own the restored filter.
 
     Returns:
-        Version 2 root state that the filter can apply to the bound graph.
+        Version 3 root state that the filter can apply to the bound graph.
     """
     prepare = _version_module(snapshot.version).for_graph
     return cast(ResponseStreamFilterSnapshot, prepare(snapshot, graph))

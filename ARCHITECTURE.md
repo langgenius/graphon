@@ -141,10 +141,18 @@ owns independent root and child [frame sessions](src/graphon/engine/filter/built
 Root templates use the existing Python node interfaces. Child Answer and End
 templates come from [retained definitions](src/graphon/engine/filter/builtin/response_stream/frame_graph.py),
 without constructing nodes or calling factories. Frame starts activate initially
-eligible templates; taken and skipped edges control the remaining paths. A reserved
-execution ID alone does not make a reply reachable. Custom frames without enough
-declarative context get no response session; ordinary node and completion events
-still pass through.
+eligible templates. Fresh sessions maintain [reachability](src/graphon/engine/filter/builtin/response_stream/reachability.py)
+per response through nonblocking edges and consumed traversal events. Branches,
+containers, responses, and nodes that block referenced variables gate their
+outgoing edges until taken; a blocking edge skipped before it is taken remains
+rejected. Shared suffixes are visited once per response instead of expanding into
+complete paths. Each native frame session owns the first consumed taken/skipped
+decision for each edge; response caches read that map while keeping their own
+selector-dependent blocking edges. Observed skips used for template selection
+remain separate from these first decisions. Activation does not read live edge
+states. A reserved execution ID alone does not make a reply reachable. Custom
+frames without enough declarative context get no response session; ordinary node
+and completion events still pass through.
 
 Keep `emit_frame_events=True` when using a context from `from_engine()`: the
 filter waits for the root baseline before resolving values. Each observed frame keeps a detached value pool and applies
@@ -188,6 +196,8 @@ source cursors.
 The filter's [v4 snapshot](src/graphon/engine/filter/builtin/response_stream/v4.py)
 persists the run identity, detached values and templates, source attempts and
 occurrence positions, traversal, pending replies, and numeric/nested display order.
+Each frame stores either consumed edge decisions or retained legacy residual paths;
+native decisions and legacy paths cannot be mixed.
 Queued replies survive removal of their execution frames. Repeated frame-start
 observations and `initialize()` calls preserve progress for the same persisted
 root execution identity; a new run of the same workflow starts fresh. Snapshot
@@ -203,13 +213,17 @@ rebind host file adapters there. Runtime snapshots alone cannot recover display
 history. The once-only guarantee covers this drained, quiescent pause boundary,
 not network acknowledgements or crash recovery.
 
-The [v1](src/graphon/engine/filter/builtin/response_stream/v1.py) and
-[v2](src/graphon/engine/filter/builtin/response_stream/v2.py) readers retain root
-migration; v3 is not supported. Old snapshots without observed skipped edges retain
-the paired graph's skip lookup. Legacy snapshots cannot establish child display history or ordering,
-so their restored run suppresses child presentation, including newly scheduled
-rounds; completed legacy frames are treated as drained. Root replies and ordinary
-Answer `answer`/`files` results remain available alongside graph, node, and frame-finish
+The [v1](src/graphon/engine/filter/builtin/response_stream/v1.py),
+[v2](src/graphon/engine/filter/builtin/response_stream/v2.py), and
+[v3](src/graphon/engine/filter/builtin/response_stream/v3.py) readers retain root
+response progress. Versions 1 and 2 retain their residual blocking paths; v1 also
+maps full-graph IDs to root-scoped IDs. Version 3 preserves residual paths or
+consumed edge decisions, with rejection winning when historical taken/rejected
+lists overlap. Old snapshots without observed skipped edges retain the paired
+graph's skip lookup. These historical snapshots cannot establish child display
+history or ordering, so their restored run suppresses child presentation, including
+newly scheduled rounds; completed legacy frames are treated as drained. Root replies
+and ordinary Answer `answer`/`files` results remain available alongside graph, node, and frame-finish
 lifecycle events. A later snapshot preserves this suppression policy; a new run
 starts with child streaming enabled.
 The [container response tests](tests/engine/test_container_response_streaming.py)
@@ -219,6 +233,10 @@ and nested replies, failure outcomes, and root compatibility.
 The [pause/resume tests](tests/engine/test_response_stream_resume.py) cover paired
 restoration, removed frames, between-round pauses, repeated observations, legacy
 child suppression, invalid state, and host file adapter rebinding.
+The [response filter tests](tests/engine/test_response_stream_filter.py) cover
+native and historical gating state; [paired pause checkpoints](tests/engine/test_response_stream_pause.py)
+exercise historical runtime/filter snapshots. The [version isolation test](tests/test_snapshot_version_isolation.py)
+keeps current snapshots independent of historical readers.
 
 ## State and execution invariants
 
