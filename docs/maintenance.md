@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-12T01:17:32Z"
+last_checked: "2026-11-19T01:17:19Z"
 -->
 # Maintaining repository knowledge
 
@@ -102,9 +102,9 @@ for changes beyond documentation.
 evidence, or approximately when a pull request last changed its content. It is not
 proof that all linked tests were executed. The
 [autofix.ci workflow](../.github/workflows/autofix.yml) can refresh the timestamp
-after content-only pull request changes; the
-[update script](../.github/scripts/update_document_timestamps.py) defines which
-changes qualify. Apply
+when a pull request changes a page's content after its last metadata change.
+The [update script](../.github/scripts/update_document_timestamps.py) defines
+which changes qualify. Apply
 [review evidence principles](#repository-knowledge-maintenance) before changing it
 by hand. The format, maintained scope, and deadline are defined and enforced by the
 [documentation check](../tests/test_repository_docs.py).
