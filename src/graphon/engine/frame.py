@@ -450,6 +450,7 @@ class FrameRegistry:
             deferred_ready_queue=parent_state.deferred_ready_queue,
             graph_execution=parent_state.graph_execution,
         )
+        state.set_ready_task_notifier(parent_state.ready_task_notifier)
         if runtime_data is not None:
             state.restore_graph_state(
                 node_states=runtime_data.graph_node_states,

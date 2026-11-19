@@ -5,6 +5,7 @@ serialization capabilities for state storage.
 """
 
 import queue
+from collections.abc import Callable
 from typing import Annotated, Literal, final
 
 from pydantic import BaseModel, Field, TypeAdapter
@@ -58,6 +59,11 @@ class InMemoryReadyQueue:
         self._queue: queue.Queue[ReadyTask] = (
             queue.Queue() if maxsize <= 0 else queue.Queue(maxsize=maxsize)
         )
+        self._on_put: Callable[[], None] | None = None
+
+    def set_put_listener(self, listener: Callable[[], None] | None) -> None:
+        """Register an optional callback invoked after an item is enqueued."""
+        self._on_put = listener
 
     def put(self, item: ReadyTask) -> None:
         """Add a task to the ready queue.
@@ -67,6 +73,8 @@ class InMemoryReadyQueue:
 
         """
         self._queue.put(item)
+        if self._on_put is not None:
+            self._on_put()
 
     def get(self, timeout: float | None = None) -> ReadyTask:
         """Retrieve and remove a task from the queue.

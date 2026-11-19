@@ -104,6 +104,17 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         self._has_pending_graph_state = False
         self._graph_state_migration: GraphStateMigration | None = None
         self._container_state_lock = threading.Lock()
+        self._ready_task_notifier: Callable[[], None] | None = None
+
+    def set_ready_task_notifier(
+        self, notifier: Callable[[], None] | None
+    ) -> None:
+        """Register a callback invoked whenever a task is placed on ready_queue."""
+        self._ready_task_notifier = notifier
+
+    @property
+    def ready_task_notifier(self) -> Callable[[], None] | None:
+        return self._ready_task_notifier
 
     @property
     def variable_pool(self) -> VariablePool:
@@ -319,6 +330,8 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
             self.defer_ready_task(task)
             return
         self.ready_queue.put(task)
+        if self._ready_task_notifier is not None:
+            self._ready_task_notifier()
 
     def snapshot_frame(
         self,

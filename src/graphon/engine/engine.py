@@ -27,7 +27,7 @@ from graphon.file.runtime import (
 from graphon.graph.graph import Graph
 from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
-from graphon.runtime.ready_queue import ResumeTask, StartTask
+from graphon.runtime.ready_queue import InMemoryReadyQueue, ResumeTask, StartTask
 from graphon.runtime.runtime_state import RuntimeState
 
 from .command.builtin.in_memory import InMemoryChannel
@@ -155,7 +155,15 @@ class Engine:
             layers=self._layers,
             file_runtime=self._file_runtime,
             workers=workers,
+            event_driven_wakeup=True,
         )
+        self._runtime_state.set_ready_task_notifier(
+            self._worker_pool.notify_task_available
+        )
+        if isinstance(self._runtime_state.ready_queue, InMemoryReadyQueue):
+            self._runtime_state.ready_queue.set_put_listener(
+                self._worker_pool.notify_task_available
+            )
 
         # Applies node events to graph and frame state.
         event_processor = NodeEventProcessor(
