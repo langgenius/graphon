@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-12T01:11:40Z"
+last_checked: "2026-11-19T18:42:18Z"
 -->
 # Graphon
 

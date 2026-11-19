@@ -33,11 +33,11 @@ from graphon.file.runtime import use_workflow_file_runtime
 from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.runtime_state import GraphProtocol
 
-from . import snapshot
+from . import snapshot, v4
 from .frame_graph import build_child_graph, find_response_container_ids
 from .frame_session import _FrameSession
 from .reply_order import _ReplyOrder
-from .snapshot import ResponseStreamFilterSnapshot
+from .snapshot import ResponseStreamFilterSnapshot, SnapshotHeader
 
 __all__ = ["ResponseStreamFilter"]
 
@@ -48,41 +48,78 @@ class ResponseStreamFilter:
     def __init__(self, *, pass_unmatched_chunks: bool = False) -> None:
         self._pass_unmatched_chunks = pass_unmatched_chunks
         self._file_runtime: WorkflowFileRuntimeProtocol | None = None
-        self._pending_state: ResponseStreamFilterSnapshot | None = None
+        self._pending_state: SnapshotHeader | None = None
         self._root_session: _FrameSession | None = None
         self._frame_sessions: dict[str, _FrameSession] = {}
         self._graph_config: Mapping[str, Any] | None = None
         self._awaiting_root_baseline = False
-        self._has_child_progress = False
+        self._context: EngineEventFilterContext | None = None
+        self._run_id: str | None = None
+        self._run_started = False
+        self._suppress_child_responses = False
+        self._finished_frame_ids: set[str] = set()
         self._reply_order = _ReplyOrder()
         self._response_container_ids: set[str] = set()
 
     def initialize(self, context: EngineEventFilterContext) -> None:
-        with use_workflow_file_runtime(context.file_runtime):
+        if (
+            self._root_session is not None
+            and self._run_started
+            and self._pending_state is None
+            and context.run_id is not None
+            and context.run_id == self._run_id
+        ):
+            self._context = context
             self._file_runtime = context.file_runtime
-            self._root_session = None
-            self._frame_sessions.clear()
-            self._reply_order.clear()
-            self._has_child_progress = False
-            self._awaiting_root_baseline = context.run_id is not None
-            root_session = _FrameSession(
-                cast(GraphProtocol, context.graph),
-                None
-                if self._awaiting_root_baseline
-                else context.runtime_state.variable_pool,
-                reply_order=self._reply_order,
-                pass_unmatched_chunks=self._pass_unmatched_chunks,
-            )
-            if self._pending_state is not None:
-                root_session.load_state(self._pending_state)
+            self._root_session.graph = cast(GraphProtocol, context.graph)
+            return
+        self._restore_progress(context, self._pending_state)
+
+    def _restore_progress(
+        self, context: EngineEventFilterContext, state: SnapshotHeader | None
+    ) -> None:
+        # Validate separately before replacing live progress.
+        with use_workflow_file_runtime(context.file_runtime):
+            graph_config = getattr(context.graph, "graph_config", None)
+            container_ids = find_response_container_ids(graph_config)
+            if isinstance(state, v4.Snapshot):
+                sessions, reply_order = v4.restore(
+                    state, context, pass_unmatched_chunks=self._pass_unmatched_chunks
+                )
+                awaiting_baseline = state.awaiting_root_baseline
+                suppress_child_responses = state.suppress_children
+                run_started = state.started
+                finished_frame_ids = set(state.finished_frames)
             else:
-                root_session.register_responses()
-            self._root_session = root_session
-            self._frame_sessions[ROOT_FRAME_ID] = root_session
-            self._graph_config = getattr(context.graph, "graph_config", None)
-            self._response_container_ids = find_response_container_ids(
-                self._graph_config
-            )
+                reply_order = _ReplyOrder()
+                awaiting_baseline = context.run_id is not None
+                root = _FrameSession(
+                    cast(GraphProtocol, context.graph),
+                    None if awaiting_baseline else context.runtime_state.variable_pool,
+                    reply_order=reply_order,
+                    pass_unmatched_chunks=self._pass_unmatched_chunks,
+                )
+                if state is not None:
+                    root.load_state(cast(ResponseStreamFilterSnapshot, state))
+                else:
+                    root.register_responses()
+                sessions = {ROOT_FRAME_ID: root}
+                # Legacy snapshots cannot establish child display history or order.
+                suppress_child_responses = state is not None
+                run_started = state is not None
+                finished_frame_ids = set()
+            self._context = context
+            self._run_id = context.run_id
+            self._file_runtime = context.file_runtime
+            self._graph_config = graph_config
+            self._response_container_ids = container_ids
+            self._frame_sessions = sessions
+            self._root_session = sessions[ROOT_FRAME_ID]
+            self._reply_order = reply_order
+            self._awaiting_root_baseline = awaiting_baseline
+            self._suppress_child_responses = suppress_child_responses
+            self._run_started = run_started
+            self._finished_frame_ids = finished_frame_ids
             self._pending_state = None
 
     def on_event(self, event: EngineEvent) -> Iterable[EngineEvent]:
@@ -104,11 +141,19 @@ class ResponseStreamFilter:
                 return [*output, *chunks]
             return [*chunks, *output]
 
-    def _process_event(self, event: EngineEvent) -> list[EngineEvent]:  # ruff: ignore[too-many-return-statements]
+    def _process_event(self, event: EngineEvent) -> list[EngineEvent]:  # ruff: ignore[too-many-return-statements, complex-structure]
         match event:
             case FrameStartedEvent():
                 return self._start_frame_session(event)
             case GraphRunStartedEvent():
+                if (
+                    event.reason == WorkflowStartReason.RESUMPTION
+                    and self._run_id is not None
+                    and not self._run_started
+                ):
+                    msg = "Resuming a run requires saved ResponseStreamFilter progress"
+                    raise ValueError(msg)
+                self._run_started = True
                 return [
                     event,
                     *(
@@ -125,6 +170,8 @@ class ResponseStreamFilter:
                     else []
                 )
                 if event.frame_id != ROOT_FRAME_ID:
+                    if session is not None:
+                        self._finished_frame_ids.add(event.frame_id)
                     self._frame_sessions.pop(event.frame_id, None)
                 self._reply_order.finish_frame(
                     event.frame_id, succeeded=event.outcome == "succeeded"
@@ -174,7 +221,7 @@ class ResponseStreamFilter:
         return [event]
 
     def _update_container_replies(self, event: EngineEvent) -> None:
-        if not isinstance(event, NodeEvent):
+        if self._suppress_child_responses or not isinstance(event, NodeEvent):
             return
         if event.node_id not in self._response_container_ids:
             return
@@ -194,13 +241,22 @@ class ResponseStreamFilter:
     def _start_frame_session(self, event: FrameStartedEvent) -> list[EngineEvent]:
         # Full-value observations are consumed here, never forwarded to the host.
         if event.frame_id == ROOT_FRAME_ID:
+            output = self._initialized_root_session.start(event)
             self._awaiting_root_baseline = False
-            return self._initialized_root_session.start(event)
-        if event.container_id not in self._response_container_ids:
+            self._run_started = True
+            return output
+        if session := self._frame_sessions.get(event.frame_id):
+            return session.start(event)
+        if (
+            event.frame_id in self._finished_frame_ids
+            or self._suppress_child_responses
+            or event.container_id not in self._response_container_ids
+        ):
             return []
         if event.reason == WorkflowStartReason.RESUMPTION:
-            msg = "Resuming child response progress is not supported yet"
+            msg = f"Missing child response progress for frame {event.frame_id}"
             raise ValueError(msg)
+        self._run_started = True
         self._reply_order.start_frame(event)
         graph = build_child_graph(self._graph_config, event)
         if graph is None:
@@ -214,8 +270,6 @@ class ResponseStreamFilter:
             pass_unmatched_chunks=self._pass_unmatched_chunks,
         )
         session.register_responses()
-        if session.has_responses:
-            self._has_child_progress = True
         self._frame_sessions[event.frame_id] = session
         return session.start(event)
 
@@ -230,26 +284,19 @@ class ResponseStreamFilter:
             return [*output, *self._reply_order.drain()]
 
     def dumps(self) -> str:
-        self._check_snapshot_scope()
+        """Save progress after draining the filtered run through its pause boundary."""
         if self._pending_state is not None:
             return snapshot.dumps(self._pending_state)
         self._ensure_initialized()
-        return snapshot.dumps(self._initialized_root_session.dump_state())
+        return snapshot.dumps(v4.capture(self))
 
     def loads(self, data: str) -> None:
-        self._check_snapshot_scope()
-        with use_workflow_file_runtime(self._file_runtime):
-            state = snapshot.loads(data)
-            if self._root_session is None or self._pending_state is not None:
-                self._pending_state = state
-                return
-            self._root_session.load_state(state)
-
-    def _check_snapshot_scope(self) -> None:
-        # Root checkpoints do not yet include child response progress.
-        if self._has_child_progress or self._reply_order.has_pending_containers:
-            msg = "Snapshots containing child response progress are not supported yet"
-            raise ValueError(msg)
+        """Stage or atomically restore progress; rebind host adapters at initialize."""
+        state = snapshot.loads(data)
+        if self._context is None or self._pending_state is not None:
+            self._pending_state = state
+            return
+        self._restore_progress(self._context, state)
 
     def _ensure_initialized(self) -> None:
         if self._root_session is None or self._pending_state is not None:

@@ -291,9 +291,9 @@ def test_active_root_reply_stays_contiguous_before_child_and_following_root_repl
     assert list(stream_filter.flush()) == []
 
 
-def _make_nested_filter(
+def _make_nested_context(
     *, stream_parent: bool = False, fail_branch: bool = False
-) -> ResponseStreamFilter:
+) -> EngineEventFilterContext:
     engine = loads(
         _dsl(
             [
@@ -356,8 +356,21 @@ def _make_nested_filter(
             ],
         )
     )
+    return EngineEventFilterContext.from_engine(engine)
+
+
+def _make_nested_filter(
+    *,
+    stream_parent: bool = False,
+    fail_branch: bool = False,
+    context: EngineEventFilterContext | None = None,
+) -> ResponseStreamFilter:
+    if context is None:
+        context = _make_nested_context(
+            stream_parent=stream_parent, fail_branch=fail_branch
+        )
     stream_filter = ResponseStreamFilter()
-    stream_filter.initialize(EngineEventFilterContext.from_engine(engine))
+    stream_filter.initialize(context)
     list(
         stream_filter.on_event(
             FrameStartedEvent(
@@ -433,11 +446,14 @@ def test_streaming_child_ancestor_finishes_reply_before_ready_descendant() -> No
     assert sum(event.is_final for event in _select_stream_chunks(output)) == 2
 
 
+@pytest.mark.parametrize("save_restore", [False, True])
 @pytest.mark.parametrize("fail_branch", [False, True])
 def test_nested_group_reserves_position_before_delayed_first_child_reply(
     fail_branch: bool,
+    save_restore: bool,
 ) -> None:
-    stream_filter = _make_nested_filter(fail_branch=fail_branch)
+    context = _make_nested_context(fail_branch=fail_branch)
+    stream_filter = _make_nested_filter(context=context)
     output = list(stream_filter.on_event(_make_container_event("root", "outer")))
     parents = [
         FrameStartedEvent(
@@ -489,6 +505,11 @@ def test_nested_group_reserves_position_before_delayed_first_child_reply(
     assert _join_stream_text(output) == "", (
         "container start reserves a position even before its child starts"
     )
+    if save_restore:
+        saved = stream_filter.dumps()
+        stream_filter = ResponseStreamFilter()
+        stream_filter.loads(saved)
+        stream_filter.initialize(context)
     for index in [1, 0]:
         child, parent = children[index], parents[index]
         output.extend(stream_filter.on_event(child))
@@ -883,13 +904,16 @@ def test_failed_item_waits_for_container_outcome_before_releasing_finished_sibli
     assert list(stream_filter.flush()) == []
 
 
+@pytest.mark.parametrize("save_restore", [False, True])
 @pytest.mark.parametrize("source_final", [False, True])
 def test_retry_replaces_hidden_attempt_without_changing_other_occurrences(
     source_final: bool,
+    save_restore: bool,
 ) -> None:
-    stream_filter, start = _make_filter_and_start(
-        answer="{{#sys.value#}}:{{#source.output#}}"
+    context = EngineEventFilterContext.from_engine(
+        loads(_make_body_dsl(answer="{{#sys.value#}}:{{#source.output#}}"))
     )
+    stream_filter, start = _make_filter_and_start(context=context)
     first, second = _make_item_frame(start, 0), _make_item_frame(start, 1)
     output = [*stream_filter.on_event(first), *stream_filter.on_event(second)]
     output.extend(
@@ -911,6 +935,11 @@ def test_retry_replaces_hidden_attempt_without_changing_other_occurrences(
             )
         )
     )
+    if save_restore:
+        saved = stream_filter.dumps()
+        stream_filter = ResponseStreamFilter()
+        stream_filter.loads(saved)
+        stream_filter.initialize(context)
     retry = NodeRunRetryEvent(
         id="source-run",
         node_id="source",
@@ -1010,24 +1039,6 @@ def test_root_snapshot_stays_live_beside_container_without_child_responses() -> 
     )
     output.extend(restored.on_event(GraphRunSucceededEvent()))
     assert _join_stream_text(output) == "root saveddone"
-
-
-def test_container_reservation_snapshot_is_rejected_until_empty_group_finishes() -> (
-    None
-):
-    stream_filter, _ = _make_filter_and_start()
-    snapshot = stream_filter.dumps()
-    list(stream_filter.on_event(_make_container_event("root", "container")))
-    with pytest.raises(ValueError, match="child"):
-        stream_filter.dumps()
-    with pytest.raises(ValueError, match="child"):
-        stream_filter.loads(snapshot)
-    list(
-        stream_filter.on_event(
-            _make_container_event("root", "container", finished=True)
-        )
-    )
-    assert stream_filter.dumps()
 
 
 def test_root_snapshot_after_zero_item_container_keeps_active_and_waiting_replies() -> (

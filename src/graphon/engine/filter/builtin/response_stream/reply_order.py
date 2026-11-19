@@ -52,13 +52,6 @@ class _ReplyOrder:
         self._frames = {ROOT_FRAME_ID: _FrameReplies(ROOT_FRAME_ID)}
         self._containers.clear()
 
-    @property
-    def has_pending_containers(self) -> bool:
-        return any(
-            not container.finished or container.frames
-            for container in self._containers.values()
-        )
-
     def _get_or_create_container(
         self, container_key: tuple[str, str]
     ) -> _ContainerReplies:

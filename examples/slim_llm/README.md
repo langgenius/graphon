@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-12T01:12:24Z"
+last_checked: "2026-11-19T18:42:18Z"
 -->
 # Slim LLM Example
 

@@ -6,6 +6,7 @@ import json
 from collections.abc import Generator, Iterable
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 from threading import Event, Thread
 from typing import Any
 
@@ -246,12 +247,18 @@ def _make_filter_and_start(
     answer: str = "[{{#source.output#}}]",
     branch: bool = False,
     second_answer: str | None = None,
+    context: EngineEventFilterContext | None = None,
 ) -> tuple[ResponseStreamFilter, FrameStartedEvent]:
-    engine = loads(
-        _make_body_dsl(answer=answer, branch=branch, second_answer=second_answer)
-    )
+    if context is None:
+        context = EngineEventFilterContext.from_engine(
+            loads(
+                _make_body_dsl(
+                    answer=answer, branch=branch, second_answer=second_answer
+                )
+            )
+        )
     stream_filter = ResponseStreamFilter()
-    stream_filter.initialize(EngineEventFilterContext.from_engine(engine))
+    stream_filter.initialize(context)
     start = FrameStartedEvent(
         frame_id="child",
         parent_frame_id="root",
@@ -384,13 +391,26 @@ def test_handled_failure_settles_source_without_replaying_fallback(
     assert list(stream_filter.flush()) == []
 
 
+@pytest.mark.parametrize("save_restore", [False, True])
 @pytest.mark.parametrize("already_displayed", [False, True])
-def test_retry_replaces_only_undisplayed_attempt(already_displayed: bool) -> None:
-    stream_filter, start = _make_filter_and_start(branch=not already_displayed)
+def test_retry_replaces_only_undisplayed_attempt(
+    already_displayed: bool, save_restore: bool
+) -> None:
+    context = EngineEventFilterContext.from_engine(
+        loads(
+            _make_body_dsl(answer="[{{#source.output#}}]", branch=not already_displayed)
+        )
+    )
+    stream_filter, start = _make_filter_and_start(context=context)
     output = [
         *stream_filter.on_event(start),
         *stream_filter.on_event(_make_source_chunk("old")),
     ]
+    if save_restore:
+        saved = stream_filter.dumps()
+        stream_filter = ResponseStreamFilter()
+        stream_filter.loads(saved)
+        stream_filter.initialize(context)
     retry = NodeRunRetryEvent(
         id="source-run",
         node_id="source",
@@ -658,14 +678,6 @@ def test_child_end_template_uses_committed_values() -> None:
     assert _join_stream_text(output) == "valuevaluedone"
 
 
-def test_child_progress_cannot_be_saved_as_a_root_only_snapshot() -> None:
-    stream_filter, start = _make_filter_and_start()
-    list(stream_filter.on_event(start))
-    list(stream_filter.on_event(_make_source_chunk("partial")))
-    with pytest.raises(ValueError, match="child"):
-        stream_filter.dumps()
-
-
 def test_root_frame_baseline_prevents_live_value_read_ahead() -> None:
     engine = loads(
         _dsl(
@@ -853,9 +865,7 @@ def test_root_commits_precede_branch_activation() -> None:
     assert _join_stream_text(output) == "committed"
 
 
-def test_root_v2_resume_keeps_partial_template_progress_with_observed_baseline() -> (
-    None
-):
+def test_root_resume_keeps_partial_template_progress_with_observed_baseline() -> None:
     engine = loads(
         _dsl(
             [
@@ -983,7 +993,12 @@ def test_root_resume_preserves_skipped_sources_without_reading_future_node_state
     skipped.state = NodeState.SKIPPED
     if legacy_snapshot:
         # Historical v2 snapshots delegated skip state to the paired graph.
-        state.pop("skipped_edges", None)
+        state = json.loads(
+            (
+                Path(__file__).with_name("fixtures")
+                / "response_stream_filter_v2_6c0d95b_partial.json"
+            ).read_text()
+        )
     else:
         # Later runtime mutations must not affect captured filter traversal.
         source.state = NodeState.SKIPPED
