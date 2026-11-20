@@ -112,7 +112,14 @@ class Dispatcher:
             logger.exception("Dispatcher error")
             self._graph_execution.fail(error)
         finally:
-            if not self._graph_execution.paused and not self._graph_execution.completed:
+            if (
+                not self._graph_execution.paused
+                and not self._graph_execution.completed
+                and not self._stop_event.is_set()
+            ):
+                # A stop() means the consumer walked away before the graph
+                # reached a terminal state; completing here recorded that as a
+                # successful run (#404).
                 self._graph_execution.complete()
             try:
                 self._event_processor.finish_frames()
