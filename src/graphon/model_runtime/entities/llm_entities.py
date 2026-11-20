@@ -90,6 +90,8 @@ _LLM_USAGE_METADATA_INPUT_ADAPTER = TypeAdapter(_LLMUsageMetadataInput)
 class LLMUsage(ModelUsage):
     """Model class for llm usage."""
 
+    model_config = ConfigDict(frozen=True)
+
     prompt_tokens: int
     prompt_unit_price: Decimal
     prompt_price_unit: Decimal
@@ -107,6 +109,12 @@ class LLMUsage(ModelUsage):
 
     @classmethod
     def empty_usage(cls) -> Self:
+        if cls is LLMUsage:
+            return _EMPTY_LLM_USAGE  # type: ignore[return-value]
+        return cls._build_empty_usage()
+
+    @classmethod
+    def _build_empty_usage(cls) -> Self:
         return cls(
             prompt_tokens=0,
             prompt_unit_price=Decimal("0.0"),
@@ -190,6 +198,9 @@ class LLMUsage(ModelUsage):
 
         """
         return self.plus(other)
+
+
+_EMPTY_LLM_USAGE = LLMUsage._build_empty_usage()
 
 
 class LLMResult(BaseModel):

@@ -27,7 +27,7 @@ class NodeRunResult(BaseModel):
     metadata: Mapping[WorkflowNodeExecutionMetadataKey, Any] = Field(
         default_factory=_default_metadata,
     )
-    llm_usage: LLMUsage = Field(default_factory=LLMUsage.empty_usage)
+    llm_usage: LLMUsage = LLMUsage.empty_usage()
 
     edge_source_handle: str = (
         "source"  # source handle id of node with multiple branches
