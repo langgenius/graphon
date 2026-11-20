@@ -76,6 +76,7 @@ class Worker(threading.Thread):
         task_acquisition_enabled: threading.Event,
         worker_id: int = 0,
         file_runtime: WorkflowFileRuntimeProtocol | None = None,
+        task_acquisition_condition: threading.Condition | None = None,
     ) -> None:
         """Initialize worker thread.
 
@@ -101,6 +102,7 @@ class Worker(threading.Thread):
         self._layers = layers
         self._task_acquisition_lock = task_acquisition_lock
         self._task_acquisition_enabled = task_acquisition_enabled
+        self._task_acquisition_condition = task_acquisition_condition
         self._current_node_started_at: datetime | None = None
         self._current_node: Node | None = None
         self._current_frame_id = ROOT_FRAME_ID
@@ -137,10 +139,22 @@ class Worker(threading.Thread):
             with self._task_acquisition_lock:
                 if not self._task_acquisition_enabled.is_set():
                     return
-                try:
-                    task = self._ready_queue.get(timeout=0.01)
-                except queue.Empty:
-                    continue
+                if self._task_acquisition_condition is not None:
+                    try:
+                        task = self._ready_queue.get(timeout=0)
+                    except queue.Empty:
+                        if (
+                            self._stop_event.is_set()
+                            or not self._task_acquisition_enabled.is_set()
+                        ):
+                            return
+                        self._task_acquisition_condition.wait()
+                        continue
+                else:
+                    try:
+                        task = self._ready_queue.get(timeout=0.01)
+                    except queue.Empty:
+                        continue
                 self._has_current_task.set()
             try:
                 self._execute_task(task)
