@@ -82,6 +82,10 @@ _MISSING_RUN_CONTEXT_VALUE = object()
 logger = logging.getLogger(__name__)
 
 
+def is_builtin_node_class(node_class: type) -> bool:
+    return node_class.__module__.startswith("graphon.nodes.")
+
+
 class _NodeRegistryMixin[NodeDataT: BaseNodeData]:
     """Node registry and config helpers kept separate from execution flow."""
 
@@ -507,12 +511,11 @@ class Node[NodeDataT: BaseNodeData](
         # but graphon itself should not know their module identities.
         # This prevents test helper subclasses from polluting the global registry and
         # accidentally overriding real node types (e.g., a test Answer node).
-        module_name = cls.__module__
         # Only register concrete subclasses that define node_type and version()
         node_type = cls.node_type
         version = cls.version()
         bucket = Node._registry.setdefault(node_type, {})
-        if module_name.startswith("graphon.nodes."):
+        if is_builtin_node_class(cls):
             # Production node definitions take precedence and may override
             bucket[version] = cls
         else:
