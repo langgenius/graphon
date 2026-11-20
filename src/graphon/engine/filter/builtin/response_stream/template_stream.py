@@ -12,8 +12,18 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 
 from graphon.engine_events.base import NodeEvent
-from graphon.engine_events.node import NodeRunRetryEvent, NodeRunStreamChunkEvent
-from graphon.enums import BuiltinNodeTypes, NodeState
+from graphon.engine_events.node import (
+    NodeRunExceptionEvent,
+    NodeRunRetryEvent,
+    NodeRunStreamChunkEvent,
+)
+from graphon.enums import (
+    BuiltinNodeTypes,
+    ErrorStrategy,
+    NodeState,
+    WorkflowNodeExecutionMetadataKey,
+)
+from graphon.nodes.base.node import is_builtin_node_class
 from graphon.nodes.base.template import Template, TextSegment, VariableSegment
 from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.runtime_state import GraphProtocol, NodeProtocol
@@ -198,11 +208,55 @@ class _TemplateStream:
                 if self.latest_streams.get(selector) is source:
                     del self.latest_streams[selector]
 
-    def finish_source(self, event: NodeEvent) -> None:
+    def finish_source(self, event: NodeEvent, *, graph: GraphProtocol) -> None:
         self.finished_node_ids.add(event.node_id)
+        if self.frame_id == ROOT_FRAME_ID:
+            if (
+                isinstance(event, NodeRunExceptionEvent)
+                and event.node_type == BuiltinNodeTypes.LLM
+            ):
+                self._finish_llm_text_stream_on_default(event, graph)
+            return
         for (execution_id, attempt, _), source in self.source_streams.items():
             if execution_id == event.id and attempt == event.retry_index:
                 source.closed = True
+
+    def _finish_llm_text_stream_on_default(
+        self, event: NodeRunExceptionEvent, graph: GraphProtocol
+    ) -> None:
+        result = event.node_run_result
+        error_strategy = result.metadata.get(
+            WorkflowNodeExecutionMetadataKey.ERROR_STRATEGY
+        )
+        if (
+            error_strategy != ErrorStrategy.DEFAULT_VALUE
+            or "text" not in result.outputs
+        ):
+            return
+        selector = (event.node_id, "text")
+        buffers = self.stream_buffers
+        chunk_events = buffers.events.get(selector)
+        if not chunk_events or buffers.is_closed(selector):
+            return
+        if any(
+            chunk_event.id != event.id or chunk_event.node_id != event.node_id
+            for chunk_event in chunk_events
+        ):
+            return
+        # An unfinished host node can still emit a final chunk for this LLM.
+        if any(
+            node_id not in self.finished_node_ids
+            and node_id not in (self.skipped_node_ids or ())
+            and not is_builtin_node_class(type(node))
+            for node_id, node in graph.nodes.items()
+        ):
+            return
+        if any(chunk_event.chunk for chunk_event in chunk_events):
+            buffers.close(selector)
+        else:
+            # Empty deltas leave the template free to read the committed value.
+            del buffers.events[selector]
+            del buffers.positions[selector]
 
     def finish_sources(self, node_ids: Iterable[str]) -> None:
         self.finished_node_ids.update(node_ids)

@@ -167,6 +167,13 @@ child replies and discards undisplayed text. See the
 [reply ordering tests](tests/engine/test_response_reply_ordering.py) for
 buffering and continuation after item failure.
 
+Root chunks preserve their event shapes and share a cursor per selector across retries and replies.
+When a root LLM commits a default `text`, the stored Answer uses that value.
+The streamed Answer keeps any text the LLM sent or uses the default if it sent no text.
+At the default event, the filter can advance past an open selector only if all its chunks came from that LLM execution and every host node has finished or been skipped.
+Otherwise the rest of the Answer and later replies wait for a final chunk on that selector.
+See the [LLM default value streaming tests](tests/engine/test_llm_default_value_streaming.py).
+
 For a root-only pause, save runtime and filter checkpoints from the same pause
 after consuming the filtered stream. Rebuild the engine and load the filter
 checkpoint into a fresh filter before consuming resumed events. The

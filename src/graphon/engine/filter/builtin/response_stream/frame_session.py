@@ -159,7 +159,7 @@ class _FrameSession:
             case GraphEdgeSkippedEvent():
                 return self._handle_edge_skipped(event)
             case NodeRunSucceededEvent() | NodeRunExceptionEvent():
-                self._template_stream.finish_source(event)
+                self._template_stream.finish_source(event, graph=self.graph)
                 return [*self._try_flush(), event]
         return [event]
 
