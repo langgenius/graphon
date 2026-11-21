@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-19T11:20:42Z"
+last_checked: "2026-11-19T01:10:52Z"
 -->
 # Repository knowledge
 
@@ -27,7 +27,7 @@ Keep detailed component knowledge next to its implementation and link it here.
 | --- | --- |
 | Engine lifecycle extensions | [Layers](../src/graphon/engine/layer/README.md) |
 | Raw frame lifecycle, variables, and execution identity | [Frame observations](../ARCHITECTURE.md#raw-frame-observations) |
-| Response activation and filter checkpoints | [Response sessions](../ARCHITECTURE.md#response-sessions) |
+| Response activation, reply ordering, and filter checkpoints | [Response sessions](../ARCHITECTURE.md#response-sessions) |
 | Pause, abort, variable updates | [Commands](../src/graphon/engine/command/README.md) |
 | Execution and host file rendering | [State ownership](../ARCHITECTURE.md#state-and-execution-invariants) |
 | Model capabilities and providers | [Model runtime](../src/graphon/model_runtime/README.md) |
