@@ -1,7 +1,6 @@
 """Node failure strategy selection."""
 
 import logging
-import time
 from typing import assert_never, final
 
 from graphon.engine_events.base import NodeEvent
@@ -103,8 +102,8 @@ class NodeFailureHandler:
     ) -> NodeRunRetryEvent:
         """Handle error by retrying the node.
 
-        Eligibility has already been established by :meth:`handle`; this helper
-        waits for the configured interval and builds the retry event.
+        Eligibility has already been established by :meth:`handle`; this helper builds
+        the retry event, and the caller holds it for the configured interval.
 
         Args:
             event: The failure event
@@ -114,9 +113,11 @@ class NodeFailureHandler:
             Event requesting the next node attempt.
 
         """
+        # No wait here: the dispatcher serializes every state transition, so a sleep
+        # would hold back the results of independent parallel branches, the scheduling
+        # of downstream nodes and every abort or pause for the whole interval (#402).
         node = self._graph.nodes[event.node_id]
 
-        time.sleep(node.retry_config.retry_interval_seconds)
         return NodeRunRetryEvent(
             id=event.id,
             node_title=node.title,
