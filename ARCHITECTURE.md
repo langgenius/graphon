@@ -167,21 +167,46 @@ child replies and discards undisplayed text. See the
 [reply ordering tests](tests/engine/test_response_reply_ordering.py) for
 buffering and continuation after item failure.
 
-For a root-only pause, save runtime and filter checkpoints from the same pause
-after consuming the filtered stream. Rebuild the engine and load the filter
-checkpoint into a fresh filter before consuming resumed events. The
-[response filter snapshot module](src/graphon/engine/filter/builtin/response_stream/snapshot.py)
-parses saved state and migrates older versions when bound to their graph. The
-[paired checkpoint tests](tests/engine/test_response_stream_pause.py) exercise
-both historical and current snapshots through command and human-input pauses.
+The filter's [v4 snapshot](src/graphon/engine/filter/builtin/response_stream/v4.py)
+persists the run identity, detached values and templates, source attempts and
+occurrence positions, traversal, pending replies, and numeric/nested display order.
+Each frame stores either consumed edge decisions or retained legacy residual paths;
+native decisions and legacy paths cannot be mixed.
+Queued replies survive removal of their execution frames. Repeated frame-start
+observations and `initialize()` calls preserve progress for the same persisted
+root execution identity; a new run of the same workflow starts fresh. Snapshot
+validation completes before replacing live progress, and missing or mismatched
+resumed frame progress raises an explicit error.
 
-Filter checkpoints cover root responses only. Both `dumps()` and `loads()`
-reject state with a pending container reply reservation or a child frame that
-has started with an Answer or End template. The latter restriction lasts for
-the whole run, even after that frame finishes. The filter also rejects resumption
-of a child frame in a container with descendant responses. Follow
-[child response checkpoint work](https://github.com/langgenius/graphon/issues/356)
-for that extension.
+Fully consume `filter_engine_events(engine.run(), ...)` through a pause and iterator
+exhaustion before saving both `engine.runtime_state.dumps()` and
+`response_filter.dumps()`. Restore the engine from that runtime snapshot and call
+`response_filter.loads()` with its paired filter snapshot before filtering the
+resumed run. Use `EngineEventFilterContext.from_engine()` with the rebuilt engine;
+rebind host file adapters there. Runtime snapshots alone cannot recover display
+history. The once-only guarantee covers this drained, quiescent pause boundary,
+not network acknowledgements or crash recovery.
+
+The [v1](src/graphon/engine/filter/builtin/response_stream/v1.py),
+[v2](src/graphon/engine/filter/builtin/response_stream/v2.py), and
+[v3](src/graphon/engine/filter/builtin/response_stream/v3.py) readers retain root
+response progress. Versions 1 and 2 retain their residual blocking paths; v1 also
+maps full-graph IDs to root-scoped IDs. Version 3 preserves residual paths or
+consumed edge decisions, with rejection winning when historical taken/rejected
+lists overlap. Old snapshots without observed skipped edges retain the paired
+graph's skip lookup. These historical snapshots cannot establish child display
+history or ordering, so their restored run suppresses child presentation, including
+newly scheduled rounds; completed legacy frames are treated as drained. Root replies
+and ordinary Answer `answer`/`files` results remain available alongside graph, node, and frame-finish
+lifecycle events. A later snapshot preserves this suppression policy; a new run
+starts with child streaming enabled.
+The [pause/resume tests](tests/engine/test_response_stream_resume.py) cover paired
+restoration, removed frames, between-round pauses, repeated observations, legacy
+child suppression, invalid state, and host file adapter rebinding.
+The [response filter tests](tests/engine/test_response_stream_filter.py) cover
+native and historical gating state; [paired pause checkpoints](tests/engine/test_response_stream_pause.py)
+exercise historical runtime/filter snapshots. The [version isolation test](tests/test_snapshot_version_isolation.py)
+keeps current snapshots independent of historical readers.
 
 ## State and execution invariants
 
@@ -248,9 +273,10 @@ wire response filters. Supply host adapters again when rebuilding from snapshots
 See [host file conversion tests](tests/variables/test_workflow_type_encoder.py)
 for rendering within that adapter scope.
 
-Persist after fully consuming the run iterator or from a quiescent `on_graph_end`
-hook. Hosts must also coordinate direct mutation of exposed runtime objects: the
-snapshot guard tracks engine activity, so it cannot protect arbitrary host writes.
+Persist runtime state after fully consuming the run iterator or from a quiescent
+`on_graph_end` hook. Hosts must also coordinate direct mutation of exposed runtime
+objects: the snapshot guard tracks engine activity, so it cannot protect arbitrary
+host writes.
 
 ## Extension seams
 

@@ -1,0 +1,86 @@
+{
+  "active_session": {
+    "index": 1,
+    "node_id": "answer"
+  },
+  "closed_streams": [],
+  "node_execution_ids": {
+    "answer": "answer-run",
+    "branch": "branch-run",
+    "skipped": "skipped-run",
+    "source": "source-run"
+  },
+  "paths_map": {
+    "answer": [
+      []
+    ]
+  },
+  "pending_sessions": [],
+  "response_nodes": [
+    "answer"
+  ],
+  "stream_buffers": [
+    {
+      "events": [
+        {
+          "chunk": "first",
+          "container_id": "container",
+          "frame_id": "root",
+          "id": "source-run",
+          "is_final": false,
+          "node_id": "source",
+          "node_run_result": {
+            "edge_source_handle": "source",
+            "error": "",
+            "error_type": "",
+            "inputs": {},
+            "llm_usage": {
+              "completion_price": "0.0",
+              "completion_price_unit": "0.0",
+              "completion_tokens": 0,
+              "completion_unit_price": "0.0",
+              "currency": "USD",
+              "latency": 0.0,
+              "prompt_price": "0.0",
+              "prompt_price_unit": "0.0",
+              "prompt_tokens": 0,
+              "prompt_unit_price": "0.0",
+              "time_to_first_token": null,
+              "time_to_generate": null,
+              "total_price": "0.0",
+              "total_tokens": 0
+            },
+            "metadata": {},
+            "outputs": {},
+            "process_data": {},
+            "retry_index": 0,
+            "status": "pending"
+          },
+          "node_type": "template-transform",
+          "node_version": "1",
+          "retry_index": 0,
+          "selector": [
+            "source",
+            "output"
+          ]
+        }
+      ],
+      "selector": [
+        "source",
+        "output"
+      ]
+    }
+  ],
+  "stream_positions": [
+    {
+      "position": 1,
+      "selector": [
+        "source",
+        "output"
+      ]
+    }
+  ],
+  "type": "ResponseStreamFilter",
+  "version": "2.0",
+  "waiting_sessions": []
+}

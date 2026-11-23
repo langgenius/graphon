@@ -862,14 +862,14 @@ def test_response_stream_filter_initialize_resets_run_state() -> None:
     assert [event.chunk for event in second_chunks] == ["second"]
 
 
-def test_response_stream_filter_writes_version_3_snapshot() -> None:
+def test_response_stream_filter_writes_version_4_snapshot() -> None:
     graph = _variable_response_graph()
     event_filter = ResponseStreamFilter()
     event_filter.initialize(_context(graph))
 
     snapshot = json.loads(event_filter.dumps())
 
-    assert snapshot["version"] == "3.0"
+    assert snapshot["version"] == "4.0"
 
 
 def test_response_stream_filter_migrates_v1_root_state_after_graph_binding() -> None:
@@ -894,20 +894,12 @@ def test_response_stream_filter_migrates_v1_root_state_after_graph_binding() -> 
         restored_filter.dumps()
     restored_filter.initialize(_context(graph))
 
-    assert json.loads(restored_filter.dumps()) == {
-        "type": "ResponseStreamFilter",
-        "version": "3.0",
-        "response_nodes": ["answer"],
-        "active_session": None,
-        "waiting_sessions": [],
-        "pending_sessions": [{"node_id": "answer", "index": 0}],
-        "node_execution_ids": {},
-        "legacy_paths_map": {"answer": [["edge_0"]]},
-        "taken_edges": [],
-        "stream_buffers": [],
-        "stream_positions": [],
-        "closed_streams": [],
-    }
+    state = json.loads(restored_filter.dumps())["frames"]["root"]
+    assert state["response_nodes"] == ["answer"]
+    assert state["active_session"] is None
+    assert [session["node_id"] for session in state["pending_sessions"]] == ["answer"]
+    assert state["paths_map"] == {"answer": [["edge_0"]]}
+    assert state["stream_buffers"] == []
 
     assert list(restored_filter.on_event(_stream_chunk("value"))) == []
     output = list(restored_filter.on_event(_edge_taken(edge_id="edge_0")))
@@ -931,7 +923,7 @@ def test_response_stream_filter_migrates_v1_graph_builder_state() -> None:
     restored_filter.loads(_V1_SIMPLE_SNAPSHOT)
     restored_filter.initialize(_context(graph))
 
-    assert json.loads(restored_filter.dumps())["legacy_paths_map"] == {
+    assert json.loads(restored_filter.dumps())["frames"]["root"]["paths_map"] == {
         "answer": [["edge_0"]]
     }
 
@@ -992,7 +984,7 @@ def test_response_stream_filter_round_trips_resume_state() -> None:
 
 
 @pytest.mark.parametrize("initialize_before_load", [False, True])
-def test_response_stream_filter_restores_partly_consumed_v3_gates(
+def test_response_stream_filter_restores_partly_consumed_gates(
     initialize_before_load: bool,
 ) -> None:
     response_graph = _variable_response_graph()
@@ -1041,10 +1033,12 @@ def test_response_stream_filter_restores_partly_consumed_v3_gates(
 @pytest.mark.parametrize("decision_field", ["taken_edges", "rejected_edges"])
 @pytest.mark.parametrize("legacy_paths", [{}, {"answer": [["edge-1"]]}])
 @pytest.mark.parametrize("initialize_before_load", [False, True])
-def test_response_stream_filter_rejects_mixed_v3_gating_modes(
+@pytest.mark.parametrize("version", ["3.0", "4.0"])
+def test_response_stream_filter_rejects_mixed_gating_modes(
     decision_field: str,
     legacy_paths: dict[str, list[list[str]]],
     initialize_before_load: bool,
+    version: str,
 ) -> None:
     context = _context(_variable_response_graph())
     event_filter = ResponseStreamFilter()
@@ -1055,12 +1049,19 @@ def test_response_stream_filter_rejects_mixed_v3_gating_modes(
         pending_filter = ResponseStreamFilter()
         pending_filter.loads(event_filter.dumps())
         event_filter = pending_filter
-    mixed_snapshot = json.dumps({
-        "type": "ResponseStreamFilter",
-        "version": "3.0",
-        "legacy_paths_map": legacy_paths,
-        decision_field: ["edge-1"],
-    })
+    if version == "3.0":
+        mixed_snapshot = json.dumps({
+            "type": "ResponseStreamFilter",
+            "version": version,
+            "legacy_paths_map": legacy_paths,
+            decision_field: ["edge-1"],
+        })
+    else:
+        saved_snapshot = json.loads(event_filter.dumps())
+        saved_snapshot["frames"]["root"].update(
+            paths_map=legacy_paths, **{decision_field: ["edge-1"]}
+        )
+        mixed_snapshot = json.dumps(saved_snapshot)
 
     with pytest.raises(ValidationError):
         event_filter.loads(mixed_snapshot)

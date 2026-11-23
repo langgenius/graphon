@@ -30,7 +30,7 @@ from graphon.runtime.runtime_state_protocol import ReadOnlyVariablePool
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.variables import Variable
 
-from . import snapshot, v3
+from . import snapshot
 from .ids import EdgeID, NodeID
 from .reachability import _EdgeDecision, _ResponseReachability
 from .reply_order import _Reply, _ReplyOrder
@@ -84,6 +84,7 @@ class _FrameSession:
         container_id: str = "",
         pass_unmatched_chunks: bool = False,
     ) -> None:
+        self.start_event: FrameStartedEvent | None = None
         self.graph = graph
         self.variable_pool = variable_pool
         self.frame_id = frame_id
@@ -103,10 +104,6 @@ class _FrameSession:
         self._response_sessions: dict[NodeID, _ResponseSession] = {}
         self._referenced_selectors: set[_Selector] = set()
 
-    @property
-    def has_responses(self) -> bool:
-        return bool(self._response_node_ids)
-
     def register_responses(self) -> None:
         gating_state = self._gating_state
         if not isinstance(gating_state, _ReachabilityState):
@@ -120,6 +117,25 @@ class _FrameSession:
                 self._register_response(NodeID(node.id), gating_state)
 
     def start(self, event: FrameStartedEvent) -> list[EngineEvent]:
+        if self.start_event is not None:
+            previous = self.start_event
+            if any(
+                getattr(previous, key) != getattr(event, key)
+                for key in (
+                    "frame_id",
+                    "parent_frame_id",
+                    "container_id",
+                    "invocation_id",
+                    "container_execution_id",
+                    "root_node_id",
+                    "index",
+                    "node_execution_ids",
+                )
+            ):
+                msg = f"Mismatched response progress for frame {event.frame_id}"
+                raise ValueError(msg)
+            return []
+        self.start_event = event.model_copy(update={"variables": ()}, deep=True)
         self._observed_values = VariablePool()
         self.variable_pool = self._observed_values
         if event.reason == WorkflowStartReason.INITIAL:
@@ -222,58 +238,11 @@ class _FrameSession:
             gating_state.first_edge_decisions.setdefault(edge_id, _EdgeDecision.SKIPPED)
         return self._try_flush()
 
-    def dump_state(self) -> v3.Snapshot:
-        gating_state = self._gating_state
-        if isinstance(gating_state, _ReachabilityState):
-            taken_edges = sorted(
-                edge_id
-                for edge_id, decision in gating_state.first_edge_decisions.items()
-                if decision is _EdgeDecision.TAKEN
-            )
-            rejected_edges = sorted(
-                edge_id
-                for edge_id, decision in gating_state.first_edge_decisions.items()
-                if decision is _EdgeDecision.SKIPPED
-            )
-            legacy_paths_map = None
-        else:
-            taken_edges = []
-            rejected_edges = []
-            legacy_paths_map = {
-                node_id: [path.edge_ids.copy() for path in paths]
-                for node_id, paths in sorted(gating_state.paths_by_response.items())
-            }
-        return v3.Snapshot(
-            skipped_edges=sorted(self._skipped_edge_ids)
-            if self._skipped_edge_ids is not None
-            else None,
-            response_nodes=[
-                str(node_id) for node_id in sorted(self._response_node_ids)
-            ],
-            active_session=self._serialize_session(self._active_session),
-            waiting_sessions=[
-                session_state
-                for session in list(self._waiting_sessions)
-                if (session_state := self._serialize_session(session)) is not None
-            ],
-            pending_sessions=[
-                session_state
-                for _, session in sorted(self._response_sessions.items())
-                if (session_state := self._serialize_session(session)) is not None
-            ],
-            node_execution_ids=dict(
-                sorted(self._template_stream.node_execution_ids.items())
-            ),
-            taken_edges=taken_edges,
-            rejected_edges=rejected_edges,
-            legacy_paths_map=legacy_paths_map,
-            stream_buffers=self._template_stream.stream_buffers.dump_buffers(),
-            stream_positions=self._template_stream.stream_buffers.dump_positions(),
-            closed_streams=self._template_stream.stream_buffers.dump_closed_selectors(),
-        )
-
     def load_state(self, state: ResponseStreamFilterSnapshot) -> None:
         state = snapshot.for_graph(state, self.graph)
+        # Current snapshots must remain usable after retiring legacy codecs.
+        from . import v3  # ruff: ignore[import-outside-top-level]
+
         if not isinstance(state, v3.Snapshot):
             msg = "Expected migrated version 3 ResponseStreamFilter state"
             raise TypeError(msg)
@@ -639,14 +608,6 @@ class _FrameSession:
         ]
         self._active_session = ordered_sessions[0] if ordered_sessions else None
         self._waiting_sessions = deque(ordered_sessions[1:])
-
-    def _serialize_session(
-        self,
-        session: _ResponseSession | None,
-    ) -> ResponseSessionState | None:
-        if session is None:
-            return None
-        return ResponseSessionState(node_id=session.node_id, index=session.index)
 
     def _session_from_state(
         self,

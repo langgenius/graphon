@@ -34,11 +34,16 @@ class StreamPositionState(BaseModel):
     position: int = Field(default=0, ge=0)
 
 
-class ResponseStreamFilterSnapshot[VersionT: str](BaseModel):
-    """Fields shared by every persisted ResponseStreamFilter version."""
+class SnapshotHeader[VersionT: str](BaseModel):
+    """Version envelope shared by filter codecs."""
 
     type: Literal["ResponseStreamFilter"] = "ResponseStreamFilter"
     version: VersionT
+
+
+class ResponseStreamFilterSnapshot[VersionT: str](SnapshotHeader[VersionT]):
+    """Response fields shared by historical versions 1, 2, and 3."""
+
     response_nodes: list[str] = Field(default_factory=list)
     active_session: ResponseSessionState | None = None
     waiting_sessions: list[ResponseSessionState] = Field(default_factory=list)
@@ -49,7 +54,7 @@ class ResponseStreamFilterSnapshot[VersionT: str](BaseModel):
     closed_streams: list[Selector] = Field(default_factory=list)
 
 
-def loads(data: str) -> ResponseStreamFilterSnapshot:
+def loads(data: str) -> SnapshotHeader:
     """Parse persisted filter state through its version-owned module.
 
     This shared boundary reads only the ``version`` header, derives the matching
@@ -77,10 +82,10 @@ def loads(data: str) -> ResponseStreamFilterSnapshot:
         raise TypeError(msg)
 
     loader = _version_module(version).loads
-    return cast(ResponseStreamFilterSnapshot, loader(data))
+    return cast(SnapshotHeader, loader(data))
 
 
-def dumps(snapshot: ResponseStreamFilterSnapshot) -> str:
+def dumps(snapshot: SnapshotHeader) -> str:
     """Serialize filter state through the module that owns its version.
 
     Delegation lets a version module prohibit unsafe output until its migration is
@@ -101,19 +106,18 @@ def for_graph(
     snapshot: ResponseStreamFilterSnapshot,
     graph: GraphProtocol,
 ) -> ResponseStreamFilterSnapshot:
-    """Bind loaded filter state to a graph at the version boundary.
+    """Bind historical response state to the root graph.
 
-    Current snapshots are returned unchanged. Legacy modules may use the graph to
-    translate persisted identifiers and return the current snapshot model. Keeping
-    that work behind this dispatch prevents migration rules from entering the filter
-    runtime.
+    Versions 1 and 2 migrate to version 3 root state, retaining residual paths;
+    version 1 also translates full-graph identifiers. Version 3 is already scoped.
+    Current version 4 snapshots restore complete frame state through their own codec.
 
     Args:
-        snapshot: Exact version state previously returned by ``loads``.
+        snapshot: Version 1, 2, or 3 state previously returned by ``loads``.
         graph: Root graph that will own the restored filter.
 
     Returns:
-        Snapshot state that the runtime can apply to the bound graph.
+        Version 3 root state that the filter can apply to the bound graph.
     """
     prepare = _version_module(snapshot.version).for_graph
     return cast(ResponseStreamFilterSnapshot, prepare(snapshot, graph))
@@ -130,7 +134,7 @@ def _version_module(version: str) -> ModuleType:
         version: Persisted snapshot version such as ``"2.0"``.
 
     Returns:
-        Imported module that owns parsing, serialization, and graph binding.
+        Imported module that owns the version's codec.
 
     Raises:
         ValueError: If the version syntax is invalid or its module is absent.

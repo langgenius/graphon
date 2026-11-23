@@ -119,9 +119,7 @@ def test_diamond_initialization_and_retained_state_are_bounded(
 ) -> None:
     graph = _AdjacencyCallLimitGraph(_build_diamond_chain(stage_count))
     context = _context(graph)
-    borrowed_object_ids = set(_collect_referenced_objects(graph)) | set(
-        _collect_referenced_objects(context.runtime_state.variable_pool)
-    )
+    borrowed_object_ids = set(_collect_referenced_objects(context))
     event_filter = ResponseStreamFilter()
     event_filter.initialize(context)
     assert 0 < graph.adjacency_calls <= graph.adjacency_call_limit
