@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-12T01:14:36Z"
+last_checked: "2026-11-19T01:18:53Z"
 -->
 # Technical debt
 
@@ -49,9 +49,20 @@ and [extractor](../tests/nodes/parameter_extractor/test_prompts.py) behavior.
 
 Document-extraction packages are mandatory in [pyproject.toml](../pyproject.toml),
 and [the extractor](../src/graphon/nodes/document_extractor/node.py) imports several
-eagerly. Minimal engine consumers inherit these dependencies, including the Python
-upper bound tied to `unstructured`. Measure installation size and startup cost
-before claiming a benefit from optional dependencies.
+eagerly. Minimal engine consumers inherit these dependencies. Measure installation
+size and startup cost before claiming a benefit from optional dependencies.
+
+Graphon's Python requirement and CI matrix include 3.14. A clean
+`pip install .` on 3.14 currently fails because no `unstructured` release
+on PyPI both meets Graphon's minimum version and accepts Python 3.14.
+The lockfile selects `unstructured` 0.27.37, which declares
+`Requires-Python: <3.14,>=3.11`. See [project metadata](../pyproject.toml),
+the [lockfile](../uv.lock), and the
+[distribution metadata](https://pypi.org/project/unstructured/0.27.37/#meta).
+
+The CI test workflow resolves dependencies with `uv`, which ignores dependency
+Python upper bounds. See the [CI matrix](../.github/workflows/test.yml) and
+[uv resolution rules](https://docs.astral.sh/uv/concepts/resolution/#universal-resolution).
 
 Consider one document-extraction extra within the existing distribution. Isolate
 its imports, provide an actionable missing-extra error, retain a fully equipped
@@ -61,11 +72,7 @@ separately if needed.
 
 **Completion:** a clean base-only installation executes a minimal graph; the full
 extra passes [extractor tests](../tests/nodes/document_extractor/) and package/lockfile
-checks. Moving `unstructured` alone does not establish Python 3.14 support; verify
-the remaining dependencies and version matrix before changing that claim.
-Continue the separate Python support work in
-[issue #386](https://github.com/langgenius/graphon/issues/386) and
-[PR #392](https://github.com/langgenius/graphon/pull/392), which are still open.
+checks. Verify clean dependency resolution for the supported Python versions.
 
 ## TD-08 — Offline execution example
 
@@ -86,15 +93,15 @@ successful node order. Keep the example small enough to serve as a reproduction.
 The [benchmark](../benchmarks/test_engine_performance.py) does not isolate the
 response-filter initialization cost, leaving a gap in performance feedback.
 
-Continue [PR #271](https://github.com/langgenius/graphon/pull/271) for the known
-response-filter initialization path and
+Use the [response gating regressions](development.md#response-gating-regressions)
+for deterministic coverage. Continue
 [PR #266](https://github.com/langgenius/graphon/pull/266) for benchmark instructions.
-Prefer deterministic complexity checks for that path and identify which phase a
-measurement covers. Add timing workloads only for a specific performance question.
+Identify which phase a measurement covers and add timing workloads only for a
+specific performance question.
 
-**Completion:** a runnable filter regression preserves output correctness, the
-command is discoverable, and results distinguish construction, initialization,
-and execution. Preserve existing benchmarks and
+**Completion:** performance commands are discoverable, and results distinguish
+construction, initialization, and execution. Preserve output correctness,
+existing benchmarks, and
 [response-filter tests](../tests/engine/test_response_stream_filter.py).
 
 ## TD-10 — Decision records

@@ -2,19 +2,25 @@ from __future__ import annotations
 
 from typing import Literal
 
+from pydantic import Field
+
 from graphon.runtime.runtime_state import GraphProtocol
 
+from . import v3
+from .ids import EdgeID, NodeID
 from .snapshot import ResponseStreamFilterSnapshot
 
 
 class Snapshot(ResponseStreamFilterSnapshot[Literal["2.0"]]):
-    """ResponseStreamFilter snapshot written by Graphon 0.8."""
+    """Legacy root-scoped snapshot with explicit residual blocking paths."""
 
     version: Literal["2.0"] = "2.0"
+    paths_map: dict[str, list[list[str]]] = Field(default_factory=dict)
+    skipped_edges: list[str] | None = None
 
 
 def loads(data: str) -> Snapshot:
-    """Validate JSON against the exact current version 2 schema.
+    """Validate JSON against the exact legacy version 2 schema.
 
     Args:
         data: Serialized ResponseStreamFilter state whose version must be ``2.0``.
@@ -26,7 +32,7 @@ def loads(data: str) -> Snapshot:
 
 
 def dumps(snapshot: ResponseStreamFilterSnapshot) -> str:
-    """Serialize native version 2 state without compatibility metadata.
+    """Serialize state using the exact legacy version 2 schema.
 
     Args:
         snapshot: State that must be an instance of this module's exact model.
@@ -40,24 +46,27 @@ def dumps(snapshot: ResponseStreamFilterSnapshot) -> str:
     if not isinstance(snapshot, Snapshot):
         msg = "Expected a version 2 ResponseStreamFilter snapshot"
         raise TypeError(msg)
-    return snapshot.model_dump_json()
+    return snapshot.model_dump_json(
+        exclude={"skipped_edges"} if snapshot.skipped_edges is None else set()
+    )
 
 
 def for_graph(
     snapshot: ResponseStreamFilterSnapshot,
     graph: GraphProtocol,
-) -> Snapshot:
-    """Confirm native version 2 state at graph-binding time.
+) -> v3.Snapshot:
+    """Preserve version 2 residual paths while upgrading the checkpoint version.
 
-    Version 2 already stores graph-scoped public IDs, so binding requires no graph
-    rewrite. This function exists as the version module's uniform dispatch target.
+    Residual paths describe the filter's event consumption, which cannot be
+    inferred from the live graph. Version 3 retains these explicit conditions for
+    restored legacy runs without enumerating any new paths.
 
     Args:
         snapshot: State that must be an instance of this module's exact model.
-        graph: Bound graph; unused because v2 needs no migration.
+        graph: Bound graph; public v2 IDs require no translation.
 
     Returns:
-        The same validated version 2 snapshot.
+        Version 3 state retaining legacy gating and stream/session progress.
 
     Raises:
         TypeError: If another version model is passed to the v2 binder.
@@ -66,4 +75,10 @@ def for_graph(
     if not isinstance(snapshot, Snapshot):
         msg = "Expected a version 2 ResponseStreamFilter snapshot"
         raise TypeError(msg)
-    return snapshot
+    return v3.Snapshot(
+        **snapshot.model_dump(exclude={"version", "paths_map"}),
+        legacy_paths_map={
+            NodeID(node_id): [[EdgeID(edge_id) for edge_id in path] for path in paths]
+            for node_id, paths in snapshot.paths_map.items()
+        },
+    )

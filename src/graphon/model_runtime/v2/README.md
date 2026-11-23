@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-16T06:22:31Z"
+last_checked: "2026-11-23T18:29:24Z"
 -->
 # Model Runtime V2
 

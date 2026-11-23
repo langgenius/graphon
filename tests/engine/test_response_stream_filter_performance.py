@@ -5,10 +5,16 @@ from typing import Any
 import pytest
 
 from graphon.engine.filter import ResponseStreamFilter
+from graphon.engine_events.base import EngineEvent
+from graphon.engine_events.graph import GraphRunStartedEvent
+from graphon.engine_events.node import NodeRunStreamChunkEvent
+from graphon.engine_events.traversal import GraphEdgeTakenEvent
 from graphon.enums import NodeExecutionType, NodeState
 from graphon.nodes.base.template import Template, VariableSegment
 from tests.engine.test_response_stream_filter import (
     _context,
+    _edge_taken,
+    _stream_chunk,
     _TestEdge,
     _TestGraph,
     _TestNode,
@@ -30,15 +36,13 @@ def _reference_paths(
     graph: _TestGraph,
     current_node_id: str,
     target_node_id: str,
-    current_path: list[str] | None = None,
-    visited: set[str] | None = None,
 ) -> list[list[str]]:
     """Enumerate paths with an independent DFS, without reverse pruning."""
     stack = [
         (
             current_node_id,
-            [] if current_path is None else current_path.copy(),
-            set() if visited is None else visited.copy(),
+            [],
+            set(),
         )
     ]
     paths: list[list[str]] = []
@@ -57,7 +61,7 @@ def _reference_paths(
     return paths
 
 
-def _diamond_with_dead_branch(*, layers: int = 6) -> _CountingGraph:
+def _diamond_with_dead_branch(*, layers: int = 8) -> _CountingGraph:
     nodes = {node_id: _TestNode(node_id) for node_id in ("root", "live", "dead")}
     nodes["answer"] = _TestNode(
         "answer",
@@ -114,209 +118,134 @@ def _diamond_with_dead_branch(*, layers: int = 6) -> _CountingGraph:
     )
 
 
-def test_response_filter_paths_keep_parallel_edges_with_distinct_source_handles() -> (
-    None
-):
-    root = _TestNode("root")
-    answer = _TestNode(
-        "answer",
-        execution_type=NodeExecutionType.RESPONSE,
-        template=Template(segments=[VariableSegment(selector=["root", "answer"])]),
+def _reference_blocking_paths(
+    graph: _TestGraph, selector: Sequence[str]
+) -> list[set[str]]:
+    response = next(
+        node
+        for node in graph.nodes.values()
+        if node.execution_type == NodeExecutionType.RESPONSE
     )
-    success_edge = _TestEdge("root-success", "root", "answer")
+    reference_graph = _TestGraph(
+        nodes=graph.nodes, edges=graph.edges, root_node_id=graph.root_node.id
+    )
+    selectors = {tuple(selector[:2])}
+    blocking_types = {
+        NodeExecutionType.BRANCH,
+        NodeExecutionType.CONTAINER,
+        NodeExecutionType.RESPONSE,
+    }
+    blocking_edge_ids = {
+        edge.id
+        for edge in graph.edges.values()
+        if graph.nodes[edge.tail].execution_type in blocking_types
+        or graph.nodes[edge.tail].blocks_variable_output(selectors)
+    }
+    return [
+        set(path) & blocking_edge_ids
+        for path in _reference_paths(reference_graph, graph.root_node.id, response.id)
+    ]
+
+
+def _assert_activation_matches_paths(graph: _TestGraph, *, seed: int = 0) -> None:
+    response = next(
+        node
+        for node in graph.nodes.values()
+        if node.execution_type == NodeExecutionType.RESPONSE
+    )
+    segment = response.get_streaming_template().segments[0]
+    assert isinstance(segment, VariableSegment)
+    selector = segment.selector
+    blocking_paths = _reference_blocking_paths(graph, selector)
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph))
+    chunk = _stream_chunk("value", source_id=selector[0], selector=selector)
+    assert list(event_filter.on_event(chunk)) == []
+    edge_ids = list(graph.edges)
+    random.Random(seed).shuffle(edge_ids)  # ruff: ignore[suspicious-non-cryptographic-random-usage] - deterministic traversal order
+    events: list[EngineEvent] = [GraphRunStartedEvent()]
+    for edge_id in [*edge_ids, *edge_ids[:2]]:
+        edge = graph.edges[edge_id]
+        events.append(
+            _edge_taken(edge_id=edge.id, source_id=edge.tail, answer_id=edge.head)
+        )
+    taken_edge_ids: set[str] = set()
+    emitted = False
+    for event in events:
+        if isinstance(event, GraphEdgeTakenEvent):
+            taken_edge_ids.add(event.edge_id)
+        ready = any(path <= taken_edge_ids for path in blocking_paths)
+        output = [
+            value.chunk
+            for value in event_filter.on_event(event)
+            if isinstance(value, NodeRunStreamChunkEvent)
+        ]
+        assert output == (["value"] if ready and not emitted else [])
+        emitted = emitted or ready
+
+
+@pytest.mark.parametrize("skipped_in_live_graph", [False, True])
+@pytest.mark.parametrize("selected_edge_id", ["edge-1", "failure"])
+def test_response_filter_keeps_parallel_handles_and_ignores_live_edge_state(
+    skipped_in_live_graph: bool,
+    selected_edge_id: str,
+) -> None:
+    graph = _variable_response_graph()
+    graph.nodes["source"].execution_type = NodeExecutionType.BRANCH
+    success_edge = graph.edges["edge-1"]
     success_edge.source_handle = "success"
-    failure_edge = _TestEdge("root-failure", "root", "answer")
+    failure_edge = _TestEdge("failure", "source", "answer")
     failure_edge.source_handle = "failure"
-    graph = _TestGraph(
-        nodes={"root": root, "answer": answer},
-        edges={
-            success_edge.id: success_edge,
-            failure_edge.id: failure_edge,
-        },
-        root_node_id="root",
-    )
+    graph.edges[failure_edge.id] = failure_edge
+    if skipped_in_live_graph:
+        success_edge.state = NodeState.SKIPPED
     event_filter = ResponseStreamFilter()
     event_filter.initialize(_context(graph))
-
-    assert {success_edge.source_handle, failure_edge.source_handle} == {
-        "success",
-        "failure",
-    }
-    assert event_filter._find_all_paths("root", "answer") == [
-        ["root-success"],
-        ["root-failure"],
-    ]
-
-
-def test_response_filter_paths_keep_skipped_edge_for_otherwise_reachable_target() -> (
-    None
-):
-    root = _TestNode("root")
-    live = _TestNode("live")
-    answer = _TestNode(
-        "answer",
-        execution_type=NodeExecutionType.RESPONSE,
-        template=Template(segments=[VariableSegment(selector=["root", "answer"])]),
-    )
-    skipped_edge = _TestEdge("root-skipped", "root", "answer")
-    skipped_edge.state = NodeState.SKIPPED
-    graph = _TestGraph(
-        nodes={"root": root, "live": live, "answer": answer},
-        edges={
-            skipped_edge.id: skipped_edge,
-            "root-live": _TestEdge("root-live", "root", "live"),
-            "live-answer": _TestEdge("live-answer", "live", "answer"),
-        },
-        root_node_id="root",
-    )
-    event_filter = ResponseStreamFilter()
-    event_filter.initialize(_context(graph))
-
-    assert event_filter._find_all_paths("root", "answer") == [
-        ["root-skipped"],
-        ["root-live", "live-answer"],
-    ]
-
-
-def test_response_filter_builds_selector_specific_blocking_paths_per_response() -> None:
-    nodes = {
-        "root": _TestNode("root"),
-        "shared": _TestNode("shared"),
-        "merge": _TestNode("merge"),
-        "other": _TestNode("other"),
-        "answer-a": _TestNode(
-            "answer-a",
-            execution_type=NodeExecutionType.RESPONSE,
-            template=Template(
-                segments=[VariableSegment(selector=["shared", "answer"])],
-            ),
-        ),
-        "answer-b": _TestNode(
-            "answer-b",
-            execution_type=NodeExecutionType.RESPONSE,
-            template=Template(
-                segments=[VariableSegment(selector=["other", "answer"])],
-            ),
-        ),
-    }
-    graph = _TestGraph(
-        nodes=nodes,
-        edges={
-            "root-shared": _TestEdge("root-shared", "root", "shared"),
-            "shared-merge": _TestEdge("shared-merge", "shared", "merge"),
-            "merge-answer-a": _TestEdge("merge-answer-a", "merge", "answer-a"),
-            "merge-answer-b": _TestEdge("merge-answer-b", "merge", "answer-b"),
-            "root-other": _TestEdge("root-other", "root", "other"),
-            "other-answer-b": _TestEdge("other-answer-b", "other", "answer-b"),
-        },
-        root_node_id="root",
-    )
-    event_filter = ResponseStreamFilter()
-    event_filter.initialize(_context(graph))
-
-    assert [path.edges for path in event_filter._paths_maps["answer-a"]] == [
-        ["shared-merge"],
-    ]
-    assert [path.edges for path in event_filter._paths_maps["answer-b"]] == [
-        [],
-        ["other-answer-b"],
-    ]
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    chunk = _stream_chunk("value")
+    assert list(event_filter.on_event(chunk)) == []
+    selected_edge = graph.edges[selected_edge_id]
+    taken_event = _edge_taken(edge_id=selected_edge.id)
+    taken_event.source_handle = selected_edge.source_handle
+    assert list(event_filter.on_event(taken_event)) == [chunk]
 
 
 def test_response_filter_reinitialization_recomputes_selector_dependent_blocking() -> (
     None
 ):
-    first_graph = _variable_response_graph(selector=["source", "answer"])
-    second_graph = _variable_response_graph(selector=["other", "answer"])
     event_filter = ResponseStreamFilter()
-
+    first_graph = _variable_response_graph(selector=["source", "answer"])
     event_filter.initialize(_context(first_graph))
-    assert [path.edges for path in event_filter._paths_maps["answer"]] == [["edge-1"]]
-
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    assert list(event_filter.on_event(_stream_chunk("blocked"))) == []
+    second_graph = _variable_response_graph(selector=["source", "text"])
     event_filter.initialize(_context(second_graph))
-    assert [path.edges for path in event_filter._paths_maps["answer"]] == [[]]
+    list(event_filter.on_event(GraphRunStartedEvent()))
+    chunk = _stream_chunk("streaming", selector=["source", "text"])
+    assert list(event_filter.on_event(chunk)) == [chunk]
 
 
-def test_response_filter_find_all_paths_handles_root_target_with_backedge() -> None:
+def test_response_filter_activates_root_response_with_backedge() -> None:
     root = _TestNode(
         "root",
         execution_type=NodeExecutionType.RESPONSE,
-        template=Template(segments=[]),
+        template=Template(segments=[VariableSegment(selector=["root", "answer"])]),
     )
-    branch = _TestNode("branch")
     graph = _TestGraph(
-        nodes={"root": root, "branch": branch},
+        nodes={"root": root, "branch": _TestNode("branch")},
         edges={
-            "root-branch": _TestEdge("root-branch", "root", "branch"),
-            "branch-root": _TestEdge("branch-root", "branch", "root"),
+            "out": _TestEdge("out", "root", "branch"),
+            "back": _TestEdge("back", "branch", "root"),
         },
         root_node_id="root",
     )
-    event_filter = ResponseStreamFilter()
-    event_filter.initialize(_context(graph))
-
-    assert event_filter._find_all_paths("root", "root") == [[]]
-    assert event_filter._find_all_paths("branch", "root") == [["branch-root"]]
+    _assert_activation_matches_paths(graph)
 
 
-def test_response_filter_does_not_expand_dead_branches() -> None:
+def test_response_filter_bounds_work_with_a_dead_diamond_branch() -> None:
     graph = _diamond_with_dead_branch()
-    baseline_paths = _reference_paths(graph, "root", "answer")
-    baseline_expansions = len(graph.outgoing_calls)
-    graph.outgoing_calls.clear()
-    event_filter = ResponseStreamFilter()
-
-    event_filter.initialize(_context(graph))
-
-    assert baseline_paths == [["root-live", "live-answer"]]
-    assert len(graph.outgoing_calls) < baseline_expansions
-
-
-def test_response_filter_classifies_each_path_edge_once_per_response(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    nodes = {
-        node_id: _TestNode(node_id) for node_id in ("root", "left", "right", "merge")
-    }
-    nodes["answer"] = _TestNode(
-        "answer",
-        execution_type=NodeExecutionType.RESPONSE,
-        template=Template(segments=[VariableSegment(selector=["root", "answer"])]),
-    )
-    edges = {
-        edge.id: edge
-        for edge in (
-            _TestEdge("root-left", "root", "left"),
-            _TestEdge("root-right", "root", "right"),
-            _TestEdge("left-merge", "left", "merge"),
-            _TestEdge("right-merge", "right", "merge"),
-            _TestEdge("merge-answer", "merge", "answer"),
-        )
-    }
-    graph = _TestGraph(
-        nodes=nodes,
-        edges=edges,
-        root_node_id="root",
-    )
-    event_filter = ResponseStreamFilter()
-    calls: list[str] = []
-    original = event_filter._is_blocking_edge
-
-    def classify_once(edge_id: str, selectors: set[tuple[str, ...]]) -> bool:
-        calls.append(edge_id)
-        return original(edge_id, selectors)
-
-    monkeypatch.setattr(event_filter, "_is_blocking_edge", classify_once)
-
-    event_filter.initialize(_context(graph))
-
-    assert calls == [
-        "root-left",
-        "left-merge",
-        "merge-answer",
-        "root-right",
-        "right-merge",
-    ]
+    _assert_activation_matches_paths(graph)
+    assert len(graph.outgoing_calls) <= 8 * (len(graph.nodes) + len(graph.edges))
 
 
 def _random_cyclic_graph(seed: int) -> _TestGraph:
@@ -341,6 +270,9 @@ def _random_cyclic_graph(seed: int) -> _TestGraph:
         execution_type=NodeExecutionType.RESPONSE,
         template=Template(segments=[VariableSegment(selector=["n0", "answer"])]),
     )
+    for node_id in node_ids[1:-1]:
+        if rng.random() < 0.5:
+            nodes[node_id].execution_type = NodeExecutionType.BRANCH
     edges = {
         f"edge-{index}": _TestEdge(f"edge-{index}", tail, head)
         for index, (tail, head) in enumerate(edge_pairs)
@@ -349,55 +281,5 @@ def _random_cyclic_graph(seed: int) -> _TestGraph:
 
 
 @pytest.mark.parametrize("seed", range(24))
-def test_response_filter_paths_match_reference_dfs_for_cyclic_graphs(
-    seed: int,
-) -> None:
-    graph = _random_cyclic_graph(seed)
-    event_filter = ResponseStreamFilter()
-    event_filter.initialize(_context(graph))
-
-    actual = event_filter._find_all_paths("n0", "n5")
-    expected = _reference_paths(graph, "n0", "n5")
-
-    assert actual == expected
-
-
-def test_response_filter_preserves_seed_path_and_visited_nodes() -> None:
-    nodes = {node_id: _TestNode(node_id) for node_id in ("root", "cycle", "branch")}
-    nodes["answer"] = _TestNode(
-        "answer",
-        execution_type=NodeExecutionType.RESPONSE,
-        template=Template(segments=[VariableSegment(selector=["root", "answer"])]),
-    )
-    edges = {
-        edge.id: edge
-        for edge in (
-            _TestEdge("root-cycle", "root", "cycle"),
-            _TestEdge("cycle-root", "cycle", "root"),
-            _TestEdge("cycle-branch", "cycle", "branch"),
-            _TestEdge("branch-answer", "branch", "answer"),
-        )
-    }
-    graph = _TestGraph(nodes=nodes, edges=edges, root_node_id="root")
-    event_filter = ResponseStreamFilter()
-    event_filter.initialize(_context(graph))
-
-    actual = event_filter._find_all_paths(
-        "root",
-        "answer",
-        current_path=["seed-edge"],
-        visited={"root"},
-    )
-    expected = _reference_paths(
-        graph,
-        "root",
-        "answer",
-        current_path=["seed-edge"],
-        visited={"root"},
-    )
-
-    assert (
-        actual
-        == expected
-        == [["seed-edge", "root-cycle", "cycle-branch", "branch-answer"]]
-    )
+def test_response_filter_activation_matches_reference_paths(seed: int) -> None:
+    _assert_activation_matches_paths(_random_cyclic_graph(seed), seed=seed)

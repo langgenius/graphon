@@ -8,7 +8,7 @@ def test_current_snapshots_do_not_import_legacy_version_modules() -> None:
 
     The subprocess starts with a clean import graph and marks each removable legacy
     module as unavailable before importing Graphon. A current RuntimeState v3
-    round-trip and ResponseStreamFilter v2 round-trip must still succeed. This
+    round-trip and ResponseStreamFilter v3 round-trip must still succeed. This
     protects the file-level retirement contract without asserting private models or
     migration implementation details.
     """
@@ -20,6 +20,7 @@ def test_current_snapshots_do_not_import_legacy_version_modules() -> None:
         sys.modules["graphon.runtime.runtime_state.v1"] = None
         sys.modules["graphon.runtime.runtime_state.v2"] = None
         sys.modules["graphon.engine.filter.builtin.response_stream.v1"] = None
+        sys.modules["graphon.engine.filter.builtin.response_stream.v2"] = None
 
         from graphon.engine.filter import ResponseStreamFilter
         from graphon.runtime import RuntimeState, VariablePool
@@ -34,9 +35,9 @@ def test_current_snapshots_do_not_import_legacy_version_modules() -> None:
 
         response_filter = ResponseStreamFilter()
         response_filter.loads(
-            json.dumps({"type": "ResponseStreamFilter", "version": "2.0"})
+            json.dumps({"type": "ResponseStreamFilter", "version": "3.0"})
         )
-        assert json.loads(response_filter.dumps())["version"] == "2.0"
+        assert json.loads(response_filter.dumps())["version"] == "3.0"
 
         try:
             RuntimeState.from_snapshot(json.dumps({"version": "1.0"}))

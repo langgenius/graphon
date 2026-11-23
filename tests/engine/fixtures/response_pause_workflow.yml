@@ -1,0 +1,39 @@
+kind: graph
+graph:
+  nodes:
+    - id: start
+      data:
+        type: start
+        variables: []
+    - id: first
+      data:
+        type: human-input
+        title: First approval
+    - id: second
+      data:
+        type: human-input
+        title: Second approval
+    - id: reply
+      data:
+        type: answer
+        answer: 'before|{{#first.answer#}}|middle|{{#second.answer#}}|after'
+    - id: tail
+      data:
+        type: answer
+        answer: '|tail'
+  edges:
+    - id: start-first
+      source: start
+      target: first
+    - id: first-second
+      source: first
+      target: second
+    - id: second-reply
+      source: second
+      target: reply
+    - id: start-reply
+      source: start
+      target: reply
+    - id: reply-tail
+      source: reply
+      target: tail
