@@ -14,7 +14,8 @@ For graph-facing nodes, use the
 
 Implement only the [capability protocols](protocols/) your adapter needs. The
 [aggregate runtime protocol](protocols/runtime.py) is for adapters that
-intentionally provide the complete surface.
+intentionally provide every model capability.
+[ModelProviderRuntime](protocols/provider_runtime.py) defines provider discovery.
 
 Use [ModelProviderFactory](model_providers/model_provider_factory.py) for provider
 discovery and credential validation; use [capability wrappers](model_providers/)

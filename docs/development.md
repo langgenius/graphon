@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-18T08:02:15Z"
+last_checked: "2026-11-19T01:18:53Z"
 -->
 # Development navigation
 
@@ -16,9 +16,8 @@ Choose boundaries around state ownership and callers. Extract a responsibility
 when it has independent ownership or repeated churn; file length alone does not
 justify splitting a module.
 
-For runtime values, let concrete types own their tags, validation, and value replacement.
-Preserve typed values across state transfers and convert to plain values at presentation boundaries, where redaction is a separate responsibility.
-Follow the [variable and container contracts](../ARCHITECTURE.md#state-and-execution-invariants) when changing those boundaries.
+Follow the [variable and container contracts](../ARCHITECTURE.md#state-and-execution-invariants)
+when changing runtime types, state transfers, or presentation values.
 
 | Task | Start in source | Relevant checks |
 | --- | --- | --- |
@@ -101,37 +100,21 @@ and the [independent review sequence](../CONTRIBUTING.md#context-free-reviews).
 
 ### Response gating regressions
 
-Keep performance and behavioral equivalence separate:
-
 - [Complexity tests](../tests/engine/test_response_stream_filter_complexity.py)
-  meter incoming/outgoing adjacency API invocations during `initialize()` on
-  6/12/24-stage diamond chains. For `n` stages, `V=n+2`, `E=2n+1`, and the
-  complete-path count is `2^n`; the middle case retains ENG-1501's
-  14-node/25-edge/4,096-path graph. The wrapper raises when its budget is exceeded,
-  avoiding a timing threshold or an unbounded exponential baseline run.
-  Two adjacency passes per response fit within `2RV <= 2V^2 <= 4VE`, since
-  `R <= V` and these connected fixtures have `E >= V-1`, `V >= 2`. The tests use
-  that `4VE` primitive-call budget and require each doubling of stages to stay
-  below a factor of four, with nonincreasing consecutive ratios. They measure
-  API invocations, not every Python operation or time inside adjacency accessors;
-  these finite-size checks do not prove an asymptotic bound.
-  Retained owned filter/session objects and UTF-8 snapshot bytes are checked
-  separately at initialization and after each chosen edge against `1024(V+E)`.
-  The caller-supplied context and its graph/runtime/value-pool objects, plus code,
-  are excluded from retained bytes; owned containers include their reference slots.
-  These fixtures have one response, bounded identifiers and no source buffers: the
-  byte bound is not a bound on arbitrary templates, values, or imported legacy paths.
+  bound adjacency calls, retained state, and snapshot size on chains of diamonds.
+  Two graph passes per response use at most `2RV` adjacency calls for `R`
+  responses and `V` nodes. With `R <= V`, `V >= 2`, and `E >= V - 1` edges,
+  the budget is `2RV <= 4VE`. Nodes and edges both grow linearly with stages,
+  so doubling the stages approaches four times the budget. The tests require
+  observed call growth below that factor. Size checks cover one response
+  without source buffers and exclude the caller-supplied context and its
+  graph/runtime/value-pool objects.
 - [Differential tests](../tests/engine/test_response_stream_filter_differential.py)
-  compare public response activation after every event prefix against the old
-  enumerate-then-project path conditions. Hypothesis varies DAGs up to ten nodes,
-  forward shortcuts, parallel handles, dead sinks, disconnected predecessors,
-  AND/OR gates, and reordered/repeated/opposite taken/skipped decisions. The law
-  is unchanged gating behavior; these tests make no performance claim.
+  compare response activation after each event against the previous path-based
+  behavior, including repeated and conflicting traversal observations.
 - [Ordered gating tests](../tests/engine/test_response_stream_filter_gating.py)
-  assert whole emitted event sequences, early output before a later blocking
-  edge, and interleaved frames with distinct response targets. Native and legacy
-  checkpoint compatibility remains in the
-  [response filter tests](../tests/engine/test_response_stream_filter.py).
+  check emitted sequences, early output before later gates open, and independent
+  progress across interleaved frames.
 
 ## Runtime pitfalls
 
