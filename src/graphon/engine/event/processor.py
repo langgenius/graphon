@@ -92,8 +92,8 @@ class NodeEventProcessor:
             task_event: The frame-scoped event to handle
 
         """
-        self._dispatch_event(frame_id=task_event.frame_id, event=task_event.event)
         frame = self._frame_registry[task_event.frame_id]
+        self._dispatch_event(frame=frame, event=task_event.event)
         handler = self._container_handler_for_frame(frame.frame_id)
         if handler is not None:
             handler.complete_frame_if_ready(frame)
@@ -152,24 +152,45 @@ class NodeEventProcessor:
     def finish_frames(self) -> None:
         self._frame_registry.finish_frames()
 
-    def _dispatch_event(self, *, frame_id: str, event: NodeEvent) -> None:
-        frame = self._frame_registry[frame_id]
-        self._frame_registry.start_frame(frame_id)
-        event.frame_id = frame_id
+    def _dispatch_event(self, *, frame: ExecutionFrame, event: NodeEvent) -> None:
+        if isinstance(event, NodeRunExceptionEvent):
+            self._graph_execution.record_node_failure()
+        try:
+            self._prepare_event(frame=frame, event=event)
+            if not isinstance(event, NodeRunFailedEvent):
+                self._dispatch(event, frame=frame)
+                return
+            frame.state.add_llm_usage(event.node_run_result.llm_usage)
+            continuation = frame.failure_handler.handle(
+                frame_id=frame.frame_id, event=event
+            )
+        except BaseException:
+            if isinstance(event, (NodeRunFailedEvent, NodeRunRetryEvent)):
+                self._graph_execution.record_node_failure()
+            raise
+
+        if continuation is not None:
+            self._dispatch_event(frame=frame, event=continuation)
+        else:
+            self._graph_execution.record_node_failure()
+            self._dispatch(event, frame=frame)
+
+    def _prepare_event(self, *, frame: ExecutionFrame, event: NodeEvent) -> None:
+        self._frame_registry.start_frame(frame.frame_id)
+        event.frame_id = frame.frame_id
         event.container_id = frame.container_id
         if not isinstance(event, NodeRunRetryEvent):
             event.retry_index = self._graph_execution.get_or_create_node_execution(
-                frame_id=frame_id,
+                frame_id=frame.frame_id,
                 node_id=event.node_id,
             ).retry_count
         if isinstance(event, NodeRunVariableUpdatedEvent):
             self._frame_registry.update_variables(
-                frame_id,
+                frame.frame_id,
                 [(event.variable.selector, event.variable)],
             )
-        for container_frame, handler in self._container_ancestors(frame_id):
+        for container_frame, handler in self._container_ancestors(frame.frame_id):
             handler.prepare_frame_event(frame=container_frame, event=event)
-        self._dispatch(event, frame=frame)
 
     @singledispatchmethod
     def _dispatch(self, event: NodeEvent, *, frame: ExecutionFrame) -> None:
@@ -273,34 +294,15 @@ class NodeEventProcessor:
 
     @_dispatch.register
     def _(self, event: NodeRunFailedEvent, *, frame: ExecutionFrame) -> None:
-        """Resolve a node failure through its frame-local failure policy.
-
-        Args:
-            event: The node failed event
-
-        """
-        # Update domain model
-        self._graph_execution.record_node_failure()
-
-        frame.state.add_llm_usage(event.node_run_result.llm_usage)
-
-        result = frame.failure_handler.handle(
-            frame_id=frame.frame_id,
-            event=event,
-        )
-
-        if result is not None:
-            # Process the resulting event (retry, exception, etc.)
-            self._dispatch_event(frame_id=frame.frame_id, event=result)
-        else:
-            handler = self._container_handler_for_frame(frame.frame_id)
-            if handler is not None:
-                self._frame_registry.record_failure(frame.frame_id, event.error)
-                handler.record_frame_failure(frame=frame, event=event)
-            elif self._graph_execution.error is None:
-                self._graph_execution.fail(RuntimeError(event.error))
-            self._collect(frame=frame, event=event)
-            frame.scheduler.finish_execution(event.node_id)
+        """Fail the frame after its node exhausts its continuations."""
+        handler = self._container_handler_for_frame(frame.frame_id)
+        if handler is not None:
+            self._frame_registry.record_failure(frame.frame_id, event.error)
+            handler.record_frame_failure(frame=frame, event=event)
+        elif self._graph_execution.error is None:
+            self._graph_execution.fail(RuntimeError(event.error))
+        self._collect(frame=frame, event=event)
+        frame.scheduler.finish_execution(event.node_id)
 
     @_dispatch.register
     def _(self, event: NodeRunExceptionEvent, *, frame: ExecutionFrame) -> None:

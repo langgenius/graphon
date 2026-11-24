@@ -86,6 +86,12 @@ A process interrupt such as `KeyboardInterrupt` propagates directly, as does any
 When the dispatcher drains pending results after a fatal error or abort, the root frame and graph keep the recorded reason.
 See the [dispatch error tests](tests/engine/test_dispatch_errors.py).
 
+A failed node adds one to `GraphExecution.exceptions_count` if it uses a fallback, has no continuation, or the engine cannot prepare its event, apply its failure policy, or schedule its retry.
+Layers observe `NodeRunRetryEvent` before the scheduler queues the next attempt.
+A retry accepted for execution or deferred during a pause adds zero, so the graph can emit `GraphRunSucceededEvent` after recovery.
+A resumed run starts from the count saved in its snapshot.
+See the [retry outcome tests](tests/engine/test_retry_terminal_state.py).
+
 `Engine.run()` delivers raw producer chunks as they arrive, including across
 parallel container items. Hosts apply [response presentation](#response-sessions)
 at the event consumer. See the [raw-event tests](tests/engine/test_raw_engine_events.py)
