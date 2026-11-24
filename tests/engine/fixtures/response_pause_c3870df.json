@@ -1,0 +1,108 @@
+{
+  "writer_commit": "c3870dfc0980f43650410ec81dc2f213eaeb8e51",
+  "first": {
+    "runtime": "{\"version\":\"2.0\",\"start_at\":0.0,\"node_run_steps\":2,\"llm_usage\":{\"prompt_tokens\":0,\"prompt_unit_price\":\"0.0\",\"prompt_price_unit\":\"0.0\",\"prompt_price\":\"0.0\",\"completion_tokens\":0,\"completion_unit_price\":\"0.0\",\"completion_price_unit\":\"0.0\",\"completion_price\":\"0.0\",\"total_tokens\":0,\"total_price\":\"0.0\",\"currency\":\"USD\",\"latency\":0.0,\"time_to_first_token\":null,\"time_to_generate\":null},\"outputs\":{},\"variable_pool\":{\"variable_dictionary\":{\"sys\":{\"workflow_execution_id\":{\"value_type\":\"string\",\"value\":\"workflow-execution\",\"id\":\"bb2a09f8-7605-45f4-b1bf-0e9e139b4a8f\",\"name\":\"workflow_execution_id\",\"description\":\"\",\"selector\":[\"sys\",\"workflow_execution_id\"]}},\"start\":{\"sys.workflow_execution_id\":{\"value_type\":\"string\",\"value\":\"workflow-execution\",\"id\":\"3fd50a2e-7ba2-4468-b889-330c6e2c4c45\",\"name\":\"sys.workflow_execution_id\",\"description\":\"\",\"selector\":[\"start\",\"sys.workflow_execution_id\"]}}}},\"ready_queue\":\"{\\\"version\\\":\\\"2.0\\\",\\\"items\\\":[]}\",\"graph_execution\":\"{\\\"version\\\":\\\"2.0\\\",\\\"workflow_id\\\":\\\"workflow\\\",\\\"started\\\":true,\\\"completed\\\":false,\\\"aborted\\\":false,\\\"paused\\\":true,\\\"pause_reasons\\\":[{\\\"TYPE\\\":\\\"hitl_required\\\",\\\"session_id\\\":\\\"session-first\\\",\\\"node_id\\\":\\\"first\\\",\\\"node_title\\\":\\\"First approval\\\"}],\\\"error\\\":null,\\\"exceptions_count\\\":0,\\\"node_executions\\\":[{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"first\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"a3db6b54-4560-42f9-b8ce-04c6238482be\\\"},{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"start\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"0f0aa9c5-2bf5-468d-a536-8cdd0510ae3a\\\"}]}\",\"deferred_ready_tasks\":\"{\\\"version\\\":\\\"2.0\\\",\\\"items\\\":[{\\\"kind\\\":\\\"start\\\",\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"first\\\"}]}\",\"container_runs\":[],\"container_frames\":[],\"graph_node_states\":{\"start\":\"taken\",\"first\":\"unknown\",\"second\":\"unknown\",\"reply\":\"unknown\",\"tail\":\"unknown\"},\"graph_edge_states\":{\"edge_0\":\"taken\",\"edge_1\":\"unknown\",\"edge_2\":\"unknown\",\"edge_3\":\"taken\",\"edge_4\":\"unknown\"}}",
+    "response_filter": "{\"type\":\"ResponseStreamFilter\",\"version\":\"1.0\",\"response_nodes\":[\"reply\",\"tail\"],\"active_session\":{\"node_id\":\"reply\",\"index\":1},\"waiting_sessions\":[],\"pending_sessions\":[{\"node_id\":\"tail\",\"index\":0}],\"node_execution_ids\":{\"first\":\"a3db6b54-4560-42f9-b8ce-04c6238482be\",\"reply\":\"291188ba-f6a8-4b01-901d-9d1e361bdb01\",\"start\":\"0f0aa9c5-2bf5-468d-a536-8cdd0510ae3a\"},\"paths_map\":{\"reply\":[[\"edge_1\",\"edge_2\"],[]],\"tail\":[[\"edge_1\",\"edge_2\",\"edge_4\"],[\"edge_4\"]]},\"stream_buffers\":[],\"stream_positions\":[],\"closed_streams\":[]}",
+    "chunks": [
+      {
+        "id": "291188ba-f6a8-4b01-901d-9d1e361bdb01",
+        "node_id": "reply",
+        "selector": [
+          "reply",
+          "answer"
+        ],
+        "chunk": "before|",
+        "is_final": false
+      }
+    ],
+    "pause": {
+      "reasons": [
+        {
+          "TYPE": "hitl_required",
+          "session_id": "session-first",
+          "node_id": "first",
+          "node_title": "First approval"
+        }
+      ],
+      "outputs": {}
+    },
+    "completed_nodes": [
+      "start"
+    ],
+    "started_nodes": {
+      "start": "0f0aa9c5-2bf5-468d-a536-8cdd0510ae3a",
+      "first": "a3db6b54-4560-42f9-b8ce-04c6238482be"
+    }
+  },
+  "second": {
+    "runtime": "{\"version\":\"2.0\",\"start_at\":0.0,\"node_run_steps\":4,\"llm_usage\":{\"prompt_tokens\":0,\"prompt_unit_price\":\"0.0\",\"prompt_price_unit\":\"0.0\",\"prompt_price\":\"0.0\",\"completion_tokens\":0,\"completion_unit_price\":\"0.0\",\"completion_price_unit\":\"0.0\",\"completion_price\":\"0.0\",\"total_tokens\":0,\"total_price\":\"0.0\",\"currency\":\"USD\",\"latency\":0.0,\"time_to_first_token\":null,\"time_to_generate\":null},\"outputs\":{},\"variable_pool\":{\"variable_dictionary\":{\"sys\":{\"workflow_execution_id\":{\"value_type\":\"string\",\"value\":\"workflow-execution\",\"id\":\"bb2a09f8-7605-45f4-b1bf-0e9e139b4a8f\",\"name\":\"workflow_execution_id\",\"description\":\"\",\"selector\":[\"sys\",\"workflow_execution_id\"]}},\"start\":{\"sys.workflow_execution_id\":{\"value_type\":\"string\",\"value\":\"workflow-execution\",\"id\":\"3fd50a2e-7ba2-4468-b889-330c6e2c4c45\",\"name\":\"sys.workflow_execution_id\",\"description\":\"\",\"selector\":[\"start\",\"sys.workflow_execution_id\"]}},\"first\":{\"answer\":{\"value_type\":\"string\",\"value\":\"alpha\",\"id\":\"65a206cd-1b12-427b-8a7e-b4902585bd99\",\"name\":\"answer\",\"description\":\"\",\"selector\":[\"first\",\"answer\"]}}}},\"ready_queue\":\"{\\\"version\\\":\\\"2.0\\\",\\\"items\\\":[]}\",\"graph_execution\":\"{\\\"version\\\":\\\"2.0\\\",\\\"workflow_id\\\":\\\"workflow\\\",\\\"started\\\":true,\\\"completed\\\":false,\\\"aborted\\\":false,\\\"paused\\\":true,\\\"pause_reasons\\\":[{\\\"TYPE\\\":\\\"hitl_required\\\",\\\"session_id\\\":\\\"session-second\\\",\\\"node_id\\\":\\\"second\\\",\\\"node_title\\\":\\\"Second approval\\\"}],\\\"error\\\":null,\\\"exceptions_count\\\":0,\\\"node_executions\\\":[{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"first\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"a3db6b54-4560-42f9-b8ce-04c6238482be\\\"},{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"second\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"f5b9575c-efaa-4fc8-a6a0-f12d554c5096\\\"},{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"start\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"0f0aa9c5-2bf5-468d-a536-8cdd0510ae3a\\\"}]}\",\"deferred_ready_tasks\":\"{\\\"version\\\":\\\"2.0\\\",\\\"items\\\":[{\\\"kind\\\":\\\"start\\\",\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"second\\\"}]}\",\"container_runs\":[],\"container_frames\":[],\"graph_node_states\":{\"start\":\"taken\",\"first\":\"unknown\",\"second\":\"unknown\",\"reply\":\"unknown\",\"tail\":\"unknown\"},\"graph_edge_states\":{\"edge_0\":\"taken\",\"edge_1\":\"taken\",\"edge_2\":\"unknown\",\"edge_3\":\"taken\",\"edge_4\":\"unknown\"}}",
+    "response_filter": "{\"type\":\"ResponseStreamFilter\",\"version\":\"1.0\",\"response_nodes\":[\"reply\",\"tail\"],\"active_session\":{\"node_id\":\"reply\",\"index\":3},\"waiting_sessions\":[],\"pending_sessions\":[{\"node_id\":\"tail\",\"index\":0}],\"node_execution_ids\":{\"first\":\"a3db6b54-4560-42f9-b8ce-04c6238482be\",\"reply\":\"291188ba-f6a8-4b01-901d-9d1e361bdb01\",\"second\":\"f5b9575c-efaa-4fc8-a6a0-f12d554c5096\",\"start\":\"0f0aa9c5-2bf5-468d-a536-8cdd0510ae3a\"},\"paths_map\":{\"reply\":[[\"edge_2\"],[]],\"tail\":[[\"edge_2\",\"edge_4\"],[\"edge_4\"]]},\"stream_buffers\":[],\"stream_positions\":[],\"closed_streams\":[]}",
+    "chunks": [
+      {
+        "id": "a3db6b54-4560-42f9-b8ce-04c6238482be",
+        "node_id": "first",
+        "selector": [
+          "first",
+          "answer"
+        ],
+        "chunk": "alpha",
+        "is_final": false
+      },
+      {
+        "id": "291188ba-f6a8-4b01-901d-9d1e361bdb01",
+        "node_id": "reply",
+        "selector": [
+          "reply",
+          "answer"
+        ],
+        "chunk": "|middle|",
+        "is_final": false
+      }
+    ],
+    "pause": {
+      "reasons": [
+        {
+          "TYPE": "hitl_required",
+          "session_id": "session-second",
+          "node_id": "second",
+          "node_title": "Second approval"
+        }
+      ],
+      "outputs": {}
+    },
+    "completed_nodes": [
+      "first"
+    ],
+    "started_nodes": {
+      "first": "a3db6b54-4560-42f9-b8ce-04c6238482be",
+      "second": "f5b9575c-efaa-4fc8-a6a0-f12d554c5096"
+    }
+  },
+  "command": {
+    "runtime": "{\"version\":\"2.0\",\"start_at\":0.0,\"node_run_steps\":0,\"llm_usage\":{\"prompt_tokens\":0,\"prompt_unit_price\":\"0.0\",\"prompt_price_unit\":\"0.0\",\"prompt_price\":\"0.0\",\"completion_tokens\":0,\"completion_unit_price\":\"0.0\",\"completion_price_unit\":\"0.0\",\"completion_price\":\"0.0\",\"total_tokens\":0,\"total_price\":\"0.0\",\"currency\":\"USD\",\"latency\":0.0,\"time_to_first_token\":null,\"time_to_generate\":null},\"outputs\":{},\"variable_pool\":{\"variable_dictionary\":{\"sys\":{\"workflow_execution_id\":{\"value_type\":\"string\",\"value\":\"workflow-execution\",\"id\":\"7d4479d2-4623-4b21-b7b3-d2bfa34e6d5c\",\"name\":\"workflow_execution_id\",\"description\":\"\",\"selector\":[\"sys\",\"workflow_execution_id\"]}}}},\"ready_queue\":\"{\\\"version\\\":\\\"2.0\\\",\\\"items\\\":[]}\",\"graph_execution\":\"{\\\"version\\\":\\\"2.0\\\",\\\"workflow_id\\\":\\\"workflow\\\",\\\"started\\\":true,\\\"completed\\\":false,\\\"aborted\\\":false,\\\"paused\\\":true,\\\"pause_reasons\\\":[{\\\"TYPE\\\":\\\"scheduled_pause\\\",\\\"message\\\":\\\"host checkpoint\\\"}],\\\"error\\\":null,\\\"exceptions_count\\\":0,\\\"node_executions\\\":[]}\",\"deferred_ready_tasks\":\"{\\\"version\\\":\\\"2.0\\\",\\\"items\\\":[{\\\"kind\\\":\\\"start\\\",\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"start\\\"}]}\",\"container_runs\":[],\"container_frames\":[],\"graph_node_states\":{\"start\":\"taken\",\"first\":\"unknown\",\"second\":\"unknown\",\"reply\":\"unknown\",\"tail\":\"unknown\"},\"graph_edge_states\":{\"edge_0\":\"unknown\",\"edge_1\":\"unknown\",\"edge_2\":\"unknown\",\"edge_3\":\"unknown\",\"edge_4\":\"unknown\"}}",
+    "response_filter": "{\"type\":\"ResponseStreamFilter\",\"version\":\"1.0\",\"response_nodes\":[\"reply\",\"tail\"],\"active_session\":{\"node_id\":\"reply\",\"index\":1},\"waiting_sessions\":[],\"pending_sessions\":[{\"node_id\":\"tail\",\"index\":0}],\"node_execution_ids\":{\"first\":\"5eca547e-edf7-4ec6-a3a2-320acbc4c062\",\"reply\":\"f6058a45-7c28-4544-a5ff-d0fd7b362ceb\"},\"paths_map\":{\"reply\":[[\"edge_1\",\"edge_2\"],[]],\"tail\":[[\"edge_1\",\"edge_2\",\"edge_4\"],[\"edge_4\"]]},\"stream_buffers\":[],\"stream_positions\":[],\"closed_streams\":[]}",
+    "chunks": [
+      {
+        "id": "f6058a45-7c28-4544-a5ff-d0fd7b362ceb",
+        "node_id": "reply",
+        "selector": [
+          "reply",
+          "answer"
+        ],
+        "chunk": "before|",
+        "is_final": false
+      }
+    ],
+    "pause": {
+      "reasons": [
+        {
+          "TYPE": "scheduled_pause",
+          "message": "host checkpoint"
+        }
+      ],
+      "outputs": {}
+    },
+    "completed_nodes": [],
+    "started_nodes": {}
+  }
+}
