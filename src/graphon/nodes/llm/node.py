@@ -426,7 +426,7 @@ class LLMNode(Node[LLMNodeData]):
         )
         yield StreamChunkEvent(
             selector=[self._node_id, "text"],
-            chunk="",
+            chunk=clean_text if self._polling_model_instance() is not None else "",
             is_final=True,
         )
         yield StreamCompletedEvent(

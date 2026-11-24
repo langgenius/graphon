@@ -7,8 +7,10 @@ source execution and attempt without consuming another response's text.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from functools import cached_property
 from uuid import uuid4
 
 from graphon.engine_events.base import NodeEvent
@@ -51,6 +53,15 @@ class _ResponseSession:
 
     def is_complete(self) -> bool:
         return self.index >= len(self.template.segments)
+
+    @cached_property
+    def repeated_selectors(self) -> set[Selector]:
+        selector_counts = Counter(
+            tuple(segment.selector)
+            for segment in self.template.segments
+            if isinstance(segment, VariableSegment)
+        )
+        return {selector for selector, count in selector_counts.items() if count > 1}
 
 
 @dataclass
@@ -391,10 +402,18 @@ class _TemplateStream:
         else:
             output_node_id = source_selector_prefix
         execution_id = self._get_or_create_execution_id(output_node_id)
-        has_stream_events = self.stream_buffers.has_events(segment.selector)
+        selector = tuple(segment.selector)
+        has_stream_events = self.stream_buffers.has_events(selector)
+        stream_is_closed = self.stream_buffers.is_closed(selector)
+        if (
+            stream_is_closed
+            and not self.stream_buffers.has_unread(selector)
+            and selector in session.repeated_selectors
+        ):
+            self.stream_buffers.positions[selector] = 0
 
-        while self.stream_buffers.has_unread(segment.selector):
-            event = self.stream_buffers.pop(segment.selector)
+        while self.stream_buffers.has_unread(selector):
+            event = self.stream_buffers.pop(selector)
             if event is None:
                 continue
 
@@ -414,7 +433,7 @@ class _TemplateStream:
             else:
                 events.append(event)
 
-        if self.stream_buffers.is_closed(segment.selector):
+        if stream_is_closed:
             is_complete = True
         elif not has_stream_events and (value := variable_pool.get(segment.selector)):
             is_last_segment = session.index == len(session.template.segments) - 1

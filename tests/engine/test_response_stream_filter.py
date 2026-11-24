@@ -1364,7 +1364,7 @@ def test_response_stream_filters_keep_interleaved_buffers_and_cursors_separate()
 
 
 @pytest.mark.parametrize("streamed", [False, True])
-def test_response_stream_filter_preserves_shared_selector_consumption(
+def test_response_stream_filter_repeats_variable_text_within_one_reply(
     streamed: bool,
 ) -> None:
     source = _TestNode("source")
@@ -1394,14 +1394,26 @@ def test_response_stream_filter_preserves_shared_selector_consumption(
     output = list(event_filter.on_event(GraphRunStartedEvent()))
     if streamed:
         output.extend(
-            event_filter.on_event(_stream_chunk("value", selector=["source", "text"]))
+            event_filter.on_event(
+                _stream_chunk("val", selector=["source", "text"], is_final=False)
+            )
+        )
+        assert (
+            "".join(
+                event.chunk
+                for event in output
+                if isinstance(event, NodeRunStreamChunkEvent)
+            )
+            == "val"
+        )
+        output.extend(
+            event_filter.on_event(_stream_chunk("ue", selector=["source", "text"]))
         )
 
     text = "".join(
         event.chunk for event in output if isinstance(event, NodeRunStreamChunkEvent)
     )
-    # Root streams currently share one read cursor per selector, unlike saved values.
-    assert text == ("value/!next:" if streamed else "value/value!next:value")
+    assert text == ("value/value!next:" if streamed else "value/value!next:value")
     assert list(event_filter.flush()) == []
 
 
