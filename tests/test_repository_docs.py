@@ -33,7 +33,9 @@ def check_document_reviews(root: Path, now: datetime) -> None:
     }
     reviews: list[tuple[datetime, Path]] = []
     for document in sorted(documents):
-        path = document.relative_to(root)
+        # Messages read as repository paths, which the assertions and CI on POSIX
+        # assume: `relative_to` alone renders `docs\guide.md` on Windows.
+        path = document.relative_to(root).as_posix()
         header = re.match(
             r"\A<!-- knowledge\n(.*?)\n-->(?:\n|$)",
             document.read_text(encoding="utf-8"),
@@ -228,9 +230,8 @@ def check_document_links(root: Path) -> None:
                     if url.path
                     else document
                 )
-                assert target.exists(), (
-                    f"Broken link: {document.relative_to(root)}:{number}: {destination}"
-                )
+                path = document.relative_to(root).as_posix()
+                assert target.exists(), f"Broken link: {path}:{number}: {destination}"
                 if url.fragment and target in anchors_by_document:
                     assert unquote(url.fragment) in anchors_by_document[target], (
                         f"Broken heading: {document.relative_to(root)}:{number}: "
