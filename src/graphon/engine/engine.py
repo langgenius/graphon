@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import queue
+from asyncio import CancelledError
 from collections.abc import Generator, Sequence
 from typing import final
 
@@ -39,7 +40,7 @@ from .container_handler import (
     IterationContainerHandler,
     LoopContainerHandler,
 )
-from .dispatcher import Dispatcher
+from .dispatcher import Dispatcher, as_graph_error
 from .event.processor import NodeEventProcessor
 from .event.stream import EventStream
 from .frame import FrameRegistry
@@ -220,38 +221,46 @@ class Engine:
 
         """
         events = self._run()
-        error: BaseException | None = None
+        consumer_error: BaseException | None = None
         try:
             while True:
                 with use_workflow_file_runtime(self._file_runtime):
                     try:
-                        event = next(events) if error is None else events.throw(error)
-                    except StopIteration:
-                        return
+                        event = (
+                            next(events)
+                            if consumer_error is None
+                            else events.throw(consumer_error)
+                        )
+                    except StopIteration as stopped:
+                        run_error = stopped.value
+                        break
                 try:
                     yield event
-                except BaseException as exc:  # ruff:ignore[blind-except]
+                except BaseException as error:  # ruff:ignore[blind-except]
                     # Forward consumer errors under the engine's file scope.
-                    error = exc
+                    consumer_error = error
                 else:
-                    error = None
+                    consumer_error = None
         finally:
             with use_workflow_file_runtime(self._file_runtime):
                 events.close()
+        if run_error is not None:
+            raise run_error
 
-    def _run(self) -> Generator[EngineEvent, None, None]:
+    def _run(self) -> Generator[EngineEvent, None, Exception | None]:
         try:
             with self._graph_execution.track_execution():
                 try:
                     yield from self._run_graph()
-                except Exception as error:
+                except Exception as error:  # ruff: ignore[blind-except]
                     failed_event = GraphRunFailedEvent(
                         error=str(error),
                         exceptions_count=self._graph_execution.exceptions_count,
                     )
                     self._event_stream.notify_layers(failed_event)
                     yield failed_event
-                    raise
+                    # Raise outside the contexts to preserve frozen exceptions.
+                    return error  # ruff: ignore[return-in-generator]
                 finally:
                     self._stop_execution()
         finally:
@@ -278,12 +287,17 @@ class Engine:
         yield started_event
         try:
             self._start_execution(resume=resume)
-        except Exception as error:
+        except (Exception, CancelledError, BaseExceptionGroup) as cause:
+            error = as_graph_error(cause)
+            if error is None:
+                raise
             self._graph_execution.fail(error)
             self._frame_registry.finish_frames()
             self._event_stream.mark_complete()
             yield from self._event_stream.emit_events()
-            raise
+            if error is cause:
+                raise
+            raise error from cause
         events = self._event_stream.emit_events()
         try:
             # Keep the iterator open so consumer errors can drain queued events.

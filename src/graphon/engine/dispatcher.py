@@ -3,6 +3,7 @@
 import logging
 import queue
 import threading
+from asyncio import CancelledError
 from typing import final
 
 from graphon.engine_events.base import NodeEvent
@@ -23,6 +24,21 @@ from .scheduler import Scheduler
 from .worker import ContainerAwaitTask, DispatchTask, WorkerPool
 
 logger = logging.getLogger(__name__)
+
+
+def as_graph_error(error: BaseException) -> Exception | None:
+    """Keep host errors reportable while passing process interrupts to the caller."""
+    if isinstance(error, Exception):
+        return error
+    if isinstance(error, BaseExceptionGroup):
+        _, unhandled = error.split((Exception, CancelledError))
+        if unhandled is not None:
+            return None
+    elif not isinstance(error, CancelledError):
+        return None
+    failure = RuntimeError(str(error) or "Graph execution was cancelled")
+    failure.__cause__ = error
+    return failure
 
 
 @final
@@ -105,19 +121,39 @@ class Dispatcher:
 
     def _dispatch_until_complete(self) -> None:
         """Process results and publish completion before releasing activity."""
+        interrupt: BaseException | None = None
         try:
             paused = self._run_until_exit()
             self._finish_dispatching(paused)
-        except Exception as error:
-            logger.exception("Dispatcher error")
-            self._graph_execution.fail(error)
+        except BaseException as cause:  # ruff: ignore[blind-except]
+            interrupt = self._record_error_or_return_interrupt(cause)
         finally:
-            if not self._graph_execution.paused and not self._graph_execution.completed:
-                self._graph_execution.complete()
             try:
-                self._event_processor.finish_frames()
+                if interrupt is None:
+                    if (
+                        not self._graph_execution.paused
+                        and not self._graph_execution.completed
+                    ):
+                        self._graph_execution.complete()
+                    self._event_processor.finish_frames()
+            except BaseException as cause:  # ruff: ignore[blind-except]
+                interrupt = self._record_error_or_return_interrupt(cause)
             finally:
-                self._event_stream.mark_complete()
+                if interrupt is None:
+                    self._event_stream.mark_complete()
+                else:
+                    self._event_stream.mark_complete(interrupt)
+
+    def _record_error_or_return_interrupt(
+        self, cause: BaseException
+    ) -> BaseException | None:
+        error = as_graph_error(cause)
+        if error is None:
+            return cause
+        logger.error("Dispatcher error", exc_info=cause)
+        if self._graph_execution.error is None:
+            self._graph_execution.fail(error)
+        return None
 
     def _run_until_exit(self) -> bool:
         self._process_commands()

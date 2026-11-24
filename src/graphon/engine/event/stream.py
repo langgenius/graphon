@@ -65,9 +65,9 @@ class EventStream:
         self._events.put(event)
         self.notify_layers(event)
 
-    def mark_complete(self) -> None:
+    def mark_complete(self, interrupt: BaseException | None = None) -> None:
         """Mark execution as complete to stop the event emission generator."""
-        self._events.put(_COMPLETE)
+        self._events.put(_COMPLETE if interrupt is None else interrupt)
 
     def reset(self) -> None:
         """Discard events and completion state from the previous engine run."""
@@ -82,4 +82,6 @@ class EventStream:
         """
         events = self._events
         while (event := events.get()) is not _COMPLETE:
+            if isinstance(event, BaseException):
+                raise event
             yield cast(EngineEvent, event)
