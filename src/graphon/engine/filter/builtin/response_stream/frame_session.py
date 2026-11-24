@@ -22,7 +22,12 @@ from graphon.engine_events.node import (
 )
 from graphon.engine_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTakenEvent
 from graphon.entities.workflow_start_reason import WorkflowStartReason
-from graphon.enums import BuiltinNodeTypes, NodeExecutionType
+from graphon.enums import (
+    BuiltinNodeTypes,
+    ErrorStrategy,
+    NodeExecutionType,
+    WorkflowNodeExecutionMetadataKey,
+)
 from graphon.nodes.base.template import VariableSegment
 from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.runtime_state import GraphProtocol
@@ -160,8 +165,24 @@ class _FrameSession:
                 return self._handle_edge_skipped(event)
             case NodeRunSucceededEvent() | NodeRunExceptionEvent():
                 self._template_stream.finish_source(event)
+                if self.frame_id == ROOT_FRAME_ID and isinstance(
+                    event, NodeRunExceptionEvent
+                ):
+                    self._close_referenced_streams_on_default(event)
                 return [*self._try_flush(), event]
         return [event]
+
+    def _close_referenced_streams_on_default(
+        self, event: NodeRunExceptionEvent
+    ) -> None:
+        strategy = event.node_run_result.metadata.get(
+            WorkflowNodeExecutionMetadataKey.ERROR_STRATEGY
+        )
+        if strategy != ErrorStrategy.DEFAULT_VALUE:
+            return
+        for selector in self._referenced_selectors:
+            if selector and selector[0] == event.node_id:
+                self._template_stream.stream_buffers.close_on_source_default(selector)
 
     def flush(self) -> list[EngineEvent]:
         return self._try_flush()

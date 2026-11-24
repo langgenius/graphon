@@ -12,14 +12,18 @@ from graphon.engine.filter import (
     ResponseStreamFilter,
     filter_engine_events,
 )
-from graphon.engine_events.graph import GraphRunSucceededEvent
+from graphon.engine_events.graph import (
+    GraphRunPartialSucceededEvent,
+    GraphRunSucceededEvent,
+)
 from graphon.engine_events.node import (
     NodeRunFailedEvent,
     NodeRunStartedEvent,
     NodeRunStreamChunkEvent,
     NodeRunSucceededEvent,
 )
-from graphon.enums import BuiltinNodeTypes
+from graphon.entities.base_node_data import DefaultValue
+from graphon.enums import BuiltinNodeTypes, ErrorStrategy
 from graphon.file.enums import FileTransferMethod, FileType
 from graphon.file.models import File
 from graphon.graph.graph import Graph
@@ -288,6 +292,76 @@ def test_transform_message_preserves_non_streamed_variables(value: Any) -> None:
         isinstance(event, StreamChunkEvent) and event.selector == [node.id, "result"]
         for event in events
     )
+
+
+@pytest.mark.parametrize("failure_stage", ["messages", "usage"])
+def test_answer_finishes_all_tool_fields_when_only_text_has_a_default(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    error = ToolNodeError("Tool disconnected")
+
+    def tool_messages() -> Generator[ToolRuntimeMessage, None, None]:
+        yield ToolRuntimeMessage(
+            type=ToolRuntimeMessage.MessageType.VARIABLE,
+            message=ToolRuntimeMessage.VariableMessage(
+                variable_name="excerpt",
+                variable_value="partial",
+                stream=True,
+            ),
+        )
+        yield ToolRuntimeMessage(
+            type=ToolRuntimeMessage.MessageType.TEXT,
+            message=ToolRuntimeMessage.TextMessage(text=""),
+        )
+        if failure_stage == "messages":
+            raise error
+
+    runtime = _RunStubToolRuntime()
+    runtime.messages = tool_messages()
+    if failure_stage == "usage":
+        monkeypatch.setattr(runtime, "get_usage", MagicMock(side_effect=error))
+    tool, _ = _build_run_tool_node(runtime=runtime, tool_node_version=None)
+    tool.node_data.error_strategy = ErrorStrategy.DEFAULT_VALUE
+    tool.node_data.default_value = [
+        DefaultValue(type="string", key="text", value="fallback"),
+    ]
+    answer = AnswerNode(
+        node_id="answer",
+        data=AnswerNodeData(answer="[{{#node-1.excerpt#}}/{{#node-1.text#}}]"),
+        init_params=build_init_params(),
+        runtime_state=tool.runtime_state,
+    )
+    start = StartNode(
+        node_id="start",
+        data=StartNodeData(),
+        init_params=build_init_params(),
+        runtime_state=tool.runtime_state,
+    )
+    graph = Graph.new().add_root(start).add_node(tool).add_node(answer).build()
+    engine = Engine(graph=graph, runtime_state=tool.runtime_state)
+    context = EngineEventFilterContext.from_engine(engine)
+    raw_events = list(engine.run())
+    assert not any(
+        isinstance(event, NodeRunStreamChunkEvent)
+        and event.node_id == tool.id
+        and event.is_final
+        for event in raw_events
+    )
+    events = list(
+        filter_engine_events(
+            raw_events,
+            context=context,
+            filters=[ResponseStreamFilter()],
+        )
+    )
+
+    text = "".join(
+        event.chunk for event in events if isinstance(event, NodeRunStreamChunkEvent)
+    )
+    assert text == "[partial/fallback]"
+    terminal = events[-1]
+    assert isinstance(terminal, GraphRunPartialSucceededEvent)
 
 
 @pytest.mark.parametrize("stream", [False, True])

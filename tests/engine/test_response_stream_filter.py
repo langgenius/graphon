@@ -14,17 +14,28 @@ from graphon.engine.filter import (
     ResponseStreamFilter,
     filter_engine_events,
 )
-from graphon.engine_events.frame import FrameStartedEvent
+from graphon.engine_events.frame import FrameStartedEvent, FrameVariablesUpdatedEvent
 from graphon.engine_events.graph import GraphRunStartedEvent
 from graphon.engine_events.node import (
+    NodeRunExceptionEvent,
     NodeRunReasoningChunkEvent,
     NodeRunRetryEvent,
     NodeRunStartedEvent,
     NodeRunStreamChunkEvent,
 )
 from graphon.engine_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTakenEvent
-from graphon.enums import BuiltinNodeTypes, NodeExecutionType, NodeState, NodeType
+from graphon.entities.workflow_start_reason import WorkflowStartReason
+from graphon.enums import (
+    BuiltinNodeTypes,
+    ErrorStrategy,
+    NodeExecutionType,
+    NodeState,
+    NodeType,
+    WorkflowNodeExecutionMetadataKey,
+    WorkflowNodeExecutionStatus,
+)
 from graphon.graph.graph import Graph
+from graphon.node_events import NodeRunResult
 from graphon.nodes.base.template import (
     Template,
     TemplateSegmentUnion,
@@ -41,6 +52,7 @@ from graphon.runtime.runtime_state import (
 )
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import StringSegment
+from graphon.variables.variables import StringVariable
 
 _V1_FIXTURE_DIR = Path(__file__).with_name("fixtures")
 # These snapshots are the exact output of ResponseStreamFilter.dumps() at c3870df.
@@ -1285,6 +1297,85 @@ def test_response_stream_filter_restores_legacy_stream_progress(version: str) ->
     assert chunks[-1].selector == ["later-answer", "answer"]
     assert chunks[-1].is_final is True
     assert list(event_filter.flush()) == []
+
+
+def test_restored_answer_finishes_buffered_and_missing_fields_after_a_default() -> None:
+    graph = _TestGraph(
+        nodes={
+            "source": _TestNode("source"),
+            "later": _TestNode("later"),
+            "answer": _TestNode(
+                "answer",
+                execution_type=NodeExecutionType.RESPONSE,
+                template=Template.from_answer_template(
+                    "{{#later.text#}}[{{#source.text#}}/{{#source.empty#}}/{{#source.details.missing#}}]"
+                ),
+            ),
+        },
+        edges={
+            "first": _TestEdge("first", "source", "later"),
+            "second": _TestEdge("second", "later", "answer"),
+        },
+        root_node_id="source",
+    )
+    context = _context(graph)
+    baseline = FrameStartedEvent(
+        frame_id=ROOT_FRAME_ID,
+        node_execution_ids={node_id: f"{node_id}-run" for node_id in graph.nodes},
+    )
+    saved = StringVariable(name="text", selector=["source", "text"], value="saved")
+    before_pause = [
+        baseline,
+        _stream_chunk("part", selector=["source", "text"], is_final=False),
+        _stream_chunk("", selector=["source", "empty"], is_final=False),
+        FrameVariablesUpdatedEvent(frame_id=ROOT_FRAME_ID, variables=(saved,)),
+        NodeRunExceptionEvent(
+            id="source-run",
+            node_id="source",
+            node_type=BuiltinNodeTypes.CODE,
+            start_at=datetime.now(UTC),
+            error="disconnected",
+            node_run_result=NodeRunResult(
+                status=WorkflowNodeExecutionStatus.EXCEPTION,
+                outputs={"text": "saved"},
+                metadata={
+                    WorkflowNodeExecutionMetadataKey.ERROR_STRATEGY: (
+                        ErrorStrategy.DEFAULT_VALUE
+                    )
+                },
+            ),
+        ),
+    ]
+    event_filter = ResponseStreamFilter()
+    output = list(
+        filter_engine_events(before_pause, context=context, filters=[event_filter])
+    )
+
+    restored_filter = ResponseStreamFilter()
+    restored_filter.loads(event_filter.dumps())
+    updated = StringVariable(
+        name="empty", selector=["source", "empty"], value="updated"
+    )
+    after_resume = [
+        baseline.model_copy(
+            update={"reason": WorkflowStartReason.RESUMPTION, "variables": (saved,)}
+        ),
+        FrameVariablesUpdatedEvent(frame_id=ROOT_FRAME_ID, variables=(updated,)),
+        _stream_chunk(
+            "ready", run_id="later-run", source_id="later", selector=["later", "text"]
+        ),
+    ]
+    output.extend(
+        filter_engine_events(after_resume, context=context, filters=[restored_filter])
+    )
+    assert (
+        "".join(
+            event.chunk
+            for event in output
+            if isinstance(event, NodeRunStreamChunkEvent)
+        )
+        == "ready[part/updated/]"
+    )
 
 
 def test_response_stream_filter_resumes_partly_consumed_template_in_order() -> None:

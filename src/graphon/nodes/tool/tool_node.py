@@ -288,12 +288,15 @@ class ToolNode(Node[ToolNodeData]):
                 node_id=node_id,
             )
 
-        yield from self._emit_final_stream_events(state)
+        if state.blob_chunks:
+            pending_ids = ", ".join(sorted(state.blob_chunks))
+            msg = f"tool blob chunk stream ended before completion: {pending_ids}"
+            raise ToolFileError(msg)
 
         usage = self._runtime.get_usage(tool_runtime=tool_runtime)
         metadata = self._build_completion_metadata(tool_info=tool_info, usage=usage)
 
-        yield StreamCompletedEvent(
+        completion_event = StreamCompletedEvent(
             node_run_result=NodeRunResult(
                 status=WorkflowNodeExecutionStatus.SUCCEEDED,
                 outputs={
@@ -307,6 +310,8 @@ class ToolNode(Node[ToolNodeData]):
                 llm_usage=usage,
             ),
         )
+        yield from self._emit_final_stream_events(state)
+        yield completion_event
 
     def transform_message(
         self,
@@ -708,11 +713,6 @@ class ToolNode(Node[ToolNodeData]):
         self,
         state: _ToolMessageState,
     ) -> Generator[NodeEventPayload, None, None]:
-        if state.blob_chunks:
-            pending_ids = ", ".join(sorted(state.blob_chunks))
-            msg = f"tool blob chunk stream ended before completion: {pending_ids}"
-            raise ToolFileError(msg)
-
         yield StreamChunkEvent(
             selector=[self._node_id, "text"],
             chunk="",
