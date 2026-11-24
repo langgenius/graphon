@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-19T01:18:53Z"
+last_checked: "2026-11-24T03:27:15Z"
 -->
 # Architecture
 
@@ -79,6 +79,12 @@ flowchart LR
 6. [EventStream](src/graphon/engine/event/stream.py) buffers events for the caller
    and notifies layers. `Engine.run()` emits terminal status and stops execution
    resources. A failed graph emits `GraphRunFailedEvent` and raises its error.
+
+A failed node adds one to `GraphExecution.exceptions_count` if it uses a fallback, has no continuation, or the engine cannot prepare its event, apply its failure policy, or schedule its retry.
+Layers observe `NodeRunRetryEvent` before the scheduler queues the next attempt.
+A retry accepted for execution or deferred during a pause adds zero, so the graph can emit `GraphRunSucceededEvent` after recovery.
+A resumed run starts from the count saved in its snapshot.
+See the [retry outcome tests](tests/engine/test_retry_terminal_state.py).
 
 `Engine.run()` delivers raw producer chunks as they arrive, including across
 parallel container items. Hosts apply [response presentation](#response-sessions)
