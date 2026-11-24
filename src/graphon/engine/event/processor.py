@@ -295,11 +295,11 @@ class NodeEventProcessor:
     @_dispatch.register
     def _(self, event: NodeRunFailedEvent, *, frame: ExecutionFrame) -> None:
         """Fail the frame after its node exhausts its continuations."""
-        self._frame_registry.record_failure(frame.frame_id, event.error)
         handler = self._container_handler_for_frame(frame.frame_id)
         if handler is not None:
+            self._frame_registry.record_failure(frame.frame_id, event.error)
             handler.record_frame_failure(frame=frame, event=event)
-        else:
+        elif self._graph_execution.error is None:
             self._graph_execution.fail(RuntimeError(event.error))
         self._collect(frame=frame, event=event)
         frame.scheduler.finish_execution(event.node_id)

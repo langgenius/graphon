@@ -78,7 +78,13 @@ flowchart LR
    applies failure/retry policies, updates scheduling, and publishes events.
 6. [EventStream](src/graphon/engine/event/stream.py) buffers events for the caller
    and notifies layers. `Engine.run()` emits terminal status and stops execution
-   resources. A failed graph emits `GraphRunFailedEvent` and raises its error.
+   resources. A failed graph yields `GraphRunFailedEvent` before raising its error.
+
+When a ready queue write fails during startup, resumption, or dispatch, the caller receives the original error for exceptions such as `OSError`.
+For errors outside `Exception`, it wraps `asyncio.CancelledError` and groups containing only ordinary exceptions or cancellations in a `RuntimeError` with the queue error as its cause.
+A process interrupt such as `KeyboardInterrupt` propagates directly, as does any group containing one.
+When the dispatcher drains pending results after a fatal error or abort, the root frame and graph keep the recorded reason.
+See the [dispatch error tests](tests/engine/test_dispatch_errors.py).
 
 A failed node adds one to `GraphExecution.exceptions_count` if it uses a fallback, has no continuation, or the engine cannot prepare its event, apply its failure policy, or schedule its retry.
 Layers observe `NodeRunRetryEvent` before the scheduler queues the next attempt.
@@ -123,8 +129,8 @@ Pause leaves unfinished frames open. Resume publishes new baselines with the
 resumption reason and existing execution IDs before resumed body events.
 [Persisted container state](src/graphon/runtime/container_state.py) preserves pending frame failures across pause and snapshot restore even when frame events are disabled.
 Terminal failure or abort closes each remaining frame once, before the graph's terminal event.
-An `Exception` thrown into `Engine.run()` during execution or at the paused event
-follows the same failure ordering; continued consumption re-raises the exception.
+An `Exception` thrown into `Engine.run()` during execution or at the paused event follows the same failure ordering, and continued consumption raises that exception.
+A consumer that throws `asyncio.CancelledError` at a yield receives the cancellation directly.
 
 Root has no owning invocation. Custom containers may omit optional item index
 and root metadata. See the
