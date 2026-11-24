@@ -37,3 +37,11 @@ def test_llm_usage_from_metadata_rejects_bool_numeric_values(
 ) -> None:
     with pytest.raises(ValidationError, match=match):
         LLMUsage.from_metadata(payload)
+
+
+def test_llm_usage_empty_usage_is_frozen_singleton() -> None:
+    usage = LLMUsage.empty_usage()
+    assert usage is LLMUsage.empty_usage()
+
+    with pytest.raises(ValidationError):
+        usage.prompt_tokens = 1  # type: ignore[misc]
