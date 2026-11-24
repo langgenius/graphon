@@ -4,6 +4,11 @@ from collections.abc import Iterable, Mapping
 from typing import Any, cast
 
 from graphon.engine.filter.protocol import EngineEventFilterContext
+from graphon.engine.frame_graph import FrameGraph
+from graphon.engine.frame_graph_factory import (
+    FrameGraphFactory,
+    build_local_graph_config,
+)
 from graphon.engine_events.base import EngineEvent, NodeEvent
 from graphon.engine_events.frame import (
     FrameFinishedEvent,
@@ -28,8 +33,10 @@ from graphon.engine_events.node import (
 )
 from graphon.engine_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTakenEvent
 from graphon.entities.workflow_start_reason import WorkflowStartReason
+from graphon.enums import BuiltinNodeTypes
 from graphon.file.protocols import WorkflowFileRuntimeProtocol
 from graphon.file.runtime import use_workflow_file_runtime
+from graphon.graph import Graph, NodeDefinition
 from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.runtime_state import GraphProtocol
 
@@ -56,6 +63,8 @@ class ResponseStreamFilter:
         self._has_child_progress = False
         self._reply_order = _ReplyOrder()
         self._response_container_ids: set[str] = set()
+        self._frame_graph_factory: FrameGraphFactory | None = None
+        self._response_containers_by_frame: dict[str, dict[str, NodeDefinition]] = {}
 
     def initialize(self, context: EngineEventFilterContext) -> None:
         with use_workflow_file_runtime(context.file_runtime):
@@ -80,9 +89,23 @@ class ResponseStreamFilter:
             self._root_session = root_session
             self._frame_sessions[ROOT_FRAME_ID] = root_session
             self._graph_config = getattr(context.graph, "graph_config", None)
-            self._response_container_ids = find_response_container_ids(
-                self._graph_config
+            self._response_containers_by_frame.clear()
+            self._frame_graph_factory = (
+                context.graph.frame_graph_factory
+                if isinstance(context.graph, FrameGraph)
+                else None
             )
+            if (
+                self._frame_graph_factory is not None
+                and context.graph.definition is not None
+            ):
+                self._register_response_containers(
+                    ROOT_FRAME_ID, context.graph.definition
+                )
+            else:
+                self._response_container_ids = find_response_container_ids(
+                    self._graph_config
+                )
             self._pending_state = None
 
     def on_event(self, event: EngineEvent) -> Iterable[EngineEvent]:
@@ -126,6 +149,7 @@ class ResponseStreamFilter:
                 )
                 if event.frame_id != ROOT_FRAME_ID:
                     self._frame_sessions.pop(event.frame_id, None)
+                    self._response_containers_by_frame.pop(event.frame_id, None)
                 self._reply_order.finish_frame(
                     event.frame_id, succeeded=event.outcome == "succeeded"
                 )
@@ -173,10 +197,32 @@ class ResponseStreamFilter:
                     return []
         return [event]
 
+    def _register_response_containers(self, frame_id: str, graph: Graph) -> None:
+        frame_graph_factory = self._frame_graph_factory
+        if frame_graph_factory is None:
+            return
+        callers: dict[str, NodeDefinition] = {}
+        for caller in graph.nodes.values():
+            if caller.call_target is None:
+                continue
+            body = frame_graph_factory.resolve_call_target(caller)
+            if any(
+                node.node_type in {BuiltinNodeTypes.ANSWER, BuiltinNodeTypes.END}
+                for scope, _ in frame_graph_factory.walk_graphs(body)
+                for node in scope.nodes.values()
+            ):
+                callers[caller.id] = caller
+        self._response_containers_by_frame[frame_id] = callers
+
+    def _container_has_response(self, frame_id: str, node_id: str) -> bool:
+        if self._frame_graph_factory is not None:
+            return node_id in self._response_containers_by_frame.get(frame_id, {})
+        return node_id in self._response_container_ids
+
     def _update_container_replies(self, event: EngineEvent) -> None:
         if not isinstance(event, NodeEvent):
             return
-        if event.node_id not in self._response_container_ids:
+        if not self._container_has_response(event.frame_id, event.node_id):
             return
         if isinstance(
             event,
@@ -196,13 +242,26 @@ class ResponseStreamFilter:
         if event.frame_id == ROOT_FRAME_ID:
             self._awaiting_root_baseline = False
             return self._initialized_root_session.start(event)
-        if event.container_id not in self._response_container_ids:
+        parent_frame_id = event.parent_frame_id or ROOT_FRAME_ID
+        if not self._container_has_response(parent_frame_id, event.container_id):
             return []
         if event.reason == WorkflowStartReason.RESUMPTION:
             msg = "Resuming child response progress is not supported yet"
             raise ValueError(msg)
         self._reply_order.start_frame(event)
-        graph = build_child_graph(self._graph_config, event)
+        config = self._graph_config
+        configured_start_node_id = None
+        if self._frame_graph_factory is not None:
+            caller = self._response_containers_by_frame[parent_frame_id][
+                event.container_id
+            ]
+            body = self._frame_graph_factory.resolve_call_target(caller)
+            configured_start_node_id = caller.config.get("start_node_id")
+            self._register_response_containers(event.frame_id, body)
+            config = build_local_graph_config(body, event.container_id)
+        graph = build_child_graph(
+            config, event, configured_start_node_id=configured_start_node_id
+        )
         if graph is None:
             return []
         session = _FrameSession(

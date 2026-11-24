@@ -1557,3 +1557,29 @@ def test_response_stream_filter_keeps_current_state_when_load_fails() -> None:
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     assert [event.chunk for event in chunks] == ["preserved"]
+
+
+def test_loading_nested_dsl_preserves_the_edge_ordinals_of_v1_snapshots() -> None:
+    engine = loads("""
+kind: graph
+graph:
+  nodes:
+    - {id: source, data: {type: start, variables: []}}
+    - {id: answer, data: {type: answer, answer: '{{#source.answer#}}'}}
+    - id: loop
+      data:
+        {type: loop, start_node_id: enter, loop_count: 1,
+         break_conditions: [], logical_operator: and}
+    - {id: enter, parentId: loop, data: {type: loop-start}}
+    - {id: finish, parentId: loop, data: {type: loop-end}}
+  edges:
+    - {id: child-edge, source: enter, target: finish}
+    - {id: root-answer, source: source, target: answer}
+""")
+    restored = ResponseStreamFilter()
+    restored.loads(_V1_NESTED_SNAPSHOT)
+    restored.initialize(EngineEventFilterContext.from_engine(engine))
+
+    assert json.loads(restored.dumps())["legacy_paths_map"] == {
+        "answer": [["root-answer"]],
+    }

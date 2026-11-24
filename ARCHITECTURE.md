@@ -9,30 +9,42 @@ Contributor commands and contribution rules live in [CONTRIBUTING.md](CONTRIBUTI
 
 ## Public entry points
 
-Graphon is an embeddable Python workflow engine. The host application supplies
-workflow configuration, inputs, integration adapters, and any persistence.
-The top-level `graphon` package does not re-export its primary classes; import
-them from the packages below.
+Graphon is an embeddable Python engine for executing Graphs. The host supplies
+the Graph definition, inputs, integration adapters, and any persistence. Import
+the primary classes from the packages below.
 
 | Surface | Entry point | Evidence |
 | --- | --- | --- |
 | YAML import and inspection | `graphon.dsl.inspect`, `graphon.dsl.loads` | [Importer](src/graphon/dsl/importer.py), [DSL tests](tests/dsl/) |
-| Graph construction | `graphon.graph.Graph`, `GraphBuilder`, `NodeFactory` | [Graph implementation](src/graphon/graph/graph.py), [graph tests](tests/graph/test_graph.py) |
-| Execution | `graphon.engine.Engine` | [Engine](src/graphon/engine/engine.py), [workflow tests](tests/workflows/test_full_engine_events.py) |
+| Graph definition | `graphon.graph.Graph`, `NodeDefinition`, `EdgeDefinition`, `GraphReference` | [Graph value objects](src/graphon/graph/graph.py), [definition and execution tests](tests/graph/test_graph_definition.py) |
+| Execution | `graphon.dsl.load_graph`, `graphon.engine.Engine` | [Importer](src/graphon/dsl/importer.py), [engine](src/graphon/engine/engine.py) |
+| Host-supplied nodes | `graphon.engine.FrameGraph`, `graphon.protocols.NodeFactory` | [Frame graph and builder](src/graphon/engine/frame_graph.py), [builder tests](tests/engine/test_frame_graph.py) |
 | Execution setup and state | `graphon.runtime.RuntimeState`, `VariablePool`, `InitParams` | [Runtime exports](src/graphon/runtime/__init__.py), [runtime tests](tests/runtime/) |
 | Integration contracts | `graphon.protocols` | [Protocol exports](src/graphon/protocols/__init__.py), [export tests](tests/test_protocols_exports.py) |
 
-The [Python example](examples/slim_llm/code.py) constructs nodes and an engine
-directly. The [DSL example](examples/slim_llm/dsl.py) uses `loads()`, which builds
-the variable pool, runtime state, node factory, graph, and engine. Built-in node
-availability and default DSL support are separate concerns: inspect the
-[DSL factory](src/graphon/dsl/node_factory.py) for its supported node types.
+For an executable DSL document, `inspect(text).document.graph` exposes its
+reusable definition. The reader groups nodes from flat Dify workflows into a
+root Graph and its embedded bodies. `loads(text, ...)` creates an engine with
+the document's variables and plugin dependencies. `load_graph(graph, ...)`
+creates a fresh engine for an existing definition with the built-in node factory. See the
+[DSL example](examples/slim_llm/dsl.py) and [supported node types](src/graphon/dsl/node_factory.py).
+
+`Engine(graph, runtime_state, node_factory=...)` builds the frame's nodes
+with the host's factory. Hosts with existing node instances can pass an
+assembled `FrameGraph` to `Engine`. Use the `FrameGraph.new()` builder or
+supply the node, edge, and adjacency maps and `root_node` to the constructor.
+See the [Python builder example](examples/slim_llm/code.py).
 
 ## Import boundaries
 
 The [Import Linter configuration](pyproject.toml) is the source of truth for
 allowed package dependencies. [Layer regression tests](tests/test_import_layers.py)
 exercise enforcement in CI.
+
+The DSL and engine both use `graphon.graph.Graph`. Hosts can import and build
+that definition independently of the engine. The executable `FrameGraph`, its
+mutable edges, and its builder live in `graphon.engine`. See the
+[frame graph import tests](tests/engine/test_frame_graph_imports.py).
 
 The public runtime package can restore snapshots without importing the engine.
 Importing `graphon.protocols` does not register built-in nodes; importing a concrete
@@ -45,8 +57,9 @@ runtime paths for new integrations; engine queue aliases exist for compatibility
 
 ```mermaid
 flowchart LR
-    Config[Graph config and NodeFactory] --> Graph[Scoped Graph]
-    Graph --> Engine[Engine and root frame]
+    DSL[DSL document] --> Graph[Immutable Graph]
+    Graph --> Engine[Engine and root FrameGraph]
+    Host[NodeFactory and runtime state] --> Engine
     Engine --> Ready[Shared ready queue]
     Ready --> Workers[Worker pool]
     Workers --> Dispatch[Dispatch queue]
@@ -58,9 +71,12 @@ flowchart LR
     Stream --> Consumer[Engine.run consumer]
 ```
 
-1. [Graph.init](src/graphon/graph/graph.py) turns input configuration into a
-   scoped executable graph. `Graph.new()` supplies the builder for directly
-   instantiated nodes; see the [Python example](examples/slim_llm/code.py).
+1. For a shared definition, the engine selects the sole entry automatically.
+   Supply `root_node_id` when there are several. The engine binds fresh node
+   instances and edges to the root frame. Each container call gets a child frame
+   for its body. For referenced bodies, the host supplies a `graph_resolver`
+   that maps a reference to a Graph. See [frame graph factory](src/graphon/engine/frame_graph_factory.py) and
+   [child frames](src/graphon/engine/frame.py).
 2. [Engine](src/graphon/engine/engine.py) binds a root frame, command processor,
    event stream, fixed worker pool, and dispatcher. Calling `run()` starts or
    resumes execution and yields graph and frame lifecycle events, committed
@@ -139,10 +155,13 @@ Keep frame events enabled so the filter receives its initial root baseline. The
 filter consumes baselines and committed replacements without forwarding them.
 Its detached view stays usable after the engine removes the frame.
 
-Root templates come from the graph's response nodes. Child Answer and End
-templates come from [retained graph definitions](src/graphon/engine/filter/builtin/response_stream/frame_graph.py)
-without reconstructing nodes. Frames without sufficient definitions have no
-response session. Response eligibility follows [reachability](src/graphon/engine/filter/builtin/response_stream/reachability.py)
+Root templates come from the root graph's response nodes. For child Answer
+and End templates, the filter reads the called Graph in its parent's frame or
+the retained configuration for a directly built frame. Bodies can use the same
+node ID for different replies. See [child templates](src/graphon/engine/filter/builtin/response_stream/frame_graph.py)
+and [response tests for called graphs](tests/graph/test_graph_definition.py).
+Frames without sufficient definitions have no response session.
+Response eligibility follows [reachability](src/graphon/engine/filter/builtin/response_stream/reachability.py)
 through nonblocking edges and consumed traversal events. A blocking edge opens
 only if its first consumed decision is a take. The engine may be ahead of the
 consumer, so activation uses the events already consumed in that frame. See
@@ -195,14 +214,17 @@ for that extension.
 
 ## State and execution invariants
 
-Execution state is owned by frames; shared queues and workflow execution connect
-those frames without requiring nested worker pools. File adapters are host
-resources owned by the engine, while snapshots contain portable state. These
-boundaries let the host rebuild an execution with its own integrations.
+All frames in one run share a [GraphExecution](src/graphon/runtime/execution.py)
+and the engine's queues and worker pool. Each frame owns its executable nodes
+and edges. `Engine.graph` exposes the root frame's `FrameGraph`.
+`Engine.definition` exposes the shared `Graph` when the host supplied one.
+The engine keeps host file adapters while snapshots carry portable state.
+See the [domain model](docs/domain-model.md#definition-and-execution) for the
+boundary between a graph and a run.
 
-[Variable pools](src/graphon/runtime/variable_pool.py) preserve node ownership through copies and serialization for both configured graphs and `Graph.new()` graphs.
+[Variable pools](src/graphon/runtime/variable_pool.py) preserve node ownership through copies and serialization for both configured graphs and frames built from host-supplied nodes.
 Iteration writes host variables already present in the parent pool back to that parent, while keeping inherited node variables private to each round.
-Independent workflows with fresh pools have separate ownership even when ancestor or sibling graphs reuse the same node IDs.
+Each Graph execution with a fresh pool tracks its own variables, even when ancestor or sibling Graphs reuse node IDs.
 
 The executable contracts below are authoritative for validation, lifecycle, and
 compatibility details:
@@ -211,7 +233,7 @@ compatibility details:
 | --- | --- | --- |
 | Frame state and queue ownership | [Frame](src/graphon/engine/frame.py), [runtime state](src/graphon/runtime/runtime_state/state.py) | [Dispatch](tests/engine/test_dispatch_patterns.py) |
 | File adapter binding and isolation | [File runtime](src/graphon/file/runtime.py), [engine](src/graphon/engine/engine.py) | [Execution file isolation](tests/engine/test_file_runtime.py), [file scopes](tests/file/test_runtime.py) |
-| Container ownership and factory preflight | [Graph and NodeFactory](src/graphon/graph/graph.py), [scoping](src/graphon/graph/scoping.py), [validation](src/graphon/graph/validation.py) | [Graph scoping and validation](tests/graph/test_graph_scoping.py) |
+| Container ownership and factory preflight | [Frame graph factory](src/graphon/engine/frame_graph_factory.py), [node factory contract](src/graphon/nodes/factory.py), [scoping](src/graphon/graph/scoping.py), [validation](src/graphon/graph/validation.py) | [Graph scoping and validation](tests/graph/test_graph_scoping.py) |
 | Branch joins and readiness | [Scheduler](src/graphon/engine/scheduler.py) | [Scheduling](tests/engine/test_scheduler.py) |
 | Container suspension and variable propagation | [Container effects](src/graphon/nodes/container_effects.py), [handlers](src/graphon/engine/container_handler/builtin/) | [Container values](tests/nodes/test_container_effects.py), [cooperative execution](tests/engine/test_cooperative_container_execution.py), [container variable scoping](tests/workflows/test_full_engine_events.py), [Iteration variable ownership](tests/engine/test_iteration_variable_scopes.py) |
 | Pause, resume, and snapshot quiescence | [Dispatcher](src/graphon/engine/dispatcher.py), [execution guard](src/graphon/runtime/execution.py) | [Serialization](tests/engine/test_runtime_state_serialization.py) |
@@ -266,7 +288,7 @@ snapshot guard tracks engine activity, so it cannot protect arbitrary host write
 
 | Change | Start here | Existing check |
 | --- | --- | --- |
-| Add a node | [Node base class](src/graphon/nodes/base/node.py), [NodeFactory](src/graphon/graph/graph.py); import the subclass to register its type/version | [Node execution binding](tests/nodes/base/test_node_execution_binding.py), [factory tests](tests/dsl/test_node_factory.py) |
+| Add a node | Import the subclass to register its type/version. See the [node base class](src/graphon/nodes/base/node.py) and [NodeFactory](src/graphon/nodes/factory.py) | [Node execution binding](tests/nodes/base/test_node_execution_binding.py), [factory tests](tests/dsl/test_node_factory.py) |
 | Add lifecycle observation or limits | [Layer API and usage](src/graphon/engine/layer/README.md); runtime access is read-only, controls use commands | [Layer context tests](tests/engine/test_layer_node_run_context.py) |
 | Pause, abort, or update variables externally | [Command API and channels](src/graphon/engine/command/README.md) | [Dispatch tests](tests/engine/test_dispatch_patterns.py) |
 | Adapt the consumer event stream | [Filter protocol](src/graphon/engine/filter/protocol.py) | [Filter tests](tests/engine/test_event_filters.py) |

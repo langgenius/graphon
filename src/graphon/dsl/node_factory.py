@@ -79,6 +79,7 @@ from .entities import (
     DslToolCredential,
 )
 from .errors import DslError
+from .graph import resolve_node_version
 from .slim import SlimClientConfig, SlimLLM
 from .tool_runtime import SlimToolNodeRuntime, resolve_dsl_tool_credential
 
@@ -769,8 +770,7 @@ class SlimDslNodeFactory:
 
         """
         data = request.data_payload
-        version = str(data.get("version") or "")
-        if "items" in data or version == VariableAssignerNodeV2.version():
+        if resolve_node_version(data) == VariableAssignerNodeV2.version():
             return VariableAssignerNodeData.model_validate(data)
         if {
             "assigned_variable_selector",

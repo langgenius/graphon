@@ -20,10 +20,9 @@ from examples.slim_llm.settings import (
     use_local_slim_binary,
 )
 from graphon.dsl.slim import SlimLLM
-from graphon.engine import Engine
+from graphon.engine import Engine, FrameGraph
 from graphon.file.enums import FileType
 from graphon.file.models import File
-from graphon.graph.graph import Graph
 from graphon.model_runtime.entities.llm_entities import LLMMode
 from graphon.model_runtime.entities.message_entities import (
     PromptMessage,
@@ -121,7 +120,7 @@ def build_graph(
     init_params: InitParams,
     runtime_state: RuntimeState,
     llm: SlimLLM,
-) -> Graph:
+) -> FrameGraph:
     start = StartNode(
         node_id="start",
         data=StartNodeData(title="Start"),
@@ -158,7 +157,7 @@ def build_graph(
         runtime_state=runtime_state,
     )
 
-    return Graph.new().add_root(start).add_node(llm_node).add_node(answer).build()
+    return FrameGraph.new().add_root(start).add_node(llm_node).add_node(answer).build()
 
 
 def main() -> int:

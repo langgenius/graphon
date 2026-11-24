@@ -4,6 +4,7 @@ import logging
 import time
 from typing import assert_never, final
 
+from graphon.engine.frame_graph import FrameGraph
 from graphon.engine_events.base import NodeEvent
 from graphon.engine_events.node import (
     NodeRunExceptionEvent,
@@ -15,7 +16,6 @@ from graphon.enums import (
     WorkflowNodeExecutionMetadataKey,
     WorkflowNodeExecutionStatus,
 )
-from graphon.graph.graph import Graph
 from graphon.node_events.base import NodeRunResult
 from graphon.runtime.execution import GraphExecution
 
@@ -32,7 +32,7 @@ class NodeFailureHandler:
 
     def __init__(
         self,
-        graph: Graph,
+        graph: FrameGraph,
         graph_execution: GraphExecution,
     ) -> None:
         """Initialize failure handling for one frame's graph.

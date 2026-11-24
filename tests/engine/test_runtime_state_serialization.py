@@ -21,6 +21,7 @@ from graphon.engine import Engine
 from graphon.engine.command.protocol import CommandChannel
 from graphon.engine.container_handler import LoopContainerHandler
 from graphon.engine.frame import ExecutionFrame, FrameRegistry
+from graphon.engine.frame_graph import FrameGraph
 from graphon.engine.layer import Layer
 from graphon.engine.ready_queue.entities import ResumeTask, StartTask
 from graphon.engine.ready_queue.in_memory import InMemoryReadyQueue
@@ -54,7 +55,6 @@ from graphon.enums import (
     NodeState,
     WorkflowNodeExecutionMetadataKey,
 )
-from graphon.graph.graph import Graph
 from graphon.nodes.base.node import Node
 from graphon.nodes.container_effects import (
     IterationFrameRequest,
@@ -288,7 +288,7 @@ def _hitl_engine(
         credentials=DslCredentials(),
         dependencies=list(plan.dependencies),
     )
-    graph = Graph.init(
+    graph = FrameGraph.init(
         graph_config=graph_config,
         node_factory=_HitlNodeFactory(
             base_factory=base_factory,
@@ -590,7 +590,7 @@ def test_runtime_snapshot_excludes_concurrent_operations(
 def _execution_frame(
     *,
     frame_id: str,
-    graph: Graph,
+    graph: FrameGraph,
     runtime_state: RuntimeState,
 ) -> ExecutionFrame:
     return ExecutionFrame(
@@ -642,7 +642,7 @@ class _GraphNode:
     state = NodeState.UNKNOWN
 
 
-def _loop_graph(runtime_state: RuntimeState) -> Graph:
+def _loop_graph(runtime_state: RuntimeState) -> FrameGraph:
     graph_config = {
         "nodes": [
             {
@@ -668,7 +668,7 @@ def _loop_graph(runtime_state: RuntimeState) -> Graph:
     loop_node.runtime_state = runtime_state
     loop_node.graph_config = graph_config
     return cast(
-        Graph,
+        FrameGraph,
         SimpleNamespace(
             nodes={"loop": loop_node},
             graph_config=graph_config,

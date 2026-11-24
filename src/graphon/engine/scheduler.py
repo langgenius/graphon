@@ -3,10 +3,9 @@
 from collections.abc import Callable, Sequence
 from typing import TypedDict, final
 
+from graphon.engine.frame_graph import Edge, FrameGraph
 from graphon.engine_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTakenEvent
 from graphon.enums import NodeExecutionType, NodeState
-from graphon.graph.edge import Edge
-from graphon.graph.graph import Graph
 from graphon.runtime.ready_queue import ReadyTask, StartTask
 from graphon.runtime.runtime_state import RuntimeState
 
@@ -25,7 +24,7 @@ class _EdgeStateAnalysis(TypedDict):
 class Scheduler:
     def __init__(
         self,
-        graph: Graph,
+        graph: FrameGraph,
         state: RuntimeState,
         frame_id: str,
     ) -> None:

@@ -87,7 +87,9 @@ def for_graph(
         for node_id, node in graph.nodes.items()
         if node.execution_type == NodeExecutionType.RESPONSE
     }
-    legacy_edge_ids = _legacy_edge_ids(graph)
+    legacy_edge_ids = getattr(graph, "legacy_edge_ids", None)
+    if legacy_edge_ids is None:
+        legacy_edge_ids = _legacy_edge_ids(graph)
 
     try:
         paths_map = {

@@ -3,9 +3,8 @@ from unittest.mock import Mock
 
 import pytest
 
+from graphon.engine.frame_graph import Edge, FrameGraph
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType, NodeState
-from graphon.graph.edge import Edge
-from graphon.graph.graph import Graph
 from graphon.graph.validation import GraphValidationError
 from graphon.nodes.base.node import Node
 
@@ -28,14 +27,14 @@ class TestGraphBuilder:
         root = create_mock_node("root", NodeExecutionType.EXECUTABLE)
 
         with pytest.raises(GraphValidationError) as exc:
-            Graph.new().add_root(root).build()
+            FrameGraph.new().add_root(root).build()
 
         assert any(issue.code == "INVALID_ROOT" for issue in exc.value.issues)
 
     @pytest.mark.parametrize("head", ["a", "b"])
     def test_build_rejects_cycles(self, head: str) -> None:
         builder = (
-            Graph
+            FrameGraph
             .new()
             .add_root(create_mock_node("start", NodeExecutionType.ROOT))
             .add_node(create_mock_node("a", NodeExecutionType.EXECUTABLE))
@@ -48,7 +47,7 @@ class TestGraphBuilder:
 
     @pytest.mark.parametrize("node_id", ["", None, 1])
     def test_build_rejects_invalid_node_ids(self, node_id: object) -> None:
-        builder = Graph.new().add_root(
+        builder = FrameGraph.new().add_root(
             create_mock_node("start", NodeExecutionType.ROOT),
         )
 
@@ -64,7 +63,7 @@ class TestGraphBuilder:
         source_handle: object,
         builder_method: str,
     ) -> None:
-        builder = Graph.new().add_root(
+        builder = FrameGraph.new().add_root(
             create_mock_node("start", NodeExecutionType.ROOT),
         )
         node = create_mock_node("a", NodeExecutionType.EXECUTABLE)
@@ -85,7 +84,7 @@ class TestGraphBuilder:
 
     def test_build_accepts_a_dag(self) -> None:
         graph = (
-            Graph
+            FrameGraph
             .new()
             .add_root(create_mock_node("start", NodeExecutionType.ROOT))
             .add_node(create_mock_node("a", NodeExecutionType.EXECUTABLE))
@@ -121,7 +120,7 @@ class TestMarkInactiveRootBranches:
         in_edges = {"child1": ["edge1"]}
         out_edges = {"root1": ["edge1"]}
 
-        Graph.mark_inactive_root_branches(
+        FrameGraph.mark_inactive_root_branches(
             nodes,
             edges,
             in_edges,
@@ -159,7 +158,7 @@ class TestMarkInactiveRootBranches:
         in_edges = {"child1": ["edge1"], "child2": ["edge2"]}
         out_edges = {"root1": ["edge1"], "root2": ["edge2"]}
 
-        Graph.mark_inactive_root_branches(
+        FrameGraph.mark_inactive_root_branches(
             nodes,
             edges,
             in_edges,
@@ -222,7 +221,7 @@ class TestMarkInactiveRootBranches:
             "child2": ["edge4"],
         }
 
-        Graph.mark_inactive_root_branches(
+        FrameGraph.mark_inactive_root_branches(
             nodes,
             edges,
             in_edges,
@@ -299,7 +298,7 @@ class TestMarkInactiveRootBranches:
             "level2_b": ["edge5"],
         }
 
-        Graph.mark_inactive_root_branches(
+        FrameGraph.mark_inactive_root_branches(
             nodes,
             edges,
             in_edges,
@@ -346,7 +345,7 @@ class TestMarkInactiveRootBranches:
         in_edges = {"child1": ["edge1"], "child2": ["edge2"]}
         out_edges = {"root1": ["edge1"], "non_root": ["edge2"]}
 
-        Graph.mark_inactive_root_branches(
+        FrameGraph.mark_inactive_root_branches(
             nodes,
             edges,
             in_edges,
@@ -362,7 +361,7 @@ class TestMarkInactiveRootBranches:
         assert edges["edge2"].state == NodeState.UNKNOWN
 
     def test_empty_graph(self) -> None:
-        Graph.mark_inactive_root_branches({}, {}, {}, {}, "non_existent")
+        FrameGraph.mark_inactive_root_branches({}, {}, {}, {}, "non_existent")
 
     def test_three_roots_mark_two_inactive(self) -> None:
         nodes = {
@@ -406,7 +405,7 @@ class TestMarkInactiveRootBranches:
             "root3": ["edge3"],
         }
 
-        Graph.mark_inactive_root_branches(
+        FrameGraph.mark_inactive_root_branches(
             nodes,
             edges,
             in_edges,
@@ -480,7 +479,7 @@ class TestMarkInactiveRootBranches:
             "mid2": ["edge5"],
         }
 
-        Graph.mark_inactive_root_branches(
+        FrameGraph.mark_inactive_root_branches(
             nodes,
             edges,
             in_edges,

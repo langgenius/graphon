@@ -3,15 +3,16 @@ last_checked: "2026-11-26T01:12:45Z"
 -->
 # Repository knowledge
 
-Start with the question you need to answer, then follow the links to code and
-tests. These documents describe this checkout; they do not substitute for the
-implementation or establish new public contracts.
+Start with the question you need to answer. The domain model describes the
+intended design. Follow the links to code and tests for current behavior and
+public contracts.
 
 ## Map
 
 | Question | Start here |
 | --- | --- |
 | What is Graphon and how do I run it? | [Project README](../README.md), [Slim example](../examples/slim_llm/README.md) |
+| What do the five subdomains own, and where do the DSL and engine share a model? | [Graph domain model](domain-model.md) |
 | Where does execution happen, and who owns state? | [Architecture](../ARCHITECTURE.md) |
 | How should runtime dependencies and mutable state be owned? | [Explicit state ownership](../CONTRIBUTING.md#explicit-state-ownership) |
 | Which files and tests should I change? | [Development guide](development.md) |

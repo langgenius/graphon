@@ -1,15 +1,5 @@
-import uuid
-from dataclasses import dataclass, field
+"""The original host import for an execution frame's edge."""
 
-from graphon.enums import NodeState
+from ._legacy_graph_types import Edge
 
-
-@dataclass
-class Edge:
-    """Edge connecting two nodes in a workflow graph."""
-
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    tail: str = ""  # tail node id (source)
-    head: str = ""  # head node id (target)
-    source_handle: str = "source"  # source handle for conditional branching
-    state: NodeState = field(default=NodeState.UNKNOWN)  # edge execution state
+__all__ = ["Edge"]

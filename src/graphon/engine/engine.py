@@ -7,6 +7,8 @@ import queue
 from collections.abc import Generator, Sequence
 from typing import final
 
+from graphon.engine.frame_graph import FrameGraph
+from graphon.engine.frame_graph_factory import FrameGraphFactory, GraphResolver
 from graphon.engine_events.base import (
     EngineEvent,
 )
@@ -24,7 +26,8 @@ from graphon.file.runtime import (
     peek_workflow_file_runtime,
     use_workflow_file_runtime,
 )
-from graphon.graph.graph import Graph
+from graphon.graph import Graph
+from graphon.nodes.factory import NodeFactory
 from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.ready_queue import ResumeTask, StartTask
@@ -61,12 +64,15 @@ class Engine:
 
     def __init__(
         self,
-        graph: Graph,
+        graph: Graph | FrameGraph,
         runtime_state: RuntimeState,
         command_channel: CommandChannel | None = None,
         workers: int = 5,
         container_handler_factories: Sequence[ContainerHandlerFactory] = (),
         *,
+        node_factory: NodeFactory | None = None,
+        root_node_id: str | None = None,
+        graph_resolver: GraphResolver | None = None,
         file_runtime: WorkflowFileRuntimeProtocol | None = None,
         emit_frame_events: bool = True,
     ) -> None:
@@ -84,6 +90,9 @@ class Engine:
                 A process-local in-memory channel is created when omitted.
             workers: Fixed number of worker threads to create while running.
             container_handler_factories: Additional container handler factories.
+            node_factory: Host factory for nodes in a shared graph definition.
+            root_node_id: Entry to execute. A single entry is selected automatically.
+            graph_resolver: Host lookup for referenced graph definitions.
             file_runtime: File adapter for this execution. None captures the
                 current scoped adapter, even if it is unconfigured.
                 Supply it again when rebuilding an engine from a snapshot.
@@ -99,7 +108,19 @@ class Engine:
             msg = "workers must be a positive integer"
             raise ValueError(msg)
 
-        # Bind runtime state to current workflow context
+        # Create the root frame's graph for this execution.
+        if isinstance(graph, Graph):
+            if node_factory is None:
+                msg = "A Graph definition requires a node_factory"
+                raise ValueError(msg)
+            if root_node_id is None:
+                if len(graph.entry_node_ids) != 1:
+                    msg = "Choose root_node_id when a graph has multiple entries"
+                    raise ValueError(msg)
+                root_node_id = next(iter(graph.entry_node_ids))
+            graph = FrameGraphFactory(graph_resolver).create(
+                graph, node_factory.with_runtime_state(runtime_state), root_node_id
+            )
         self._graph = graph
         self._runtime_state = runtime_state
         self._file_runtime = (
@@ -216,7 +237,7 @@ class Engine:
         """Execute the graph without leaking its file adapter to event consumers.
 
         Yields:
-            `EngineEvent` instances emitted during workflow execution.
+            `EngineEvent` instances emitted during graph execution.
 
         """
         events = self._run()
@@ -440,7 +461,12 @@ class Engine:
         return self._file_runtime
 
     @property
-    def graph(self) -> Graph:
+    def definition(self) -> Graph | None:
+        """The shared definition, when the engine was built from one."""
+        return self._graph.definition
+
+    @property
+    def graph(self) -> FrameGraph:
         """Get the graph bound to this engine."""
         return self._graph
 

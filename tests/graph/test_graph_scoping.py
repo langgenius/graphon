@@ -8,11 +8,11 @@ from unittest.mock import Mock
 
 import pytest
 
+from graphon.engine.frame_graph import Edge, FrameGraph
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.entities.graph_config import NodeConfigDict, NodeConfigDictAdapter
 from graphon.enums import NodeExecutionType, NodeState
-from graphon.graph.edge import Edge
-from graphon.graph.graph import Graph
+from graphon.graph import Graph
 from graphon.graph.validation import GraphValidationError
 from graphon.nodes.base.node import Node
 from graphon.nodes.loop.loop_start_node import LoopStartNode
@@ -136,7 +136,7 @@ def _config_edges(graph_config: Mapping[str, Any]) -> set[tuple[str, str]]:
     return {(edge["source"], edge["target"]) for edge in graph_config["edges"]}
 
 
-def _graph_edges(graph: Graph) -> set[tuple[str, str]]:
+def _graph_edges(graph: FrameGraph) -> set[tuple[str, str]]:
     return {(edge.tail, edge.head) for edge in graph.edges.values()}
 
 
@@ -405,7 +405,7 @@ def test_graph_constructor_accepts_cycle() -> None:
     root = cast(Node, Mock(spec=Node, id="node"))
     edge = Edge(id="cycle", tail="node", head="node")
 
-    graph = Graph(root_node=root, nodes={"node": root}, edges={"cycle": edge})
+    graph = FrameGraph(root_node=root, nodes={"node": root}, edges={"cycle": edge})
 
     assert graph.root_node is root
     assert graph.edges["cycle"] is edge
