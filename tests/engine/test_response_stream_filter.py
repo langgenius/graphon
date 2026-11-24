@@ -1417,6 +1417,52 @@ def test_response_stream_filter_repeats_variable_text_within_one_reply(
     assert list(event_filter.flush()) == []
 
 
+@pytest.mark.parametrize(
+    ("chunk_texts", "suffix"),
+    [(["done"], ""), (["do", "ne", ""], "!")],
+    ids=["polling", "tokens"],
+)
+def test_root_reply_forwards_source_chunks_once_for_repeated_references(
+    chunk_texts: list[str], suffix: str
+) -> None:
+    template = Template.from_answer_template(
+        "{{#source.text#}}/{{#source.text#}}" + suffix
+    )
+    graph = _variable_response_graph(segments=template.segments)
+    source_chunks = [
+        _stream_chunk(
+            text, selector=["source", "text"], is_final=index == len(chunk_texts) - 1
+        )
+        for index, text in enumerate(chunk_texts)
+    ]
+    expected_source_chunks = [event.model_copy(deep=True) for event in source_chunks]
+    output = filter_engine_events(
+        [
+            GraphRunStartedEvent(),
+            FrameStartedEvent(
+                frame_id=ROOT_FRAME_ID,
+                node_execution_ids={"source": "source-run", "answer": "answer-run"},
+            ),
+            *source_chunks,
+        ],
+        context=_context(graph),
+        filters=[ResponseStreamFilter()],
+    )
+
+    chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
+    assert chunks[: len(source_chunks)] == expected_source_chunks
+    reply_chunks = chunks[len(source_chunks) :]
+    assert "".join(event.chunk for event in reply_chunks) == "/done" + suffix
+    assert all(
+        event.id == "answer-run"
+        and event.node_id == "answer"
+        and event.selector == ["answer", "answer"]
+        for event in reply_chunks
+    )
+    assert not any(event.is_final for event in reply_chunks[:-1])
+    assert reply_chunks[-1].is_final
+
+
 def test_response_stream_filter_can_load_before_filter_chain_initializes() -> None:
     graph = _variable_response_graph()
     context = _context(graph)

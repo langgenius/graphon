@@ -16,7 +16,7 @@ from uuid import uuid4
 from graphon.engine_events.base import NodeEvent
 from graphon.engine_events.node import NodeRunRetryEvent, NodeRunStreamChunkEvent
 from graphon.enums import BuiltinNodeTypes, NodeState
-from graphon.nodes.base.template import Template, TextSegment, VariableSegment
+from graphon.nodes.base.template import Template, VariableSegment
 from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.runtime_state import GraphProtocol, NodeProtocol
 from graphon.runtime.runtime_state_protocol import ReadOnlyVariablePool
@@ -282,7 +282,11 @@ class _TemplateStream:
                 else:
                     break
             else:
-                events.extend(self._create_text_chunks(segment, session, graph=graph))
+                events.extend(
+                    self._create_response_text_chunks(
+                        segment.text, session, graph=graph
+                    )
+                )
                 session.index += 1
 
         if (
@@ -403,14 +407,6 @@ class _TemplateStream:
             output_node_id = source_selector_prefix
         execution_id = self._get_or_create_execution_id(output_node_id)
         selector = tuple(segment.selector)
-        has_stream_events = self.stream_buffers.has_events(selector)
-        stream_is_closed = self.stream_buffers.is_closed(selector)
-        if (
-            stream_is_closed
-            and not self.stream_buffers.has_unread(selector)
-            and selector in session.repeated_selectors
-        ):
-            self.stream_buffers.positions[selector] = 0
 
         while self.stream_buffers.has_unread(selector):
             event = self.stream_buffers.pop(selector)
@@ -433,9 +429,17 @@ class _TemplateStream:
             else:
                 events.append(event)
 
-        if stream_is_closed:
+        buffered_events = self.stream_buffers.events.get(selector)
+        if self.stream_buffers.is_closed(selector):
+            if (
+                not events
+                and buffered_events
+                and selector in session.repeated_selectors
+            ):
+                text = "".join(event.chunk for event in buffered_events)
+                events = self._create_response_text_chunks(text, session, graph=graph)
             is_complete = True
-        elif not has_stream_events and (value := variable_pool.get(segment.selector)):
+        elif buffered_events is None and (value := variable_pool.get(segment.selector)):
             is_last_segment = session.index == len(session.template.segments) - 1
             events.append(
                 self._create_stream_chunk_event(
@@ -451,9 +455,9 @@ class _TemplateStream:
 
         return events, is_complete
 
-    def _create_text_chunks(
+    def _create_response_text_chunks(
         self,
-        segment: TextSegment,
+        text: str,
         session: _ResponseSession,
         *,
         graph: GraphProtocol,
@@ -471,7 +475,7 @@ class _TemplateStream:
                 node_id=current_response_node.id,
                 execution_id=execution_id,
                 selector=self._get_text_segment_selector(current_response_node),
-                chunk=segment.text,
+                chunk=text,
                 is_final=is_last_segment,
                 graph=graph,
             )

@@ -148,6 +148,11 @@ only if its first consumed decision is a take. The engine may be ahead of the
 consumer, so activation uses the events already consumed in that frame. See
 [response gating regressions](docs/development.md#response-gating-regressions).
 
+When a root reply repeats a streamed node output, the filter forwards each unread source chunk with its original final flag.
+Once the final chunk has been read, remaining references in that reply emit the buffered text under the reply node's execution ID and text selector.
+If the template ends with a repeated reference or a trailing literal, that segment closes the reply.
+See the [response filter tests](tests/engine/test_response_stream_filter.py).
+
 [Template assembly](src/graphon/engine/filter/builtin/response_stream/template_stream.py)
 keeps child source streams distinct by frame, execution, attempt, and selector.
 A child Answer emits under its reserved execution ID and the
