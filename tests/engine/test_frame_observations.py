@@ -241,7 +241,7 @@ def test_disabled_frame_observations_do_not_copy_unused_context() -> None:
         "root", StartNodeData(), init_params=build_init_params(), runtime_state=state
     )
     engine = Engine(
-        graph=FrameGraph.new().add_root(root).build(),
+        graph=FrameGraph(root_node=root, nodes={root.id: root}),
         runtime_state=state,
         emit_frame_events=False,
     )

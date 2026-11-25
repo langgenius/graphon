@@ -9,7 +9,6 @@ import pytest
 from pydantic import ValidationError
 
 from graphon.dsl import loads
-from graphon.engine import FrameGraph
 from graphon.engine.filter import (
     EngineEventFilterContext,
     ResponseStreamFilter,
@@ -41,6 +40,7 @@ from graphon.runtime.runtime_state import (
 )
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import StringSegment
+from tests.helpers.frame_graph import build_linear_frame_graph
 
 _V1_FIXTURE_DIR = Path(__file__).with_name("fixtures")
 # These snapshots are the exact output of ResponseStreamFilter.dumps() at c3870df.
@@ -924,9 +924,7 @@ def test_response_stream_filter_migrates_v1_graph_builder_state() -> None:
             segments=[VariableSegment(selector=["source", "answer"])],
         ),
     )
-    graph = (
-        FrameGraph.new().add_root(cast(Any, source)).add_node(cast(Any, answer)).build()
-    )
+    graph = build_linear_frame_graph(cast(Any, source), cast(Any, answer))
     assert graph.graph_config is None
 
     restored_filter = ResponseStreamFilter()

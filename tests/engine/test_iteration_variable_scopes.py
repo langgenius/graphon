@@ -36,6 +36,7 @@ from graphon.runtime.container_state import (
     CustomContainerFrameState,
 )
 from graphon.runtime.ready_queue import ResumeTask
+from tests.helpers.frame_graph import build_linear_frame_graph
 from tests.helpers.workflow_events import final_outputs
 
 
@@ -320,7 +321,7 @@ class _WorkflowHandler:
 
 def _run_workflow(
     *,
-    root_graph_kind: Literal["builder", "config"] = "config",
+    root_graph_source: Literal["nodes", "config"] = "config",
     root_node_id: str = "source",
     inherit_pool: bool = False,
     serialize_pool: bool = False,
@@ -358,12 +359,12 @@ def _run_workflow(
             _build_edge_config("sibling-tool", "end"),
         ])
     factory = _NodeFactory(state, signals)
-    if root_graph_kind == "builder":
+    if root_graph_source == "nodes":
         start, tool, end = [
             factory.create_node(NodeConfigDictAdapter.validate_python(node_config))
             for node_config in node_configs
         ]
-        graph = FrameGraph.new().add_root(start).add_node(tool).add_node(end).build()
+        graph = build_linear_frame_graph(start, tool, end)
     else:
         graph = FrameGraph.init(
             graph_config={"nodes": node_configs, "edges": edge_configs},
@@ -392,13 +393,13 @@ def _run_workflow(
     return outputs
 
 
-@pytest.mark.parametrize("root_graph_kind", ["builder", "config"])
+@pytest.mark.parametrize("root_graph_source", ["nodes", "config"])
 @pytest.mark.parametrize("serialize_pool", [False, True])
 def test_iteration_preserves_inherited_node_variables(
-    root_graph_kind: Literal["builder", "config"], serialize_pool: bool
+    root_graph_source: Literal["nodes", "config"], serialize_pool: bool
 ) -> None:
     outputs = _run_workflow(
-        root_graph_kind=root_graph_kind,
+        root_graph_source=root_graph_source,
         root_node_id="session",
         inherit_pool=True,
         serialize_pool=serialize_pool,

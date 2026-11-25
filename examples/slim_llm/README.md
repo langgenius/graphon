@@ -3,7 +3,7 @@ last_checked: "2026-11-26T01:12:45Z"
 -->
 # Slim LLM Example
 
-This directory has two versions of the same LLM workflow:
+The YAML and Python examples run the same LLM graph.
 
 ```text
 start -> llm -> answer
@@ -11,9 +11,11 @@ start -> llm -> answer
 
 ## Source and setup
 
-[graph.yml](graph.yml) defines the workflow; [dsl.py](dsl.py) imports it and
-[code.py](code.py) constructs it directly. [settings.py](settings.py) handles
-example configuration; the [Slim client](../../src/graphon/dsl/slim/client.py)
+The DSL example loads the graph from YAML. The Python example builds it from
+node definitions and passes the resulting `Graph` to `load_graph()`. See
+[graph.yml](graph.yml), [dsl.py](dsl.py), and [code.py](code.py).
+
+[settings.py](settings.py) handles example configuration. The [Slim client](../../src/graphon/dsl/slim/client.py)
 defines daemon configuration and binary lookup. Use
 [credentials.example.json](credentials.example.json) as the credential schema.
 Complete [repository setup](../../CONTRIBUTING.md#development-setup) first.
@@ -49,5 +51,5 @@ uv run python code.py
 uv run python code.py "Reply with only the word Graphon."
 ```
 
-Running either workflow invokes a real model. Use `--help` to check command
+Both examples invoke a real model. Use `--help` to check command
 usage without credentials or a Slim executable.

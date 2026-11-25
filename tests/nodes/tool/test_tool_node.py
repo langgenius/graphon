@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from graphon.engine import Engine, FrameGraph
+from graphon.engine import Engine
 from graphon.engine.filter import (
     EngineEventFilterContext,
     ResponseStreamFilter,
@@ -38,6 +38,7 @@ from graphon.nodes.tool_runtime_entities import (
 )
 from graphon.runtime.runtime_state import RuntimeState
 from tests.helpers.builders import build_init_params, build_variable_pool
+from tests.helpers.frame_graph import build_linear_frame_graph
 
 
 def _message_stream(
@@ -348,14 +349,8 @@ def test_tool_session_id_is_preserved_in_filtered_answer(
         init_params=init_params,
         runtime_state=runtime_state,
     )
-    graph = (
-        FrameGraph
-        .new()
-        .add_root(start_node)
-        .add_node(session_node)
-        .add_node(forward_node)
-        .add_node(answer_node)
-        .build()
+    graph = build_linear_frame_graph(
+        start_node, session_node, forward_node, answer_node
     )
     engine = Engine(graph=graph, runtime_state=runtime_state)
     events = list(

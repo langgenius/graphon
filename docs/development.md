@@ -23,8 +23,8 @@ when changing runtime types, state transfers, or presentation values.
 | --- | --- | --- |
 | Update runtime, development, build, or CI dependencies | [Package metadata](../pyproject.toml), [lockfile](../uv.lock), [CI workflows](../.github/workflows/) | [Repository validation](../CONTRIBUTING.md#testing-and-validation), [package build](../justfile), [extractor tests](../tests/nodes/document_extractor/) |
 | Change import boundaries or queue ownership | [Import boundaries](../ARCHITECTURE.md#import-boundaries), [runtime queues](../src/graphon/runtime/ready_queue/) | `just imports`, [runtime isolation](../tests/runtime/test_runtime_imports.py), [public contract imports](../tests/test_protocols_exports.py) |
-| Define or validate a Graph | [Graph](../src/graphon/graph/graph.py), [validation](../src/graphon/graph/validation.py) | [Graph definitions](../tests/graph/test_graph_definition.py) |
-| Build a `FrameGraph` for execution | [Bind a Graph definition to a frame](../src/graphon/engine/frame_graph_factory.py), [build a frame from configuration or node instances](../src/graphon/engine/frame_graph.py) | [Frame graph builder](../tests/engine/test_frame_graph.py), [frame scoping](../tests/engine/test_frame_graph_scoping.py), [frame validation](../tests/engine/test_frame_graph_validation.py) |
+| Define or validate a Graph | [Graph and GraphBuilder](../src/graphon/graph/graph.py), [validation](../src/graphon/graph/validation.py) | [Graph definitions](../tests/graph/test_graph_definition.py), [Python builder](../tests/graph/test_graph_builder.py) |
+| Build a `FrameGraph` for execution | [Bind a Graph definition to a frame](../src/graphon/engine/frame_graph_factory.py), [build a frame from configuration or node instances](../src/graphon/engine/frame_graph.py) | [Inactive entry branches](../tests/engine/test_frame_graph.py), [frame scoping](../tests/engine/test_frame_graph_scoping.py), [frame validation](../tests/engine/test_frame_graph_validation.py) |
 | Import Dify DSL or wire node dependencies | [Importer](../src/graphon/dsl/importer.py), [flat DSL to Graph](../src/graphon/dsl/graph.py), [node factory](../src/graphon/dsl/node_factory.py) | [DSL tests](../tests/dsl/), especially importer, node factory, and app bootstrap |
 | Change a built-in node | [nodes](../src/graphon/nodes/), [base node](../src/graphon/nodes/base/node.py) | Matching [node tests](../tests/nodes/); [workflow events](../tests/workflows/test_full_engine_events.py) for graph-visible changes |
 | Change dispatch, scheduling, or containers | [engine](../src/graphon/engine/), [container effects](../src/graphon/nodes/container_effects.py) | [engine tests](../tests/engine/), [container values](../tests/nodes/test_container_effects.py), [container dispatch](../tests/nodes/test_container_dispatch.py), [workflow events](../tests/workflows/test_full_engine_events.py) |
@@ -59,10 +59,10 @@ and the node's constructor instead of importing host infrastructure into the
 engine. [Protocol export tests](../tests/test_protocols_exports.py) protect that
 public surface.
 
-- **Models:** inject a prepared `LLMProtocol` as `LLMNode.model_instance`.
-  [SlimLLM](../src/graphon/dsl/slim/llm.py) is the provided graph-facing adapter;
-  [code.py](../examples/slim_llm/code.py) shows direct wiring. Provider discovery
-  and capability wrappers have separate protocols; see the
+- **Model adapters** implement `LLMProtocol`. Pass the adapter to `LLMNode` as
+  `model_instance`, as the [DSL factory](../src/graphon/dsl/node_factory.py) does
+  with [SlimLLM](../src/graphon/dsl/slim/llm.py). For provider discovery and
+  capability wrappers, see the
   [model runtime guide](../src/graphon/model_runtime/README.md).
   For polling, subclass [`graphon.protocols.LLMPollingCapableProtocol`](../src/graphon/nodes/llm/runtime_protocols.py).
   A successful polling run emits the completed text in its final text chunk.

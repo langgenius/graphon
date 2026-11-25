@@ -30,12 +30,9 @@ graph:
     "qualified_name",
     [
         "graphon.graph:Graph.init",
-        "graphon.graph:Graph.new",
         "graphon.graph:Edge",
-        "graphon.graph:GraphBuilder",
         "graphon.graph:NodeFactory",
         "graphon.graph.graph:Edge",
-        "graphon.graph.graph:GraphBuilder",
         "graphon.graph.graph:NodeFactory",
     ],
 )
@@ -48,17 +45,38 @@ def test_old_graph_edge_module_is_removed() -> None:
     assert find_spec("graphon.graph.edge") is None
 
 
-def test_using_a_graph_definition_does_not_load_the_engine() -> None:
+@pytest.mark.parametrize(
+    "name",
+    [
+        "graphon.engine:FrameGraph.new",
+        "graphon.engine:GraphBuilder",
+        "graphon.engine.frame_graph:GraphBuilder",
+    ],
+)
+def test_engine_omits_graph_authoring_apis(name: str) -> None:
+    with pytest.raises(AttributeError):
+        resolve_name(name)
+
+
+def test_authoring_a_graph_does_not_load_the_engine_or_executable_nodes() -> None:
     script = dedent(
         """
         import sys
 
         from graphon import graph
 
-        definition = graph.Graph(nodes=[graph.NodeDefinition("start", "start")])
-        assert definition.node("start").node_type == "start"
+        definition = (
+            graph.Graph.new()
+            .add_root(graph.NodeDefinition("start", "start"))
+            .add_node(graph.NodeDefinition("reply", "answer"))
+            .add_root(graph.NodeDefinition("other", "start"))
+            .connect(tail="other", head="reply")
+            .build()
+        )
+        assert definition.node("reply").node_type == "answer"
         assert not any(
-            name == "graphon.engine" or name.startswith("graphon.engine.")
+            name in {"graphon.engine", "graphon.nodes"}
+            or name.startswith(("graphon.engine.", "graphon.nodes."))
             for name in sys.modules
         )
         """

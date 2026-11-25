@@ -16,6 +16,7 @@ from .validation import GraphValidationError, GraphValidationIssue, get_edge_iss
 __all__ = [
     "EdgeDefinition",
     "Graph",
+    "GraphBuilder",
     "GraphReference",
     "NodeDefinition",
 ]
@@ -117,6 +118,27 @@ _BUILTIN_ENTRY_TYPES = frozenset((
 ))
 
 
+def _check_new_node(
+    node: NodeDefinition, nodes_by_id: Mapping[str, NodeDefinition]
+) -> None:
+    if not isinstance(node, NodeDefinition):
+        msg = "Graph nodes must be node definitions"
+        raise TypeError(msg)
+    if node.id in nodes_by_id:
+        raise GraphValidationError([
+            GraphValidationIssue(
+                "DUPLICATE_NODE_ID", f"Duplicate node ID: {node.id}", node.id
+            )
+        ])
+
+
+def _is_entry(node: NodeDefinition, entry_types: frozenset[tuple[str, str]]) -> bool:
+    return (
+        node.node_type in _BUILTIN_ENTRY_TYPES
+        or (node.node_type, node.version) in entry_types
+    )
+
+
 @final
 @dataclass(frozen=True, slots=True, init=False)
 class Graph:
@@ -143,22 +165,11 @@ class Graph:
     ) -> None:
         nodes_by_id: dict[str, NodeDefinition] = {}
         for node in nodes:
-            if not isinstance(node, NodeDefinition):
-                msg = "Graph nodes must be node definitions"
-                raise TypeError(msg)
-            if node.id in nodes_by_id:
-                raise GraphValidationError([
-                    GraphValidationIssue(
-                        "DUPLICATE_NODE_ID", f"Duplicate node ID: {node.id}", node.id
-                    )
-                ])
+            _check_new_node(node, nodes_by_id)
             nodes_by_id[node.id] = node
         entry_types = frozenset(entry_types)
         entry_node_ids = frozenset(
-            node.id
-            for node in nodes_by_id.values()
-            if node.node_type in _BUILTIN_ENTRY_TYPES
-            or (node.node_type, node.version) in entry_types
+            node.id for node in nodes_by_id.values() if _is_entry(node, entry_types)
         )
         if not entry_node_ids:
             raise GraphValidationError([
@@ -200,6 +211,11 @@ class Graph:
             MappingProxyType({key: tuple(items) for key, items in outgoing.items()}),
         )
 
+    @staticmethod
+    def new(*, entry_types: Iterable[tuple[str, str]] = ()) -> GraphBuilder:
+        """Start a new graph definition in Python."""
+        return GraphBuilder(entry_types=entry_types)
+
     def __hash__(self) -> int:
         return hash((
             frozenset(self.nodes.items()),
@@ -215,3 +231,72 @@ class Graph:
 
     def outgoing(self, node_id: str) -> tuple[EdgeDefinition, ...]:
         return self._outgoing_edges.get(node_id, ())
+
+
+@final
+class GraphBuilder:
+    """Build immutable graphs by adding node definitions and connecting them."""
+
+    def __init__(self, *, entry_types: Iterable[tuple[str, str]] = ()) -> None:
+        self._entry_types = frozenset(entry_types)
+        self._nodes_by_id: dict[str, NodeDefinition] = {}
+        self._edges: list[EdgeDefinition] = []
+
+    def add_root(self, node: NodeDefinition) -> GraphBuilder:
+        """Start a path at an entry node. A graph can have several entries."""
+        _check_new_node(node, self._nodes_by_id)
+        if not _is_entry(node, self._entry_types):
+            raise GraphValidationError([
+                GraphValidationIssue(
+                    "INVALID_ROOT", f"Node {node.id!r} is not an entry.", node.id
+                )
+            ])
+        self._nodes_by_id[node.id] = node
+        return self
+
+    def add_node(
+        self,
+        node: NodeDefinition,
+        *,
+        from_node_id: str | None = None,
+        source_handle: str = "source",
+    ) -> GraphBuilder:
+        """Connect a new node from the last node added or the named predecessor."""
+        if not self._nodes_by_id:
+            msg = "Add a root before adding other nodes"
+            raise ValueError(msg)
+        _check_new_node(node, self._nodes_by_id)
+        source_id = (
+            next(reversed(self._nodes_by_id)) if from_node_id is None else from_node_id
+        )
+        self._add_edge(source_id, node.id, source_handle)
+        self._nodes_by_id[node.id] = node
+        return self
+
+    def connect(
+        self, *, tail: str, head: str, source_handle: str = "source"
+    ) -> GraphBuilder:
+        """Connect two nodes already in this graph."""
+        if head not in self._nodes_by_id:
+            msg = f"Unknown target node: {head!r}"
+            raise ValueError(msg)
+        self._add_edge(tail, head, source_handle)
+        return self
+
+    def _add_edge(self, source_id: str, target_id: str, source_handle: str) -> None:
+        if source_id not in self._nodes_by_id:
+            msg = f"Unknown source node: {source_id!r}"
+            raise ValueError(msg)
+        self._edges.append(
+            EdgeDefinition(
+                f"edge_{len(self._edges)}", source_id, target_id, source_handle
+            )
+        )
+
+    def build(self) -> Graph:
+        """Return an immutable snapshot of the current nodes and edges."""
+        return Graph(
+            nodes=self._nodes_by_id.values(),
+            edges=self._edges,
+            entry_types=self._entry_types,
+        )
