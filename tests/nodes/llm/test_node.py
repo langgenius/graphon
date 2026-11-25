@@ -686,6 +686,14 @@ def test_polling_llm_checks_until_success(monkeypatch: pytest.MonkeyPatch) -> No
         "cursor": "2",
     }
     assert completed_event.node_run_result.outputs["text"] == "checked"
+    text_chunks = [
+        event
+        for event in events
+        if isinstance(event, StreamChunkEvent) and event.selector == ["llm", "text"]
+    ]
+    assert "".join(event.chunk for event in text_chunks) == "checked"
+    assert not any(event.is_final for event in text_chunks[:-1])
+    assert text_chunks[-1].is_final
 
 
 def test_polling_llm_saves_video_output_file(
