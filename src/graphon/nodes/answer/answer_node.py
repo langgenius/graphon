@@ -33,14 +33,14 @@ class AnswerNode(Node[AnswerNodeData]):
                 text_parts.append(segment.text)
                 continue
 
-            value = self.runtime_state.variable_pool.get(segment.selector)
-            if value is None:
+            resolved_segment = self.runtime_state.variable_pool.get(segment.selector)
+            if resolved_segment is None:
                 continue
-            text_parts.append(value.markdown)
-            if isinstance(value, FileSegment):
-                files.append(value.value)
-            elif isinstance(value, ArrayFileSegment):
-                files.extend(value.value)
+            text_parts.append(resolved_segment.markdown)
+            if isinstance(resolved_segment, FileSegment):
+                files.append(resolved_segment.value)
+            elif isinstance(resolved_segment, ArrayFileSegment):
+                files.extend(resolved_segment.value)
 
         return NodeRunResult(
             status=WorkflowNodeExecutionStatus.SUCCEEDED,

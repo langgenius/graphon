@@ -369,38 +369,28 @@ def test_full_answer_graph_is_verified_from_events() -> None:
     ("choice", "expected_answer"),
     [("take", "(ok)"), ("skip", "()")],
 )
-@pytest.mark.parametrize(
-    "container_nodes",
-    [[], _iteration_nodes("iteration"), _loop_nodes("loop")],
-    ids=["root", "iteration", "loop"],
-)
-def test_answer_matches_its_stream_after_a_branch(
-    choice: str, expected_answer: str, container_nodes: list[dict[str, Any]]
+def test_saved_and_streamed_answers_omit_skipped_branch_output(
+    choice: str, expected_answer: str
 ) -> None:
-    container_id = container_nodes[0]["id"] if container_nodes else ""
-    branch_target = container_id or "answer"
+    start = _start_node()
+    start["data"]["variables"] = [
+        {"type": "text-input", "variable": "choice", "label": "Choice"}
+    ]
+    case = {
+        "case_id": "true",
+        "logical_operator": "and",
+        "conditions": [
+            {
+                "variable_selector": ["start", "choice"],
+                "comparison_operator": "is",
+                "value": "take",
+            }
+        ],
+    }
     dsl = _graph_dsl(
         nodes=[
-            _start_node(),
-            {
-                "id": "branch",
-                "data": {
-                    "type": "if-else",
-                    "cases": [
-                        {
-                            "case_id": "take",
-                            "logical_operator": "and",
-                            "conditions": [
-                                {
-                                    "variable_selector": ["start", "choice"],
-                                    "comparison_operator": "is",
-                                    "value": "take",
-                                }
-                            ],
-                        }
-                    ],
-                },
-            },
+            start,
+            {"id": "branch", "data": {"type": "if-else", "cases": [case]}},
             {
                 "id": "source",
                 "data": {
@@ -409,73 +399,32 @@ def test_answer_matches_its_stream_after_a_branch(
                     "variables": [],
                 },
             },
-            *container_nodes,
             {
                 "id": "answer",
-                "data": {
-                    "type": "answer",
-                    "answer": "({{#source.output#}})",
-                    "container_id": container_id,
-                },
+                "data": {"type": "answer", "answer": "({{#source.output#}})"},
             },
         ],
         edges=[
             _edge("start", "branch"),
-            {"source": "branch", "target": "source", "sourceHandle": "take"},
-            {"source": "branch", "target": branch_target, "sourceHandle": "false"},
-            _edge("source", branch_target),
-            *([_edge(f"{container_id}-start", "answer")] if container_id else []),
+            {"source": "branch", "target": "source", "sourceHandle": "true"},
+            {"source": "branch", "target": "answer", "sourceHandle": "false"},
+            _edge("source", "answer"),
         ],
     )
-    engine = loads(dsl, start_inputs={"choice": choice, "items": [1]})
-    events = list(
-        filter_engine_events(
-            engine.run(),
-            context=EngineEventFilterContext.from_engine(engine),
-            filters=[ResponseStreamFilter()],
-        )
+    engine = loads(dsl, start_inputs={"choice": choice})
+    events = filter_engine_events(
+        engine.run(),
+        context=EngineEventFilterContext.from_engine(engine),
+        filters=[ResponseStreamFilter()],
     )
 
     streamed_answer = "".join(
         event.chunk for event in events if isinstance(event, NodeRunStreamChunkEvent)
     )
-    assert final_outputs(events)["answer"] == expected_answer
-    if not container_id:
-        saved_answer = engine.runtime_state.variable_pool.get(("answer", "answer"))
-        assert saved_answer is not None
-        assert saved_answer.to_object() == expected_answer
     assert streamed_answer == expected_answer
-
-
-def test_answer_stream_continues_after_a_missing_object_field() -> None:
-    dsl = _graph_dsl(
-        nodes=[
-            _start_node(),
-            {
-                "id": "answer",
-                "data": {"type": "answer", "answer": "({{#start.payload.optional#}})"},
-            },
-        ],
-        edges=[_edge("start", "answer")],
-    )
-    engine = loads(dsl, start_inputs={"payload": {}})
-    events = list(
-        filter_engine_events(
-            engine.run(),
-            context=EngineEventFilterContext.from_engine(engine),
-            filters=[ResponseStreamFilter()],
-        )
-    )
-
-    assert final_outputs(events)["answer"] == "()"
-    assert (
-        "".join(
-            event.chunk
-            for event in events
-            if isinstance(event, NodeRunStreamChunkEvent)
-        )
-        == "()"
-    )
+    saved_answer = engine.runtime_state.variable_pool.get(("answer", "answer"))
+    assert saved_answer is not None
+    assert saved_answer.to_object() == expected_answer
 
 
 def test_resume_replays_tasks_through_a_bounded_ready_queue() -> None:

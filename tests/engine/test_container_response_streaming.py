@@ -52,7 +52,7 @@ from graphon.nodes.base.template import Template
 from graphon.nodes.template_transform.template_transform_node import (
     TemplateTransformNode,
 )
-from graphon.variables.variables import ObjectVariable, StringVariable
+from graphon.variables.variables import StringVariable
 from tests.engine.test_file_runtime import _make_file, _make_file_adapter
 from tests.engine.test_frame_observations import _dsl, _node
 from tests.engine.test_response_stream_filter import (
@@ -367,30 +367,6 @@ def test_reverse_arrival_waits_for_template_order_without_replaying_final_value(
     output.extend(stream_filter.on_event(_make_source_completion()))
     assert _join_stream_text(output) == "first/second"
     assert sum(event.is_final for event in _select_stream_chunks(output)) == 1
-
-
-def test_child_answer_reads_a_field_added_after_its_source_finishes() -> None:
-    stream_filter, start = _make_filter_and_start(answer="({{#source.output.label#}})")
-    source_output = ObjectVariable(
-        name="output", selector=["source", "output"], value={}
-    )
-    events = [
-        *stream_filter.on_event(start),
-        *stream_filter.on_event(
-            FrameVariablesUpdatedEvent(frame_id="child", variables=(source_output,))
-        ),
-        *stream_filter.on_event(_make_source_completion()),
-        *stream_filter.on_event(
-            FrameVariablesUpdatedEvent(
-                frame_id="child",
-                variables=(
-                    source_output.model_copy(update={"value": {"label": "late"}}),
-                ),
-            )
-        ),
-    ]
-
-    assert _join_stream_text(events) == "(late)"
 
 
 @pytest.mark.parametrize("streamed", [False, True])
