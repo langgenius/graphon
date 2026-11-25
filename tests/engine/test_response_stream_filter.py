@@ -15,7 +15,7 @@ from graphon.engine.filter import (
     filter_engine_events,
 )
 from graphon.engine_events.frame import FrameStartedEvent
-from graphon.engine_events.graph import GraphRunStartedEvent
+from graphon.engine_events.graph import GraphRunPausedEvent, GraphRunStartedEvent
 from graphon.engine_events.node import (
     NodeRunReasoningChunkEvent,
     NodeRunRetryEvent,
@@ -41,6 +41,16 @@ from graphon.runtime.runtime_state import (
 )
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import StringSegment
+from tests.engine.test_frame_observations import _dsl, _node
+from tests.engine.test_response_stream_pause import (
+    _request_hitl_pause,
+    _run_with_response_filter,
+)
+from tests.engine.test_runtime_state_serialization import (
+    _complete_loop_hitl,
+    _hitl_engine,
+    _new_runtime_state,
+)
 
 _V1_FIXTURE_DIR = Path(__file__).with_name("fixtures")
 # These snapshots are the exact output of ResponseStreamFilter.dumps() at c3870df.
@@ -734,6 +744,62 @@ def test_response_stream_filter_reads_scalar_variable_values() -> None:
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     assert [event.chunk for event in chunks] == ["saved"]
+
+
+@pytest.mark.parametrize("restore", [False, True], ids=["direct", "checkpoint"])
+def test_queued_answer_skips_a_field_added_after_it_finishes(restore: bool) -> None:
+    dsl = _dsl(
+        [
+            _node("first", "answer", answer="first={{#start.payload.optional#}}"),
+            _node("queued", "answer", answer="({{#start.payload.optional#}})"),
+            _node("approval", "human-input", title="Approve update"),
+            _node(
+                "update",
+                "assigner",
+                version="2",
+                items=[
+                    {
+                        "variable_selector": ["start", "payload"],
+                        "input_type": "constant",
+                        "operation": "set",
+                        "value": {"optional": "late"},
+                    }
+                ],
+            ),
+        ],
+        [
+            ("start", "first"),
+            ("start", "queued"),
+            ("queued", "approval"),
+            ("approval", "update"),
+            ("update", "first"),
+        ],
+    )
+    engine = _hitl_engine(
+        dsl,
+        runtime_state=_new_runtime_state({"payload": {}}),
+        callback=_request_hitl_pause if restore else _complete_loop_hitl,
+    )
+    stream_filter = ResponseStreamFilter()
+    events = _run_with_response_filter(engine, stream_filter)
+    if restore:
+        assert isinstance(events[-1], GraphRunPausedEvent)
+        engine = _hitl_engine(
+            dsl,
+            runtime_state=RuntimeState.from_snapshot(engine.runtime_state.dumps()),
+            callback=_complete_loop_hitl,
+        )
+        restored_filter = ResponseStreamFilter()
+        restored_filter.loads(stream_filter.dumps())
+        events.extend(_run_with_response_filter(engine, restored_filter))
+
+    queued_answer = engine.runtime_state.variable_pool.get(("queued", "answer"))
+    assert queued_answer is not None
+    assert queued_answer.to_object() == "()"
+    streamed_text = "".join(
+        event.chunk for event in events if isinstance(event, NodeRunStreamChunkEvent)
+    )
+    assert streamed_text == "first=late()"
 
 
 @pytest.mark.parametrize("node_type", [BuiltinNodeTypes.ANSWER, BuiltinNodeTypes.END])

@@ -179,6 +179,7 @@ class _TemplateStream:
     )
     latest_streams: dict[Selector, _SourceStream] = field(default_factory=dict)
     finished_node_ids: set[str] = field(default_factory=set)
+    missing_answer_selectors: dict[str, set[Selector]] = field(default_factory=dict)
 
     def append(self, event: NodeRunStreamChunkEvent) -> None:
         if self.frame_id == ROOT_FRAME_ID:
@@ -220,10 +221,27 @@ class _TemplateStream:
         for source in self.source_streams.values():
             source.closed = True
 
+    def record_missing_answer_selectors(
+        self,
+        answer_node_id: str,
+        selectors: Iterable[Selector],
+        variable_pool: ReadOnlyVariablePool,
+    ) -> None:
+        missing_selectors = {
+            selector
+            for selector in selectors
+            if not self.stream_buffers.has_events(selector)
+            and selector not in self.latest_streams
+            and variable_pool.get(selector) is None
+        }
+        if missing_selectors:
+            self.missing_answer_selectors[answer_node_id] = missing_selectors
+
     def clear(self) -> None:
         self.stream_buffers = _StreamBuffers()
         self.source_streams.clear()
         self.latest_streams.clear()
+        self.missing_answer_selectors.clear()
 
     def is_skipped(self, node_id: str, *, graph: GraphProtocol) -> bool:
         if self.skipped_node_ids is not None:
@@ -258,12 +276,16 @@ class _TemplateStream:
         variable_pool: ReadOnlyVariablePool,
     ) -> list[NodeRunStreamChunkEvent]:
         events: list[NodeRunStreamChunkEvent] = []
+        missing_selectors = self.missing_answer_selectors.get(session.node_id, ())
         while session.index < len(session.template.segments):
             segment = session.template.segments[session.index]
 
             if isinstance(segment, VariableSegment):
                 source_selector_prefix = segment.selector[0] if segment.selector else ""
-                if self.is_skipped(source_selector_prefix, graph=graph):
+                if self.is_skipped(source_selector_prefix, graph=graph) or (
+                    tuple(segment.selector) in missing_selectors
+                    and session.index not in session.segment_streams
+                ):
                     session.index += 1
                     continue
 
@@ -368,7 +390,9 @@ class _TemplateStream:
                 self._create_child_response_chunk(event, session, graph=graph)
             ], True
         return [], bool(
-            segment.selector and segment.selector[0] in self.finished_node_ids
+            graph.nodes[session.node_id].node_type != BuiltinNodeTypes.ANSWER
+            and segment.selector
+            and segment.selector[0] in self.finished_node_ids
         )
 
     def _create_child_response_chunk(

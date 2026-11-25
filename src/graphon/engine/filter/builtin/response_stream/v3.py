@@ -7,7 +7,7 @@ from pydantic import Field, model_validator
 from graphon.runtime.runtime_state import GraphProtocol
 
 from .ids import EdgeID, NodeID
-from .snapshot import ResponseStreamFilterSnapshot
+from .snapshot import ResponseStreamFilterSnapshot, Selector
 
 
 class Snapshot(ResponseStreamFilterSnapshot[Literal["3.0"]]):
@@ -33,6 +33,7 @@ class Snapshot(ResponseStreamFilterSnapshot[Literal["3.0"]]):
     # All observed skipped edge IDs for template selection, including late skips.
     # None retains the paired graph's skip lookup for older checkpoints.
     skipped_edges: list[EdgeID] | None = None
+    missing_answer_selectors: dict[str, list[Selector]] = Field(default_factory=dict)
     # Response node ID -> alternative residual paths (OR). Each path contains
     # the remaining blocking edge IDs that must all be taken (AND).
     legacy_paths_map: dict[NodeID, list[list[EdgeID]]] | None = None
@@ -58,6 +59,8 @@ def dumps(snapshot: ResponseStreamFilterSnapshot) -> str:
     excluded_fields = {"skipped_edges"} if snapshot.skipped_edges is None else set()
     if not snapshot.rejected_edges:
         excluded_fields.add("rejected_edges")
+    if not snapshot.missing_answer_selectors:
+        excluded_fields.add("missing_answer_selectors")
     return snapshot.model_dump_json(exclude=excluded_fields)
 
 

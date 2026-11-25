@@ -160,6 +160,17 @@ class _FrameSession:
                 return self._handle_edge_skipped(event)
             case NodeRunSucceededEvent() | NodeRunExceptionEvent():
                 self._template_stream.finish_source(event)
+                if (
+                    isinstance(event, NodeRunSucceededEvent)
+                    and event.node_type == BuiltinNodeTypes.ANSWER
+                    and NodeID(event.node_id) in self._replies
+                    and self.variable_pool is not None
+                ):
+                    self._template_stream.record_missing_answer_selectors(
+                        event.node_id,
+                        self._get_referenced_selectors(NodeID(event.node_id)),
+                        self.variable_pool,
+                    )
                 return [*self._try_flush(), event]
         return [event]
 
@@ -264,6 +275,12 @@ class _FrameSession:
             node_execution_ids=dict(
                 sorted(self._template_stream.node_execution_ids.items())
             ),
+            missing_answer_selectors={
+                node_id: sorted(selectors)
+                for node_id, selectors in sorted(
+                    self._template_stream.missing_answer_selectors.items()
+                )
+            },
             taken_edges=taken_edges,
             rejected_edges=rejected_edges,
             legacy_paths_map=legacy_paths_map,
@@ -338,6 +355,10 @@ class _FrameSession:
             stream_buffers=stream_buffers,
             node_execution_ids=node_execution_ids,
             skipped_node_ids=self._find_skipped_node_ids(),
+            missing_answer_selectors={
+                node_id: set(selectors)
+                for node_id, selectors in state.missing_answer_selectors.items()
+            },
         )
         self._response_node_ids = response_node_ids
         self._gating_state = gating_state
@@ -582,6 +603,7 @@ class _FrameSession:
         reply.finished = True
         if reply.displayed or self.frame_id == ROOT_FRAME_ID:
             del self._replies[node_id]
+            self._template_stream.missing_answer_selectors.pop(node_id, None)
         else:
             self._completed_sessions[node_id] = self._active_session
         self._active_session = None
