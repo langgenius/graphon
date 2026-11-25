@@ -29,10 +29,12 @@ the document's variables and plugin dependencies. `load_graph(graph, ...)`
 creates a fresh engine for an existing definition with the built-in node factory. See the
 [DSL example](examples/slim_llm/dsl.py) and [supported node types](src/graphon/dsl/node_factory.py).
 
-`Engine(graph, runtime_state, node_factory=...)` builds the frame's nodes
-with the host's factory. Hosts with existing node instances can pass an
-assembled `FrameGraph` to `Engine`. Use the `FrameGraph.new()` builder or
-supply the node, edge, and adjacency maps and `root_node` to the constructor.
+`Engine(graph, runtime_state, node_factory=...)` builds the root frame from a
+shared definition. To supply a frame directly, use `Engine(frame_graph, runtime_state)`.
+Build a frame from raw configuration with
+`FrameGraph.init(graph_config=..., node_factory=..., root_node_id=...)`.
+For existing node instances, use `FrameGraph.new()` or pass the node, edge,
+and adjacency maps and `root_node` to the `FrameGraph` constructor.
 See the [Python builder example](examples/slim_llm/code.py).
 
 ## Import boundaries
@@ -41,9 +43,9 @@ The [Import Linter configuration](pyproject.toml) is the source of truth for
 allowed package dependencies. [Layer regression tests](tests/test_import_layers.py)
 exercise enforcement in CI.
 
-The DSL and engine both use `graphon.graph.Graph`. Hosts can import and build
-that definition independently of the engine. The executable `FrameGraph`, its
-mutable edges, and its builder live in `graphon.engine`. See the
+The DSL and engine share `graphon.graph.Graph`, which hosts can construct
+without loading the engine. `graphon.engine` exports the executable `FrameGraph`,
+its mutable `Edge` type, and `GraphBuilder`. See the
 [frame graph import tests](tests/engine/test_frame_graph_imports.py).
 
 The public runtime package can restore snapshots without importing the engine.
@@ -233,7 +235,7 @@ compatibility details:
 | --- | --- | --- |
 | Frame state and queue ownership | [Frame](src/graphon/engine/frame.py), [runtime state](src/graphon/runtime/runtime_state/state.py) | [Dispatch](tests/engine/test_dispatch_patterns.py) |
 | File adapter binding and isolation | [File runtime](src/graphon/file/runtime.py), [engine](src/graphon/engine/engine.py) | [Execution file isolation](tests/engine/test_file_runtime.py), [file scopes](tests/file/test_runtime.py) |
-| Container ownership and factory preflight | [Frame graph factory](src/graphon/engine/frame_graph_factory.py), [node factory contract](src/graphon/nodes/factory.py), [scoping](src/graphon/graph/scoping.py), [validation](src/graphon/graph/validation.py) | [Graph scoping and validation](tests/graph/test_graph_scoping.py) |
+| Container ownership and factory preflight | [Frame graph factory](src/graphon/engine/frame_graph_factory.py), [node factory contract](src/graphon/nodes/factory.py), [scoping](src/graphon/graph/scoping.py), [validation](src/graphon/graph/validation.py) | [Frame scoping and preflight](tests/engine/test_frame_graph_scoping.py) |
 | Branch joins and readiness | [Scheduler](src/graphon/engine/scheduler.py) | [Scheduling](tests/engine/test_scheduler.py) |
 | Container suspension and variable propagation | [Container effects](src/graphon/nodes/container_effects.py), [handlers](src/graphon/engine/container_handler/builtin/) | [Container values](tests/nodes/test_container_effects.py), [cooperative execution](tests/engine/test_cooperative_container_execution.py), [container variable scoping](tests/workflows/test_full_engine_events.py), [Iteration variable ownership](tests/engine/test_iteration_variable_scopes.py) |
 | Pause, resume, and snapshot quiescence | [Dispatcher](src/graphon/engine/dispatcher.py), [execution guard](src/graphon/runtime/execution.py) | [Serialization](tests/engine/test_runtime_state_serialization.py) |

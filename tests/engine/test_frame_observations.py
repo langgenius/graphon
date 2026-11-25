@@ -13,7 +13,7 @@ import pytest
 
 from graphon import engine_events
 from graphon.dsl import loads
-from graphon.engine import Engine
+from graphon.engine import Engine, FrameGraph
 from graphon.engine.command import (
     CommandProcessor,
     UpdateVariablesCommand,
@@ -31,7 +31,6 @@ from graphon.engine_events.node import (
 )
 from graphon.entities.workflow_start_reason import WorkflowStartReason
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
-from graphon.graph import Graph
 from graphon.node_events.base import NodeEventPayload, NodeRunResult
 from graphon.node_events.node import StreamChunkEvent, StreamCompletedEvent
 from graphon.nodes.container_effects import (
@@ -242,7 +241,7 @@ def test_disabled_frame_observations_do_not_copy_unused_context() -> None:
         "root", StartNodeData(), init_params=build_init_params(), runtime_state=state
     )
     engine = Engine(
-        graph=Graph.new().add_root(root).build(),
+        graph=FrameGraph.new().add_root(root).build(),
         runtime_state=state,
         emit_frame_events=False,
     )

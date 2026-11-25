@@ -8,11 +8,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from graphon.engine.frame_graph import Edge, FrameGraph
+from graphon.engine import Edge, FrameGraph
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.entities.graph_config import NodeConfigDict, NodeConfigDictAdapter
 from graphon.enums import NodeExecutionType, NodeState
-from graphon.graph import Graph
 from graphon.graph.validation import GraphValidationError
 from graphon.nodes.base.node import Node
 from graphon.nodes.loop.loop_start_node import LoopStartNode
@@ -147,7 +146,7 @@ def test_invalid_node_ids_fail_before_construction(node_id: object) -> None:
     node_factory = _RecordingNodeFactory()
 
     with pytest.raises(GraphValidationError):
-        Graph.init(
+        FrameGraph.init(
             graph_config=graph_config,
             node_factory=node_factory,
             root_node_id="start",
@@ -177,7 +176,7 @@ def test_invalid_edges_fail_before_construction(
     node_factory = _RecordingNodeFactory()
 
     with pytest.raises(GraphValidationError):
-        Graph.init(
+        FrameGraph.init(
             graph_config=graph_config,
             node_factory=node_factory,
             root_node_id="start",
@@ -202,7 +201,7 @@ def test_cycles_fail_before_construction(
     node_factory = _RecordingNodeFactory()
 
     with pytest.raises(GraphValidationError, match=r"(?i)cycle") as error:
-        Graph.init(
+        FrameGraph.init(
             graph_config=graph_config,
             node_factory=node_factory,
             root_node_id="start",
@@ -226,7 +225,7 @@ def test_cycles_outside_the_active_path_are_rejected(has_inactive_root: bool) ->
     node_factory = _RecordingNodeFactory()
 
     with pytest.raises(GraphValidationError, match=r"(?i)cycle"):
-        Graph.init(
+        FrameGraph.init(
             graph_config=graph_config,
             node_factory=node_factory,
             root_node_id="start",
@@ -239,7 +238,7 @@ def test_child_validation_does_not_include_sibling_cycles() -> None:
     graph_config = _scoped_graph_config()
     graph_config["edges"].append(_edge("b-end", "b-start"))
 
-    graph = Graph.init(
+    graph = FrameGraph.init(
         graph_config=graph_config,
         node_factory=_RecordingNodeFactory(),
         root_node_id="a-start",
@@ -249,14 +248,14 @@ def test_child_validation_does_not_include_sibling_cycles() -> None:
     assert set(graph.nodes) == {"a-start", "nested-container", "a-end"}
 
 
-def test_graph_init_preserves_input_and_handles() -> None:
+def test_frame_graph_init_preserves_config_and_edge_handles() -> None:
     graph_config = _scoped_graph_config()
     graph_config["nodes"].append({"id": "start", "type": "custom-note", "data": {}})
     graph_config["edges"][1]["sourceHandle"] = ""
     graph_config["edges"][2]["sourceHandle"] = "custom"
     original_graph_config = deepcopy(graph_config)
 
-    graph = Graph.init(
+    graph = FrameGraph.init(
         graph_config=graph_config,
         node_factory=_RecordingNodeFactory(),
         root_node_id="start",
@@ -277,7 +276,7 @@ def test_skip_validation_allows_cycle_and_missing_target() -> None:
         _edge("end", "missing"),
     ])
 
-    graph = Graph.init(
+    graph = FrameGraph.init(
         graph_config=graph_config,
         node_factory=_RecordingNodeFactory(),
         root_node_id="end",
@@ -298,7 +297,7 @@ def test_skip_validation_still_rejects_invalid_input(invalid_input: str) -> None
         graph_config["edges"][0]["sourceHandle"] = None
 
     with pytest.raises(GraphValidationError):
-        Graph.init(
+        FrameGraph.init(
             graph_config=graph_config,
             node_factory=_RecordingNodeFactory(),
             root_node_id="start",
@@ -310,7 +309,7 @@ def test_invalid_root_is_rejected() -> None:
     node_factory = _RecordingNodeFactory()
 
     with pytest.raises(GraphValidationError) as error:
-        Graph.init(
+        FrameGraph.init(
             graph_config=_scoped_graph_config(),
             node_factory=node_factory,
             root_node_id="end",
@@ -337,7 +336,7 @@ def test_root_validation_accepts_factory_alias_for_loop_entry() -> None:
                 ),
             )
 
-    graph = Graph.init(
+    graph = FrameGraph.init(
         graph_config={
             "nodes": [_node("entry", node_type="entry-alias")],
             "edges": [],
@@ -351,7 +350,7 @@ def test_root_validation_accepts_factory_alias_for_loop_entry() -> None:
 
 @pytest.mark.parametrize("target", ["missing", "other-start"])
 def test_skip_validation_allows_invalid_inactive_branches(target: str) -> None:
-    graph = Graph.init(
+    graph = FrameGraph.init(
         graph_config={
             "nodes": [
                 _node("start", node_type="start"),
@@ -376,7 +375,7 @@ def test_duplicate_child_edge_ids_fail_before_construction() -> None:
     node_factory = _RecordingNodeFactory()
 
     with pytest.raises(ValueError, match="Duplicate graph edge ID: duplicate"):
-        Graph.init(
+        FrameGraph.init(
             graph_config=graph_config,
             node_factory=node_factory,
             root_node_id="start",
@@ -391,7 +390,7 @@ def test_skip_validation_still_rejects_cross_scope_edges() -> None:
     node_factory = _RecordingNodeFactory()
 
     with pytest.raises(ValueError, match="crosses container scopes"):
-        Graph.init(
+        FrameGraph.init(
             graph_config=graph_config,
             node_factory=node_factory,
             root_node_id="start",
@@ -401,7 +400,7 @@ def test_skip_validation_still_rejects_cross_scope_edges() -> None:
     assert node_factory.created_node_ids == []
 
 
-def test_graph_constructor_accepts_cycle() -> None:
+def test_frame_graph_constructor_accepts_cycle() -> None:
     root = cast(Node, Mock(spec=Node, id="node"))
     edge = Edge(id="cycle", tail="node", head="node")
 
@@ -411,11 +410,11 @@ def test_graph_constructor_accepts_cycle() -> None:
     assert graph.edges["cycle"] is edge
 
 
-def test_graph_init_materializes_only_root_scope_by_default() -> None:
+def test_frame_graph_init_builds_only_root_scope_by_default() -> None:
     graph_config = _scoped_graph_config()
     node_factory = _RecordingNodeFactory()
 
-    graph = Graph.init(
+    graph = FrameGraph.init(
         graph_config=graph_config,
         node_factory=node_factory,
         root_node_id="start",
@@ -435,7 +434,7 @@ def test_graph_init_materializes_only_root_scope_by_default() -> None:
     assert graph.graph_config["viewport"] == graph_config["viewport"]
 
 
-def test_graph_init_preserves_typed_node_container_ownership() -> None:
+def test_frame_graph_init_preserves_typed_node_container_ownership() -> None:
     """Keep ownership when callers provide already validated node configs.
 
     ``NodeConfigDictAdapter`` stores ``data`` as ``BaseNodeData`` rather than a
@@ -454,7 +453,7 @@ def test_graph_init_preserves_typed_node_container_ownership() -> None:
         "edges": [_edge("start", "owner")],
     }
 
-    graph = Graph.init(
+    graph = FrameGraph.init(
         graph_config=graph_config,
         node_factory=_RecordingNodeFactory(),
         root_node_id="start",
@@ -492,7 +491,7 @@ def test_typed_node_default_does_not_hide_explicit_legacy_ownership() -> None:
         "edges": [_edge("start", "owner")],
     }
 
-    graph = Graph.init(
+    graph = FrameGraph.init(
         graph_config=graph_config,
         node_factory=_RecordingNodeFactory(),
         root_node_id="start",
@@ -509,11 +508,11 @@ def test_typed_node_default_does_not_hide_explicit_legacy_ownership() -> None:
     assert "container_id" not in original_data.model_fields_set
 
 
-def test_graph_init_scopes_execution_and_retains_only_its_subtree_config() -> None:
+def test_child_frame_graph_keeps_local_nodes_and_subtree_config() -> None:
     graph_config = _scoped_graph_config()
     node_factory = _RecordingNodeFactory()
 
-    graph = Graph.init(
+    graph = FrameGraph.init(
         graph_config=graph_config,
         node_factory=node_factory,
         root_node_id="a-start",
@@ -543,14 +542,14 @@ def test_graph_init_scopes_execution_and_retains_only_its_subtree_config() -> No
 def test_scoped_graphs_preserve_full_config_edge_ids() -> None:
     """Expose legacy fallback IDs and retain them in every scoped config.
 
-    Missing DSL IDs use their original full-config ordinal. Graph initialization
+    Missing DSL IDs use their original full-config ordinal. Frame construction
     writes those IDs only to copied configs so callers are not mutated, while
     later child and nested materializations reuse the public ``id`` field.
     """
     graph_config = _scoped_graph_config()
     node_factory = _RecordingNodeFactory()
 
-    root_graph = Graph.init(
+    root_graph = FrameGraph.init(
         graph_config=graph_config,
         node_factory=node_factory,
         root_node_id="start",
@@ -577,7 +576,7 @@ def test_scoped_graphs_preserve_full_config_edge_ids() -> None:
         "__graphon_edge_id" not in edge for edge in root_graph.graph_config["edges"]
     )
 
-    child_graph = Graph.init(
+    child_graph = FrameGraph.init(
         graph_config=root_graph.graph_config,
         node_factory=node_factory,
         root_node_id="a-start",
@@ -596,7 +595,7 @@ def test_scoped_graphs_preserve_full_config_edge_ids() -> None:
         ("nested-start", "nested-end"),
     }
 
-    nested_graph = Graph.init(
+    nested_graph = FrameGraph.init(
         graph_config=child_graph.graph_config,
         node_factory=node_factory,
         root_node_id="nested-start",
@@ -611,12 +610,12 @@ def test_scoped_graphs_preserve_full_config_edge_ids() -> None:
     }
 
 
-def test_graph_init_preserves_public_edge_ids() -> None:
+def test_frame_graph_init_preserves_public_edge_ids() -> None:
     graph_config = _scoped_graph_config()
     graph_config["edges"][0]["id"] = "start-to-container"
     graph_config["edges"][3]["id"] = "child-edge"
 
-    root_graph = Graph.init(
+    root_graph = FrameGraph.init(
         graph_config=graph_config,
         node_factory=_RecordingNodeFactory(),
         root_node_id="start",
@@ -624,7 +623,7 @@ def test_graph_init_preserves_public_edge_ids() -> None:
     assert "start-to-container" in root_graph.edges
     assert root_graph.graph_config is not None
 
-    child_graph = Graph.init(
+    child_graph = FrameGraph.init(
         graph_config=root_graph.graph_config,
         node_factory=_RecordingNodeFactory(),
         root_node_id="a-start",
@@ -647,14 +646,14 @@ def test_generated_edge_ids_reserve_explicit_ids(
 ) -> None:
     """Keep fallback IDs distinct from every supplied public edge ID.
 
-    Mixed DSLs may give stable IDs to only some edges. Graph initialization
+    Mixed DSLs may give stable IDs to only some edges. Frame construction
     must reserve all supplied IDs before filling omissions so both an explicit
     ID before an unnamed edge and one later in the config remain loadable.
     """
     graph_config = _scoped_graph_config()
     graph_config["edges"][explicit_index]["id"] = explicit_id
 
-    graph = Graph.init(
+    graph = FrameGraph.init(
         graph_config=graph_config,
         node_factory=_RecordingNodeFactory(),
         root_node_id="start",
@@ -673,7 +672,7 @@ def test_generated_edge_ids_reserve_explicit_ids_only_in_their_graph() -> None:
     graph_config = _scoped_graph_config()
     graph_config["edges"][3]["id"] = "edge_0"
 
-    root_graph = Graph.init(
+    root_graph = FrameGraph.init(
         graph_config=graph_config,
         node_factory=_RecordingNodeFactory(),
         root_node_id="start",
@@ -681,7 +680,7 @@ def test_generated_edge_ids_reserve_explicit_ids_only_in_their_graph() -> None:
     assert root_graph.edges["edge_0"].tail == "start"
     assert root_graph.graph_config is not None
 
-    child_graph = Graph.init(
+    child_graph = FrameGraph.init(
         graph_config=root_graph.graph_config,
         node_factory=_RecordingNodeFactory(),
         root_node_id="a-start",
@@ -691,13 +690,13 @@ def test_generated_edge_ids_reserve_explicit_ids_only_in_their_graph() -> None:
     assert child_graph.edges["edge_0"].tail == "a-start"
 
 
-def test_graph_init_rejects_duplicate_edge_ids_in_one_scope() -> None:
+def test_frame_graph_init_rejects_duplicate_edge_ids_in_one_scope() -> None:
     graph_config = _scoped_graph_config()
     graph_config["edges"][0]["id"] = "edge-duplicate"
     graph_config["edges"][1]["id"] = "edge-duplicate"
 
     with pytest.raises(ValueError, match="Duplicate graph edge ID: edge-duplicate"):
-        Graph.init(
+        FrameGraph.init(
             graph_config=graph_config,
             node_factory=_RecordingNodeFactory(),
             root_node_id="start",
@@ -709,20 +708,20 @@ def test_child_graphs_may_reuse_edge_ids() -> None:
     graph_config["edges"][3]["id"] = "local-edge"
     graph_config["edges"][6]["id"] = "local-edge"
 
-    root_graph = Graph.init(
+    root_graph = FrameGraph.init(
         graph_config=graph_config,
         node_factory=_RecordingNodeFactory(),
         root_node_id="start",
     )
     assert root_graph.graph_config is not None
 
-    child_a = Graph.init(
+    child_a = FrameGraph.init(
         graph_config=root_graph.graph_config,
         node_factory=_RecordingNodeFactory(),
         root_node_id="a-start",
         container_id="container-a",
     )
-    child_b = Graph.init(
+    child_b = FrameGraph.init(
         graph_config=root_graph.graph_config,
         node_factory=_RecordingNodeFactory(),
         root_node_id="b-start",
@@ -734,19 +733,19 @@ def test_child_graphs_may_reuse_edge_ids() -> None:
 
 
 @pytest.mark.parametrize("edge_id", ["", None, 1])
-def test_graph_init_rejects_invalid_public_edge_ids(edge_id: object) -> None:
+def test_frame_graph_init_rejects_invalid_public_edge_ids(edge_id: object) -> None:
     graph_config = _scoped_graph_config()
     graph_config["edges"][0]["id"] = edge_id
 
     with pytest.raises(ValueError, match="must be a non-empty string"):
-        Graph.init(
+        FrameGraph.init(
             graph_config=graph_config,
             node_factory=_RecordingNodeFactory(),
             root_node_id="start",
         )
 
 
-def test_graph_init_rejects_edges_crossing_container_scopes() -> None:
+def test_frame_graph_init_rejects_edges_crossing_container_scopes() -> None:
     graph_config = _scoped_graph_config()
     graph_config["edges"].append(_edge("container-a", "a-start"))
 
@@ -757,18 +756,18 @@ def test_graph_init_rejects_edges_crossing_container_scopes() -> None:
             r"'' and 'container-a'"
         ),
     ):
-        Graph.init(
+        FrameGraph.init(
             graph_config=graph_config,
             node_factory=_RecordingNodeFactory(),
             root_node_id="start",
         )
 
 
-def test_graph_init_rejects_orphan_scopes_and_unknown_edges() -> None:
+def test_frame_graph_init_rejects_missing_owners_and_edge_endpoints() -> None:
     graph_config = _scoped_graph_config()
     graph_config["nodes"].append(_node("orphan", container_id="missing"))
     with pytest.raises(ValueError, match="orphan"):
-        Graph.init(
+        FrameGraph.init(
             graph_config=graph_config,
             node_factory=_RecordingNodeFactory(),
             root_node_id="start",
@@ -777,7 +776,7 @@ def test_graph_init_rejects_orphan_scopes_and_unknown_edges() -> None:
     graph_config = _scoped_graph_config()
     graph_config["edges"].append(_edge("ghost-a", "ghost-b"))
     with pytest.raises(GraphValidationError):
-        Graph.init(
+        FrameGraph.init(
             graph_config=graph_config,
             node_factory=_RecordingNodeFactory(),
             root_node_id="start",
@@ -791,7 +790,7 @@ def test_graph_init_rejects_orphan_scopes_and_unknown_edges() -> None:
         ("loop", "loop_id"),
     ],
 )
-def test_graph_init_accepts_container_scope_owners(
+def test_frame_graph_init_accepts_container_scope_owners(
     owner_type: str,
     ownership_field: str,
 ) -> None:
@@ -813,7 +812,7 @@ def test_graph_init_accepts_container_scope_owners(
         "edges": [_edge("start", "owner")],
     }
 
-    graph = Graph.init(
+    graph = FrameGraph.init(
         graph_config=graph_config,
         node_factory=_RecordingNodeFactory(),
         root_node_id="start",
@@ -829,12 +828,12 @@ def test_graph_init_accepts_container_scope_owners(
         assert "container_id" not in graph_config["nodes"][2]["data"]
 
 
-def test_graph_init_rejects_non_container_scope_owner() -> None:
+def test_frame_graph_init_rejects_non_container_scope_owner() -> None:
     """Reject a child scope whose direct owner cannot create a child frame.
 
     Scoping removes child nodes from the parent's executable graph. Allowing an
     ordinary node to own that scope would therefore make execution succeed while
-    silently skipping the child, so Graph initialization must fail first.
+    silently skipping the child, so frame construction must fail first.
     """
     graph_config = {
         "nodes": [
@@ -852,7 +851,7 @@ def test_graph_init_rejects_non_container_scope_owner() -> None:
         ValueError,
         match="Node 'ordinary' owns child nodes but is not a container",
     ):
-        Graph.init(
+        FrameGraph.init(
             graph_config=graph_config,
             node_factory=_RecordingNodeFactory(),
             root_node_id="start",
@@ -882,7 +881,7 @@ def test_nested_non_container_owner_is_rejected_before_construction() -> None:
         ValueError,
         match="Node 'ordinary' owns child nodes but is not a container",
     ):
-        Graph.init(
+        FrameGraph.init(
             graph_config=graph_config,
             node_factory=factory,
             root_node_id="start",
@@ -898,7 +897,7 @@ def test_nested_non_container_owner_is_rejected_before_construction() -> None:
         ("iteration", "iteration", "loop", "loop", "iteration_id"),
     ],
 )
-def test_graph_init_accepts_nested_legacy_fields_without_container_id(
+def test_frame_graph_init_accepts_nested_legacy_fields_without_container_id(
     outer_id: str,
     outer_type: str,
     inner_id: str,
@@ -935,7 +934,7 @@ def test_graph_init_accepts_nested_legacy_fields_without_container_id(
         ],
     }
 
-    graph = Graph.init(
+    graph = FrameGraph.init(
         graph_config=graph_config,
         node_factory=_RecordingNodeFactory(),
         root_node_id=inner_start_id,
@@ -955,7 +954,7 @@ def test_graph_init_accepts_nested_legacy_fields_without_container_id(
     )
 
 
-def test_graph_init_rejects_unrelated_legacy_container_owners() -> None:
+def test_frame_graph_init_rejects_unrelated_legacy_container_owners() -> None:
     """Reject two legacy owners when neither container encloses the other."""
     graph_config = {
         "nodes": [
@@ -974,7 +973,7 @@ def test_graph_init_rejects_unrelated_legacy_container_owners() -> None:
     }
 
     with pytest.raises(ValueError, match="ambiguous legacy container owners"):
-        Graph.init(
+        FrameGraph.init(
             graph_config=graph_config,
             node_factory=_RecordingNodeFactory(),
             root_node_id="nested",

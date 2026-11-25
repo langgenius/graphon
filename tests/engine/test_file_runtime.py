@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from graphon.dsl import loads
-from graphon.engine import Engine
+from graphon.engine import Engine, FrameGraph
 from graphon.engine.filter import EngineEventFilterContext, ResponseStreamFilter
 from graphon.engine.layer import Layer
 from graphon.engine_events.base import EngineEvent, NodeEvent
@@ -25,7 +25,6 @@ from graphon.file import File, FileTransferMethod, FileType
 from graphon.file.file_manager import to_prompt_message_content
 from graphon.file.protocols import WorkflowFileRuntimeProtocol
 from graphon.file.runtime import use_workflow_file_runtime
-from graphon.graph.graph import Graph
 from graphon.model_runtime.entities.message_entities import DocumentPromptMessageContent
 from graphon.nodes.base.entities import OutputVariableEntity
 from graphon.nodes.base.node import Node
@@ -76,7 +75,7 @@ def _make_file_engine(
         workflow_id="workflow", graph_config={}, run_context={}, call_depth=0
     )
     graph = (
-        Graph
+        FrameGraph
         .new()
         .add_root(
             StartNode("start", StartNodeData(), init_params=params, runtime_state=state)

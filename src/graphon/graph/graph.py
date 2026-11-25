@@ -7,27 +7,17 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, final
+from typing import Any, final
 
 from graphon.enums import BuiltinNodeTypes
 
-from . import _legacy_graph_types
 from .validation import GraphValidationError, GraphValidationIssue, get_edge_issues
-
-if TYPE_CHECKING:
-    from graphon.nodes.factory import NodeFactory
-
-    from ._legacy_graph_types import GraphBuilder
-
-__getattr__ = _legacy_graph_types.get_public_type
 
 __all__ = [
     "EdgeDefinition",
     "Graph",
-    "GraphBuilder",
     "GraphReference",
     "NodeDefinition",
-    "NodeFactory",
 ]
 
 
@@ -225,26 +215,3 @@ class Graph:
 
     def outgoing(self, node_id: str) -> tuple[EdgeDefinition, ...]:
         return self._outgoing_edges.get(node_id, ())
-
-    @staticmethod
-    def new() -> _legacy_graph_types.GraphBuilder:
-        """Build a frame from nodes supplied by the host."""
-        return _legacy_graph_types.FrameGraph.new()
-
-    @staticmethod
-    def init(
-        *,
-        graph_config: Mapping[str, Any],
-        node_factory: _legacy_graph_types.NodeFactory,
-        root_node_id: str,
-        container_id: str = "",
-        skip_validation: bool = False,
-    ) -> _legacy_graph_types.FrameGraph:
-        """Build a frame from node and edge configuration supplied by the host."""
-        return _legacy_graph_types.FrameGraph.init(
-            graph_config=graph_config,
-            node_factory=node_factory,
-            root_node_id=root_node_id,
-            container_id=container_id,
-            skip_validation=skip_validation,
-        )

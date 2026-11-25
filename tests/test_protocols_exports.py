@@ -4,7 +4,6 @@ from textwrap import dedent
 
 from graphon import protocols
 from graphon.file.protocols import WorkflowFileRuntimeProtocol
-from graphon.graph.graph import NodeFactory
 from graphon.graph.validation import GraphValidationRule
 from graphon.http.protocols import HttpClientProtocol, HttpResponseProtocol
 from graphon.model_runtime.memory.prompt_message_memory import PromptMessageMemory
@@ -23,6 +22,7 @@ from graphon.model_runtime.protocols.text_embedding_runtime import (
 )
 from graphon.model_runtime.protocols.tts_runtime import TTSModelRuntime
 from graphon.nodes.code.code_node import CodeExecutorProtocol
+from graphon.nodes.factory import NodeFactory
 from graphon.nodes.llm.protocols import CredentialsProvider, ModelFactory
 from graphon.nodes.llm.runtime_protocols import (
     LLMPollingCapableProtocol,

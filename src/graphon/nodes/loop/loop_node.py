@@ -232,7 +232,7 @@ class LoopNode(Node[LoopNodeData]):
         """Return nodes governed by the nearest enclosing Loop.
 
         Resolve canonical and legacy ownership before walking the hierarchy so
-        callers can inspect persisted configs before ``Graph.init``. A Loop End
+        callers can inspect persisted configs before building a frame. A Loop End
         nested in an Iteration can still stop its surrounding Loop. The walk stops
         at a different Loop so an inner Loop End never breaks an outer Loop.
 

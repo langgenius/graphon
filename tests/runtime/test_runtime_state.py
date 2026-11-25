@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from graphon.engine import FrameGraph
 from graphon.engine.ready_queue.entities import (
     ReadyTask,
     ResumeTask,
@@ -19,7 +20,6 @@ from graphon.enums import (
     NodeState,
 )
 from graphon.file import File, FileTransferMethod, FileType
-from graphon.graph.graph import Graph
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.nodes.container_effects import (
     IterationFrameRequest,
@@ -287,7 +287,7 @@ class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
             execution_type=NodeExecutionType.EXECUTABLE,
             state=NodeState.UNKNOWN,
         )
-        graph = Graph.new().add_root(root).add_node(end).build()
+        graph = FrameGraph.new().add_root(root).add_node(end).build()
 
         restored = RuntimeState.from_snapshot(legacy_snapshot or state.dumps())
         restored.attach_graph(graph)
@@ -510,7 +510,7 @@ class TestRuntimeState:  # ruff:ignore[too-many-public-methods]
             execution_type=NodeExecutionType.EXECUTABLE,
             state=NodeState.TAKEN,
         )
-        graph = Graph.new().add_root(root).add_node(end).build()
+        graph = FrameGraph.new().add_root(root).add_node(end).build()
         assert graph.graph_config is None
 
         restored = RuntimeState.from_snapshot(_VERSION_2_GRAPH_BUILDER_SNAPSHOT)

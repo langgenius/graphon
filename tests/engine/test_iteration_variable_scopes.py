@@ -7,14 +7,13 @@ from typing import Any, Literal, override
 
 import pytest
 
-from graphon.engine import Engine
+from graphon.engine import Engine, FrameGraph
 from graphon.engine.frame import ExecutionFrame, FrameRegistry
 from graphon.engine_events.base import NodeEvent
 from graphon.engine_events.node import NodeRunFailedEvent, NodeRunVariableUpdatedEvent
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.entities.graph_config import NodeConfigDict, NodeConfigDictAdapter
 from graphon.enums import NodeExecutionType, WorkflowNodeExecutionStatus
-from graphon.graph import Graph
 from graphon.node_events.base import NodeRunResult
 from graphon.node_events.node import StreamCompletedEvent
 from graphon.nodes.base.node import Node
@@ -252,7 +251,7 @@ class _WorkflowHandler:
                 "edges": [_build_edge_config("start", self.sibling_node_id)],
             }
         )
-        graph = Graph.init(
+        graph = FrameGraph.init(
             graph_config=graph_config,
             node_factory=_NodeFactory(state, self.signals),
             root_node_id="start",
@@ -364,9 +363,9 @@ def _run_workflow(
             factory.create_node(NodeConfigDictAdapter.validate_python(node_config))
             for node_config in node_configs
         ]
-        graph = Graph.new().add_root(start).add_node(tool).add_node(end).build()
+        graph = FrameGraph.new().add_root(start).add_node(tool).add_node(end).build()
     else:
-        graph = Graph.init(
+        graph = FrameGraph.init(
             graph_config={"nodes": node_configs, "edges": edge_configs},
             node_factory=factory,
             root_node_id=root_node_id,

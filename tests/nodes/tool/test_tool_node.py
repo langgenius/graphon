@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from graphon.engine import Engine
+from graphon.engine import Engine, FrameGraph
 from graphon.engine.filter import (
     EngineEventFilterContext,
     ResponseStreamFilter,
@@ -22,7 +22,6 @@ from graphon.engine_events.node import (
 from graphon.enums import BuiltinNodeTypes
 from graphon.file.enums import FileTransferMethod, FileType
 from graphon.file.models import File
-from graphon.graph.graph import Graph
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.node_events.node import StreamChunkEvent, StreamCompletedEvent
 from graphon.nodes.answer.answer_node import AnswerNode
@@ -350,7 +349,7 @@ def test_tool_session_id_is_preserved_in_filtered_answer(
         runtime_state=runtime_state,
     )
     graph = (
-        Graph
+        FrameGraph
         .new()
         .add_root(start_node)
         .add_node(session_node)

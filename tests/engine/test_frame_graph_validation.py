@@ -7,10 +7,10 @@ from typing import Any, cast
 
 import pytest
 
+from graphon.engine import FrameGraph
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.entities.graph_config import NodeConfigDict
 from graphon.enums import BuiltinNodeTypes, ErrorStrategy, NodeExecutionType, NodeType
-from graphon.graph.graph import Graph
 from graphon.graph.validation import GraphValidationError
 from graphon.node_events.base import NodeEventPayload, NodeRunResult
 from graphon.nodes.base.node import Node
@@ -94,7 +94,7 @@ class _SimpleNodeFactory:
 
 
 @pytest.fixture
-def graph_init_dependencies() -> tuple[_SimpleNodeFactory, dict[str, object]]:
+def node_factory_and_config() -> tuple[_SimpleNodeFactory, dict[str, object]]:
     graph_config: dict[str, object] = {"edges": [], "nodes": []}
     init_params = build_init_params(
         workflow_id="workflow",
@@ -112,10 +112,10 @@ def graph_init_dependencies() -> tuple[_SimpleNodeFactory, dict[str, object]]:
     return factory, graph_config
 
 
-def test_graph_initialization_runs_default_validators(
-    graph_init_dependencies: tuple[_SimpleNodeFactory, dict[str, object]],
+def test_frame_graph_init_builds_the_configured_nodes(
+    node_factory_and_config: tuple[_SimpleNodeFactory, dict[str, object]],
 ) -> None:
-    node_factory, graph_config = graph_init_dependencies
+    node_factory, graph_config = node_factory_and_config
     graph_config["nodes"] = [
         {
             "id": "start",
@@ -131,7 +131,7 @@ def test_graph_initialization_runs_default_validators(
         {"source": "start", "target": "answer", "sourceHandle": "success"},
     ]
 
-    graph = Graph.init(
+    graph = FrameGraph.init(
         graph_config=graph_config,
         node_factory=node_factory,
         root_node_id="start",
@@ -142,7 +142,7 @@ def test_graph_initialization_runs_default_validators(
 
 
 def test_child_post_init_sees_only_its_scoped_graph_config(
-    graph_init_dependencies: tuple[_SimpleNodeFactory, dict[str, object]],
+    node_factory_and_config: tuple[_SimpleNodeFactory, dict[str, object]],
 ) -> None:
     """Bind child InitParams before construction invokes the post-init hook.
 
@@ -151,7 +151,7 @@ def test_child_post_init_sees_only_its_scoped_graph_config(
     before constructing any child node; otherwise custom ``post_init()`` hooks can
     cache parent and sibling nodes permanently.
     """
-    node_factory, graph_config = graph_init_dependencies
+    node_factory, graph_config = node_factory_and_config
     graph_config["nodes"] = [
         {
             "id": "root",
@@ -190,14 +190,14 @@ def test_child_post_init_sees_only_its_scoped_graph_config(
         {"source": "child-start", "target": "child-end"},
     ]
 
-    root_graph = Graph.init(
+    root_graph = FrameGraph.init(
         graph_config=graph_config,
         node_factory=node_factory,
         root_node_id="root",
     )
     assert root_graph.graph_config is not None
     assert root_graph.node_factory is not None
-    child_graph = Graph.init(
+    child_graph = FrameGraph.init(
         graph_config=root_graph.graph_config,
         node_factory=root_graph.node_factory,
         root_node_id="child-start",
@@ -225,10 +225,10 @@ def test_node_data_from_mapping_returns_typed_node_data() -> None:
     assert node_data.execution_type == NodeExecutionType.EXECUTABLE
 
 
-def test_graph_validation_fails_for_unknown_edge_targets(
-    graph_init_dependencies: tuple[_SimpleNodeFactory, dict[str, object]],
+def test_frame_graph_init_rejects_an_unknown_edge_target(
+    node_factory_and_config: tuple[_SimpleNodeFactory, dict[str, object]],
 ) -> None:
-    node_factory, graph_config = graph_init_dependencies
+    node_factory, graph_config = node_factory_and_config
     graph_config["nodes"] = [
         {
             "id": "start",
@@ -244,7 +244,7 @@ def test_graph_validation_fails_for_unknown_edge_targets(
     ]
 
     with pytest.raises(GraphValidationError) as exc:
-        Graph.init(
+        FrameGraph.init(
             graph_config=graph_config,
             node_factory=node_factory,
             root_node_id="start",
@@ -253,10 +253,10 @@ def test_graph_validation_fails_for_unknown_edge_targets(
     assert any(issue.code == "MISSING_NODE" for issue in exc.value.issues)
 
 
-def test_graph_promotes_fail_branch_nodes_to_branch_execution_type(
-    graph_init_dependencies: tuple[_SimpleNodeFactory, dict[str, object]],
+def test_frame_graph_init_promotes_fail_branch_nodes_to_branch_execution_type(
+    node_factory_and_config: tuple[_SimpleNodeFactory, dict[str, object]],
 ) -> None:
-    node_factory, graph_config = graph_init_dependencies
+    node_factory, graph_config = node_factory_and_config
     graph_config["nodes"] = [
         {
             "id": "start",
@@ -279,7 +279,7 @@ def test_graph_promotes_fail_branch_nodes_to_branch_execution_type(
         {"source": "start", "target": "branch", "sourceHandle": "success"},
     ]
 
-    graph = Graph.init(
+    graph = FrameGraph.init(
         graph_config=graph_config,
         node_factory=node_factory,
         root_node_id="start",
@@ -288,10 +288,10 @@ def test_graph_promotes_fail_branch_nodes_to_branch_execution_type(
     assert graph.nodes["branch"].execution_type == NodeExecutionType.BRANCH
 
 
-def test_graph_init_ignores_custom_note_nodes_before_node_data_validation(
-    graph_init_dependencies: tuple[_SimpleNodeFactory, dict[str, object]],
+def test_frame_graph_init_skips_custom_notes_before_validating_node_data(
+    node_factory_and_config: tuple[_SimpleNodeFactory, dict[str, object]],
 ) -> None:
-    node_factory, graph_config = graph_init_dependencies
+    node_factory, graph_config = node_factory_and_config
     graph_config["nodes"] = [
         {
             "id": "start",
@@ -318,7 +318,7 @@ def test_graph_init_ignores_custom_note_nodes_before_node_data_validation(
         {"source": "start", "target": "answer", "sourceHandle": "success"},
     ]
 
-    graph = Graph.init(
+    graph = FrameGraph.init(
         graph_config=graph_config,
         node_factory=node_factory,
         root_node_id="start",
@@ -329,10 +329,10 @@ def test_graph_init_ignores_custom_note_nodes_before_node_data_validation(
     assert "note" not in graph.nodes
 
 
-def test_graph_init_fails_for_unknown_root_node_id(
-    graph_init_dependencies: tuple[_SimpleNodeFactory, dict[str, object]],
+def test_frame_graph_init_rejects_an_unknown_root_node_id(
+    node_factory_and_config: tuple[_SimpleNodeFactory, dict[str, object]],
 ) -> None:
-    node_factory, graph_config = graph_init_dependencies
+    node_factory, graph_config = node_factory_and_config
     graph_config["nodes"] = [
         {
             "id": "start",
@@ -346,7 +346,7 @@ def test_graph_init_fails_for_unknown_root_node_id(
     graph_config["edges"] = []
 
     with pytest.raises(ValueError, match="Root node id missing not found in the graph"):
-        Graph.init(
+        FrameGraph.init(
             graph_config=graph_config,
             node_factory=node_factory,
             root_node_id="missing",

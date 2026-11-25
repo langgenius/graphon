@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from graphon.dsl import loads
+from graphon.engine import FrameGraph
 from graphon.engine.filter import (
     EngineEventFilterContext,
     ResponseStreamFilter,
@@ -24,7 +25,6 @@ from graphon.engine_events.node import (
 )
 from graphon.engine_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTakenEvent
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType, NodeState, NodeType
-from graphon.graph.graph import Graph
 from graphon.nodes.base.template import (
     Template,
     TemplateSegmentUnion,
@@ -924,7 +924,9 @@ def test_response_stream_filter_migrates_v1_graph_builder_state() -> None:
             segments=[VariableSegment(selector=["source", "answer"])],
         ),
     )
-    graph = Graph.new().add_root(cast(Any, source)).add_node(cast(Any, answer)).build()
+    graph = (
+        FrameGraph.new().add_root(cast(Any, source)).add_node(cast(Any, answer)).build()
+    )
     assert graph.graph_config is None
 
     restored_filter = ResponseStreamFilter()

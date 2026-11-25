@@ -19,11 +19,10 @@ def normalize_nodes(
 ) -> tuple[list[dict[str, Any]], dict[str, str]]:
     """Copy nodes and normalize their direct container IDs once.
 
-    This is the compatibility boundary used by :meth:`Graph.init`. It resolves
-    canonical, React Flow, and legacy ownership fields against the complete node
-    hierarchy, removes editor-only note widgets, then writes the result to
-    ``data.container_id`` on copied dictionaries. Filtering happens before
-    Pydantic node validation because notes intentionally have no executable
+    Resolve canonical, React Flow, and legacy ownership fields against the
+    complete node hierarchy, remove editor-only note widgets, then write the
+    result to ``data.container_id`` on copied dictionaries. Filtering happens
+    before Pydantic node validation because notes intentionally have no executable
     ``data.type``. The caller's persisted input is never modified. Prevalidated
     :class:`BaseNodeData` values are dumped with ``exclude_unset`` so an unset
     canonical default cannot hide an explicitly supplied legacy owner.

@@ -3,7 +3,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from graphon.engine.frame_graph import Edge, FrameGraph
+from graphon.engine import Edge, FrameGraph, GraphBuilder
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType, NodeState
 from graphon.graph.validation import GraphValidationError
 from graphon.nodes.base.node import Node
@@ -83,9 +83,11 @@ class TestGraphBuilder:
                 ).build()
 
     def test_build_accepts_a_dag(self) -> None:
+        builder = FrameGraph.new()
+        assert isinstance(builder, GraphBuilder)
+
         graph = (
-            FrameGraph
-            .new()
+            builder
             .add_root(create_mock_node("start", NodeExecutionType.ROOT))
             .add_node(create_mock_node("a", NodeExecutionType.EXECUTABLE))
             .add_node(create_mock_node("b", NodeExecutionType.EXECUTABLE))
@@ -94,6 +96,7 @@ class TestGraphBuilder:
         )
 
         assert set(graph.nodes) == {"start", "a", "b"}
+        assert all(isinstance(edge, Edge) for edge in graph.edges.values())
         assert {(edge.tail, edge.head) for edge in graph.edges.values()} == {
             ("start", "a"),
             ("a", "b"),

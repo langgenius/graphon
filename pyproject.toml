@@ -115,8 +115,6 @@ layers = [
     'engine_events : node_events',
     'entities : variables : file : http : model_runtime : enums : prompt_entities : template_rendering : workflow_type_encoder',
 ]
-# Published Graph.init/new and builder imports delegate to the engine when called.
-ignore_imports = ['graphon.graph._legacy_graph_types -> graphon.engine.frame_graph']
 broken_contract_guidance = 'Depend on the same or a lower architectural layer. Inject dependencies from the composition layer, and classify every new top-level module in this contract. See ARCHITECTURE.md#import-boundaries.'
 
 [tool.pytest]
