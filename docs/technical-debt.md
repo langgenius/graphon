@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-09-08T00:00:00Z"
+last_checked: "2026-11-26T05:49:47Z"
 -->
 # Architecture review and technical debt
 
@@ -12,7 +12,7 @@ independent reviews, and its final naming pass.
 TD-01 and TD-05's initial implementation and architectural layering follow-up
 are complete locally. Validation and independent reviews are recorded in
 the [import boundaries plan](plans/runtime-import-boundaries.md).
-Other remediation remains proposed, not accepted architecture policy. Priorities
+The 0.8 backport addresses the TD-09 filter regression. Other remediation remains proposed. Priorities
 express the original review's judgment.
 **Scope:** repository structure, execution and integration boundaries, developer
 feedback, and knowledge maintenance. Evidence includes source, callers, test
@@ -68,7 +68,7 @@ approved package names or team assignments.
 | Consumer presentation | [event filters](../src/graphon/engine/filter/) | Raw execution and response formatting are separate APIs despite filters living under `engine/`. That behavioral boundary matters more than moving the folder. |
 | Public integration facade | [protocols](../src/graphon/protocols/__init__.py) | Discoverable re-exports preserve contract identity without registering concrete nodes. |
 | Host application | Outside this repository | Owns tenant policy, credentials, persistence, and presentation. Graphon should expose the needed ports and retain opaque host references. |
-| Engineering feedback and knowledge | [tests](../tests/), [benchmarks](../benchmarks/), [examples](../examples/), [docs](README.md), [CI](../.github/workflows/) | Existing checks and navigation now include dependency enforcement. Remaining gaps include a public offline example and performance coverage of a known hot path. |
+| Engineering feedback and knowledge | [tests](../tests/), [benchmarks](../benchmarks/), [examples](../examples/), [docs](README.md), [CI](../.github/workflows/) | Existing checks and navigation now include dependency enforcement. The TD-09 check covers response-filter traversal. A public offline example remains proposed. |
 
 The original review scanned 276 Python source files, including local and
 type-checking imports. This selected dependency map includes the subsequent
@@ -139,7 +139,7 @@ queue dependency and facade side effects identified below are now removed locall
 
 TD-02 and TD-03 are **implemented locally**. TD-04 is **completed locally**, with
 required reviews and checks complete. TD-01 and TD-05 are **completed locally**,
-with reviews and checks recorded in their plan. Other entries remain **proposed**. P1 means
+with reviews and checks recorded in their plan. TD-09 has a filter regression on this branch. Other entries remain **proposed**. P1 means
 a reproduced correctness problem or a boundary that must be addressed before
 the stated deployment use.
 P2 is targeted architecture or feedback work. P3 can follow the more consequential
@@ -157,7 +157,7 @@ relative change size, not a delivery estimate.
 | TD-06 | Ignored LLM integration arguments | P2 | Model/node API | Small, with a compatibility window |
 | TD-07 | Optional capability dependencies | P2 | Packaging/document extraction | Medium |
 | TD-08 | Offline execution and diagnostic example | P2 | Examples/developer experience | Small |
-| TD-09 | Performance feedback for expensive phases | P2 | Filters/performance | Small–medium; overlaps open work |
+| TD-09 | Performance feedback for expensive phases | P2 | Filters/performance | Small–medium; filter regression covered |
 | TD-10 | Decision memory and debt maintenance | P3 | Maintainers/docs | Small; overlaps open work |
 
 ## TD-01 — Dependency direction and runtime queue ownership
@@ -396,25 +396,16 @@ Its separation from ordinary tests is intentional.
 **Evidence and consequence:** it measures two rounds of a five-node sequential
 execution. DSL import and graph construction happen outside the timer, and
 response-filter initialization is absent. Those results cannot establish the
-cost of import, filtering, branching, or large graphs. Open
-[PR #271](https://github.com/langgenius/graphon/pull/271) tracks a response-filter
-initialization problem and proposes deterministic operation-count regressions;
-that implementation is not in the reviewed checkout.
+cost of import, filtering, branching, or large graphs. The 0.8 backport of
+[PR #400](https://github.com/langgenius/graphon/pull/400) covers root response
+filtering with a [regression test](../tests/engine/test_response_stream_filter.py).
+Its 12 converging branches represent 4,096 paths. The test bounds outgoing-edge
+reads and checkpoint size, restores the filter halfway through traversal, and
+checks when the answer is delivered.
 
-**Proposed change:** finish or reuse that focused work and clearly identify which
-phase each performance result measures. Prefer its deterministic complexity
-checks for the known filter path, with a representative optional benchmark for
-timing. Follow existing [benchmark documentation PR #266](https://github.com/langgenius/graphon/pull/266)
-instead of creating competing instructions. Do not impose a universal timing
-threshold on the current tiny workload or add a benchmark matrix without a
-specific performance question.
-
-**Done when:** the expensive filter path has a runnable regression check with
-output correctness preserved, contributors can find the relevant command, and
-reported results distinguish construction, initialization, and execution.
-Existing engine benchmarks and
-[response-filter behavior tests](../tests/engine/test_response_stream_filter.py)
-remain intact.
+```bash
+uv run pytest -n 0 tests/engine/test_response_stream_filter.py -k exponential_paths
+```
 
 ## TD-10 — Decision memory and debt maintenance
 
@@ -460,7 +451,7 @@ generator are not prerequisites. No recurring automation was configured here.
    recorded in the [shared plan](plans/runtime-import-boundaries.md).
    Handle TD-06 next in a separately documented API transition.
 4. Add TD-08's offline example; use it in TD-07's minimal-install check. Continue
-   the existing TD-09 and TD-10 work without duplicate proposals.
+   the existing TD-10 work without duplicate proposals.
 
 Keep the existing package structure unless a selected item requires a local
 move. Large files deserve inspection, but line count alone is not debt:

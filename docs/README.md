@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-09-08T17:06:45Z"
+last_checked: "2026-11-26T05:49:47Z"
 -->
 # Repository knowledge
 
@@ -35,6 +35,7 @@ Keep detailed component knowledge next to its implementation and link it here.
 | --- | --- | --- |
 | Engine lifecycle extensions | [Layers](../src/graphon/engine/layer/README.md) | [Layer base](../src/graphon/engine/layer/base.py), [worker context tests](../tests/engine/test_layer_node_run_context.py) |
 | Pause, abort, variable updates | [Commands](../src/graphon/engine/command/README.md) | [Command processor](../src/graphon/engine/command/processor.py), [dispatch tests](../tests/engine/test_dispatch_patterns.py) |
+| Root response streaming and checkpoint restoration | [Response streaming](../ARCHITECTURE.md#response-streaming) | [Filter tests](../tests/engine/test_response_stream_filter.py), [pause and resume tests](../tests/engine/test_response_stream_pause.py) |
 | Execution and host file rendering | [State ownership](../ARCHITECTURE.md#state-and-execution-invariants) | [File runtime](../src/graphon/file/runtime.py), [execution file tests](../tests/engine/test_file_runtime.py) |
 | Model capabilities and providers | [Model runtime](../src/graphon/model_runtime/README.md) | [Public protocols](../src/graphon/protocols/__init__.py), [model dispatch tests](../tests/model_runtime/test_model_dispatch.py) |
 | DSL and direct Python construction | [Slim example setup](../examples/slim_llm/README.md) | [DSL example](../examples/slim_llm/dsl.py), [Python example](../examples/slim_llm/code.py), [example tests](../tests/examples/test_slim_llm_example.py) |

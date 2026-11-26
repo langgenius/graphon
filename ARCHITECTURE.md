@@ -1,9 +1,9 @@
 <!-- knowledge
-last_checked: "2026-09-08T00:00:00Z"
+last_checked: "2026-11-26T05:49:47Z"
 -->
 # Architecture
 
-Current implementation, verified against source and tests on 2026-09-08.
+Current implementation, verified against source and tests on 2026-11-26.
 This is a navigation map, not a record of historical design decisions.
 Contributor commands and contribution rules live in [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -130,15 +130,20 @@ source blocks the response's variable selectors, open only after the filter cons
 their root-frame `GraphEdgeTakenEvent`. Any open route from the root suffices;
 this does not change scheduler join rules. Reachability expands without enumerating
 complete paths or reading live edge states, which may be ahead of the consumer.
-Child-frame traversal events do not open root edges.
+Child-frame traversal events do not open root edges. The filter ignores
+`GraphEdgeSkippedEvent`, so a later root-frame take can still open the same edge.
 
 Filter checkpoints preserve consumer progress separately from runtime snapshots.
 The [current snapshot model](src/graphon/engine/filter/builtin/response_stream/v3.py)
-records consumed edge IDs; the [v1](src/graphon/engine/filter/builtin/response_stream/v1.py)
-and [v2](src/graphon/engine/filter/builtin/response_stream/v2.py) readers retain
-already-materialized residual paths when binding legacy state. Sessions, buffered
-chunks, and cursors resume together. See [response-filter tests](tests/engine/test_response_stream_filter.py)
-for activation, instance isolation, and restoration, and
+records taken root-edge IDs for fresh runs. When binding a
+[v1](src/graphon/engine/filter/builtin/response_stream/v1.py) or
+[v2](src/graphon/engine/filter/builtin/response_stream/v2.py) checkpoint, it
+retains the blocking edges still outstanding on each saved path, along with
+sessions, buffered chunks, and cursors. Hosts restore the runtime and filter
+checkpoints together to resume after the last delivered chunk. See
+[response-filter tests](tests/engine/test_response_stream_filter.py) for gating
+and bounded graph traversal, [pause tests](tests/engine/test_response_stream_pause.py)
+for human-input and command pauses across historical and current writers, and
 [version-isolation tests](tests/test_snapshot_version_isolation.py) for operation
 without legacy readers.
 

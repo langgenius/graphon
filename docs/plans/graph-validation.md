@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-09-08T00:00:00Z"
+last_checked: "2026-11-26T05:49:47Z"
 -->
 # TD-02: Reject invalid graphs before execution
 
