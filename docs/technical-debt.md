@@ -52,15 +52,8 @@ and [the extractor](../src/graphon/nodes/document_extractor/node.py) imports sev
 eagerly. Minimal engine consumers inherit these dependencies. Measure installation
 size and startup cost before claiming a benefit from optional dependencies.
 
-Graphon's [Python requirement](../pyproject.toml) allows Python 3.14. A clean
-`pip install .` on 3.14 currently fails because the
-[published unstructured releases](https://pypi.org/project/unstructured/#history)
-that meet Graphon's minimum require Python below 3.14.
-
-The [CI test workflow](../.github/workflows/test.yml) exercises Python 3.14
-with uv. The [lockfile](../uv.lock) can include this dependency because uv's
-[universal resolver](https://docs.astral.sh/uv/concepts/resolution/#universal-resolution)
-ignores dependency Python upper bounds.
+The required [unstructured dependency](https://pypi.org/project/unstructured/0.27.37/#meta)
+limits Graphon's [Python support](../pyproject.toml) to versions below 3.14.
 
 Consider one document-extraction extra within the existing distribution. Isolate
 its imports, provide an actionable missing-extra error, retain a fully equipped
