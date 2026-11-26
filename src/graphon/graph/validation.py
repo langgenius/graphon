@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Container, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from graphlib import CycleError, TopologicalSorter
 from typing import TYPE_CHECKING, Protocol
@@ -33,6 +33,15 @@ class GraphValidationError(ValueError):
         self.issues: tuple[GraphValidationIssue, ...] = tuple(issues)
         message = "; ".join(f"[{issue.code}] {issue.message}" for issue in self.issues)
         super().__init__(message)
+
+
+def check_unique_node_id(node_id: str, existing_ids: Container[str]) -> None:
+    if node_id in existing_ids:
+        raise GraphValidationError([
+            GraphValidationIssue(
+                "DUPLICATE_NODE_ID", f"Duplicate node ID: {node_id}", node_id
+            )
+        ])
 
 
 class GraphValidationRule(Protocol):

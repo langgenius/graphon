@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from itertools import starmap
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -16,6 +16,12 @@ from graphon.engine_events.graph import GraphRunSucceededEvent
 from graphon.engine_events.node import NodeRunStreamChunkEvent, NodeRunSucceededEvent
 from graphon.enums import NodeState
 from graphon.graph import EdgeDefinition, Graph, GraphReference, NodeDefinition
+
+
+@pytest.mark.parametrize("node_id", ["", None, 1])
+def test_node_definition_rejects_an_invalid_id(node_id: object) -> None:
+    with pytest.raises(ValueError, match="Node ID"):
+        NodeDefinition(cast(str, node_id), "start")
 
 
 def test_graph_owns_immutable_config_and_compares_by_content() -> None:

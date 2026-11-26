@@ -108,7 +108,7 @@ type = 'layers'
 containers = ['graphon']
 exhaustive = true
 layers = [
-    'dsl',
+    'dsl | graph_builder',
     'engine',
     'protocols : errors',
     'graph : nodes : runtime : utils : variable_loader',

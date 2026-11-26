@@ -12,7 +12,7 @@ protocols, and a runnable end-to-end example.
 ## Highlights
 
 - Queue-based `Engine` orchestration with event-driven execution
-- Graph parsing, validation, and fluent graph building
+- Graph definitions from YAML or Python, with node and edge validation
 - Frame-owned runtime state and variables with shared workflow execution state
 - Built-in node implementations for common workflow patterns
 - DSL import support with Slim-backed LLM nodes

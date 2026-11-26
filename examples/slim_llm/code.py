@@ -16,12 +16,14 @@ from examples.slim_llm.settings import (
     use_local_slim_binary,
 )
 from graphon.dsl import DslDependency, PluginDependencyType, load_graph
-from graphon.graph import Graph, NodeDefinition
+from graphon.graph import Graph
+from graphon.graph_builder import GraphBuilder
 
 
 def build_graph() -> Graph:
-    start = NodeDefinition("start", "start")
-    llm = NodeDefinition(
+    builder = GraphBuilder()
+    start_id = builder.add_node("start", "start")
+    llm_id = builder.add_node(
         "llm",
         "llm",
         config={
@@ -35,8 +37,12 @@ def build_graph() -> Graph:
             "context": {"enabled": False},
         },
     )
-    answer = NodeDefinition("answer", "answer", config={"answer": "{{#llm.text#}}"})
-    return Graph.new().add_root(start).add_node(llm).add_node(answer).build()
+    answer_id = builder.add_node(
+        "answer", "answer", config={"answer": "{{#llm.text#}}"}
+    )
+    builder.connect(start_id, llm_id)
+    builder.connect(llm_id, answer_id)
+    return builder.build()
 
 
 def run(query: str) -> str:

@@ -33,8 +33,9 @@ pool, so it can handle competing writes to the same variable.
 
 ## Definition and execution
 
-A `Graph` is an immutable **value object**. It defines where execution can
-start, each node's type, version and settings, and the Graph a node can call.
+A `Graph` is an immutable **value object**, whether read from YAML or built in
+Python. It defines where execution can start, each node's type, version and
+settings, and the Graph a node can call.
 Edges connect nodes within the same Graph. Two definitions are equal when this
 content matches, including node and edge IDs and the order of each node's
 outgoing edges.

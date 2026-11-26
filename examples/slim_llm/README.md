@@ -3,7 +3,7 @@ last_checked: "2026-11-26T01:12:45Z"
 -->
 # Slim LLM Example
 
-The YAML and Python examples run the same LLM graph.
+The YAML and Python examples run the same three steps.
 
 ```text
 start -> llm -> answer
@@ -11,9 +11,9 @@ start -> llm -> answer
 
 ## Source and setup
 
-The DSL example loads the graph from YAML. The Python example builds it from
-node definitions and passes the resulting `Graph` to `load_graph()`. See
-[graph.yml](graph.yml), [dsl.py](dsl.py), and [code.py](code.py).
+The YAML example passes its document to `loads()`. The Python example connects
+the nodes with `GraphBuilder` and passes the result of `build()` to `load_graph()`.
+See [graph.yml](graph.yml), [dsl.py](dsl.py), and [code.py](code.py).
 
 [settings.py](settings.py) handles example configuration. The [Slim client](../../src/graphon/dsl/slim/client.py)
 defines daemon configuration and binary lookup. Use

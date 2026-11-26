@@ -30,13 +30,16 @@ graph:
     "qualified_name",
     [
         "graphon.graph:Graph.init",
+        "graphon.graph:Graph.new",
         "graphon.graph:Edge",
+        "graphon.graph:GraphBuilder",
         "graphon.graph:NodeFactory",
         "graphon.graph.graph:Edge",
+        "graphon.graph.graph:GraphBuilder",
         "graphon.graph.graph:NodeFactory",
     ],
 )
-def test_graph_package_omits_legacy_execution_apis(qualified_name: str) -> None:
+def test_graph_package_omits_builder_and_execution_apis(qualified_name: str) -> None:
     with pytest.raises(AttributeError):
         resolve_name(qualified_name)
 
@@ -58,25 +61,30 @@ def test_engine_omits_graph_authoring_apis(name: str) -> None:
         resolve_name(name)
 
 
-def test_authoring_a_graph_does_not_load_the_engine_or_executable_nodes() -> None:
+def test_graph_and_builder_import_independently_of_dsl_and_execution() -> None:
     script = dedent(
         """
         import sys
 
-        from graphon import graph
+        from graphon.graph import Graph, NodeDefinition
 
-        definition = (
-            graph.Graph.new()
-            .add_root(graph.NodeDefinition("start", "start"))
-            .add_node(graph.NodeDefinition("reply", "answer"))
-            .add_root(graph.NodeDefinition("other", "start"))
-            .connect(tail="other", head="reply")
-            .build()
-        )
+        start = NodeDefinition("start", "start")
+        assert Graph(nodes=[start]).node("start") == start
+        assert "graphon.graph_builder" not in sys.modules
+
+        from graphon.graph_builder import GraphBuilder
+
+        assert GraphBuilder.__module__.split(".")[:2] == ["graphon", "graph_builder"]
+        builder = GraphBuilder()
+        start_id = builder.add_node("start", "start")
+        reply_id = builder.add_node("reply", "answer")
+        builder.connect(start_id, reply_id)
+        definition = builder.build()
+        assert isinstance(definition, Graph)
         assert definition.node("reply").node_type == "answer"
         assert not any(
-            name in {"graphon.engine", "graphon.nodes"}
-            or name.startswith(("graphon.engine.", "graphon.nodes."))
+            name in {"graphon.dsl", "graphon.engine", "graphon.nodes"}
+            or name.startswith(("graphon.dsl.", "graphon.engine.", "graphon.nodes."))
             for name in sys.modules
         )
         """

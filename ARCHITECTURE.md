@@ -16,7 +16,8 @@ the primary classes from the packages below.
 | Surface | Entry point | Evidence |
 | --- | --- | --- |
 | YAML import and inspection | `graphon.dsl.inspect`, `graphon.dsl.loads` | [Importer](src/graphon/dsl/importer.py), [DSL tests](tests/dsl/) |
-| Graph definition | `graphon.graph.Graph`, `GraphBuilder`, `NodeDefinition`, `EdgeDefinition`, `GraphReference` | [Graph and builder](src/graphon/graph/graph.py), [definition and execution tests](tests/graph/test_graph_definition.py), [builder tests](tests/graph/test_graph_builder.py) |
+| Python graph building | `graphon.graph_builder.GraphBuilder` | [Builder](src/graphon/graph_builder/builder.py), [builder tests](tests/graph_builder/test_graph_builder.py) |
+| Shared graph definition | `graphon.graph.Graph`, `NodeDefinition`, `EdgeDefinition`, `GraphReference` | [Graph](src/graphon/graph/graph.py), [definition and execution tests](tests/graph/test_graph_definition.py) |
 | Execution | `graphon.dsl.load_graph`, `graphon.engine.Engine` | [Importer](src/graphon/dsl/importer.py), [engine](src/graphon/engine/engine.py) |
 | Host-supplied nodes | `graphon.engine.FrameGraph`, `graphon.protocols.NodeFactory` | [Frame graph](src/graphon/engine/frame_graph.py), [frame construction tests](tests/engine/test_frame_graph_validation.py) |
 | Execution setup and state | `graphon.runtime.RuntimeState`, `VariablePool`, `InitParams` | [Runtime exports](src/graphon/runtime/__init__.py), [runtime tests](tests/runtime/) |
@@ -27,9 +28,11 @@ reusable definition. The reader groups nodes from flat Dify workflows into a
 root Graph and its embedded bodies. `loads(text, ...)` creates an engine with
 the document's variables and plugin dependencies. See the [DSL example](examples/slim_llm/dsl.py).
 
-In Python, `Graph.new()` returns a `GraphBuilder`. Add `NodeDefinition` objects
-and call `build()` to get an immutable `Graph`. Pass either definition to
-`load_graph(graph, ...)` to create a fresh engine with the built-in node factory.
+In Python, create a `GraphBuilder` and register each node with
+`add_node(node_id, node_type)`. Pass the returned IDs to `connect(source, target)`
+for each directed edge. `build()` returns an immutable `Graph`.
+Pass a definition from either source to `load_graph(graph, ...)` to create a
+fresh engine with the built-in node factory.
 See the [Python example](examples/slim_llm/code.py) and [supported node types](src/graphon/dsl/node_factory.py).
 
 With a host factory, `Engine(graph, runtime_state, node_factory=...)` creates
@@ -44,9 +47,10 @@ The [Import Linter configuration](pyproject.toml) is the source of truth for
 allowed package dependencies. [Layer regression tests](tests/test_import_layers.py)
 exercise enforcement in CI.
 
-Hosts can build a definition through `graphon.graph` without importing the
-engine or executable node classes. `graphon.engine` exports `FrameGraph` and
-its mutable `Edge` type. See the
+The DSL reader and Python builder are independent packages at the same layer.
+Both use `graphon.graph`. Hosts can construct a `Graph` with `GraphBuilder`
+before loading the engine or executable node classes. `graphon.engine` exports
+`FrameGraph` and its mutable `Edge` type. See the
 [frame graph import tests](tests/engine/test_frame_graph_imports.py).
 
 The public runtime package can restore snapshots without importing the engine.
@@ -60,8 +64,8 @@ runtime paths for new integrations; engine queue aliases exist for compatibility
 
 ```mermaid
 flowchart LR
-    DSL[DSL document] --> Graph[Immutable Graph]
-    Python[Python builder] --> Graph
+    DSL["YAML · graphon.dsl"] --> Graph["graphon.graph.Graph"]
+    Python["Python · graphon.graph_builder"] --> Graph
     Graph --> Engine[Engine and root FrameGraph]
     Host[NodeFactory and runtime state] --> Engine
     Engine --> Ready[Shared ready queue]
