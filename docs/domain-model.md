@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-25T09:37:22Z"
+last_checked: "2026-11-26T09:53:20Z"
 -->
 # Graph domain model
 
