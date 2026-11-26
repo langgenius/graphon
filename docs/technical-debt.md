@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-19T01:18:53Z"
+last_checked: "2026-11-26T01:12:45Z"
 -->
 # Technical debt
 
@@ -52,17 +52,8 @@ and [the extractor](../src/graphon/nodes/document_extractor/node.py) imports sev
 eagerly. Minimal engine consumers inherit these dependencies. Measure installation
 size and startup cost before claiming a benefit from optional dependencies.
 
-Graphon's Python requirement and CI matrix include 3.14. A clean
-`pip install .` on 3.14 currently fails because no `unstructured` release
-on PyPI both meets Graphon's minimum version and accepts Python 3.14.
-The lockfile selects `unstructured` 0.27.37, which declares
-`Requires-Python: <3.14,>=3.11`. See [project metadata](../pyproject.toml),
-the [lockfile](../uv.lock), and the
-[distribution metadata](https://pypi.org/project/unstructured/0.27.37/#meta).
-
-The CI test workflow resolves dependencies with `uv`, which ignores dependency
-Python upper bounds. See the [CI matrix](../.github/workflows/test.yml) and
-[uv resolution rules](https://docs.astral.sh/uv/concepts/resolution/#universal-resolution).
+The required [unstructured dependency](https://pypi.org/project/unstructured/0.27.37/#meta)
+limits Graphon's [Python support](../pyproject.toml) to versions below 3.14.
 
 Consider one document-extraction extra within the existing distribution. Isolate
 its imports, provide an actionable missing-extra error, retain a fully equipped
@@ -106,12 +97,9 @@ existing benchmarks, and
 
 ## TD-10 — Decision records
 
-[Issue #199](https://github.com/langgenius/graphon/issues/199) and
-[PR #200](https://github.com/langgenius/graphon/pull/200) cover decision records,
-including HITL and model polling boundaries. Current behavior guides do not
-substitute for accepted decisions.
-
-Continue that work and reconcile it with [maintenance guidance](maintenance.md).
+Continue the [decision-record proposal](https://github.com/langgenius/graphon/issues/199)
+for design decisions such as HITL and model polling boundaries. Reconcile any
+accepted convention with [maintenance guidance](maintenance.md).
 Promote approved lasting rules to stable guides and executable checks.
 
 **Completion:** accepted decisions have repository-local links and explicit

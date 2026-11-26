@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-19T01:10:52Z"
+last_checked: "2026-11-26T01:12:45Z"
 -->
 # Commands
 
@@ -18,7 +18,10 @@ including writes completed before a later command update fails.
 ## Usage
 
 Pass the channel to [Engine](../engine.py) through `command_channel`; each
-channel belongs to one workflow execution.
+channel belongs to one workflow execution. For Redis, use a unique `channel_key`
+for each execution. Watch for
+[`GraphRunPausedEvent` or `GraphRunAbortedEvent`](../../engine_events/graph.py)
+to see when a queued pause or abort takes effect.
 
 ```python
 from graphon.engine import Engine
