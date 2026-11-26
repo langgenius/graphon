@@ -14,6 +14,9 @@ from graphon.engine.filter import (
     ResponseStreamFilter,
     filter_engine_events,
 )
+from graphon.engine.filter.builtin.response_stream.template_stream import (
+    _TemplateStream,
+)
 from graphon.engine_events.frame import FrameStartedEvent
 from graphon.engine_events.graph import GraphRunStartedEvent
 from graphon.engine_events.node import (
@@ -1557,3 +1560,27 @@ def test_response_stream_filter_keeps_current_state_when_load_fails() -> None:
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     assert [event.chunk for event in chunks] == ["preserved"]
+
+
+def test_forget_replaced_streams_drops_only_the_matching_selector() -> None:
+    """A replaced value forgets its own stream, not a longer one sharing a prefix.
+
+    `latest_streams` is keyed by the selector, so the old `key[:2]` prefix test
+    counted `("source", "text")` as a match for `("source", "text", "deep")` and
+    dropped the nested stream's entry along with the intended one.
+    """
+    # A nested frame is the one that records `latest_streams`; the root frame
+    # drains straight into its buffers.
+    stream = _TemplateStream(frame_id="nested-frame")
+    flat = ("source", "text")
+    nested = ("source", "text", "deep")
+    for run_id, selector in (("flat-run", flat), ("nested-run", nested)):
+        stream.append(
+            _stream_chunk("value", run_id=run_id, selector=selector, is_final=False)
+        )
+
+    assert set(stream.latest_streams) == {flat, nested}
+
+    stream.forget_replaced_streams(flat)
+
+    assert set(stream.latest_streams) == {nested}

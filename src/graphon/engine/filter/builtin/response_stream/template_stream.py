@@ -198,8 +198,13 @@ class _TemplateStream:
 
     def forget_replaced_streams(self, selector: Sequence[str]) -> None:
         # Existing occurrences stay pinned; later occurrences see the replacement.
+        #
+        # `latest_streams` is keyed by the selector itself, so compare the whole
+        # key: `key[:2]` was a prefix of a longer selector and dropped the entry of
+        # a *different* stream that happened to start with these parts.
+        target = tuple(selector)
         for key in list(self.latest_streams):
-            if key[:2] == tuple(selector):
+            if key == target:
                 del self.latest_streams[key]
 
     def close_previous_attempts(self, event: NodeRunRetryEvent) -> None:
