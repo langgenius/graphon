@@ -1,0 +1,115 @@
+{
+  "writer_commit": "4fa22141774dff80e90e4dfa98ea3e6fbf0421bb",
+  "first": {
+    "runtime": "{\"start_at\":0.0,\"node_run_steps\":2,\"llm_usage\":{\"prompt_tokens\":0,\"prompt_unit_price\":\"0.0\",\"prompt_price_unit\":\"0.0\",\"prompt_price\":\"0.0\",\"completion_tokens\":0,\"completion_unit_price\":\"0.0\",\"completion_price_unit\":\"0.0\",\"completion_price\":\"0.0\",\"total_tokens\":0,\"total_price\":\"0.0\",\"currency\":\"USD\",\"latency\":0.0,\"time_to_first_token\":null,\"time_to_generate\":null},\"outputs\":{},\"variable_pool\":{\"variable_dictionary\":{\"sys\":{\"workflow_execution_id\":{\"value_type\":\"string\",\"value\":\"workflow-execution\",\"id\":\"f15f548a-7121-46e4-97b1-0b8363cec690\",\"name\":\"workflow_execution_id\",\"description\":\"\",\"selector\":[\"sys\",\"workflow_execution_id\"]}},\"start\":{\"sys.workflow_execution_id\":{\"value_type\":\"string\",\"value\":\"workflow-execution\",\"id\":\"c039da01-7e2c-46ad-9957-718fcfcfbcc2\",\"name\":\"sys.workflow_execution_id\",\"description\":\"\",\"selector\":[\"start\",\"sys.workflow_execution_id\"]}}}},\"ready_queue\":\"{\\\"version\\\":\\\"2.0\\\",\\\"items\\\":[]}\",\"graph_execution\":\"{\\\"version\\\":\\\"2.0\\\",\\\"workflow_id\\\":\\\"workflow\\\",\\\"started\\\":true,\\\"completed\\\":false,\\\"aborted\\\":false,\\\"paused\\\":true,\\\"pause_reasons\\\":[{\\\"TYPE\\\":\\\"hitl_required\\\",\\\"session_id\\\":\\\"session-first\\\",\\\"node_id\\\":\\\"first\\\",\\\"node_title\\\":\\\"First approval\\\"}],\\\"error\\\":null,\\\"exceptions_count\\\":0,\\\"node_executions\\\":[{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"first\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"012be38d-ed3c-4b9d-8351-a264c0e5884f\\\"},{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"start\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"98c69480-5773-448c-8346-71aa4f82d843\\\"}]}\",\"deferred_ready_tasks\":\"{\\\"version\\\":\\\"2.0\\\",\\\"items\\\":[{\\\"kind\\\":\\\"start\\\",\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"first\\\"}]}\",\"container_runs\":[],\"container_frames\":[],\"graph_node_states\":{\"start\":\"taken\",\"first\":\"unknown\",\"second\":\"unknown\",\"reply\":\"unknown\",\"tail\":\"unknown\"},\"graph_edge_states\":{\"start-first\":\"taken\",\"first-second\":\"unknown\",\"second-reply\":\"unknown\",\"start-reply\":\"taken\",\"reply-tail\":\"unknown\"},\"version\":\"3.0\"}",
+    "response_filter": "{\"type\":\"ResponseStreamFilter\",\"version\":\"2.0\",\"response_nodes\":[\"reply\",\"tail\"],\"active_session\":{\"node_id\":\"reply\",\"index\":1},\"waiting_sessions\":[],\"pending_sessions\":[{\"node_id\":\"tail\",\"index\":0}],\"node_execution_ids\":{\"first\":\"012be38d-ed3c-4b9d-8351-a264c0e5884f\",\"reply\":\"beb4b748-bb49-431f-9eb8-549b65c655f5\",\"start\":\"98c69480-5773-448c-8346-71aa4f82d843\"},\"paths_map\":{\"reply\":[[\"first-second\",\"second-reply\"],[]],\"tail\":[[\"first-second\",\"second-reply\",\"reply-tail\"],[\"reply-tail\"]]},\"stream_buffers\":[],\"stream_positions\":[],\"closed_streams\":[]}",
+    "chunks": [
+      {
+        "id": "beb4b748-bb49-431f-9eb8-549b65c655f5",
+        "node_id": "reply",
+        "selector": [
+          "reply",
+          "answer"
+        ],
+        "chunk": "before|",
+        "is_final": false
+      }
+    ],
+    "pause": {
+      "container_id": "",
+      "reasons": [
+        {
+          "TYPE": "hitl_required",
+          "session_id": "session-first",
+          "node_id": "first",
+          "node_title": "First approval"
+        }
+      ],
+      "outputs": {}
+    },
+    "completed_nodes": [
+      "start"
+    ],
+    "started_nodes": {
+      "start": "98c69480-5773-448c-8346-71aa4f82d843",
+      "first": "012be38d-ed3c-4b9d-8351-a264c0e5884f"
+    }
+  },
+  "second": {
+    "runtime": "{\"start_at\":0.0,\"node_run_steps\":4,\"llm_usage\":{\"prompt_tokens\":0,\"prompt_unit_price\":\"0.0\",\"prompt_price_unit\":\"0.0\",\"prompt_price\":\"0.0\",\"completion_tokens\":0,\"completion_unit_price\":\"0.0\",\"completion_price_unit\":\"0.0\",\"completion_price\":\"0.0\",\"total_tokens\":0,\"total_price\":\"0.0\",\"currency\":\"USD\",\"latency\":0.0,\"time_to_first_token\":null,\"time_to_generate\":null},\"outputs\":{},\"variable_pool\":{\"variable_dictionary\":{\"sys\":{\"workflow_execution_id\":{\"value_type\":\"string\",\"value\":\"workflow-execution\",\"id\":\"f15f548a-7121-46e4-97b1-0b8363cec690\",\"name\":\"workflow_execution_id\",\"description\":\"\",\"selector\":[\"sys\",\"workflow_execution_id\"]}},\"start\":{\"sys.workflow_execution_id\":{\"value_type\":\"string\",\"value\":\"workflow-execution\",\"id\":\"c039da01-7e2c-46ad-9957-718fcfcfbcc2\",\"name\":\"sys.workflow_execution_id\",\"description\":\"\",\"selector\":[\"start\",\"sys.workflow_execution_id\"]}},\"first\":{\"answer\":{\"value_type\":\"string\",\"value\":\"alpha\",\"id\":\"c975a9c2-bc3e-4a16-aa1a-202f5cc3e142\",\"name\":\"answer\",\"description\":\"\",\"selector\":[\"first\",\"answer\"]}}}},\"ready_queue\":\"{\\\"version\\\":\\\"2.0\\\",\\\"items\\\":[]}\",\"graph_execution\":\"{\\\"version\\\":\\\"2.0\\\",\\\"workflow_id\\\":\\\"workflow\\\",\\\"started\\\":true,\\\"completed\\\":false,\\\"aborted\\\":false,\\\"paused\\\":true,\\\"pause_reasons\\\":[{\\\"TYPE\\\":\\\"hitl_required\\\",\\\"session_id\\\":\\\"session-second\\\",\\\"node_id\\\":\\\"second\\\",\\\"node_title\\\":\\\"Second approval\\\"}],\\\"error\\\":null,\\\"exceptions_count\\\":0,\\\"node_executions\\\":[{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"first\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"012be38d-ed3c-4b9d-8351-a264c0e5884f\\\"},{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"second\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"038aa28d-c9c9-4edd-abf0-ec3f419b9635\\\"},{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"start\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"98c69480-5773-448c-8346-71aa4f82d843\\\"}]}\",\"deferred_ready_tasks\":\"{\\\"version\\\":\\\"2.0\\\",\\\"items\\\":[{\\\"kind\\\":\\\"start\\\",\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"second\\\"}]}\",\"container_runs\":[],\"container_frames\":[],\"graph_node_states\":{\"start\":\"taken\",\"first\":\"unknown\",\"second\":\"unknown\",\"reply\":\"unknown\",\"tail\":\"unknown\"},\"graph_edge_states\":{\"start-first\":\"taken\",\"first-second\":\"taken\",\"second-reply\":\"unknown\",\"start-reply\":\"taken\",\"reply-tail\":\"unknown\"},\"version\":\"3.0\"}",
+    "response_filter": "{\"type\":\"ResponseStreamFilter\",\"version\":\"2.0\",\"response_nodes\":[\"reply\",\"tail\"],\"active_session\":{\"node_id\":\"reply\",\"index\":3},\"waiting_sessions\":[],\"pending_sessions\":[{\"node_id\":\"tail\",\"index\":0}],\"node_execution_ids\":{\"first\":\"012be38d-ed3c-4b9d-8351-a264c0e5884f\",\"reply\":\"beb4b748-bb49-431f-9eb8-549b65c655f5\",\"second\":\"038aa28d-c9c9-4edd-abf0-ec3f419b9635\",\"start\":\"98c69480-5773-448c-8346-71aa4f82d843\"},\"paths_map\":{\"reply\":[[\"second-reply\"],[]],\"tail\":[[\"second-reply\",\"reply-tail\"],[\"reply-tail\"]]},\"stream_buffers\":[],\"stream_positions\":[],\"closed_streams\":[]}",
+    "chunks": [
+      {
+        "id": "012be38d-ed3c-4b9d-8351-a264c0e5884f",
+        "node_id": "first",
+        "selector": [
+          "first",
+          "answer"
+        ],
+        "chunk": "alpha",
+        "is_final": false
+      },
+      {
+        "id": "beb4b748-bb49-431f-9eb8-549b65c655f5",
+        "node_id": "reply",
+        "selector": [
+          "reply",
+          "answer"
+        ],
+        "chunk": "|middle|",
+        "is_final": false
+      }
+    ],
+    "pause": {
+      "container_id": "",
+      "reasons": [
+        {
+          "TYPE": "hitl_required",
+          "session_id": "session-second",
+          "node_id": "second",
+          "node_title": "Second approval"
+        }
+      ],
+      "outputs": {}
+    },
+    "completed_nodes": [
+      "first"
+    ],
+    "started_nodes": {
+      "first": "012be38d-ed3c-4b9d-8351-a264c0e5884f",
+      "second": "038aa28d-c9c9-4edd-abf0-ec3f419b9635"
+    }
+  },
+  "command": {
+    "runtime": "{\"start_at\":0.0,\"node_run_steps\":1,\"llm_usage\":{\"prompt_tokens\":0,\"prompt_unit_price\":\"0.0\",\"prompt_price_unit\":\"0.0\",\"prompt_price\":\"0.0\",\"completion_tokens\":0,\"completion_unit_price\":\"0.0\",\"completion_price_unit\":\"0.0\",\"completion_price\":\"0.0\",\"total_tokens\":0,\"total_price\":\"0.0\",\"currency\":\"USD\",\"latency\":0.0,\"time_to_first_token\":null,\"time_to_generate\":null},\"outputs\":{},\"variable_pool\":{\"variable_dictionary\":{\"sys\":{\"workflow_execution_id\":{\"value_type\":\"string\",\"value\":\"workflow-execution\",\"id\":\"e22a994d-fdae-41af-a6d9-98ca9a463594\",\"name\":\"workflow_execution_id\",\"description\":\"\",\"selector\":[\"sys\",\"workflow_execution_id\"]}},\"start\":{\"sys.workflow_execution_id\":{\"value_type\":\"string\",\"value\":\"workflow-execution\",\"id\":\"411dfb6b-458b-43c3-9670-e16e76366083\",\"name\":\"sys.workflow_execution_id\",\"description\":\"\",\"selector\":[\"start\",\"sys.workflow_execution_id\"]}}}},\"ready_queue\":\"{\\\"version\\\":\\\"2.0\\\",\\\"items\\\":[]}\",\"graph_execution\":\"{\\\"version\\\":\\\"2.0\\\",\\\"workflow_id\\\":\\\"workflow\\\",\\\"started\\\":true,\\\"completed\\\":false,\\\"aborted\\\":false,\\\"paused\\\":true,\\\"pause_reasons\\\":[{\\\"TYPE\\\":\\\"scheduled_pause\\\",\\\"message\\\":\\\"host checkpoint\\\"}],\\\"error\\\":null,\\\"exceptions_count\\\":0,\\\"node_executions\\\":[{\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"start\\\",\\\"retry_count\\\":0,\\\"execution_id\\\":\\\"5c559e8f-87f4-4a7c-92cf-dc300fe9ae94\\\"}]}\",\"deferred_ready_tasks\":\"{\\\"version\\\":\\\"2.0\\\",\\\"items\\\":[{\\\"kind\\\":\\\"start\\\",\\\"frame_id\\\":\\\"root\\\",\\\"node_id\\\":\\\"first\\\"}]}\",\"container_runs\":[],\"container_frames\":[],\"graph_node_states\":{\"start\":\"taken\",\"first\":\"taken\",\"second\":\"unknown\",\"reply\":\"unknown\",\"tail\":\"unknown\"},\"graph_edge_states\":{\"start-first\":\"taken\",\"first-second\":\"unknown\",\"second-reply\":\"unknown\",\"start-reply\":\"taken\",\"reply-tail\":\"unknown\"},\"version\":\"3.0\"}",
+    "response_filter": "{\"type\":\"ResponseStreamFilter\",\"version\":\"2.0\",\"response_nodes\":[\"reply\",\"tail\"],\"active_session\":{\"node_id\":\"reply\",\"index\":1},\"waiting_sessions\":[],\"pending_sessions\":[{\"node_id\":\"tail\",\"index\":0}],\"node_execution_ids\":{\"first\":\"0a8f7f59-80a1-4372-b5e1-c7489326697d\",\"reply\":\"1833e0e7-da63-41e6-954d-cf4065818399\",\"start\":\"5c559e8f-87f4-4a7c-92cf-dc300fe9ae94\"},\"paths_map\":{\"reply\":[[\"first-second\",\"second-reply\"],[]],\"tail\":[[\"first-second\",\"second-reply\",\"reply-tail\"],[\"reply-tail\"]]},\"stream_buffers\":[],\"stream_positions\":[],\"closed_streams\":[]}",
+    "chunks": [
+      {
+        "id": "1833e0e7-da63-41e6-954d-cf4065818399",
+        "node_id": "reply",
+        "selector": [
+          "reply",
+          "answer"
+        ],
+        "chunk": "before|",
+        "is_final": false
+      }
+    ],
+    "pause": {
+      "container_id": "",
+      "reasons": [
+        {
+          "TYPE": "scheduled_pause",
+          "message": "host checkpoint"
+        }
+      ],
+      "outputs": {}
+    },
+    "completed_nodes": [
+      "start"
+    ],
+    "started_nodes": {
+      "start": "5c559e8f-87f4-4a7c-92cf-dc300fe9ae94"
+    }
+  }
+}
