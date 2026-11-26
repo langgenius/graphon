@@ -141,7 +141,7 @@ class _StreamBuffers:
     def close(self, selector: Sequence[str]) -> None:
         self.closed_selectors.add(tuple(selector))
 
-    def close_on_source_default(self, selector: Selector) -> None:
+    def close_and_drop_buffer_without_text(self, selector: Selector) -> None:
         self.close(selector)
         if not any(event.chunk for event in self.events.get(selector, ())):
             # Drop empty chunks so the template can read the current saved value.
@@ -454,7 +454,7 @@ class _TemplateStream:
         is_closed = self.stream_buffers.is_closed(selector)
         if is_closed and not events and buffered_events:
             segment_indices = session.segment_indices_by_selector[selector]
-            # A default can close the first reference after its partial text was sent.
+            # A terminal event can close the first reference after it sent partial text.
             if len(segment_indices) > 1 and (
                 session.index != segment_indices[0] or buffered_events[-1].is_final
             ):

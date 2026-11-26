@@ -12,18 +12,20 @@ from graphon.engine.filter import (
     ResponseStreamFilter,
     filter_engine_events,
 )
+from graphon.engine_events.base import EngineEvent
 from graphon.engine_events.graph import (
     GraphRunPartialSucceededEvent,
     GraphRunSucceededEvent,
 )
 from graphon.engine_events.node import (
     NodeRunFailedEvent,
+    NodeRunRetryEvent,
     NodeRunStartedEvent,
     NodeRunStreamChunkEvent,
     NodeRunSucceededEvent,
 )
-from graphon.entities.base_node_data import DefaultValue
-from graphon.enums import BuiltinNodeTypes, ErrorStrategy
+from graphon.entities.base_node_data import DefaultValue, RetryConfig
+from graphon.enums import BuiltinNodeTypes, ErrorStrategy, NodeExecutionType
 from graphon.file.enums import FileTransferMethod, FileType
 from graphon.file.models import File
 from graphon.graph.graph import Graph
@@ -362,6 +364,138 @@ def test_answer_finishes_all_tool_fields_when_only_text_has_a_default(
     assert text == "[partial/fallback]"
     terminal = events[-1]
     assert isinstance(terminal, GraphRunPartialSucceededEvent)
+
+
+def _run_tool_answer_chain(
+    tool: ToolNode, *, output_field: str, source_handle: str = "source"
+) -> list[EngineEvent]:
+    node_args = {
+        "init_params": build_init_params(),
+        "runtime_state": tool.runtime_state,
+    }
+    graph = (
+        Graph
+        .new()
+        .add_root(StartNode(node_id="start", data=StartNodeData(), **node_args))
+        .add_node(tool)
+        .add_node(
+            AnswerNode(
+                node_id="first",
+                data=AnswerNodeData(answer=f"[{{{{#{tool.id}.{output_field}#}}}}]END"),
+                **node_args,
+            ),
+            source_handle=source_handle,
+        )
+        .add_node(
+            AnswerNode(node_id="next", data=AnswerNodeData(answer="|NEXT"), **node_args)
+        )
+        .build()
+    )
+    engine = Engine(graph=graph, runtime_state=tool.runtime_state, workers=1)
+    return list(
+        filter_engine_events(
+            engine.run(),
+            context=EngineEventFilterContext.from_engine(engine),
+            filters=[ResponseStreamFilter()],
+        )
+    )
+
+
+def _join_streamed_text(events: list[EngineEvent]) -> str:
+    return "".join(
+        event.chunk for event in events if isinstance(event, NodeRunStreamChunkEvent)
+    )
+
+
+def _assert_streamed_answer_chain(
+    events: list[EngineEvent], first_answer_text: str
+) -> None:
+    assert _join_streamed_text(events) == f"{first_answer_text}|NEXT"
+    first_answer_start_index = next(
+        index
+        for index, event in enumerate(events)
+        if isinstance(event, NodeRunStartedEvent) and event.node_id == "first"
+    )
+    assert _join_streamed_text(events[:first_answer_start_index]) == first_answer_text
+
+
+def test_tool_fail_branch_finishes_the_answer_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _RunStubToolRuntime()
+    runtime.messages = _message_stream(
+        ToolRuntimeMessage(
+            type=ToolRuntimeMessage.MessageType.TEXT,
+            message=ToolRuntimeMessage.TextMessage(text="partial"),
+        )
+    )
+    monkeypatch.setattr(
+        runtime, "get_usage", MagicMock(side_effect=ToolNodeError("Usage unavailable"))
+    )
+    tool, _ = _build_run_tool_node(runtime=runtime, tool_node_version=None)
+    tool.node_data.error_strategy = ErrorStrategy.FAIL_BRANCH
+    tool.execution_type = NodeExecutionType.BRANCH
+
+    events = _run_tool_answer_chain(
+        tool, output_field="text", source_handle="fail-branch"
+    )
+
+    terminal = events[-1]
+    assert isinstance(terminal, GraphRunPartialSucceededEvent)
+    assert terminal.outputs["answer"] == "[]END|NEXT"
+    _assert_streamed_answer_chain(events, "[partial]END")
+
+
+@pytest.mark.parametrize(
+    ("first_chunk", "streamed_excerpt"), [("part", "part"), ("", "saved")]
+)
+def test_tool_retry_with_non_streamed_output_finishes_the_answer_chain(
+    monkeypatch: pytest.MonkeyPatch, first_chunk: str, streamed_excerpt: str
+) -> None:
+    runtime = _RunStubToolRuntime()
+    first_attempt_messages = _message_stream(
+        ToolRuntimeMessage(
+            type=ToolRuntimeMessage.MessageType.VARIABLE,
+            message=ToolRuntimeMessage.VariableMessage(
+                variable_name="excerpt", variable_value=first_chunk, stream=True
+            ),
+        )
+    )
+    retry_messages = _message_stream(
+        ToolRuntimeMessage(
+            type=ToolRuntimeMessage.MessageType.VARIABLE,
+            message=ToolRuntimeMessage.VariableMessage(
+                variable_name="excerpt", variable_value="saved", stream=False
+            ),
+        )
+    )
+    monkeypatch.setattr(
+        runtime,
+        "invoke",
+        MagicMock(side_effect=[first_attempt_messages, retry_messages]),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "get_usage",
+        MagicMock(side_effect=[ToolNodeError("Usage unavailable"), runtime.usage]),
+    )
+    tool, _ = _build_run_tool_node(runtime=runtime, tool_node_version=None)
+    tool.node_data.retry_config = RetryConfig(
+        retry_enabled=True, max_retries=1, retry_interval=0
+    )
+
+    events = _run_tool_answer_chain(tool, output_field="excerpt")
+
+    terminal = events[-1]
+    assert isinstance(terminal, (GraphRunSucceededEvent, GraphRunPartialSucceededEvent))
+    assert terminal.outputs["answer"] == "[saved]END|NEXT"
+    _assert_streamed_answer_chain(events, f"[{streamed_excerpt}]END")
+    retry_event_index = next(
+        index
+        for index, event in enumerate(events)
+        if isinstance(event, NodeRunRetryEvent) and event.node_id == tool.id
+    )
+    assert _join_streamed_text(events[: retry_event_index + 1]) == f"[{first_chunk}"
 
 
 @pytest.mark.parametrize("stream", [False, True])

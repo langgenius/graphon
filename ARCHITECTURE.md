@@ -157,15 +157,20 @@ See the [response filter tests](tests/engine/test_response_stream_filter.py).
 When a branch skips a node and its output is absent, the root Answer omits that reference and keeps the surrounding text in both the saved and streamed reply.
 See the [Answer node](src/graphon/nodes/answer/answer_node.py) and [branch workflow test](tests/workflows/test_full_engine_events.py).
 
-When a node in the root frame uses `DEFAULT_VALUE`, the filter closes all its referenced fields so replies can continue without a final source chunk.
-Fields without a configured default also close.
-The filter keeps partial text even for a field the reply has yet to reach.
-If no text arrived for a field, the filter reads its current saved value when the template reaches it and leaves a missing field empty.
-The Answer node renders its stored result from committed variables, so its output can contain the default even when the reply showed partial text.
-See the [LLM retry tests](tests/engine/test_llm_default_value_streaming.py).
+The root filter closes every referenced output when its source node finishes
+through `DEFAULT_VALUE` or `FAIL_BRANCH`. A successful retry closes its
+referenced streams that are still open and have buffered chunks. This lets
+replies continue without a final source chunk. The filter keeps partial text
+even for references the reply has yet to reach. For fields closed by these
+events, the template uses the current committed value when there is no buffered
+text and omits the reference if the value is missing. The Answer node renders
+its saved output from committed variables, so it can differ from the stream.
+See the [LLM retry tests](tests/engine/test_llm_default_value_streaming.py) and
+[Tool response tests](tests/nodes/tool/test_tool_node.py).
 
-A Tool node prepares its outputs and usage before sending final markers for text and streamed variables, so an empty field can still display its default if preparation fails.
-See the [Tool output tests](tests/nodes/tool/test_tool_node.py).
+Tool nodes collect usage and prepare outputs before emitting final markers for
+text and streamed variables. See the
+[Tool node implementation](src/graphon/nodes/tool/tool_node.py).
 
 [Template assembly](src/graphon/engine/filter/builtin/response_stream/template_stream.py)
 keeps child source streams distinct by frame, execution, attempt, and selector.

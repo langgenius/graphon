@@ -22,12 +22,7 @@ from graphon.engine_events.node import (
 )
 from graphon.engine_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTakenEvent
 from graphon.entities.workflow_start_reason import WorkflowStartReason
-from graphon.enums import (
-    BuiltinNodeTypes,
-    ErrorStrategy,
-    NodeExecutionType,
-    WorkflowNodeExecutionMetadataKey,
-)
+from graphon.enums import BuiltinNodeTypes, NodeExecutionType
 from graphon.nodes.base.template import VariableSegment
 from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.runtime_state import GraphProtocol
@@ -165,24 +160,27 @@ class _FrameSession:
                 return self._handle_edge_skipped(event)
             case NodeRunSucceededEvent() | NodeRunExceptionEvent():
                 self._template_stream.finish_source(event)
-                if self.frame_id == ROOT_FRAME_ID and isinstance(
-                    event, NodeRunExceptionEvent
-                ):
-                    self._close_referenced_streams_on_default(event)
+                if self.frame_id == ROOT_FRAME_ID:
+                    self._close_root_streams_after_handled_failure_or_retry(event)
                 return [*self._try_flush(), event]
         return [event]
 
-    def _close_referenced_streams_on_default(
-        self, event: NodeRunExceptionEvent
+    def _close_root_streams_after_handled_failure_or_retry(
+        self, event: NodeRunSucceededEvent | NodeRunExceptionEvent
     ) -> None:
-        strategy = event.node_run_result.metadata.get(
-            WorkflowNodeExecutionMetadataKey.ERROR_STRATEGY
-        )
-        if strategy != ErrorStrategy.DEFAULT_VALUE:
+        succeeded = isinstance(event, NodeRunSucceededEvent)
+        if succeeded and event.retry_index == 0:
             return
+        buffers = self._template_stream.stream_buffers
         for selector in self._referenced_selectors:
-            if selector and selector[0] == event.node_id:
-                self._template_stream.stream_buffers.close_on_source_default(selector)
+            if not selector or selector[0] != event.node_id:
+                continue
+            # A retry can finish without a final marker for an earlier chunk.
+            if succeeded and (
+                not buffers.has_events(selector) or buffers.is_closed(selector)
+            ):
+                continue
+            buffers.close_and_drop_buffer_without_text(selector)
 
     def flush(self) -> list[EngineEvent]:
         return self._try_flush()
