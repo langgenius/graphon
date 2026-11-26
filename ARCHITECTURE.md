@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-24T18:14:20Z"
+last_checked: "2026-11-26T01:12:45Z"
 -->
 # Architecture
 
@@ -136,8 +136,8 @@ Use [filter_engine_events](src/graphon/engine/filter/chain.py) with
 [ResponseStreamFilter](src/graphon/engine/filter/builtin/response_stream/filter.py)
 and [EngineEventFilterContext.from_engine](src/graphon/engine/filter/protocol.py).
 Keep frame events enabled so the filter receives its initial root baseline. The
-filter consumes baselines and committed replacements internally. Its detached
-view stays usable after the engine removes the frame.
+filter consumes baselines and committed replacements without forwarding them.
+Its detached view stays usable after the engine removes the frame.
 
 Root templates come from the graph's response nodes. Child Answer and End
 templates come from [retained graph definitions](src/graphon/engine/filter/builtin/response_stream/frame_graph.py)
@@ -148,9 +148,11 @@ only if its first consumed decision is a take. The engine may be ahead of the
 consumer, so activation uses the events already consumed in that frame. See
 [response gating regressions](docs/development.md#response-gating-regressions).
 
-When a root reply repeats a streamed node output, the filter forwards each unread source chunk with its original final flag.
-Once the final chunk has been read, remaining references in that reply emit the buffered text under the reply node's execution ID and text selector.
-If the template ends with a repeated reference or a trailing literal, that segment closes the reply.
+Root replies forward unread node-output chunks with the producer's execution ID,
+selector, and `is_final` value. After the source closes and the filter reads its
+chunks, a repeated reference emits the buffered text with the reply node's
+execution ID and streaming text selector. When a repeated reference or literal
+ends the template, its chunk has `is_final=True`.
 See the [response filter tests](tests/engine/test_response_stream_filter.py).
 
 [Template assembly](src/graphon/engine/filter/builtin/response_stream/template_stream.py)

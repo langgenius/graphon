@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-19T01:10:52Z"
+last_checked: "2026-11-26T01:12:45Z"
 -->
 # Contributing to Graphon
 
@@ -110,8 +110,9 @@ each with a new context-free subagent.
 - Python compatible with [project metadata](pyproject.toml)
 - [`uv`](https://docs.astral.sh/uv/)
 - [`just`](https://just.systems/)
-- [`fd`](https://github.com/sharkdp/fd)
 - `git`
+
+The optional `just clean` recipe also needs [`fd`](https://github.com/sharkdp/fd).
 
 ### Bootstrap
 

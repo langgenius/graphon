@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-19T01:18:53Z"
+last_checked: "2026-11-26T01:14:08Z"
 -->
 # Development navigation
 
@@ -62,8 +62,13 @@ public surface.
   [SlimLLM](../src/graphon/dsl/slim/llm.py) is the provided graph-facing adapter;
   [code.py](../examples/slim_llm/code.py) shows direct wiring. Provider discovery
   and capability wrappers have separate protocols; see the
-  [model runtime guide](../src/graphon/model_runtime/README.md) and
-  [dispatch tests](../tests/model_runtime/test_model_dispatch.py).
+  [model runtime guide](../src/graphon/model_runtime/README.md).
+  For polling, subclass [`graphon.protocols.LLMPollingCapableProtocol`](../src/graphon/nodes/llm/runtime_protocols.py).
+  A successful polling run emits the completed text in its final text chunk.
+  For complete results in `separated` mode, the node strips `<think>` blocks
+  from visible text and prefers nonempty `LLMResult.reasoning_content`, with
+  the extracted reasoning as a fallback.
+  See the [LLM node tests](../tests/nodes/llm/test_node.py).
 - **Files and HTTP:** use the [file binding guidance](../ARCHITECTURE.md#state-and-execution-invariants)
   when wiring engines, filters, or host rendering. Node-specific ports live in
   [nodes/protocols.py](../src/graphon/nodes/protocols.py); generated LLM files use
@@ -102,12 +107,11 @@ and the [independent review sequence](../CONTRIBUTING.md#context-free-reviews).
 
 - [Complexity tests](../tests/engine/test_response_stream_filter_complexity.py)
   bound adjacency calls, retained state, and snapshot size on chains of diamonds.
-  Two graph passes per response use at most `2RV` adjacency calls for `R`
-  responses and `V` nodes. With `R <= V`, `V >= 2`, and `E >= V - 1` edges,
-  the budget is `2RV <= 4VE`. Nodes and edges both grow linearly with stages,
-  so doubling the stages approaches four times the budget. The tests require
-  observed call growth below that factor. Size checks cover one response
-  without source buffers and exclude borrowed graph and value-pool objects.
+  The `4VE` call budget allows two `V`-node traversals for each of up to `V`
+  responses on a connected graph with `E` edges. Doubling the stages approaches
+  four times that budget because nodes and edges both grow linearly with stages.
+  The size checks cover one response without buffered source text and exclude
+  borrowed graph and value-pool objects.
 - [Differential tests](../tests/engine/test_response_stream_filter_differential.py)
   compare response activation after each event against the previous path-based
   behavior, including repeated and conflicting traversal observations.

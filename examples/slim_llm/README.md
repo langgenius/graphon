@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-19T01:10:52Z"
+last_checked: "2026-11-26T01:12:45Z"
 -->
 # Slim LLM Example
 
@@ -25,7 +25,10 @@ cd examples/slim_llm
 cp credentials.example.json credentials.json
 ```
 
-Fill in `credentials.json`. See the [Git ignore rule](../../.gitignore) and
+Fill in the model credentials in `credentials.json`. For a remote daemon,
+set `slim.mode` to `remote` and supply `slim.daemon_addr` and
+`slim.daemon_key`. The example defaults to local mode. See the
+[Git ignore rule](../../.gitignore) and
 [PR file check](../../.github/workflows/pr.yml) for local-configuration exclusions.
 
 Provide a Slim executable through `SLIM_BINARY_PATH`, place an executable named
@@ -46,6 +49,5 @@ uv run python code.py
 uv run python code.py "Reply with only the word Graphon."
 ```
 
-Running either workflow invokes a real model; `--help` only displays command
-usage and needs no credentials or Slim executable. Use [settings.py](settings.py)
-to choose local or remote daemon setup and resolve configuration errors.
+Running either workflow invokes a real model. Use `--help` to check command
+usage without credentials or a Slim executable.
