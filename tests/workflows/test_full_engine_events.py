@@ -12,6 +12,11 @@ from graphon.dsl import loads
 from graphon.engine import Engine
 from graphon.engine.command import UpdateVariablesCommand
 from graphon.engine.container_handler import LoopContainerHandler
+from graphon.engine.filter import (
+    EngineEventFilterContext,
+    ResponseStreamFilter,
+    filter_engine_events,
+)
 from graphon.engine.frame import FrameRegistry
 from graphon.engine.layer import Layer
 from graphon.engine.ready_queue.entities import StartTask
@@ -33,6 +38,7 @@ from graphon.engine_events.loop import (
     NodeRunLoopSucceededEvent,
 )
 from graphon.engine_events.node import (
+    NodeRunStreamChunkEvent,
     NodeRunSucceededEvent,
     NodeRunVariableUpdatedEvent,
 )
@@ -357,6 +363,68 @@ def test_full_answer_graph_is_verified_from_events() -> None:
     outputs = final_outputs(events)
     assert set(outputs) == {"answer", "files"}
     assert outputs["answer"] == "Hello Graphon"
+
+
+@pytest.mark.parametrize(
+    ("choice", "expected_answer"),
+    [("take", "(ok)"), ("skip", "()")],
+)
+def test_saved_and_streamed_answers_omit_skipped_branch_output(
+    choice: str, expected_answer: str
+) -> None:
+    start = _start_node()
+    start["data"]["variables"] = [
+        {"type": "text-input", "variable": "choice", "label": "Choice"}
+    ]
+    case = {
+        "case_id": "true",
+        "logical_operator": "and",
+        "conditions": [
+            {
+                "variable_selector": ["start", "choice"],
+                "comparison_operator": "is",
+                "value": "take",
+            }
+        ],
+    }
+    dsl = _graph_dsl(
+        nodes=[
+            start,
+            {"id": "branch", "data": {"type": "if-else", "cases": [case]}},
+            {
+                "id": "source",
+                "data": {
+                    "type": "template-transform",
+                    "template": "ok",
+                    "variables": [],
+                },
+            },
+            {
+                "id": "answer",
+                "data": {"type": "answer", "answer": "({{#source.output#}})"},
+            },
+        ],
+        edges=[
+            _edge("start", "branch"),
+            {"source": "branch", "target": "source", "sourceHandle": "true"},
+            {"source": "branch", "target": "answer", "sourceHandle": "false"},
+            _edge("source", "answer"),
+        ],
+    )
+    engine = loads(dsl, start_inputs={"choice": choice})
+    events = filter_engine_events(
+        engine.run(),
+        context=EngineEventFilterContext.from_engine(engine),
+        filters=[ResponseStreamFilter()],
+    )
+
+    streamed_answer = "".join(
+        event.chunk for event in events if isinstance(event, NodeRunStreamChunkEvent)
+    )
+    assert streamed_answer == expected_answer
+    saved_answer = engine.runtime_state.variable_pool.get(("answer", "answer"))
+    assert saved_answer is not None
+    assert saved_answer.to_object() == expected_answer
 
 
 def test_resume_replays_tasks_through_a_bounded_ready_queue() -> None:

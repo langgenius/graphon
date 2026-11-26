@@ -153,6 +153,9 @@ Once the final chunk has been read, remaining references in that reply emit the 
 If the template ends with a repeated reference or a trailing literal, that segment closes the reply.
 See the [response filter tests](tests/engine/test_response_stream_filter.py).
 
+When a branch skips a node and its output is absent, the root Answer omits that reference and keeps the surrounding text in both the saved and streamed reply.
+See the [Answer node](src/graphon/nodes/answer/answer_node.py) and [branch workflow test](tests/workflows/test_full_engine_events.py).
+
 [Template assembly](src/graphon/engine/filter/builtin/response_stream/template_stream.py)
 keeps child source streams distinct by frame, execution, attempt, and selector.
 A child Answer emits under its reserved execution ID and the

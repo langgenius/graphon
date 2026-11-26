@@ -10,14 +10,9 @@ from graphon.file.models import File
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.answer.entities import AnswerNodeData
 from graphon.nodes.base.node import Node
-from graphon.nodes.base.template import Template
+from graphon.nodes.base.template import Template, TextSegment
 from graphon.nodes.base.variable_template_parser import VariableTemplateParser
-from graphon.variables.segments import (
-    ArrayFileSegment,
-    FileSegment,
-    Segment,
-)
-from graphon.variables.template_resolution import convert_template
+from graphon.variables.segments import ArrayFileSegment, FileSegment
 
 
 class AnswerNode(Node[AnswerNodeData]):
@@ -31,39 +26,29 @@ class AnswerNode(Node[AnswerNodeData]):
 
     @override
     def _run(self) -> NodeRunResult:
-        segments = convert_template(
-            self.runtime_state.variable_pool,
-            self.node_data.answer,
-        )
-        files = self._extract_files_from_segments(segments.value)
+        text_parts: list[str] = []
+        files: list[File] = []
+        for segment in Template.from_answer_template(self.node_data.answer).segments:
+            if isinstance(segment, TextSegment):
+                text_parts.append(segment.text)
+                continue
+
+            resolved_segment = self.runtime_state.variable_pool.get(segment.selector)
+            if resolved_segment is None:
+                continue
+            text_parts.append(resolved_segment.markdown)
+            if isinstance(resolved_segment, FileSegment):
+                files.append(resolved_segment.value)
+            elif isinstance(resolved_segment, ArrayFileSegment):
+                files.extend(resolved_segment.value)
+
         return NodeRunResult(
             status=WorkflowNodeExecutionStatus.SUCCEEDED,
             outputs={
-                "answer": segments.markdown,
+                "answer": "".join(text_parts),
                 "files": ArrayFileSegment(value=files),
             },
         )
-
-    def _extract_files_from_segments(self, segments: Sequence[Segment]) -> list[File]:
-        """Extract all files from segments containing FileSegment or
-        ArrayFileSegment instances.
-
-        FileSegment contains a single file, while ArrayFileSegment contains
-        multiple files. This method flattens all files into a single list.
-
-        Returns:
-            A flat list of `File` objects extracted from the segments.
-
-        """
-        files = []
-        for segment in segments:
-            if isinstance(segment, FileSegment):
-                # Single file - wrap in list for consistency
-                files.append(segment.value)
-            elif isinstance(segment, ArrayFileSegment):
-                # Multiple files - extend the list
-                files.extend(segment.value)
-        return files
 
     @classmethod
     @override
