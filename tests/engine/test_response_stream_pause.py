@@ -147,17 +147,17 @@ def checkpoints(request: pytest.FixtureRequest) -> _PauseCheckpoints:
         return _PauseCheckpoints.model_validate_json(
             (_FIXTURES / f"response_pause_{request.param}.json").read_text()
         )
-    first = _capture_pause(
+    first_pause = _capture_pause(
         _hitl_engine(
             _DSL, runtime_state=_new_runtime_state({}), callback=_request_hitl_pause
         ),
         ResponseStreamFilter(),
     )
-    engine, stream_filter = _restore_pause(first, _complete_first)
-    second = _capture_pause(engine, stream_filter)
+    engine, stream_filter = _restore_pause(first_pause, _complete_first)
+    second_pause = _capture_pause(engine, stream_filter)
     channel = InMemoryChannel()
     channel.send_command(PauseCommand(reason="host checkpoint"))
-    command = _capture_pause(
+    command_pause = _capture_pause(
         _hitl_engine(
             _DSL,
             runtime_state=_new_runtime_state({}),
@@ -167,7 +167,10 @@ def checkpoints(request: pytest.FixtureRequest) -> _PauseCheckpoints:
         ResponseStreamFilter(),
     )
     return _PauseCheckpoints(
-        writer_commit="current", first=first, second=second, command=command
+        writer_commit="current",
+        first=first_pause,
+        second=second_pause,
+        command=command_pause,
     )
 
 

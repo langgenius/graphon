@@ -140,40 +140,40 @@ def main() -> None:
     engine = helpers._hitl_engine(
         dsl, runtime_state=helpers._new_runtime_state({}), callback=_request_hitl_pause
     )
-    first = capture_pause(engine, filters.ResponseStreamFilter())
+    first_pause = capture_pause(engine, filters.ResponseStreamFilter())
     state_type = type(
         engine.graph_runtime_state if uses_graph_engine else engine.runtime_state
     )
     resumed_engine = helpers._hitl_engine(
         dsl,
-        runtime_state=state_type.from_snapshot(first["runtime"]),
+        runtime_state=state_type.from_snapshot(first_pause["runtime"]),
         callback=complete_first,
     )
     resumed_filter = filters.ResponseStreamFilter()
-    resumed_filter.loads(first["response_filter"])
-    second = capture_pause(resumed_engine, resumed_filter)
+    resumed_filter.loads(first_pause["response_filter"])
+    second_pause = capture_pause(resumed_engine, resumed_filter)
 
-    command = capture_pause(
+    command_pause = capture_pause(
         _create_pause_command_engine(helpers, uses_graph_engine, dsl),
         filters.ResponseStreamFilter(),
     )
-    for checkpoint in (first, second, command):
+    for checkpoint in (first_pause, second_pause, command_pause):
         assert json.loads(checkpoint["runtime"])["version"] == (
             "2.0" if uses_graph_engine else "3.0"
         )
         assert json.loads(checkpoint["response_filter"])["version"] == (
             "1.0" if uses_graph_engine else "2.0"
         )
-    assert command["pause"]["reasons"] == [
+    assert command_pause["pause"]["reasons"] == [
         SchedulingPause(message="host checkpoint").model_dump(mode="json")
     ]
     args.output.write_text(
         json.dumps(
             {
                 "writer_commit": args.revision,
-                "first": first,
-                "second": second,
-                "command": command,
+                "first": first_pause,
+                "second": second_pause,
+                "command": command_pause,
             },
             indent=2,
         )
