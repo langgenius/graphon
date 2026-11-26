@@ -7,7 +7,6 @@ source execution and attempt without consuming another response's text.
 
 from __future__ import annotations
 
-from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -55,13 +54,12 @@ class _ResponseSession:
         return self.index >= len(self.template.segments)
 
     @cached_property
-    def repeated_selectors(self) -> set[Selector]:
-        selector_counts = Counter(
-            tuple(segment.selector)
-            for segment in self.template.segments
-            if isinstance(segment, VariableSegment)
-        )
-        return {selector for selector, count in selector_counts.items() if count > 1}
+    def segment_indices_by_selector(self) -> dict[Selector, list[int]]:
+        indices: dict[Selector, list[int]] = {}
+        for index, segment in enumerate(self.template.segments):
+            if isinstance(segment, VariableSegment):
+                indices.setdefault(tuple(segment.selector), []).append(index)
+        return indices
 
 
 @dataclass
@@ -142,6 +140,13 @@ class _StreamBuffers:
 
     def close(self, selector: Sequence[str]) -> None:
         self.closed_selectors.add(tuple(selector))
+
+    def close_and_drop_buffer_without_text(self, selector: Selector) -> None:
+        self.close(selector)
+        if not any(event.chunk for event in self.events.get(selector, ())):
+            # Drop empty chunks so the template can read the current saved value.
+            self.events.pop(selector, None)
+            self.positions.pop(selector, None)
 
     def is_closed(self, selector: Sequence[str]) -> bool:
         return tuple(selector) in self.closed_selectors
@@ -398,7 +403,6 @@ class _TemplateStream:
     ) -> tuple[list[NodeRunStreamChunkEvent], bool]:
         events: list[NodeRunStreamChunkEvent] = []
         source_selector_prefix = segment.selector[0] if segment.selector else ""
-        is_complete = False
 
         is_non_node_selector = source_selector_prefix not in graph.nodes
         if is_non_node_selector:
@@ -430,16 +434,10 @@ class _TemplateStream:
                 events.append(event)
 
         buffered_events = self.stream_buffers.events.get(selector)
-        if self.stream_buffers.is_closed(selector):
-            if (
-                not events
-                and buffered_events
-                and selector in session.repeated_selectors
-            ):
-                text = "".join(event.chunk for event in buffered_events)
-                events = self._create_response_text_chunks(text, session, graph=graph)
-            is_complete = True
-        elif buffered_events is None and (value := variable_pool.get(segment.selector)):
+        if (
+            buffered_events is None
+            and (value := variable_pool.get(selector)) is not None
+        ):
             is_last_segment = session.index == len(session.template.segments) - 1
             events.append(
                 self._create_stream_chunk_event(
@@ -451,9 +449,18 @@ class _TemplateStream:
                     graph=graph,
                 ),
             )
-            is_complete = True
+            return events, True
 
-        return events, is_complete
+        is_closed = self.stream_buffers.is_closed(selector)
+        if is_closed and not events and buffered_events:
+            segment_indices = session.segment_indices_by_selector[selector]
+            # A terminal event can close the first reference after it sent partial text.
+            if len(segment_indices) > 1 and (
+                session.index != segment_indices[0] or buffered_events[-1].is_final
+            ):
+                text = "".join(event.chunk for event in buffered_events)
+                events = self._create_response_text_chunks(text, session, graph=graph)
+        return events, is_closed
 
     def _create_response_text_chunks(
         self,

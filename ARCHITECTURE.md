@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-24T18:14:20Z"
+last_checked: "2026-11-26T03:33:49Z"
 -->
 # Architecture
 
@@ -148,13 +148,29 @@ only if its first consumed decision is a take. The engine may be ahead of the
 consumer, so activation uses the events already consumed in that frame. See
 [response gating regressions](docs/development.md#response-gating-regressions).
 
-When a root reply repeats a streamed node output, the filter forwards each unread source chunk with its original final flag.
-Once the final chunk has been read, remaining references in that reply emit the buffered text under the reply node's execution ID and text selector.
-If the template ends with a repeated reference or a trailing literal, that segment closes the reply.
+Root replies share one read position per selector across retries.
+The filter forwards each unread source chunk for a node output with its original final flag.
+Once the stream closes, later references to that output within the same reply emit the buffered text under the reply node's execution ID and text selector.
+When repeated text or a literal ends the template, the filter marks that reply chunk final.
 See the [response filter tests](tests/engine/test_response_stream_filter.py).
 
 When a branch skips a node and its output is absent, the root Answer omits that reference and keeps the surrounding text in both the saved and streamed reply.
 See the [Answer node](src/graphon/nodes/answer/answer_node.py) and [branch workflow test](tests/workflows/test_full_engine_events.py).
+
+The root filter closes every referenced output when its source node finishes
+through `DEFAULT_VALUE` or `FAIL_BRANCH`. A successful retry closes its
+referenced streams that are still open and have buffered chunks. This lets
+replies continue without a final source chunk. The filter keeps partial text
+even for references the reply has yet to reach. For fields closed by these
+events, the template uses the current committed value when there is no buffered
+text and omits the reference if the value is missing. The Answer node renders
+its saved output from committed variables, so it can differ from the stream.
+See the [LLM retry tests](tests/engine/test_llm_default_value_streaming.py) and
+[Tool response tests](tests/nodes/tool/test_tool_node.py).
+
+Tool nodes collect usage and prepare outputs before emitting final markers for
+text and streamed variables. See the
+[Tool node implementation](src/graphon/nodes/tool/tool_node.py).
 
 [Template assembly](src/graphon/engine/filter/builtin/response_stream/template_stream.py)
 keeps child source streams distinct by frame, execution, attempt, and selector.
@@ -176,9 +192,10 @@ child replies and discards undisplayed text. See the
 buffering and continuation after item failure.
 
 For a root-only pause, save runtime and filter checkpoints from the same pause
-after consuming the filtered stream. Rebuild the engine and load the filter
-checkpoint into a fresh filter before consuming resumed events. The
-[response filter snapshot module](src/graphon/engine/filter/builtin/response_stream/snapshot.py)
+after consuming the filtered stream.
+The filter checkpoint preserves buffered chunks, read positions, and closed selectors.
+Rebuild the engine and load the filter checkpoint into a fresh filter before consuming resumed events.
+The [response filter snapshot module](src/graphon/engine/filter/builtin/response_stream/snapshot.py)
 parses saved state and migrates older versions when bound to their graph. The
 [paired checkpoint tests](tests/engine/test_response_stream_pause.py) exercise
 both historical and current snapshots through command and human-input pauses.

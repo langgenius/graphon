@@ -160,8 +160,27 @@ class _FrameSession:
                 return self._handle_edge_skipped(event)
             case NodeRunSucceededEvent() | NodeRunExceptionEvent():
                 self._template_stream.finish_source(event)
+                if self.frame_id == ROOT_FRAME_ID:
+                    self._close_root_streams_after_handled_failure_or_retry(event)
                 return [*self._try_flush(), event]
         return [event]
+
+    def _close_root_streams_after_handled_failure_or_retry(
+        self, event: NodeRunSucceededEvent | NodeRunExceptionEvent
+    ) -> None:
+        succeeded = isinstance(event, NodeRunSucceededEvent)
+        if succeeded and event.retry_index == 0:
+            return
+        buffers = self._template_stream.stream_buffers
+        for selector in self._referenced_selectors:
+            if not selector or selector[0] != event.node_id:
+                continue
+            # A retry can finish without a final marker for an earlier chunk.
+            if succeeded and (
+                not buffers.has_events(selector) or buffers.is_closed(selector)
+            ):
+                continue
+            buffers.close_and_drop_buffer_without_text(selector)
 
     def flush(self) -> list[EngineEvent]:
         return self._try_flush()
