@@ -1,5 +1,5 @@
 from collections import deque
-from collections.abc import Set
+from collections.abc import Set as AbstractSet
 
 from graphon.runtime.runtime_state import GraphProtocol
 
@@ -18,7 +18,7 @@ class _ResponseReachability:
         graph: GraphProtocol,
         response_node_id: str,
         blocking_edge_ids: set[str],
-        taken_edge_ids: Set[str],
+        taken_edge_ids: AbstractSet[str],
     ) -> None:
         self._graph = graph
         self._response_node_id = response_node_id
