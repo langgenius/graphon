@@ -1,7 +1,7 @@
 """Apply node events to execution state."""
 
 import logging
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from functools import singledispatchmethod
 from typing import final
 
@@ -84,6 +84,19 @@ class NodeEventProcessor:
         self._event_stream = event_stream
         self._frame_registry = frame_registry
         self._container_handlers = container_handlers
+        self._schedule_retry: Callable[[str, NodeEvent, float], None] | None = None
+
+    def set_retry_scheduler(
+        self,
+        schedule: Callable[[str, NodeEvent, float], None],
+    ) -> None:
+        """Take the caller that holds a retry until its interval has passed.
+
+        Args:
+            schedule: Called with the frame, the retry event and the interval.
+
+        """
+        self._schedule_retry = schedule
 
     def dispatch(self, task_event: NodeEventTask) -> None:
         """Handle any task-scoped node event.
@@ -290,6 +303,18 @@ class NodeEventProcessor:
         )
 
         if result is not None:
+            if (
+                isinstance(result, NodeRunRetryEvent)
+                and self._schedule_retry is not None
+            ):
+                interval = frame.graph.nodes[
+                    event.node_id
+                ].retry_config.retry_interval_seconds
+
+                if interval > 0:
+                    self._schedule_retry(frame.frame_id, result, interval)
+                    return
+
             # Process the resulting event (retry, exception, etc.)
             self._dispatch_event(frame_id=frame.frame_id, event=result)
         else:

@@ -3,6 +3,8 @@
 import logging
 import queue
 import threading
+import time
+from operator import itemgetter
 from typing import final
 
 from graphon.engine_events.base import NodeEvent
@@ -20,7 +22,7 @@ from .command.processor import CommandProcessor
 from .event.processor import NodeEventProcessor
 from .event.stream import EventStream
 from .scheduler import Scheduler
-from .worker import ContainerAwaitTask, DispatchTask, WorkerPool
+from .worker import ContainerAwaitTask, DispatchTask, NodeEventTask, WorkerPool
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +77,15 @@ class Dispatcher:
 
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
+        # Node retries waiting out their interval, earliest first (#402).
+        self._held_retries: list[tuple[float, str, NodeEvent]] = []
+
+        # Optional: a processor that does not hold retries (a test double) simply
+        # dispatches them as it always did.
+        set_retry_scheduler = getattr(event_processor, "set_retry_scheduler", None)
+
+        if set_retry_scheduler is not None:
+            set_retry_scheduler(self._schedule_retry)
 
     def start(self) -> None:
         """Start the dispatcher thread."""
@@ -119,6 +130,36 @@ class Dispatcher:
             finally:
                 self._event_stream.mark_complete()
 
+    def _schedule_retry(self, frame_id: str, event: NodeEvent, delay: float) -> None:
+        """Hold a node's retry until `delay` has passed, without waiting for it here.
+
+        The loop drains the dispatch queue every iteration, so other branches keep
+        producing and their results keep arriving while one node waits (#402).
+
+        Args:
+            frame_id: Frame the retry belongs to
+            event: The retry event to dispatch once due
+            delay: Seconds to hold it
+
+        """
+        self._held_retries.append((time.monotonic() + max(delay, 0.0), frame_id, event))
+        self._held_retries.sort(key=itemgetter(0))
+
+    def _dispatch_due_retries(self) -> None:
+        """Dispatch every held retry whose interval has passed."""
+        now = time.monotonic()
+
+        while self._held_retries and self._held_retries[0][0] <= now:
+            _, frame_id, event = self._held_retries.pop(0)
+            self._dispatch_task(NodeEventTask(frame_id=frame_id, event=event))
+
+    def _next_hold_seconds(self) -> float | None:
+        """Seconds until the earliest held retry is due, or None when none is held."""
+        if not self._held_retries:
+            return None
+
+        return max(self._held_retries[0][0] - time.monotonic(), 0.0)
+
     def _run_until_exit(self) -> bool:
         self._process_commands()
         while not self._stop_event.is_set():
@@ -136,8 +177,13 @@ class Dispatcher:
         return False
 
     def _dispatch_next_event(self) -> None:
+        self._dispatch_due_retries()
+        held = self._next_hold_seconds()
+
+        wait = 0.1 if held is None else min(0.1, held)
+
         try:
-            task = self._dispatch_queue.get(timeout=0.1)
+            task = self._dispatch_queue.get(timeout=wait)
         except queue.Empty:
             self._process_commands()
             return
