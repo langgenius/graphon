@@ -1,39 +1,120 @@
-"""Check host pause identities across engine events and runtime snapshots."""
+"""Check host-owned wait data across engine events and runtime snapshots."""
 
 import pytest
 from pydantic import ValidationError
 
 from graphon.engine_events.graph import GraphRunPausedEvent
 from graphon.engine_events.node import NodeRunPauseRequestedEvent
+from graphon.entities.pause_reason import ExternalWait
 from graphon.node_events.node import PauseRequestedEvent
 from graphon.runtime import RuntimeState, VariablePool
 
 
-def make_external_wait_payload(frame_id: str, execution_id: str) -> dict[str, str]:
-    return {
+@pytest.mark.parametrize(
+    ("wait_type", "wait_id"),
+    [
+        ("hitl", ""),
+        ("dify.hitl", "session:1"),
+        ("dify.hitl.v1", "  审核 / request\n"),
+        ("langgenius.scheduling_pause", "job:1"),
+        ("_owner.Custom_2", "job:2"),
+    ],
+)
+def test_external_wait_preserves_opaque_id(wait_type: str, wait_id: str) -> None:
+    reason_payload = {
         "TYPE": "external_wait",
-        "wait_id": f"external-job:{frame_id}",
-        "node_id": "worker",
-        "node_title": "External worker",
-        "execution_id": execution_id,
-        "frame_id": frame_id,
+        "wait_type": wait_type,
+        "wait_id": wait_id,
     }
+    pause_request = PauseRequestedEvent.model_validate({"reason": reason_payload})
+
+    assert isinstance(pause_request.reason, ExternalWait)
+    assert pause_request.reason.model_dump(mode="json") == reason_payload
 
 
-def test_external_wait_identity_survives_events_and_snapshot() -> None:
+@pytest.mark.parametrize(
+    "wait_type",
+    [
+        "",
+        "dify.",
+        ".dify",
+        "dify..hitl",
+        "dify.1hitl",
+        "dify.h-itl",
+        "dify.人",
+        "dify.hitl\n",
+    ],
+)
+def test_external_wait_type_requires_dot_separated_ascii_identifiers(
+    wait_type: str,
+) -> None:
+    with pytest.raises(ValidationError) as error:
+        PauseRequestedEvent.model_validate({
+            "reason": {
+                "TYPE": "external_wait",
+                "wait_type": wait_type,
+                "wait_id": "id",
+            },
+        })
+
+    assert {issue["loc"][-1] for issue in error.value.errors()} == {"wait_type"}
+
+
+@pytest.mark.parametrize("field_name", ["wait_type", "wait_id"])
+def test_external_wait_requires_wait_type_and_wait_id(field_name: str) -> None:
+    reason_payload = {
+        "TYPE": "external_wait",
+        "wait_type": "dify.hitl",
+        "wait_id": "id",
+    }
+    del reason_payload[field_name]
+
+    with pytest.raises(ValidationError) as error:
+        PauseRequestedEvent.model_validate({"reason": reason_payload})
+
+    assert any(
+        issue["loc"][-1] == field_name and issue["type"] == "missing"
+        for issue in error.value.errors()
+    )
+
+
+def test_external_wait_rejects_frame_id() -> None:
+    with pytest.raises(ValidationError) as error:
+        PauseRequestedEvent.model_validate({
+            "reason": {
+                "TYPE": "external_wait",
+                "wait_type": "dify.hitl",
+                "wait_id": "id",
+                "frame_id": "root",
+            },
+        })
+
+    assert any(
+        issue["loc"][-1] == "frame_id" and issue["type"] == "extra_forbidden"
+        for issue in error.value.errors()
+    )
+
+
+def test_external_wait_round_trips_in_pause_events_and_runtime_snapshot() -> None:
     state = RuntimeState(
         workflow_id="workflow", variable_pool=VariablePool(), start_at=0
     )
-    expected_payloads = []
-    for frame_id in ("iteration:0", "iteration:1"):
+    expected_reason_payloads: list[dict[str, str]] = []
+    expected_execution_ids: dict[str, str] = {}
+    for index, wait_type in enumerate(("dify.external_agent", "dify.hitl")):
+        frame_id = f"iteration:{index}"
         execution = state.graph_execution.get_or_create_node_execution(
             frame_id=frame_id, node_id="worker"
         )
-        reason_payload = make_external_wait_payload(frame_id, execution.execution_id)
+        reason_payload = {
+            "TYPE": "external_wait",
+            "wait_type": wait_type,
+            "wait_id": "opaque: / 等待",
+        }
         pause_request = PauseRequestedEvent.model_validate({"reason": reason_payload})
         node_pause = NodeRunPauseRequestedEvent(
             id=execution.execution_id,
-            node_id=reason_payload["node_id"],
+            node_id="worker",
             node_type="worker",
             frame_id=frame_id,
             reason=pause_request.reason,
@@ -42,45 +123,31 @@ def test_external_wait_identity_survives_events_and_snapshot() -> None:
             node_pause.model_dump_json()
         )
         assert restored_node_pause.reason.model_dump(mode="json") == reason_payload
+        assert restored_node_pause.frame_id == frame_id
+        assert restored_node_pause.id == execution.execution_id
         state.graph_execution.pause(restored_node_pause.reason)
-        expected_payloads.append(reason_payload)
+        expected_reason_payloads.append(reason_payload)
+        expected_execution_ids[frame_id] = execution.execution_id
 
     graph_pause = GraphRunPausedEvent(reasons=state.graph_execution.pause_reasons)
     restored_graph_pause = GraphRunPausedEvent.model_validate_json(
         graph_pause.model_dump_json()
     )
-    assert restored_graph_pause.model_dump(mode="json")["reasons"] == expected_payloads
+    assert (
+        restored_graph_pause.model_dump(mode="json")["reasons"]
+        == expected_reason_payloads
+    )
 
     restored_state = RuntimeState.from_snapshot(state.dumps())
     assert restored_state.graph_execution.paused
     assert [
         reason.model_dump(mode="json")
         for reason in restored_state.graph_execution.pause_reasons
-    ] == expected_payloads
-    for reason_payload in expected_payloads:
-        execution = restored_state.graph_execution.get_or_create_node_execution(
-            frame_id=reason_payload["frame_id"], node_id=reason_payload["node_id"]
+    ] == expected_reason_payloads
+    for frame_id, execution_id in expected_execution_ids.items():
+        restored_execution = (
+            restored_state.graph_execution.get_or_create_node_execution(
+                frame_id=frame_id, node_id="worker"
+            )
         )
-        assert execution.execution_id == reason_payload["execution_id"]
-
-
-@pytest.mark.parametrize(
-    ("field", "value", "error_type"),
-    [
-        ("wait_id", "", "string_too_short"),
-        ("node_id", "", "string_too_short"),
-        ("execution_id", "", "string_too_short"),
-        ("frame_id", "", "string_too_short"),
-        ("deadline", "host-owned", "extra_forbidden"),
-    ],
-)
-def test_external_wait_rejects_invalid_fields(
-    field: str, value: str, error_type: str
-) -> None:
-    reason_payload = make_external_wait_payload("root", "execution") | {field: value}
-    with pytest.raises(ValidationError) as error:
-        PauseRequestedEvent.model_validate({"reason": reason_payload})
-    assert any(
-        item["loc"][-1] == field and item["type"] == error_type
-        for item in error.value.errors()
-    )
+        assert restored_execution.execution_id == execution_id

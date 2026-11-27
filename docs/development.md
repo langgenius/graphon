@@ -85,11 +85,12 @@ public surface.
   into [HumanInputNode](../src/graphon/nodes/human_input/human_input_node.py).
   The host returns a pause, completed, or expired decision. See
   [human-input tests](../tests/nodes/human_input/) for the event contract.
-- For host-managed work, a custom node can yield `PauseRequestedEvent` with an
-  `ExternalWaitReason`. Pause events and runtime snapshots preserve the wait
-  ID and the identity of the frame-local node execution. See the
-  [pause reason model](../src/graphon/entities/pause_reason.py) and
-  [round-trip tests](../tests/runtime/test_external_wait.py).
+- For host-managed work, a custom node can yield `PauseRequestedEvent` with
+  [`ExternalWait`](../src/graphon/entities/pause_reason.py). The reason requires
+  a `wait_type` of one or more dot-separated ASCII identifiers and an opaque
+  `wait_id` string whose meaning the host defines. Reserve `dify.*` for upstream
+  Dify producers. `NodeRunPauseRequestedEvent` and runtime state carry execution
+  identity. See the [round-trip tests](../tests/runtime/test_external_wait.py).
 
 ## Validate the behavior you changed
 
