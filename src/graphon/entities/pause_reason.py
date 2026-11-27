@@ -49,6 +49,9 @@ class ExternalWait(BaseModel):
     TYPE: Literal[PauseReasonType.EXTERNAL_WAIT] = PauseReasonType.EXTERNAL_WAIT
     # Hosts use this type to interpret wait_id. The dify.* namespace is
     # reserved for wait types defined by upstream Dify.
+    # PEG grammar for wait_type:
+    #   WAIT_TYPE  <- IDENTIFIER ('.' IDENTIFIER)* !.
+    #   IDENTIFIER <- [A-Za-z_] [A-Za-z0-9_]*
     wait_type: str = Field(
         pattern=r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$"
     )
