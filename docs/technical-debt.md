@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-26T01:12:45Z"
+last_checked: "2026-11-27T06:38:54Z"
 -->
 # Technical debt
 
@@ -17,6 +17,7 @@ item is resolved.
 | TD-08 | [Offline execution example](#td-08--offline-execution-example) | P2 | Examples |
 | TD-09 | [Performance feedback](#td-09--performance-feedback) | P2 | Filters/performance |
 | TD-10 | [Decision records](#td-10--decision-records) | P3 | Maintainers/docs |
+| TD-11 | [Legacy Start input form](#td-11--legacy-start-input-form) | P2 | Start node and host |
 
 P2 denotes targeted API, architecture, or developer-feedback work; P3 can follow
 more consequential changes. Priorities are suggestions, not delivery commitments.
@@ -104,3 +105,15 @@ Promote approved lasting rules to stable guides and executable checks.
 
 **Completion:** accepted decisions have repository-local links and explicit
 status, and the knowledge index and maintenance guidance agree with merged policy.
+
+## TD-11 — Legacy Start input form
+
+Saved Start configurations still use the deprecated `VariableEntity`. Its
+schema is frozen so those graphs continue to load. New controls such as
+multi-select belong in the host, along with their validation. See the
+[form model](../src/graphon/variables/input_entities.py),
+[schema compatibility test](../tests/variables/test_input_entities.py), and
+[multi-select proposal](https://github.com/langgenius/graphon/pull/259).
+
+Close this item when the host owns the form and saved Start nodes still run
+with their existing inputs.

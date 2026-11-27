@@ -1,0 +1,113 @@
+{
+  "deprecated": true,
+  "fields": {
+    "allowed_file_extensions": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "allowed_file_types": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/FileType"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "allowed_file_upload_methods": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/FileTransferMethod"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "default": {
+      "default": null
+    },
+    "description": {
+      "default": "",
+      "type": "string"
+    },
+    "hide": {
+      "default": false,
+      "type": "boolean"
+    },
+    "json_schema": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "label": {
+      "type": "string"
+    },
+    "max_length": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "options": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "required": {
+      "default": false,
+      "type": "boolean"
+    },
+    "type": {
+      "$ref": "#/$defs/VariableEntityType"
+    },
+    "variable": {
+      "type": "string"
+    }
+  },
+  "input_types": [
+    "checkbox",
+    "external_data_tool",
+    "file",
+    "file-list",
+    "json_object",
+    "number",
+    "paragraph",
+    "select",
+    "text-input"
+  ],
+  "required": [
+    "label",
+    "type",
+    "variable"
+  ]
+}
