@@ -2,6 +2,7 @@ from enum import StrEnum, auto
 from typing import Annotated, Literal, cast
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from typing_extensions import deprecated
 
 
 class PauseReasonType(StrEnum):
@@ -14,9 +15,13 @@ class PauseReasonType(StrEnum):
 
     HITL_REQUIRED = auto()
     SCHEDULED_PAUSE = auto()
+    EXTERNAL_WAIT = auto()
 
 
+@deprecated("Use ExternalWait for new pause reasons.", category=None)
 class HitlRequired(BaseModel):
+    """Deprecated human-input pause reason emitted by the built-in Human Input node."""
+
     model_config = ConfigDict(extra="forbid")
 
     TYPE: Literal[PauseReasonType.HITL_REQUIRED] = PauseReasonType.HITL_REQUIRED
@@ -29,6 +34,37 @@ class SchedulingPause(BaseModel):
     TYPE: Literal[PauseReasonType.SCHEDULED_PAUSE] = PauseReasonType.SCHEDULED_PAUSE
 
     message: str
+
+
+class ExternalWait(BaseModel):
+    """General-purpose pause reason for a node awaiting a host-managed result.
+
+    Nodes can use this reason to wait for human input or an external service.
+    The host defines the meaning of ``wait_id`` for each ``wait_type`` and
+    resumes the waiting execution when the result is ready.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    TYPE: Literal[PauseReasonType.EXTERNAL_WAIT] = PauseReasonType.EXTERNAL_WAIT
+    # Hosts use this type to interpret wait_id. The dify.* namespace is
+    # reserved for wait types defined by upstream Dify.
+    # PEG grammar for wait_type:
+    #   WAIT_TYPE  <- IDENTIFIER ('.' IDENTIFIER)* !.
+    #   IDENTIFIER <- [A-Za-z_] [A-Za-z0-9_]*
+    wait_type: str = Field(
+        pattern=r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$"
+    )
+    # Opaque identifier of the work the host is waiting for.
+    wait_id: str
+    # ID of the node in the graph definition, shared across its executions.
+    node_id: str = Field(min_length=1)
+    # Display title of the node at the time it requested the pause.
+    node_title: str
+    # ID of the specific node execution that requested the pause.
+    node_execution_id: str = Field(min_length=1)
+    # ID of the execution frame containing that node execution.
+    frame_id: str = Field(min_length=1)
 
 
 class _LegacyHumanInputRequired(BaseModel):
@@ -71,7 +107,7 @@ def _decode_pause_reason(value: object) -> object:
 
 
 type PauseReason = Annotated[
-    HitlRequired | SchedulingPause,
+    HitlRequired | SchedulingPause | ExternalWait,  # ty: ignore[deprecated]
     Field(discriminator="TYPE"),
     BeforeValidator(_decode_pause_reason),
 ]

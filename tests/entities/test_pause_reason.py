@@ -5,7 +5,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from graphon.entities.pause_reason import (
-    HitlRequired,
+    HitlRequired,  # ty: ignore[deprecated]
     PauseReason,
     SchedulingPause,
 )
@@ -28,7 +28,7 @@ class TestPauseReasonDiscriminator:
                         "node_title": "node_title",
                     },
                 },
-                HitlRequired(
+                HitlRequired(  # ty: ignore[deprecated]
                     session_id="session-1",
                     node_id="node_id",
                     node_title="node_title",
@@ -58,7 +58,7 @@ class TestPauseReasonDiscriminator:
     @pytest.mark.parametrize(
         "reason",
         [
-            HitlRequired(
+            HitlRequired(  # ty: ignore[deprecated]
                 session_id="session-1",
                 node_id="node_id",
                 node_title="node_title",
@@ -122,7 +122,7 @@ class TestPauseReasonDiscriminator:
 
         holder = _Holder.model_validate_json(payload)
 
-        assert isinstance(holder.reason, HitlRequired)
+        assert isinstance(holder.reason, HitlRequired)  # ty: ignore[deprecated]
         assert holder.reason.TYPE == "hitl_required"
         assert holder.reason.session_id == "form-1"
         assert holder.reason.node_id == "node_id"

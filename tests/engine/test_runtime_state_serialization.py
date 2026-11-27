@@ -46,7 +46,7 @@ from graphon.engine_events.node import (
     NodeRunSucceededEvent,
 )
 from graphon.entities.graph_config import NodeConfigDict
-from graphon.entities.pause_reason import HitlRequired
+from graphon.entities.pause_reason import HitlRequired  # ty: ignore[deprecated]
 from graphon.entities.workflow_start_reason import WorkflowStartReason
 from graphon.enums import (
     BuiltinNodeTypes,
@@ -875,7 +875,7 @@ def test_loop_hitl_runtime_state_round_trip_preserves_progress() -> None:
     ]
     assert len(pause_requests) == 1
     assert pause_requests[0].container_id == "loop"
-    assert pause_requests[0].reason == HitlRequired(
+    assert pause_requests[0].reason == HitlRequired(  # ty: ignore[deprecated]
         session_id="session-human-input",
         node_id="human-input",
         node_title="Approve loop round",
@@ -1082,7 +1082,7 @@ def test_parallel_iteration_hitl_runtime_state_round_trip_preserves_order() -> N
     resume_tasks = [task for task in deferred_tasks if isinstance(task, ResumeTask)]
     assert len(pause_requests) == 1
     assert pause_requests[0].container_id == "iteration"
-    assert pause_requests[0].reason == HitlRequired(
+    assert pause_requests[0].reason == HitlRequired(  # ty: ignore[deprecated]
         session_id="session-beta",
         node_id="human-input",
         node_title="Approve iteration item",

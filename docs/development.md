@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-26T01:14:08Z"
+last_checked: "2026-11-27T03:17:49Z"
 -->
 # Development navigation
 
@@ -83,8 +83,17 @@ public surface.
   [code runtime tests](../tests/dsl/test_code_runtime.py).
 - **Human input:** inject the [HITLCallback](../src/graphon/nodes/human_input/entities.py)
   into [HumanInputNode](../src/graphon/nodes/human_input/human_input_node.py).
-  The host returns a pause, completed, or expired decision. See
+  The host returns a pause, completed, or expired decision. The built-in node
+  still emits the deprecated `HitlRequired` reason. See
   [human-input tests](../tests/nodes/human_input/) for the event contract.
+- For new integrations, yield `PauseRequestedEvent` with
+  [`ExternalWait`](../src/graphon/entities/pause_reason.py), the general-purpose
+  pause reason for waits such as human input or an external service result. It requires
+  a `wait_type` of one or more dot-separated ASCII identifiers and an opaque
+  `wait_id` string whose meaning the host defines. Reserve `dify.*` for upstream
+  Dify producers. Include `node_id` and `node_title` to identify the node in the
+  graph, and `node_execution_id` and `frame_id` to identify the execution that
+  requested the pause. See the [round-trip tests](../tests/runtime/test_external_wait.py).
 
 ## Validate the behavior you changed
 

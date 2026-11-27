@@ -61,7 +61,7 @@ from graphon.engine_events.traversal import (
     GraphEdgeSkippedEvent,
     GraphEdgeTakenEvent,
 )
-from graphon.entities.pause_reason import HitlRequired, SchedulingPause
+from graphon.entities.pause_reason import HitlRequired, SchedulingPause  # ty: ignore[deprecated]
 from graphon.enums import (
     BuiltinNodeTypes,
     ErrorHandleMode,
@@ -1135,7 +1135,7 @@ def test_pause_requested_event_defers_current_task_for_resume() -> None:
                 id="human-run",
                 node_id="human",
                 node_type=BuiltinNodeTypes.HUMAN_INPUT,
-                reason=HitlRequired(
+                reason=HitlRequired(  # ty: ignore[deprecated]
                     session_id="session-1",
                     node_id="human",
                     node_title="Human",
@@ -1325,7 +1325,7 @@ def test_frame_registry_restores_child_frame() -> None:
     assert child_frame.graph.nodes["start"].state == NodeState.TAKEN
 
     graph_execution.pause(
-        HitlRequired(
+        HitlRequired(  # ty: ignore[deprecated]
             session_id="session-1",
             node_id="start",
             node_title="Start",
