@@ -18,11 +18,11 @@ class PauseReasonType(StrEnum):
     EXTERNAL_WAIT = auto()
 
 
-@deprecated("Use ExternalWait for new human-input integrations.", category=None)
+@deprecated("Use ExternalWait for new pause reasons.", category=None)
 class HitlRequired(BaseModel):
     """Deprecated human-input pause reason emitted by the built-in Human Input node."""
 
-    model_config = ConfigDict(extra="forbid", json_schema_extra={"deprecated": True})
+    model_config = ConfigDict(extra="forbid")
 
     TYPE: Literal[PauseReasonType.HITL_REQUIRED] = PauseReasonType.HITL_REQUIRED
     session_id: str
@@ -44,7 +44,7 @@ class ExternalWait(BaseModel):
     resumes the waiting execution when the result is ready.
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(frozen=True)
 
     TYPE: Literal[PauseReasonType.EXTERNAL_WAIT] = PauseReasonType.EXTERNAL_WAIT
     # Hosts use this type to interpret wait_id. The dify.* namespace is

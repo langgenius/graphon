@@ -43,6 +43,15 @@ def test_external_wait_preserves_opaque_id(
     assert pause_request.reason.model_dump(mode="json") == reason_payload
 
 
+def test_external_wait_reads_events_with_unknown_fields(
+    reason_payload: dict[str, str],
+) -> None:
+    event = PauseRequestedEvent.model_validate({
+        "reason": {**reason_payload, "future_field": "value"},
+    })
+    assert event.reason.model_dump(mode="json") == reason_payload
+
+
 @pytest.mark.parametrize(
     "wait_type",
     [

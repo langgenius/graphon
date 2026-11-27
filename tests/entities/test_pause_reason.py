@@ -16,11 +16,6 @@ class _Holder(BaseModel):
 
 
 class TestPauseReasonDiscriminator:
-    def test_schema_marks_hitl_required_as_deprecated(self) -> None:
-        reasons = _Holder.model_json_schema()["$defs"]
-        assert reasons["HitlRequired"]["deprecated"] is True
-        assert not reasons["ExternalWait"].get("deprecated", False)
-
     @pytest.mark.parametrize(
         ("dict_value", "expected"),
         [
