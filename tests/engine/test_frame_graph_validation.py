@@ -15,6 +15,7 @@ from graphon.graph.validation import GraphValidationError
 from graphon.node_events.base import NodeEventPayload, NodeRunResult
 from graphon.nodes.base.node import Node
 from graphon.runtime.init_params import InitParams
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 
@@ -56,11 +57,11 @@ class _TestNode(Node[_TestNodeData]):
 @dataclass(slots=True)
 class _SimpleNodeFactory:
     init_params: InitParams
-    runtime_state: RuntimeState
+    runtime_state: ReadOnlyRuntimeStateWrapper
 
     def with_runtime_state(
         self,
-        runtime_state: RuntimeState,
+        runtime_state: ReadOnlyRuntimeStateWrapper,
     ) -> _SimpleNodeFactory:
         """Copy this test factory with the state owned by a child frame."""
         return replace(self, runtime_state=runtime_state)
@@ -107,7 +108,7 @@ def node_factory_and_config() -> tuple[_SimpleNodeFactory, dict[str, object]]:
     )
     factory = _SimpleNodeFactory(
         init_params=init_params,
-        runtime_state=runtime_state,
+        runtime_state=runtime_state.read_only_view,
     )
     return factory, graph_config
 

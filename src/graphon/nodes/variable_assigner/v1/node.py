@@ -16,6 +16,7 @@ from graphon.nodes.base.node import Node
 from graphon.nodes.variable_assigner.common import helpers as common_helpers
 from graphon.nodes.variable_assigner.common.exc import VariableOperatorNodeError
 from graphon.runtime.init_params import InitParams
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.variables.types import SegmentType
 from graphon.variables.variables import (
@@ -40,7 +41,7 @@ class VariableAssignerNode(Node[VariableAssignerData]):
         data: VariableAssignerData,
         *,
         init_params: InitParams,
-        runtime_state: RuntimeState,
+        runtime_state: RuntimeState | ReadOnlyRuntimeStateWrapper,
     ) -> None:
         super().__init__(
             node_id=node_id,

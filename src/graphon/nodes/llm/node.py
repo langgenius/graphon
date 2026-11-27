@@ -74,6 +74,7 @@ from graphon.nodes.llm.runtime_protocols import (
 )
 from graphon.prompt_entities import MemoryConfig
 from graphon.runtime.init_params import InitParams
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.template_rendering import Jinja2TemplateRenderer
 from graphon.variables.segments import (
@@ -155,7 +156,7 @@ class LLMNode(Node[LLMNodeData]):
         data: LLMNodeData,
         *,
         init_params: InitParams,
-        runtime_state: RuntimeState,
+        runtime_state: RuntimeState | ReadOnlyRuntimeStateWrapper,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
         model_instance: LLMProtocol,
@@ -675,7 +676,7 @@ class LLMNode(Node[LLMNodeData]):
             raise LLMNodeError(msg)
 
     def _raise_if_polling_aborted(self) -> None:
-        if self.runtime_state.graph_execution.aborted:
+        if self.runtime_state.aborted:
             msg = "workflow execution was aborted"
             raise LLMNodeError(msg)
 

@@ -16,7 +16,7 @@ from graphon.nodes.tool_runtime_entities import (
     ToolRuntimeMessage,
     ToolRuntimeParameter,
 )
-from graphon.runtime.variable_pool import VariablePool
+from graphon.runtime.runtime_state_protocol import ReadOnlyVariablePool
 from graphon.variables.template_resolution import convert_template
 
 from .entities import DslToolCredential
@@ -187,7 +187,7 @@ class _SlimToolActionClient:
 
 @dataclass(slots=True)
 class _SlimToolParameterResolver:
-    variable_pool: VariablePool | None
+    variable_pool: ReadOnlyVariablePool | None
 
     def resolve_form_values(
         self,
@@ -300,7 +300,7 @@ class SlimToolNodeRuntime(ToolNodeRuntimeProtocol):
         *,
         node_id: str,
         node_data: ToolNodeData,
-        variable_pool: VariablePool | None,
+        variable_pool: ReadOnlyVariablePool | None,
         node_execution_id: str | None = None,
     ) -> ToolRuntimeHandle:
         _ = node_id, node_execution_id

@@ -62,6 +62,7 @@ from graphon.engine_events.traversal import (
     GraphEdgeSkippedEvent,
     GraphEdgeTakenEvent,
 )
+from graphon.entities.graph_config import NodeConfigDict
 from graphon.entities.pause_reason import HitlRequired, SchedulingPause
 from graphon.enums import (
     BuiltinNodeTypes,
@@ -69,7 +70,6 @@ from graphon.enums import (
     ErrorStrategy,
     NodeExecutionType,
     NodeState,
-    NodeType,
 )
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.node_events.base import NodeRunResult
@@ -83,6 +83,7 @@ from graphon.nodes.factory import NodeFactory
 from graphon.nodes.human_input.entities import PauseRequested
 from graphon.nodes.human_input.human_input_node import HumanInputNode
 from graphon.nodes.iteration.iteration_node import IterationNode
+from graphon.nodes.start.start_node import StartNode
 from graphon.runtime.container_state import (
     CustomContainerFrameState,
     CustomContainerRunState,
@@ -95,9 +96,11 @@ from graphon.runtime.container_state import (
 )
 from graphon.runtime.execution import GraphExecution
 from graphon.runtime.init_params import InitParams
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.variables import IntegerVariable, StringVariable
+from tests.helpers import build_init_params
 
 
 def _variable_value(
@@ -310,7 +313,7 @@ class _FrameFactory:
 
     def with_runtime_state(
         self,
-        runtime_state: RuntimeState,
+        runtime_state: ReadOnlyRuntimeStateWrapper,
     ) -> "_FrameFactory":
         _ = runtime_state
         return self
@@ -1180,23 +1183,13 @@ def test_graph_execution_tracks_node_executions_by_frame() -> None:
 
 
 def test_frame_registry_creates_child_frame_with_rebound_runtime() -> None:
-    @dataclass
-    class RuntimeBoundNode:
-        id: str
-        runtime_state: RuntimeState
-
-        node_type: ClassVar[NodeType] = BuiltinNodeTypes.START
-        execution_type: ClassVar[NodeExecutionType] = NodeExecutionType.ROOT
-        error_strategy: ClassVar[None] = None
-        state: ClassVar[NodeState] = NodeState.UNKNOWN
-
     class RuntimeBoundFactory:
-        def __init__(self, runtime_state: RuntimeState) -> None:
+        def __init__(self, runtime_state: ReadOnlyRuntimeStateWrapper) -> None:
             self.runtime_state = runtime_state
 
         def with_runtime_state(
             self,
-            runtime_state: RuntimeState,
+            runtime_state: ReadOnlyRuntimeStateWrapper,
         ) -> "RuntimeBoundFactory":
             return RuntimeBoundFactory(runtime_state)
 
@@ -1214,10 +1207,15 @@ def test_frame_registry_creates_child_frame_with_rebound_runtime() -> None:
         ) -> NodeExecutionType:
             """Accept the minimal config and report its root execution type."""
             _ = node_config
-            return RuntimeBoundNode.execution_type
+            return StartNode.execution_type
 
-        def create_node(self, node_config: dict[str, object]) -> RuntimeBoundNode:
-            return RuntimeBoundNode(str(node_config["id"]), self.runtime_state)
+        def create_node(self, node_config: NodeConfigDict) -> StartNode:
+            return StartNode(
+                node_id=node_config["id"],
+                data=StartNode.validate_node_data(node_config["data"]),
+                init_params=build_init_params(),
+                runtime_state=self.runtime_state,
+            )
 
     graph_config = {
         "nodes": [{"id": "start", "data": {"type": BuiltinNodeTypes.START}}],
@@ -1234,7 +1232,7 @@ def test_frame_registry_creates_child_frame_with_rebound_runtime() -> None:
     )
     root_graph = FrameGraph.init(
         graph_config=graph_config,
-        node_factory=cast(Any, RuntimeBoundFactory(root_runtime_state)),
+        node_factory=cast(Any, RuntimeBoundFactory(root_runtime_state.read_only_view)),
         root_node_id="start",
     )
     frame_registry = FrameRegistry()
@@ -1256,7 +1254,13 @@ def test_frame_registry_creates_child_frame_with_rebound_runtime() -> None:
     assert type(child_frame.graph).__module__.startswith("graphon.engine.")
     assert child_frame.graph is not root_graph
     assert child_frame.graph.nodes["start"] is not root_graph.nodes["start"]
-    assert child_frame.graph.nodes["start"].runtime_state is child_frame.state
+    root_runtime_state.variable_pool.add(("parent", "private"), "root only")
+    child_frame.state.variable_pool.add(("start", "child"), "visible in this frame")
+    child_pool = child_frame.graph.nodes["start"].runtime_state.variable_pool
+    assert child_pool.get_by_prefix("start") == {"child": "visible in this frame"}
+    assert not hasattr(child_pool, "add")
+    assert child_pool.get(("parent", "private")) is None
+    assert root_runtime_state.variable_pool.get(("start", "child")) is None
     assert child_frame.state.ready_queue is root_runtime_state.ready_queue
     assert child_frame.state.graph_execution is graph_execution
 
@@ -2148,7 +2152,7 @@ def test_parallel_iteration_preserves_aggregate_and_response_order() -> None:  #
         "is_parallel": True,
         "parallel_nums": 2,
     })
-    iteration_node.runtime_state = runtime_state
+    iteration_node.runtime_state = runtime_state.read_only_view
     iteration_node.graph_config = graph_config
     graph = SimpleNamespace(
         nodes={"iteration": iteration_node},
@@ -2541,7 +2545,7 @@ def test_iteration_frame_completion_requests_next_index() -> None:
         "is_parallel": True,
         "parallel_nums": 2,
     })
-    iteration_node.runtime_state = runtime_state
+    iteration_node.runtime_state = runtime_state.read_only_view
     iteration_node.graph_config = graph_config
     graph = SimpleNamespace(
         nodes={"iteration": iteration_node},

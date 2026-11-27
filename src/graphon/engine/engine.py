@@ -119,7 +119,9 @@ class Engine:
                     raise ValueError(msg)
                 root_node_id = next(iter(graph.entry_node_ids))
             graph = FrameGraphFactory(graph_resolver).create(
-                graph, node_factory.with_runtime_state(runtime_state), root_node_id
+                graph,
+                node_factory.with_runtime_state(runtime_state.read_only_view),
+                root_node_id,
             )
         self._graph = graph
         self._runtime_state = runtime_state
@@ -204,9 +206,8 @@ class Engine:
 
     def _validate_runtime_state_consistency(self) -> None:
         """Validate that all nodes share the same RuntimeState."""
-        expected_state_id = id(self._runtime_state)
         for node in self._graph.nodes.values():
-            if id(node.runtime_state) != expected_state_id:
+            if node.runtime_state is not self._runtime_state.read_only_view:
                 msg = (
                     "RuntimeState consistency violation: Node "
                     f"'{node.id}' has a different instance"

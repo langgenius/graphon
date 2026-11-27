@@ -31,8 +31,9 @@ from graphon.nodes.tool_runtime_entities import (
     ToolRuntimeParameter,
 )
 from graphon.runtime.init_params import InitParams
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.runtime_state import RuntimeState
-from graphon.runtime.variable_pool import VariablePool
+from graphon.runtime.runtime_state_protocol import ReadOnlyVariablePool
 from graphon.variables.segments import ArrayFileSegment
 from graphon.variables.template_resolution import convert_template
 
@@ -80,7 +81,7 @@ class ToolNode(Node[ToolNodeData]):
         data: ToolNodeData,
         *,
         init_params: InitParams,
-        runtime_state: RuntimeState,
+        runtime_state: RuntimeState | ReadOnlyRuntimeStateWrapper,
         tool_file_manager: ToolFileManagerProtocol,
         # TODO @-LAN: See https://github.com/langgenius/graphon/issues/new/choose.  # ruff:ignore[line-contains-todo]
         # Make `runtime` optional once Graphon provides a default tool runtime
@@ -122,7 +123,7 @@ class ToolNode(Node[ToolNodeData]):
             # Logically, we shouldn't use the node_data.version field for judgment
             # But for backward compatibility with historical data
             # this version field judgment is still preserved here.
-            variable_pool: VariablePool | None = None
+            variable_pool: ReadOnlyVariablePool | None = None
             if (
                 self.node_data.version != "1"
                 or self.node_data.tool_node_version is not None
@@ -202,7 +203,7 @@ class ToolNode(Node[ToolNodeData]):
         self,
         *,
         tool_parameters: Sequence[ToolRuntimeParameter],
-        variable_pool: VariablePool,
+        variable_pool: ReadOnlyVariablePool,
         node_data: ToolNodeData,
         for_log: bool = False,
     ) -> dict[str, Any]:
@@ -212,7 +213,7 @@ class ToolNode(Node[ToolNodeData]):
         Args:
             tool_parameters (Sequence[ToolRuntimeParameter]): The list of tool
             parameters.
-            variable_pool (VariablePool): The variable pool containing the variables.
+            variable_pool: Variables visible to this node.
             node_data (ToolNodeData): The data associated with the tool node.
             for_log (bool): Whether to produce log-friendly parameter values.
 
@@ -259,7 +260,7 @@ class ToolNode(Node[ToolNodeData]):
     def _get_tool_runtime(
         self,
         *,
-        variable_pool: VariablePool | None,
+        variable_pool: ReadOnlyVariablePool | None,
         node_execution_id: str,
     ) -> ToolRuntimeHandle:
         return self._runtime.get_runtime(

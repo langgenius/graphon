@@ -11,6 +11,7 @@ from graphon.nodes.base.entities import VariableSelector
 from graphon.nodes.base.node import Node
 from graphon.nodes.template_transform.entities import TemplateTransformNodeData
 from graphon.runtime.init_params import InitParams
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.template_rendering import (
     Jinja2TemplateRenderer,
@@ -39,7 +40,7 @@ class TemplateTransformNode(Node[TemplateTransformNodeData]):
         data: TemplateTransformNodeData,
         *,
         init_params: InitParams,
-        runtime_state: RuntimeState,
+        runtime_state: RuntimeState | ReadOnlyRuntimeStateWrapper,
         jinja2_template_renderer: Jinja2TemplateRenderer,
         max_output_length: int | None = None,
     ) -> None:

@@ -10,6 +10,7 @@ import sys
 import threading
 from collections.abc import Generator, Iterator, Sequence
 from contextlib import ExitStack, contextmanager, nullcontext
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import final, override
@@ -19,8 +20,11 @@ from graphon.engine.frame import FrameRegistry
 from graphon.engine.layer import Layer
 from graphon.engine_events.base import NodeEvent
 from graphon.engine_events.node import (
+    NodeRunExceptionEvent,
     NodeRunFailedEvent,
     NodeRunStartedEvent,
+    NodeRunSucceededEvent,
+    NodeRunVariableUpdatedEvent,
     is_node_result_event,
 )
 from graphon.enums import WorkflowNodeExecutionStatus
@@ -55,6 +59,21 @@ class ContainerAwaitTask:
 
 
 type DispatchTask = NodeEventTask | ContainerAwaitTask
+
+
+def _copy_node_writes(event: NodeEvent) -> NodeEvent:
+    """Capture the write before the node resumes on the worker thread."""
+    if isinstance(event, NodeRunVariableUpdatedEvent):
+        return event.model_copy(
+            update={"variable": event.variable.model_copy(deep=True)}
+        )
+    if isinstance(event, (NodeRunSucceededEvent, NodeRunExceptionEvent)):
+        result = event.node_run_result
+        outputs = deepcopy(dict(result.outputs))
+        return event.model_copy(
+            update={"node_run_result": result.model_copy(update={"outputs": outputs})}
+        )
+    return event
 
 
 @final
@@ -309,8 +328,9 @@ class Worker(threading.Thread):
         node_events: Iterator[NodeEvent | ContainerAwaitRequest],
     ) -> tuple[NodeEvent | None, bool]:
         result_event: NodeEvent | None = None
-        for event in node_events:
-            if isinstance(event, ContainerAwaitRequest):
+        for event_or_request in node_events:
+            if isinstance(event_or_request, ContainerAwaitRequest):
+                request = event_or_request.model_copy(deep=True)
                 started_at = self._current_node_started_at
                 if started_at is None:
                     msg = "container await request emitted before node start"
@@ -324,16 +344,17 @@ class Worker(threading.Thread):
                             frame_id=self._current_frame_id,
                             node_id=node.id,
                             started_at=started_at,
-                            request=event,
+                            request=request,
                         )
                     )
                 self._dispatch_queue.put(
                     ContainerAwaitTask(
                         invocation_id=invocation_id,
-                        request=event,
+                        request=request,
                     )
                 )
                 return None, True
+            event = _copy_node_writes(event_or_request)
             if isinstance(event, NodeRunStartedEvent) and event.id == node.execution_id:
                 self._current_node_started_at = event.start_at
             self._dispatch_queue.put(

@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-26T09:53:20Z"
+last_checked: "2026-11-27T06:38:54Z"
 -->
 # Graph domain model
 
@@ -14,7 +14,7 @@ flowchart TB
         dsl["Graph DSL<br/>Write and check a Graph"] -->|Graph definition| engine["Graph Engine<br/>Execute a Graph"]
         runningNode(["Node"]) -->|"yields events, including write requests"| engine
     end
-    runningNode -->|reads from VariablePool| variable["Variable<br/>Typed values visible<br/>to each node"]
+    runningNode -->|reads frame variables| variable["Variable<br/>Typed values visible<br/>to each node"]
     engine -->|writes to VariablePool| variable
     modelRuntime["Model Runtime<br/>Send requests to providers<br/>and read their replies"] -->|model replies| runningNode
     engine -->|publishes events to callers| response["Response<br/>Choose, order, and stream<br/>replies to users"]
@@ -27,9 +27,11 @@ Response interprets the events the engine exposes to callers and assembles the
 reply users see. See [Execution flow](../ARCHITECTURE.md#execution-flow) and
 [Response sessions](../ARCHITECTURE.md#response-sessions).
 
-During a run, nodes can read the shared `VariablePool`. A node must yield an
-event to request a write. Only the Graph Engine applies these writes to the
-pool, so it can handle competing writes to the same variable.
+Nodes in a frame share a read-only view of its variable pool. Each read returns
+a copy of the current value. A node yields `VariableUpdatedEvent` to write a
+variable or supplies named outputs in its result. The engine copies these
+values when it receives them and commits the writes in dispatch order.
+See the [frame observation tests](../tests/engine/test_frame_observations.py).
 
 ## Definition and execution
 

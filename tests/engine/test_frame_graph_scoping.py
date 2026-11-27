@@ -15,6 +15,7 @@ from graphon.enums import NodeExecutionType, NodeState
 from graphon.graph.validation import GraphValidationError
 from graphon.nodes.base.node import Node
 from graphon.nodes.loop.loop_start_node import LoopStartNode
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.runtime_state import RuntimeState
 from tests.helpers import build_init_params, build_variable_pool
 
@@ -32,7 +33,7 @@ class _RecordingNodeFactory:
 
     def with_runtime_state(
         self,
-        runtime_state: RuntimeState,
+        runtime_state: ReadOnlyRuntimeStateWrapper,
     ) -> _RecordingNodeFactory:
         """Accept frame state rebinding for this stateless test factory."""
         _ = runtime_state

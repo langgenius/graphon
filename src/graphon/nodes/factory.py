@@ -7,7 +7,7 @@ from typing import Any, Protocol
 from graphon.entities.graph_config import NodeConfigDict
 from graphon.enums import NodeExecutionType
 from graphon.nodes.base.node import Node
-from graphon.runtime.runtime_state import RuntimeState
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 
 
 class NodeFactory(Protocol):
@@ -19,7 +19,7 @@ class NodeFactory(Protocol):
     @abstractmethod
     def with_runtime_state(
         self,
-        runtime_state: RuntimeState,
+        runtime_state: ReadOnlyRuntimeStateWrapper,
     ) -> NodeFactory:
         """Return a factory bound to one execution frame's runtime state.
 
@@ -31,7 +31,7 @@ class NodeFactory(Protocol):
         themselves.
 
         Args:
-            runtime_state: Runtime state owned by the frame being constructed.
+            runtime_state: Read-only view of the frame being constructed.
 
         Returns:
             A factory ready to construct nodes for exactly that execution frame.

@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-26T03:21:10Z"
+last_checked: "2026-11-27T06:38:54Z"
 -->
 # Development navigation
 
@@ -49,6 +49,8 @@ when changing runtime types, state transfers, or presentation values.
    when extending import support.
 4. For a custom host factory, use the
    [factory validation and isolation contract](../ARCHITECTURE.md#state-and-execution-invariants).
+   When the engine builds a frame, `with_runtime_state()` receives its
+   read-only state view. Pass that view to the nodes the factory creates.
    Bind scoped configuration before construction because `post_init()` runs in
    the constructor.
 5. Complete [validation](#validate-the-behavior-you-changed).

@@ -21,6 +21,7 @@ from graphon.nodes.protocols import (
     ToolFileManagerProtocol,
 )
 from graphon.runtime.init_params import InitParams
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.variables.segments import ArrayFileSegment
 
@@ -57,7 +58,7 @@ class HttpRequestNode(Node[HttpRequestNodeData]):
         data: HttpRequestNodeData,
         *,
         init_params: InitParams,
-        runtime_state: RuntimeState,
+        runtime_state: RuntimeState | ReadOnlyRuntimeStateWrapper,
         http_request_config: HttpRequestNodeConfig,
         dependencies: HttpRequestNodeDependencies | None = None,
         http_client: HttpClientProtocol | None = None,

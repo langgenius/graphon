@@ -27,7 +27,7 @@ from graphon.model_runtime.entities.model_entities import (
 from graphon.model_runtime.memory.prompt_message_memory import PromptMessageMemory
 from graphon.nodes.base.entities import VariableSelector
 from graphon.prompt_entities import MemoryConfig
-from graphon.runtime.variable_pool import VariablePool
+from graphon.runtime.runtime_state_protocol import ReadOnlyVariablePool
 from graphon.template_rendering import Jinja2TemplateRenderer, TemplateRenderError
 from graphon.variables.segments import (
     ArrayAnySegment,
@@ -79,7 +79,9 @@ def build_model_identity_inputs(
     }
 
 
-def fetch_files(variable_pool: VariablePool, selector: Sequence[str]) -> Sequence[File]:
+def fetch_files(
+    variable_pool: ReadOnlyVariablePool, selector: Sequence[str]
+) -> Sequence[File]:
     variable = variable_pool.get(selector)
     if variable is None:
         return []
@@ -247,7 +249,7 @@ def fetch_prompt_messages(
     memory_config: MemoryConfig | None = None,
     vision_enabled: bool = False,
     vision_detail: ImagePromptMessageContent.DETAIL,
-    variable_pool: VariablePool,
+    variable_pool: ReadOnlyVariablePool,
     jinja2_variables: Sequence[VariableSelector],
     context_files: Sequence[File] | None = None,
     jinja2_template_renderer: Jinja2TemplateRenderer | None = None,
@@ -342,7 +344,7 @@ def handle_list_messages(
     messages: Sequence[LLMNodeChatModelMessage],
     context: str,
     jinja2_variables: Sequence[VariableSelector],
-    variable_pool: VariablePool,
+    variable_pool: ReadOnlyVariablePool,
     vision_detail_config: ImagePromptMessageContent.DETAIL,
     jinja2_template_renderer: Jinja2TemplateRenderer | None = None,
 ) -> Sequence[PromptMessage]:
@@ -419,7 +421,7 @@ def render_jinja2_message(
     *,
     template: str,
     jinja2_variables: Sequence[VariableSelector],
-    variable_pool: VariablePool,
+    variable_pool: ReadOnlyVariablePool,
     jinja2_template_renderer: Jinja2TemplateRenderer | None = None,
 ) -> str:
     if not template:
@@ -442,7 +444,7 @@ def handle_completion_template(
     template: LLMNodeCompletionModelPromptTemplate,
     context: str,
     jinja2_variables: Sequence[VariableSelector],
-    variable_pool: VariablePool,
+    variable_pool: ReadOnlyVariablePool,
     jinja2_template_renderer: Jinja2TemplateRenderer | None = None,
 ) -> Sequence[PromptMessage]:
     if template.edition_type == "jinja2":
@@ -619,7 +621,7 @@ def _coerce_resolved_value(raw: str) -> int | float | bool | str:
 
 def resolve_completion_params_variables(
     completion_params: Mapping[str, Any],
-    variable_pool: VariablePool,
+    variable_pool: ReadOnlyVariablePool,
 ) -> dict[str, Any]:
     """Resolve variable references (``{{#node_id.var#}}``) in string-typed
     completion params.

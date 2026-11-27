@@ -78,7 +78,9 @@ from graphon.runtime.container_state import (
     create_container_run_state,
 )
 from graphon.runtime.init_params import InitParams
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.runtime_state import RuntimeState
+from graphon.runtime.runtime_state_protocol import ReadOnlyRuntimeState
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import StringSegment
 from tests.helpers.workflow_events import final_outputs
@@ -235,7 +237,7 @@ class _HitlNodeFactory:
 
     def with_runtime_state(
         self,
-        runtime_state: RuntimeState,
+        runtime_state: ReadOnlyRuntimeStateWrapper,
     ) -> _HitlNodeFactory:
         return _HitlNodeFactory(
             base_factory=self.base_factory.with_runtime_state(runtime_state),
@@ -397,7 +399,7 @@ def test_runtime_snapshot_rejects_active_callbacks() -> None:
 def test_runtime_snapshot_rejects_paused_workers_and_child_frames() -> None:
     state = _new_runtime_state({"items": ["alpha", "beta"]})
     alpha_started = Event()
-    child_states: list[RuntimeState] = []
+    child_states: list[ReadOnlyRuntimeState] = []
     snapshots: list[str | Exception] = []
 
     class ChildStateLayer(Layer):
@@ -618,7 +620,7 @@ class _FrameFactory:
 
     def with_runtime_state(
         self,
-        runtime_state: RuntimeState,
+        runtime_state: ReadOnlyRuntimeStateWrapper,
     ) -> _FrameFactory:
         _ = runtime_state
         return self
@@ -665,7 +667,7 @@ def _loop_graph(runtime_state: RuntimeState) -> FrameGraph:
         "break_conditions": [],
         "logical_operator": "and",
     })
-    loop_node.runtime_state = runtime_state
+    loop_node.runtime_state = runtime_state.read_only_view
     loop_node.graph_config = graph_config
     return cast(
         FrameGraph,

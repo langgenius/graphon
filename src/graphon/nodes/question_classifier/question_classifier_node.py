@@ -42,6 +42,7 @@ from graphon.nodes.llm.runtime_protocols import (
     PromptMessageSerializerProtocol,
 )
 from graphon.runtime.init_params import InitParams
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.template_rendering import Jinja2TemplateRenderer
 from graphon.utils.json_in_md_parser import parse_and_check_json_markdown
@@ -109,7 +110,7 @@ class QuestionClassifierNode(Node[QuestionClassifierNodeData]):
         data: QuestionClassifierNodeData,
         *,
         init_params: InitParams,
-        runtime_state: RuntimeState,
+        runtime_state: RuntimeState | ReadOnlyRuntimeStateWrapper,
         dependencies: QuestionClassifierNodeDependencies | None = None,
         credentials_provider: object | None = None,
         model_factory: object | None = None,

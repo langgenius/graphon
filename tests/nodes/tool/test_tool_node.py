@@ -557,7 +557,7 @@ def test_run_passes_variable_pool_and_bound_execution_id_to_runtime(
     expects_variable_pool: bool,
 ) -> None:
     runtime = _RunStubToolRuntime()
-    node, variable_pool = _build_run_tool_node(
+    node, _variable_pool = _build_run_tool_node(
         runtime=runtime,
         tool_node_version=tool_node_version,
     )
@@ -567,7 +567,9 @@ def test_run_passes_variable_pool_and_bound_execution_id_to_runtime(
     assert runtime.last_get_runtime_kwargs == {
         "node_id": "node-1",
         "node_data": node.node_data,
-        "variable_pool": variable_pool if expects_variable_pool else None,
+        "variable_pool": node.runtime_state.variable_pool
+        if expects_variable_pool
+        else None,
         "node_execution_id": "bound-execution",
     }
     assert node.execution_id == "bound-execution"

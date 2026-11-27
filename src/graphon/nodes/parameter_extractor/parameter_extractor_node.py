@@ -44,8 +44,9 @@ from graphon.nodes.llm.runtime_protocols import (
     PromptMessageSerializerProtocol,
 )
 from graphon.runtime.init_params import InitParams
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.runtime_state import RuntimeState
-from graphon.runtime.variable_pool import VariablePool
+from graphon.runtime.runtime_state_protocol import ReadOnlyVariablePool
 from graphon.variables.factory import build_segment_with_type
 from graphon.variables.template_resolution import convert_template
 from graphon.variables.types import ArrayValidation, SegmentType
@@ -146,7 +147,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         data: ParameterExtractorNodeData,
         *,
         init_params: InitParams,
-        runtime_state: RuntimeState,
+        runtime_state: RuntimeState | ReadOnlyRuntimeStateWrapper,
         dependencies: _ParameterExtractorNodeDependencies,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
@@ -162,7 +163,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         data: ParameterExtractorNodeData,
         *,
         init_params: InitParams,
-        runtime_state: RuntimeState,
+        runtime_state: RuntimeState | ReadOnlyRuntimeStateWrapper,
         dependencies: None = None,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
@@ -177,7 +178,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         data: ParameterExtractorNodeData,
         *,
         init_params: InitParams,
-        runtime_state: RuntimeState,
+        runtime_state: RuntimeState | ReadOnlyRuntimeStateWrapper,
         dependencies: _ParameterExtractorNodeDependencies | None = None,
         credentials_provider: object | None = None,
         model_factory: object | None = None,
@@ -403,7 +404,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
     def _prepare_model_instance(
         self,
         *,
-        variable_pool: VariablePool,
+        variable_pool: ReadOnlyVariablePool,
     ) -> LLMProtocol:
         model_instance = self._model_instance
         model_instance.parameters = llm_utils.resolve_completion_params_variables(
@@ -431,7 +432,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         self,
         *,
         query: str,
-        variable_pool: VariablePool,
+        variable_pool: ReadOnlyVariablePool,
         model_instance: LLMProtocol,
         files: Sequence[File],
         model_schema_features: Sequence[ModelFeature],
@@ -498,7 +499,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         self,
         node_data: ParameterExtractorNodeData,
         query: str,
-        variable_pool: VariablePool,
+        variable_pool: ReadOnlyVariablePool,
         model_instance: LLMProtocol,
         memory: PromptMessageMemory | None,
         files: Sequence[File],
@@ -590,7 +591,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         self,
         data: ParameterExtractorNodeData,
         query: str,
-        variable_pool: VariablePool,
+        variable_pool: ReadOnlyVariablePool,
         model_instance: LLMProtocol,
         memory: PromptMessageMemory | None,
         files: Sequence[File],
@@ -624,7 +625,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         self,
         node_data: ParameterExtractorNodeData,
         query: str,
-        variable_pool: VariablePool,
+        variable_pool: ReadOnlyVariablePool,
         model_instance: LLMProtocol,
         memory: PromptMessageMemory | None,
         files: Sequence[File],
@@ -657,7 +658,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         self,
         node_data: ParameterExtractorNodeData,
         query: str,
-        variable_pool: VariablePool,
+        variable_pool: ReadOnlyVariablePool,
         model_instance: LLMProtocol,
         memory: PromptMessageMemory | None,
         files: Sequence[File],
@@ -968,7 +969,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         self,
         node_data: ParameterExtractorNodeData,
         query: str,
-        variable_pool: VariablePool,
+        variable_pool: ReadOnlyVariablePool,
         memory: PromptMessageMemory | None,
         max_token_limit: int = 2000,
     ) -> list[LLMNodeChatModelMessage]:
@@ -1006,7 +1007,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         *,
         node_data: ParameterExtractorNodeData,
         query: str,
-        variable_pool: VariablePool,
+        variable_pool: ReadOnlyVariablePool,
         memory: PromptMessageMemory | None,
         max_token_limit: int = 2000,
     ) -> list[LLMNodeChatModelMessage]:
@@ -1023,7 +1024,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         self,
         node_data: ParameterExtractorNodeData,
         query: str,
-        variable_pool: VariablePool,
+        variable_pool: ReadOnlyVariablePool,
         memory: PromptMessageMemory | None,
         max_token_limit: int = 2000,
     ) -> list[LLMNodeChatModelMessage] | LLMNodeCompletionModelPromptTemplate:
@@ -1071,7 +1072,7 @@ class ParameterExtractorNode(Node[ParameterExtractorNodeData]):
         self,
         node_data: ParameterExtractorNodeData,
         query: str,
-        variable_pool: VariablePool,
+        variable_pool: ReadOnlyVariablePool,
         model_instance: LLMProtocol,
         context: str | None,
     ) -> int:

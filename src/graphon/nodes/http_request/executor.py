@@ -11,7 +11,7 @@ from json_repair import repair_json
 
 from graphon.file.enums import FileTransferMethod
 from graphon.http import HttpClientProtocol, HttpResponse
-from graphon.runtime.variable_pool import VariablePool
+from graphon.runtime.runtime_state_protocol import ReadOnlyVariablePool
 from graphon.variables.segments import ArrayFileSegment, FileSegment
 from graphon.variables.template_resolution import convert_template
 
@@ -91,7 +91,7 @@ class Executor:
         *,
         node_data: HttpRequestNodeData,
         timeout: HttpRequestNodeTimeout,
-        variable_pool: VariablePool,
+        variable_pool: ReadOnlyVariablePool,
         http_request_config: HttpRequestNodeConfig,
         max_retries: int | None = None,
         ssl_verify: bool | None = None,
@@ -289,8 +289,8 @@ class Executor:
     def _init_binary_body(self, data: Sequence[BodyData]) -> None:
         item = self._require_single_body_item(data, body_type="binary")
         file_selector = item.file
-        file_variable = self.variable_pool.get_file(file_selector)
-        if file_variable is None:
+        file_variable = self.variable_pool.get(file_selector)
+        if not isinstance(file_variable, FileSegment):
             msg = f"cannot fetch file with selector {file_selector}"
             raise FileFetchError(msg)
         self.content = self._file_manager.download(file_variable.value)

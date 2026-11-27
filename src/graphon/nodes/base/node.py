@@ -75,6 +75,7 @@ from graphon.node_events.node import (
 )
 from graphon.nodes.container_effects import ContainerAwaitRequest, ContainerRunResult
 from graphon.runtime.init_params import InitParams
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.runtime_state import RuntimeState
 
 _MISSING_RUN_CONTEXT_VALUE = object()
@@ -595,7 +596,7 @@ class Node[NodeDataT: BaseNodeData](
         data: NodeDataT,
         *,
         init_params: InitParams,
-        runtime_state: RuntimeState,
+        runtime_state: RuntimeState | ReadOnlyRuntimeStateWrapper,
     ) -> None:
         if not node_id:
             msg = "node_id is required"
@@ -607,7 +608,7 @@ class Node[NodeDataT: BaseNodeData](
         self.workflow_id = init_params.workflow_id
         self.graph_config = init_params.graph_config
         self.workflow_call_depth = init_params.call_depth
-        self.runtime_state = runtime_state
+        self.runtime_state = runtime_state.read_only_view
         self.state: NodeState = NodeState.UNKNOWN  # node execution state
 
         self._node_id = node_id

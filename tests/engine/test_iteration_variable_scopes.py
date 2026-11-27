@@ -30,7 +30,12 @@ from graphon.nodes.iteration.iteration_node import IterationNode
 from graphon.nodes.iteration.iteration_start_node import IterationStartNode
 from graphon.nodes.start.start_node import StartNode
 from graphon.nodes.variable_assigner.v2.node import VariableAssignerNode
-from graphon.runtime import InitParams, RuntimeState, VariablePool
+from graphon.runtime import (
+    InitParams,
+    ReadOnlyRuntimeStateWrapper,
+    RuntimeState,
+    VariablePool,
+)
 from graphon.runtime.container_state import (
     ContainerFrameState,
     CustomContainerFrameState,
@@ -80,11 +85,13 @@ class _WaitNode(Node[BaseNodeData]):
 
 @dataclass(frozen=True)
 class _NodeFactory:
-    state: RuntimeState
+    state: ReadOnlyRuntimeStateWrapper
     signals: Mapping[str, Event]
     graph_config: Mapping[str, Any] = field(default_factory=dict)
 
-    def with_runtime_state(self, runtime_state: RuntimeState) -> _NodeFactory:
+    def with_runtime_state(
+        self, runtime_state: ReadOnlyRuntimeStateWrapper
+    ) -> _NodeFactory:
         return replace(self, state=runtime_state)
 
     def with_graph_config(self, graph_config: Mapping[str, Any]) -> _NodeFactory:
@@ -254,7 +261,7 @@ class _WorkflowHandler:
         )
         graph = FrameGraph.init(
             graph_config=graph_config,
-            node_factory=_NodeFactory(state, self.signals),
+            node_factory=_NodeFactory(state.read_only_view, self.signals),
             root_node_id="start",
         )
         frame = self.frames.create(
@@ -358,7 +365,7 @@ def _run_workflow(
             _build_edge_config(root_node_id, "sibling-tool"),
             _build_edge_config("sibling-tool", "end"),
         ])
-    factory = _NodeFactory(state, signals)
+    factory = _NodeFactory(state.read_only_view, signals)
     if root_graph_source == "nodes":
         start, tool, end = [
             factory.create_node(NodeConfigDictAdapter.validate_python(node_config))

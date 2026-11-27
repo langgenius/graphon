@@ -67,6 +67,7 @@ from graphon.nodes.variable_assigner.v2.node import (
     VariableAssignerNode as VariableAssignerNodeV2,
 )
 from graphon.runtime.init_params import InitParams
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.template_rendering import Jinja2TemplateRenderer, TemplateRenderError
 
@@ -421,12 +422,13 @@ type _NodeBuilder = Callable[[Any, _NodeBuildRequest], Node]
 class SlimDslNodeFactory:
     graph_config: Mapping[str, Any]
     init_params: InitParams
-    runtime_state: RuntimeState
+    runtime_state: RuntimeState | ReadOnlyRuntimeStateWrapper
     credentials: DslCredentials
     dependencies: list[DslDependency]
     slim_client_config: SlimClientConfig = field(init=False)
 
     def __post_init__(self) -> None:
+        self.runtime_state = self.runtime_state.read_only_view
         slim = self.credentials.slim
         self.slim_client_config = SlimClientConfig(
             folder=_resolve_plugin_folder(self.credentials),
@@ -445,7 +447,7 @@ class SlimDslNodeFactory:
 
     def with_runtime_state(
         self,
-        runtime_state: RuntimeState,
+        runtime_state: RuntimeState | ReadOnlyRuntimeStateWrapper,
     ) -> SlimDslNodeFactory:
         """Return a copied factory bound to one execution frame's state.
 

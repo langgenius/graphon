@@ -17,6 +17,7 @@ from graphon.nodes.base.node import Node
 from graphon.nodes.variable_assigner.common import helpers as common_helpers
 from graphon.nodes.variable_assigner.common.exc import VariableOperatorNodeError
 from graphon.runtime.init_params import InitParams
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.variables.consts import SELECTORS_LENGTH
 from graphon.variables.types import SegmentType
@@ -82,7 +83,7 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
         data: VariableAssignerNodeData,
         *,
         init_params: InitParams,
-        runtime_state: RuntimeState,
+        runtime_state: RuntimeState | ReadOnlyRuntimeStateWrapper,
     ) -> None:
         super().__init__(
             node_id=node_id,
@@ -141,9 +142,7 @@ class VariableAssignerNode(Node[VariableAssignerNodeData]):
         updated_variable_selectors: list[Sequence[str]] = []
         # Preserve intra-node read-after-write behavior without mutating the shared pool
         # until the engine processes the emitted VariableUpdatedEvent instances.
-        working_variable_pool = self.runtime_state.variable_pool.model_copy(
-            deep=True,
-        )
+        working_variable_pool = self.runtime_state.variable_pool.mutable_copy()
 
         try:
             for item in self.node_data.items:

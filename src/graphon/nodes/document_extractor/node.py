@@ -41,6 +41,7 @@ from graphon.http import HttpClientProtocol, HttpxHttpClient
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.node import Node
 from graphon.runtime.init_params import InitParams
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.variables.segments import ArrayFileSegment, ArrayStringSegment, FileSegment
 
@@ -293,7 +294,7 @@ class DocumentExtractorNode(Node[DocumentExtractorNodeData]):
         data: DocumentExtractorNodeData,
         *,
         init_params: InitParams,
-        runtime_state: RuntimeState,
+        runtime_state: RuntimeState | ReadOnlyRuntimeStateWrapper,
         unstructured_api_config: UnstructuredApiConfig | None = None,
         http_client: HttpClientProtocol | None = None,
     ) -> None:

@@ -399,7 +399,7 @@ class FrameRegistry:
             msg = "Parent graph does not carry node_factory for frame creation."
             raise RuntimeError(msg)
 
-        rebound_factory = node_factory.with_runtime_state(state)
+        rebound_factory = node_factory.with_runtime_state(state.read_only_view)
         if (
             isinstance(parent_graph, FrameGraph)
             and parent_graph.definition is not None
