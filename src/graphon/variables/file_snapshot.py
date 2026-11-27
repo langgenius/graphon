@@ -58,10 +58,10 @@ def serialize_file_snapshot(
 def _collect_file_paths(
     value: Any, paths: list[FilePath] | None, path: FilePath = ()
 ) -> Any:
-    if isinstance(value, SerializedFile):
+    if isinstance(value, (SerializedFile, File)):
         if paths is not None:
             paths.append(path)
-        return value.data
+        return value.data if isinstance(value, SerializedFile) else value
     if isinstance(value, Mapping):
         path_count = len(paths or ())
         result = {
