@@ -14,6 +14,7 @@ class PauseReasonType(StrEnum):
 
     HITL_REQUIRED = auto()
     SCHEDULED_PAUSE = auto()
+    EXTERNAL_WAIT = auto()
 
 
 class HitlRequired(BaseModel):
@@ -29,6 +30,23 @@ class SchedulingPause(BaseModel):
     TYPE: Literal[PauseReasonType.SCHEDULED_PAUSE] = PauseReasonType.SCHEDULED_PAUSE
 
     message: str
+
+
+class ExternalWaitReason(BaseModel):
+    """Identify a node execution waiting for host-managed work.
+
+    The host stores the work and its result and resumes the same frame-local
+    execution when the result is ready.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    TYPE: Literal[PauseReasonType.EXTERNAL_WAIT] = PauseReasonType.EXTERNAL_WAIT
+    wait_id: str = Field(min_length=1)
+    node_id: str = Field(min_length=1)
+    node_title: str
+    execution_id: str = Field(min_length=1)
+    frame_id: str = Field(min_length=1)
 
 
 class _LegacyHumanInputRequired(BaseModel):
@@ -71,7 +89,7 @@ def _decode_pause_reason(value: object) -> object:
 
 
 type PauseReason = Annotated[
-    HitlRequired | SchedulingPause,
+    HitlRequired | SchedulingPause | ExternalWaitReason,
     Field(discriminator="TYPE"),
     BeforeValidator(_decode_pause_reason),
 ]
