@@ -13,7 +13,7 @@ from graphon.nodes.tool_runtime_entities import (
 
 if TYPE_CHECKING:
     from graphon.nodes.tool.entities import ToolNodeData
-    from graphon.runtime.variable_pool import VariablePool
+    from graphon.runtime.runtime_state_protocol import ReadOnlyVariablePool
 
 
 class ToolNodeRuntimeProtocol(Protocol):
@@ -29,7 +29,7 @@ class ToolNodeRuntimeProtocol(Protocol):
         *,
         node_id: str,
         node_data: ToolNodeData,
-        variable_pool: VariablePool | None,
+        variable_pool: ReadOnlyVariablePool | None,
         node_execution_id: str | None = None,
     ) -> ToolRuntimeHandle: ...
 

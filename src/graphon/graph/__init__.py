@@ -1,11 +1,10 @@
-from .edge import Edge
-from .graph import Graph, GraphBuilder, NodeFactory
+from .graph import EdgeDefinition, Graph, GraphReference, NodeDefinition
 from .graph_template import GraphTemplate
 
 __all__ = [
-    "Edge",
+    "EdgeDefinition",
     "Graph",
-    "GraphBuilder",
+    "GraphReference",
     "GraphTemplate",
-    "NodeFactory",
+    "NodeDefinition",
 ]

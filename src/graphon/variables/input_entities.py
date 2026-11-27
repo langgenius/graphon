@@ -1,10 +1,11 @@
 import json
 from collections.abc import Sequence
 from enum import StrEnum
-from typing import Any
+from typing import Any, final
 
 from jsonschema import Draft7Validator, SchemaError
 from pydantic import BaseModel, Field, field_validator
+from typing_extensions import deprecated
 
 from graphon.file.enums import (
     FileTransferMethod,
@@ -29,8 +30,13 @@ class VariableEntityType(StrEnum):
     JSON_OBJECT = "json_object"
 
 
+@final
+@deprecated(
+    "Legacy Start input form. Define new input fields and controls in the host.",
+    category=None,
+)
 class VariableEntity(BaseModel):
-    """Shared variable entity used by workflow runtime and app configuration."""
+    """Input form stored in existing Start configurations. Its schema is frozen."""
 
     # `variable` records the name of the variable in user inputs.
     variable: str

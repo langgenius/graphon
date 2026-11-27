@@ -135,7 +135,10 @@ def _build_node_definition(node_id: str, data: Mapping[str, Any]) -> _NodeDefini
 
 
 def build_child_graph(
-    graph_config: Mapping[str, Any] | None, start: FrameStartedEvent
+    graph_config: Mapping[str, Any] | None,
+    start: FrameStartedEvent,
+    *,
+    configured_start_node_id: str | None = None,
 ) -> GraphProtocol | None:
     if not graph_config:
         return None
@@ -152,7 +155,7 @@ def build_child_graph(
         if isinstance(data, BaseNodeData):
             data = data.model_dump(mode="python")
         nodes[node_id] = _build_node_definition(node_id, data)
-    root_node_id = start.root_node_id
+    root_node_id = start.root_node_id or configured_start_node_id
     if root_node_id is None and (container := node_configs.get(start.container_id)):
         data = container["data"]
         root_node_id = (

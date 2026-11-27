@@ -24,7 +24,6 @@ from graphon.engine_events.node import (
 )
 from graphon.engine_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTakenEvent
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType, NodeState, NodeType
-from graphon.graph.graph import Graph
 from graphon.nodes.base.template import (
     Template,
     TemplateSegmentUnion,
@@ -41,6 +40,7 @@ from graphon.runtime.runtime_state import (
 )
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import StringSegment
+from tests.helpers.frame_graph import build_linear_frame_graph
 
 _V1_FIXTURE_DIR = Path(__file__).with_name("fixtures")
 # These snapshots are the exact output of ResponseStreamFilter.dumps() at c3870df.
@@ -924,7 +924,7 @@ def test_response_stream_filter_migrates_v1_graph_builder_state() -> None:
             segments=[VariableSegment(selector=["source", "answer"])],
         ),
     )
-    graph = Graph.new().add_root(cast(Any, source)).add_node(cast(Any, answer)).build()
+    graph = build_linear_frame_graph(cast(Any, source), cast(Any, answer))
     assert graph.graph_config is None
 
     restored_filter = ResponseStreamFilter()
@@ -1557,3 +1557,29 @@ def test_response_stream_filter_keeps_current_state_when_load_fails() -> None:
 
     chunks = [event for event in output if isinstance(event, NodeRunStreamChunkEvent)]
     assert [event.chunk for event in chunks] == ["preserved"]
+
+
+def test_loading_nested_dsl_preserves_the_edge_ordinals_of_v1_snapshots() -> None:
+    engine = loads("""
+kind: graph
+graph:
+  nodes:
+    - {id: source, data: {type: start, variables: []}}
+    - {id: answer, data: {type: answer, answer: '{{#source.answer#}}'}}
+    - id: loop
+      data:
+        {type: loop, start_node_id: enter, loop_count: 1,
+         break_conditions: [], logical_operator: and}
+    - {id: enter, parentId: loop, data: {type: loop-start}}
+    - {id: finish, parentId: loop, data: {type: loop-end}}
+  edges:
+    - {id: child-edge, source: enter, target: finish}
+    - {id: root-answer, source: source, target: answer}
+""")
+    restored = ResponseStreamFilter()
+    restored.loads(_V1_NESTED_SNAPSHOT)
+    restored.initialize(EngineEventFilterContext.from_engine(engine))
+
+    assert json.loads(restored.dumps())["legacy_paths_map"] == {
+        "answer": [["root-answer"]],
+    }

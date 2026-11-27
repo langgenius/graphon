@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import UserDict
-from collections.abc import Generator, Sequence
+from collections.abc import Generator, Iterator, Sequence
 from datetime import UTC, datetime
 from threading import Event, Thread
 from typing import Any, override
@@ -13,7 +13,7 @@ import pytest
 
 from graphon import engine_events
 from graphon.dsl import loads
-from graphon.engine import Engine
+from graphon.engine import Engine, FrameGraph
 from graphon.engine.command import (
     CommandProcessor,
     UpdateVariablesCommand,
@@ -31,9 +31,12 @@ from graphon.engine_events.node import (
 )
 from graphon.entities.workflow_start_reason import WorkflowStartReason
 from graphon.enums import BuiltinNodeTypes, WorkflowNodeExecutionStatus
-from graphon.graph import Graph
 from graphon.node_events.base import NodeEventPayload, NodeRunResult
-from graphon.node_events.node import StreamChunkEvent, StreamCompletedEvent
+from graphon.node_events.node import (
+    StreamChunkEvent,
+    StreamCompletedEvent,
+    VariableUpdatedEvent,
+)
 from graphon.nodes.container_effects import (
     ContainerAwaitRequest,
     ContainerExecutionResult,
@@ -110,6 +113,55 @@ def _assert_frame_lifetimes(events: Sequence[EngineEvent]) -> None:
             if isinstance(event, NodeEvent) and event.frame_id == start.frame_id:
                 assert event.id == start.node_execution_ids[event.node_id]
     assert events.index(finishes[-1]) < len(events) - 1
+
+
+def test_node_cannot_change_a_variable_after_yielding_its_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = loads(_dsl([], []))
+    node = engine.graph.nodes["start"]
+    address = ("conversation", "profile")
+    engine.runtime_state.variable_pool.add(address, {"tags": []})
+
+    def update_profile() -> Generator[NodeEventPayload, None, None]:
+        profile = node.runtime_state.variable_pool.get(address)
+        assert isinstance(profile, ObjectVariable)
+        profile.value["tags"].append("requested")
+        yield VariableUpdatedEvent(variable=profile)
+        profile.value["tags"].append("after yield")
+        yield StreamCompletedEvent(
+            node_run_result=NodeRunResult(status=WorkflowNodeExecutionStatus.SUCCEEDED)
+        )
+
+    monkeypatch.setattr(node, "_run", update_profile)
+    list(engine.run())
+    pool = engine.runtime_state.variable_pool
+    assert pool.get_by_prefix("conversation")["profile"] == {"tags": ["requested"]}
+
+
+@pytest.mark.parametrize("streamed", [False, True])
+def test_node_cannot_change_a_committed_output(
+    monkeypatch: pytest.MonkeyPatch, streamed: bool
+) -> None:
+    engine = loads(_dsl([], []))
+    output = {"tags": ["published"]}
+    result = NodeRunResult(
+        status=WorkflowNodeExecutionStatus.SUCCEEDED, outputs={"result": output}
+    )
+
+    def stream_result() -> Iterator[StreamCompletedEvent]:
+        yield StreamCompletedEvent(node_run_result=result)
+        output["tags"].append("after yield")
+
+    monkeypatch.setattr(
+        engine.graph.nodes["start"],
+        "_run",
+        stream_result if streamed else lambda: result,
+    )
+    list(engine.run())
+    output["tags"].append("after completion")
+    pool = engine.runtime_state.variable_pool
+    assert pool.get_by_prefix("start")["result"] == {"tags": ["published"]}
 
 
 def test_root_baseline_commits_identity_and_detached_values() -> None:
@@ -242,7 +294,7 @@ def test_disabled_frame_observations_do_not_copy_unused_context() -> None:
         "root", StartNodeData(), init_params=build_init_params(), runtime_state=state
     )
     engine = Engine(
-        graph=Graph.new().add_root(root).build(),
+        graph=FrameGraph(root_node=root, nodes={root.id: root}),
         runtime_state=state,
         emit_frame_events=False,
     )

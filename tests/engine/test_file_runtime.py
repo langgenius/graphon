@@ -25,7 +25,6 @@ from graphon.file import File, FileTransferMethod, FileType
 from graphon.file.file_manager import to_prompt_message_content
 from graphon.file.protocols import WorkflowFileRuntimeProtocol
 from graphon.file.runtime import use_workflow_file_runtime
-from graphon.graph.graph import Graph
 from graphon.model_runtime.entities.message_entities import DocumentPromptMessageContent
 from graphon.nodes.base.entities import OutputVariableEntity
 from graphon.nodes.base.node import Node
@@ -46,6 +45,7 @@ from tests.engine.test_runtime_state_serialization import (
     _new_runtime_state,
     _snapshot_after_hitl_pause,
 )
+from tests.helpers.frame_graph import build_linear_frame_graph
 from tests.helpers.workflow_events import final_outputs
 
 
@@ -75,38 +75,29 @@ def _make_file_engine(
     params = InitParams(
         workflow_id="workflow", graph_config={}, run_context={}, call_depth=0
     )
-    graph = (
-        Graph
-        .new()
-        .add_root(
-            StartNode("start", StartNodeData(), init_params=params, runtime_state=state)
-        )
-        .add_node(
-            DocumentExtractorNode(
-                "extract",
-                DocumentExtractorNodeData(variable_selector=["sys", "file"]),
-                init_params=params,
-                runtime_state=state,
-            )
-        )
-        .add_node(
-            EndNode(
-                "end",
-                EndNodeData(
-                    outputs=[
-                        OutputVariableEntity(
-                            variable="text", value_selector=["extract", "text"]
-                        ),
-                        OutputVariableEntity(
-                            variable="url", value_selector=["sys", "file", "url"]
-                        ),
-                    ]
-                ),
-                init_params=params,
-                runtime_state=state,
-            )
-        )
-        .build()
+    graph = build_linear_frame_graph(
+        StartNode("start", StartNodeData(), init_params=params, runtime_state=state),
+        DocumentExtractorNode(
+            "extract",
+            DocumentExtractorNodeData(variable_selector=["sys", "file"]),
+            init_params=params,
+            runtime_state=state,
+        ),
+        EndNode(
+            "end",
+            EndNodeData(
+                outputs=[
+                    OutputVariableEntity(
+                        variable="text", value_selector=["extract", "text"]
+                    ),
+                    OutputVariableEntity(
+                        variable="url", value_selector=["sys", "file", "url"]
+                    ),
+                ]
+            ),
+            init_params=params,
+            runtime_state=state,
+        ),
     )
     return Engine(graph, state, workers=1, file_runtime=file_runtime)
 

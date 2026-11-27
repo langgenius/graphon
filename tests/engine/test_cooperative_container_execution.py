@@ -11,6 +11,7 @@ import pytest
 
 from graphon.engine.event.node_failure import NodeFailureHandler
 from graphon.engine.frame import ExecutionFrame, FrameRegistry
+from graphon.engine.frame_graph import FrameGraph
 from graphon.engine.layer import Layer
 from graphon.engine.ready_queue.entities import (
     ResumeTask,
@@ -35,7 +36,6 @@ from graphon.enums import (
     NodeExecutionType,
     WorkflowNodeExecutionStatus,
 )
-from graphon.graph.graph import Graph
 from graphon.node_events.base import NodeRunResult
 from graphon.nodes.base.node import Node
 from graphon.nodes.container_effects import (
@@ -54,7 +54,7 @@ from graphon.runtime.variable_pool import VariablePool
 def _execution_frame(
     *,
     frame_id: str,
-    graph: Graph,
+    graph: FrameGraph,
     runtime_state: RuntimeState,
 ) -> ExecutionFrame:
     scheduler = Scheduler(graph, runtime_state, frame_id)
@@ -303,7 +303,7 @@ def test_worker_suspends_and_resumes_container_invocation(resume_fails: bool) ->
             )
 
     container_node = ContainerNode()
-    graph = Graph(
+    graph = FrameGraph(
         nodes={"loop": cast(Node, container_node)},
         root_node=cast(Node, container_node),
     )
@@ -443,7 +443,7 @@ def test_worker_reports_resume_failure_on_suspended_invocation_frame() -> None:
     frame_registry = FrameRegistry()
     container_node = ContainerNode()
     graph_node = cast(Node, container_node)
-    parent_graph = Graph(
+    parent_graph = FrameGraph(
         nodes={"loop": graph_node},
         root_node=graph_node,
     )

@@ -13,6 +13,7 @@ from graphon.node_events.base import NodeEventPayload, NodeRunResult
 from graphon.node_events.node import PauseRequestedEvent, StreamCompletedEvent
 from graphon.nodes.base.node import Node
 from graphon.runtime.init_params import InitParams
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.variables.segments import Segment
 
@@ -42,7 +43,7 @@ class HumanInputNode(Node[HumanInputNodeData]):
         data: HumanInputNodeData,
         *,
         init_params: InitParams,
-        runtime_state: RuntimeState,
+        runtime_state: RuntimeState | ReadOnlyRuntimeStateWrapper,
         hitl_callback: HITLCallback,
     ) -> None:
         super().__init__(

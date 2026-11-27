@@ -11,7 +11,7 @@ from .entities import (
     PluginDependencyType,
 )
 from .errors import DslError
-from .importer import inspect, loads
+from .importer import inspect, load_graph, loads
 from .node_factory import SlimDslNodeFactory
 from .slim import SlimClient, SlimClientError
 
@@ -32,5 +32,6 @@ __all__ = [
     "SlimClientError",
     "SlimDslNodeFactory",
     "inspect",
+    "load_graph",
     "loads",
 ]

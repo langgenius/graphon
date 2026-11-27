@@ -408,3 +408,16 @@ def test_sibling_graphs_may_reuse_edge_ids(owner_field: str) -> None:
     plan = inspect_dsl(dsl)
 
     assert plan.load_status == LoadStatus.LOADABLE
+
+
+def test_legacy_assigner_with_items_has_the_version_selected_by_the_node_factory() -> (
+    None
+):
+    data = _assigner_data()
+    graph = inspect_dsl(_graph_dsl_for_node(data)).document.graph
+    del data["version"]
+    legacy = inspect_dsl(_graph_dsl_for_node(data)).document.graph
+    assert graph is not None
+    assert legacy is not None
+    assert legacy.node("node").version == "2"
+    assert legacy == graph

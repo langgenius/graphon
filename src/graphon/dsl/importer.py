@@ -14,8 +14,9 @@ from pydantic import ValidationError
 from graphon.engine import Engine
 from graphon.engine.command import CommandChannel
 from graphon.engine.container_handler import ContainerHandlerFactory
+from graphon.engine.frame_graph_factory import GraphResolver
 from graphon.enums import BuiltinNodeTypes
-from graphon.graph.graph import Graph
+from graphon.graph import Graph
 from graphon.graph.scoping import resolve_container_id
 from graphon.graph.validation import GraphValidationError
 from graphon.runtime.init_params import InitParams
@@ -34,6 +35,7 @@ from .entities import (
     PluginDependencyType,
 )
 from .errors import DslError
+from .graph import read_graph
 from .node_factory import SUPPORTED_DEFAULT_FACTORY_NODE_TYPES, SlimDslNodeFactory
 
 
@@ -97,6 +99,7 @@ def loads(
     command_channel: CommandChannel | None = None,
     workers: int = 5,
     container_handler_factories: Sequence[ContainerHandlerFactory] = (),
+    graph_resolver: GraphResolver | None = None,
 ) -> Engine:
     plan = inspect(dsl, source_kind=source_kind)
     if plan.load_status == LoadStatus.UNSUPPORTED:
@@ -112,49 +115,26 @@ def loads(
             kind=plan.document.kind,
         )
 
-    graph_config = plan.document.graph_config
-    if graph_config is None:
+    if plan.document.graph_config is None:
         msg = "DSL does not contain an executable graph."
-        raise _dsl_error(
-            msg,
-            code="graph.missing",
-            kind=plan.document.kind,
-        )
-
-    root_id = root_node_id or _select_root_node_id(graph_config)
-    workflow_id = workflow_id if workflow_id is not None else str(uuid4())
-    variable_pool = _build_variable_pool(
-        runtime_variables=plan.document.runtime_variables,
-        root_node_id=root_id,
-        run_context=run_context or {},
-        start_inputs=start_inputs or {},
-    )
-    init_params = InitParams(
-        workflow_id=workflow_id,
-        graph_config=graph_config,
-        run_context=run_context or {},
-        call_depth=0,
-    )
-    runtime_state = RuntimeState(
-        variable_pool=variable_pool,
-        start_at=time.time(),
-        workflow_id=workflow_id,
-    )
-    parsed_credentials = _parse_credentials(credentials)
-    node_factory = SlimDslNodeFactory(
-        graph_config=graph_config,
-        init_params=init_params,
-        runtime_state=runtime_state,
-        credentials=parsed_credentials,
-        dependencies=list(plan.dependencies),
-    )
-
+        raise _dsl_error(msg, code="graph.missing", kind=plan.document.kind)
     try:
-        graph = Graph.init(
-            graph_config=graph_config,
-            node_factory=node_factory,
-            root_node_id=root_id,
+        graph, legacy_edge_ids = read_graph(plan.document.graph_config)
+        engine = load_graph(
+            graph,
+            credentials=credentials,
+            graph_id=workflow_id,
+            root_node_id=root_node_id,
+            run_context=run_context,
+            start_inputs=start_inputs,
+            runtime_variables=plan.document.runtime_variables,
+            dependencies=plan.dependencies,
+            command_channel=command_channel,
+            workers=workers,
+            container_handler_factories=container_handler_factories,
+            graph_resolver=graph_resolver,
         )
+        engine.graph.legacy_edge_ids = legacy_edge_ids
     except DslError:
         raise
     except GraphValidationError as error:
@@ -170,10 +150,65 @@ def loads(
             code="graph.build_failed",
             kind=plan.document.kind,
         ) from error
+    return engine
 
+
+def load_graph(
+    graph: Graph,
+    *,
+    credentials: dict[str, Any] | str | None = None,
+    graph_id: str | None = None,
+    root_node_id: str | None = None,
+    run_context: Mapping[str, Any] | None = None,
+    start_inputs: Mapping[str, Any] | None = None,
+    runtime_variables: DslRuntimeVariables | None = None,
+    dependencies: Sequence[DslDependency] = (),
+    command_channel: CommandChannel | None = None,
+    workers: int = 5,
+    container_handler_factories: Sequence[ContainerHandlerFactory] = (),
+    graph_resolver: GraphResolver | None = None,
+) -> Engine:
+    """Create a new execution of a shared graph with the built-in node factory."""
+    if root_node_id is None:
+        candidates = [
+            node_id for node_id in graph.nodes if node_id in graph.entry_node_ids
+        ]
+        if len(candidates) != 1:
+            msg = "DSL graph must contain exactly one entry unless root_node_id is set."
+            raise _dsl_error(
+                msg,
+                code="graph.root_ambiguous",
+                details={"root_node_candidates": candidates},
+            )
+        root_node_id = candidates[0]
+    graph_id = graph_id if graph_id is not None else str(uuid4())
+    variable_pool = _build_variable_pool(
+        runtime_variables=runtime_variables or DslRuntimeVariables(),
+        root_node_id=root_node_id,
+        run_context=run_context or {},
+        start_inputs=start_inputs or {},
+    )
+    state = RuntimeState(
+        variable_pool=variable_pool, start_at=time.time(), workflow_id=graph_id
+    )
+    node_factory = SlimDslNodeFactory(
+        graph_config={},
+        init_params=InitParams(
+            workflow_id=graph_id,
+            graph_config={},
+            run_context=run_context or {},
+            call_depth=0,
+        ),
+        runtime_state=state,
+        credentials=_parse_credentials(credentials),
+        dependencies=list(dependencies),
+    )
     return Engine(
         graph=graph,
-        runtime_state=runtime_state,
+        runtime_state=state,
+        root_node_id=root_node_id,
+        node_factory=node_factory,
+        graph_resolver=graph_resolver,
         command_channel=command_channel,
         workers=workers,
         container_handler_factories=container_handler_factories,
@@ -810,30 +845,6 @@ def _dependency_from_mapping(
                 package=package if isinstance(package, str) else None,
                 source=source,
             )
-
-
-def _root_node_candidates(graph_config: Mapping[str, Any]) -> list[str]:
-    return [
-        str(node["id"])
-        for node in graph_config.get("nodes", [])
-        if isinstance(node, Mapping)
-        and isinstance(node.get("data"), Mapping)
-        and node["data"].get("type") == BuiltinNodeTypes.START
-    ]
-
-
-def _select_root_node_id(graph_config: Mapping[str, Any]) -> str:
-    candidates = _root_node_candidates(graph_config)
-    if len(candidates) != 1:
-        msg = (
-            "DSL graph must contain exactly one start node unless root_node_id is set."
-        )
-        raise _dsl_error(
-            msg,
-            code="graph.root_ambiguous",
-            details={"root_node_candidates": candidates},
-        )
-    return candidates[0]
 
 
 def _build_variable_pool(

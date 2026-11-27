@@ -4,10 +4,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
+from graphon.engine.frame_graph import FrameGraph
 from graphon.engine_events.base import EngineEvent
 from graphon.file.protocols import WorkflowFileRuntimeProtocol
 from graphon.file.runtime import peek_workflow_file_runtime
-from graphon.graph.graph import Graph
 from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.runtime_state_protocol import ReadOnlyRuntimeState
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 class EngineEventFilterContext:
     """Run-scoped context available to engine event filters."""
 
-    graph: Graph
+    graph: FrameGraph
     runtime_state: ReadOnlyRuntimeState
     file_runtime: WorkflowFileRuntimeProtocol | None = field(
         default_factory=peek_workflow_file_runtime,

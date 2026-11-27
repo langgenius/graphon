@@ -559,9 +559,21 @@ def test_slim_dsl_node_factory_rebinds_runtime_state() -> None:
     assert rebound_factory.init_params is init_params
     assert rebound_factory.credentials is credentials
     assert rebound_factory.dependencies is dependencies
-    assert rebound_factory.runtime_state is rebound_runtime_state
+    assert rebound_factory.runtime_state is rebound_runtime_state.read_only_view
     assert rebound_factory.slim_client_config == factory.slim_client_config
-    assert node.runtime_state is rebound_runtime_state
+    pool = node.runtime_state.variable_pool
+    assert pool.get_by_prefix("start") == {"query": "after"}
+    rebound_runtime_state.variable_pool.add(("start", "profile"), {"tags": ["old"]})
+    profile = pool.get(("start", "profile"))
+    assert profile is not None
+    profile.value["tags"].append("new")
+    assert rebound_runtime_state.variable_pool.get_by_prefix("start")["profile"] == {
+        "tags": ["old"]
+    }
+    assert not hasattr(pool, "add")
+    assert not hasattr(pool, "remove")
+    assert not hasattr(pool, "clear_scope")
+    assert not hasattr(pool, "variable_dictionary")
 
 
 @pytest.mark.parametrize(

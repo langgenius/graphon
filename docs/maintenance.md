@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-26T01:12:45Z"
+last_checked: "2026-11-27T06:43:00Z"
 -->
 # Maintaining repository knowledge
 
@@ -77,6 +77,11 @@ normal change's [knowledge review](#review-for-drift):
 | Unresolved technical debt | [Technical debt](technical-debt.md) |
 | A complex task's progress and unresolved decisions | A linked plan under `docs/plans/`, created when needed |
 | Completed plans retained as history | [Archived plans](archive/plans/), excluded from routine knowledge checks |
+
+Write knowledge pages for someone using the current version. When existing
+users need to change their code, configuration, or data to upgrade, draft the
+migration steps in a temporary local file outside repository knowledge. Include
+those steps in the pull request description when you open the PR.
 
 ## Validation
 

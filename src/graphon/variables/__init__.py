@@ -1,3 +1,4 @@
+from .address import VariableAddress
 from .factory import (
     TypeMismatchError,
     UnsupportedSegmentTypeError,
@@ -5,7 +6,7 @@ from .factory import (
     build_segment_with_type,
     segment_to_variable,
 )
-from .input_entities import VariableEntity, VariableEntityType
+from .input_entities import VariableEntity, VariableEntityType  # ty: ignore[deprecated]
 from .segment_group import SegmentGroup
 from .segments import (
     ArrayAnySegment,
@@ -76,6 +77,7 @@ __all__ = [
     "TypeMismatchError",
     "UnsupportedSegmentTypeError",
     "Variable",
+    "VariableAddress",
     "VariableBase",
     "VariableEntity",
     "VariableEntityType",

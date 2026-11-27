@@ -1,3 +1,5 @@
+import pytest
+
 from graphon.runtime.variable_pool import VariablePool
 from graphon.variables.segments import (
     BooleanSegment,
@@ -185,6 +187,50 @@ class TestVariablePoolGetAndNestedAttribute:
         assert list(output.selector) == ["copy", "output"]
         assert output.name == "output"
         assert output.id != original.id
+
+
+@pytest.mark.parametrize(
+    "selector",
+    [(), ("start",), ("start", "profile", "name"), "ab", (1, "name"), ("start", 1)],
+)
+def test_writes_require_a_variable_address(selector: tuple[str, ...] | str) -> None:
+    pool = VariablePool()
+    pool.add(("start", "profile"), {"name": "Ada"})
+    pool.add(("a", "b"), "two letters")
+
+    with pytest.raises(ValueError, match="address"):
+        pool.remove(selector)
+    with pytest.raises(ValueError, match="address"):
+        pool.add(selector, "new value")
+
+    assert pool.flatten() == {"start.profile": {"name": "Ada"}, "a.b": "two letters"}
+
+
+def test_remove_variable_and_clear_scope() -> None:
+    pool = VariablePool()
+    pool.add(("start", "profile"), {"name": "Ada"})
+    pool.add(("start", "count"), 1)
+    pool.add(("start", "language"), "es")
+    pool.add(("other", "count"), 2)
+
+    pool.remove(["start", "profile"])
+    assert pool.flatten() == {
+        "start.count": 1,
+        "start.language": "es",
+        "other.count": 2,
+    }
+    pool.clear_scope("start")
+    assert pool.flatten() == {"other.count": 2}
+
+
+def test_field_path_can_be_read_and_cannot_replace_its_variable() -> None:
+    pool = VariablePool()
+    pool.add(("start", "profile"), {"name": "Ada"})
+    path = ("start", "profile", "name")
+    assert pool.get(path) == StringSegment(value="Ada")
+    with pytest.raises(ValueError, match=r"address|selector"):
+        pool.add(path, "new name")
+    assert pool.get_by_prefix("start") == {"profile": {"name": "Ada"}}
 
 
 class TestVariablePoolGetNotModifyVariableDictionary:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Container, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from graphlib import CycleError, TopologicalSorter
 from typing import TYPE_CHECKING, Protocol
@@ -9,8 +9,9 @@ from typing import TYPE_CHECKING, Protocol
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType, NodeType
 
 if TYPE_CHECKING:
-    from .edge import Edge
-    from .graph import Graph
+    from graphon.runtime.runtime_state.protocol import EdgeProtocol, GraphProtocol
+
+    from .graph import EdgeDefinition
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,18 +35,27 @@ class GraphValidationError(ValueError):
         super().__init__(message)
 
 
+def check_unique_node_id(node_id: str, existing_ids: Container[str]) -> None:
+    if node_id in existing_ids:
+        raise GraphValidationError([
+            GraphValidationIssue(
+                "DUPLICATE_NODE_ID", f"Duplicate node ID: {node_id}", node_id
+            )
+        ])
+
+
 class GraphValidationRule(Protocol):
     """Protocol that individual validation rules must satisfy."""
 
     @abstractmethod
-    def validate(self, graph: Graph) -> Sequence[GraphValidationIssue]:
+    def validate(self, graph: GraphProtocol) -> Sequence[GraphValidationIssue]:
         """Validate the provided graph and return any discovered issues."""
         ...
 
 
 def get_edge_issues(
     node_scopes: Mapping[str, str],
-    edges: Iterable[Edge],
+    edges: Iterable[EdgeDefinition | EdgeProtocol],
 ) -> list[GraphValidationIssue]:
     """Check edge fields, endpoints, and cycles without constructing nodes.
 
@@ -59,18 +69,24 @@ def get_edge_issues(
     Returns:
         Issues for invalid edges or a cycle; empty for a valid graph.
     """
+    from .graph import EdgeDefinition  # ruff: ignore[import-outside-top-level]
+
     issues: list[GraphValidationIssue] = []
     predecessors: dict[str, list[str]] = {node_id: [] for node_id in node_scopes}
     for edge in edges:
+        if isinstance(edge, EdgeDefinition):
+            source, target = edge.source, edge.target
+        else:
+            source, target = edge.tail, edge.head
         if not isinstance(edge.source_handle, str):
             issues.append(
                 GraphValidationIssue(
                     code="INVALID_EDGE",
                     message=f"Edge {edge.id!r} sourceHandle must be a string.",
-                    node_id=edge.tail,
+                    node_id=source,
                 )
             )
-        for field, node_id in (("source", edge.tail), ("target", edge.head)):
+        for field, node_id in (("source", source), ("target", target)):
             if node_id not in node_scopes:
                 issues.append(
                     GraphValidationIssue(
@@ -82,8 +98,8 @@ def get_edge_issues(
                         node_id=node_id,
                     ),
                 )
-        if edge.tail in node_scopes and edge.head in node_scopes:
-            predecessors[edge.head].append(edge.tail)
+        if source in node_scopes and target in node_scopes:
+            predecessors[target].append(source)
     if not issues:
         try:
             TopologicalSorter(predecessors).prepare()
@@ -103,7 +119,7 @@ def get_edge_issues(
 
 
 class _EdgeValidator:
-    def validate(self, graph: Graph) -> Sequence[GraphValidationIssue]:
+    def validate(self, graph: GraphProtocol) -> Sequence[GraphValidationIssue]:
         return get_edge_issues(
             dict.fromkeys(graph.nodes, ""),
             graph.edges.values(),
@@ -120,7 +136,7 @@ class _RootNodeValidator:
         BuiltinNodeTypes.LOOP_START,
     )
 
-    def validate(self, graph: Graph) -> Sequence[GraphValidationIssue]:
+    def validate(self, graph: GraphProtocol) -> Sequence[GraphValidationIssue]:
         root_node = graph.root_node
         issues: list[GraphValidationIssue] = []
         if root_node.id not in graph.nodes:
@@ -159,7 +175,7 @@ class GraphValidator:
 
     rules: tuple[GraphValidationRule, ...]
 
-    def validate(self, graph: Graph) -> None:
+    def validate(self, graph: GraphProtocol) -> None:
         """Validate the graph against all configured rules."""
         issues: list[GraphValidationIssue] = []
         for rule in self.rules:

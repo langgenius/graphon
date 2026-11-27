@@ -47,6 +47,7 @@ from graphon.nodes.llm import LLMNode, LLMNodeData
 from graphon.nodes.llm.exc import LLMNodeError
 from graphon.nodes.llm.reasoning import split_reasoning
 from graphon.nodes.llm.runtime_protocols import LLMPollingCapableProtocol, LLMProtocol
+from graphon.runtime.execution import GraphExecution
 from graphon.runtime.runtime_state import RuntimeState
 
 from ...helpers import build_init_params, build_variable_pool
@@ -130,6 +131,7 @@ def _build_llm_node(
     workflow_run_id: str | None = "wr-test",
     run_context: dict[str, Any] | None = None,
     llm_file_saver: Any | None = None,
+    graph_execution: GraphExecution | None = None,
 ) -> LLMNode:
     prepared_model = model_instance
     if prepared_model is None:
@@ -170,6 +172,7 @@ def _build_llm_node(
             workflow_id="workflow",
             variable_pool=build_variable_pool(variables=prepared_variables),
             start_at=0.0,
+            graph_execution=graph_execution,
         ),
         model_instance=cast(LLMProtocol, prepared_model),
         llm_file_saver=MagicMock() if llm_file_saver is None else llm_file_saver,
@@ -1010,8 +1013,9 @@ def test_polling_llm_respects_existing_abort_before_start(
             result=_llm_result(),
         ),
     ])
-    node = _build_llm_node(model_instance=model)
-    node.runtime_state.graph_execution.abort("stop")
+    execution = GraphExecution(workflow_id="workflow")
+    execution.abort("stop")
+    node = _build_llm_node(model_instance=model, graph_execution=execution)
     _stub_simple_prompt(monkeypatch, node)
 
     events = list(node._run())

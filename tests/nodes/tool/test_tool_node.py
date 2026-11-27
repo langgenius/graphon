@@ -22,7 +22,6 @@ from graphon.engine_events.node import (
 from graphon.enums import BuiltinNodeTypes
 from graphon.file.enums import FileTransferMethod, FileType
 from graphon.file.models import File
-from graphon.graph.graph import Graph
 from graphon.model_runtime.entities.llm_entities import LLMUsage
 from graphon.node_events.node import StreamChunkEvent, StreamCompletedEvent
 from graphon.nodes.answer.answer_node import AnswerNode
@@ -39,6 +38,7 @@ from graphon.nodes.tool_runtime_entities import (
 )
 from graphon.runtime.runtime_state import RuntimeState
 from tests.helpers.builders import build_init_params, build_variable_pool
+from tests.helpers.frame_graph import build_linear_frame_graph
 
 
 def _message_stream(
@@ -349,14 +349,8 @@ def test_tool_session_id_is_preserved_in_filtered_answer(
         init_params=init_params,
         runtime_state=runtime_state,
     )
-    graph = (
-        Graph
-        .new()
-        .add_root(start_node)
-        .add_node(session_node)
-        .add_node(forward_node)
-        .add_node(answer_node)
-        .build()
+    graph = build_linear_frame_graph(
+        start_node, session_node, forward_node, answer_node
     )
     engine = Engine(graph=graph, runtime_state=runtime_state)
     events = list(
@@ -563,7 +557,7 @@ def test_run_passes_variable_pool_and_bound_execution_id_to_runtime(
     expects_variable_pool: bool,
 ) -> None:
     runtime = _RunStubToolRuntime()
-    node, variable_pool = _build_run_tool_node(
+    node, _variable_pool = _build_run_tool_node(
         runtime=runtime,
         tool_node_version=tool_node_version,
     )
@@ -573,7 +567,9 @@ def test_run_passes_variable_pool_and_bound_execution_id_to_runtime(
     assert runtime.last_get_runtime_kwargs == {
         "node_id": "node-1",
         "node_data": node.node_data,
-        "variable_pool": variable_pool if expects_variable_pool else None,
+        "variable_pool": node.runtime_state.variable_pool
+        if expects_variable_pool
+        else None,
         "node_execution_id": "bound-execution",
     }
     assert node.execution_id == "bound-execution"

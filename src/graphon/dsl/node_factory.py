@@ -67,6 +67,7 @@ from graphon.nodes.variable_assigner.v2.node import (
     VariableAssignerNode as VariableAssignerNodeV2,
 )
 from graphon.runtime.init_params import InitParams
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.template_rendering import Jinja2TemplateRenderer, TemplateRenderError
 
@@ -79,6 +80,7 @@ from .entities import (
     DslToolCredential,
 )
 from .errors import DslError
+from .graph import resolve_node_version
 from .slim import SlimClientConfig, SlimLLM
 from .tool_runtime import SlimToolNodeRuntime, resolve_dsl_tool_credential
 
@@ -420,12 +422,13 @@ type _NodeBuilder = Callable[[Any, _NodeBuildRequest], Node]
 class SlimDslNodeFactory:
     graph_config: Mapping[str, Any]
     init_params: InitParams
-    runtime_state: RuntimeState
+    runtime_state: RuntimeState | ReadOnlyRuntimeStateWrapper
     credentials: DslCredentials
     dependencies: list[DslDependency]
     slim_client_config: SlimClientConfig = field(init=False)
 
     def __post_init__(self) -> None:
+        self.runtime_state = self.runtime_state.read_only_view
         slim = self.credentials.slim
         self.slim_client_config = SlimClientConfig(
             folder=_resolve_plugin_folder(self.credentials),
@@ -444,7 +447,7 @@ class SlimDslNodeFactory:
 
     def with_runtime_state(
         self,
-        runtime_state: RuntimeState,
+        runtime_state: RuntimeState | ReadOnlyRuntimeStateWrapper,
     ) -> SlimDslNodeFactory:
         """Return a copied factory bound to one execution frame's state.
 
@@ -769,8 +772,7 @@ class SlimDslNodeFactory:
 
         """
         data = request.data_payload
-        version = str(data.get("version") or "")
-        if "items" in data or version == VariableAssignerNodeV2.version():
+        if resolve_node_version(data) == VariableAssignerNodeV2.version():
             return VariableAssignerNodeData.model_validate(data)
         if {
             "assigned_variable_selector",

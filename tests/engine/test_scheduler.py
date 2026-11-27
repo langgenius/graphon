@@ -1,11 +1,10 @@
 from collections.abc import Sequence
 from typing import cast
 
+from graphon.engine.frame_graph import Edge, FrameGraph
 from graphon.engine.scheduler import Scheduler
 from graphon.engine_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTakenEvent
 from graphon.enums import BuiltinNodeTypes, NodeExecutionType, NodeState
-from graphon.graph.edge import Edge
-from graphon.graph.graph import Graph
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.runtime.variable_pool import VariablePool
 
@@ -60,7 +59,7 @@ class _Graph:
 def _branch_scheduler() -> Scheduler:
     graph = _Graph()
     return Scheduler(
-        graph=cast(Graph, graph),
+        graph=cast(FrameGraph, graph),
         state=RuntimeState(
             workflow_id="workflow", variable_pool=VariablePool(), start_at=0
         ),

@@ -12,6 +12,7 @@ from graphon.runtime.container_state import (
     ContainerRunState,
     FrameRuntimeData,
 )
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.ready_queue import InMemoryReadyQueue, ReadyQueue, ReadyTask
 from graphon.runtime.variable_pool import VariablePool
 
@@ -104,6 +105,12 @@ class RuntimeState:  # ruff:ignore[too-many-public-methods]
         self._has_pending_graph_state = False
         self._graph_state_migration: GraphStateMigration | None = None
         self._container_state_lock = threading.Lock()
+        self._read_only_view = ReadOnlyRuntimeStateWrapper(self)
+
+    @property
+    def read_only_view(self) -> ReadOnlyRuntimeStateWrapper:
+        """The live read-only view shared by this frame's nodes."""
+        return self._read_only_view
 
     @property
     def variable_pool(self) -> VariablePool:

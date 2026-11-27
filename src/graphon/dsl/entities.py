@@ -6,6 +6,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from graphon.graph import Graph
+
+from .graph import read_graph
+
 
 class DslKind(StrEnum):
     APP = auto()
@@ -46,6 +50,14 @@ class DslDocument(BaseModel):
     kind: DslKind
     graph_config: Mapping[str, Any] | None = None
     runtime_variables: DslRuntimeVariables = Field(default_factory=DslRuntimeVariables)
+
+    @property
+    def graph(self) -> Graph | None:
+        """Build an immutable snapshot of the document's current graph configuration."""
+        if self.graph_config is None:
+            return None
+        graph, _ = read_graph(self.graph_config)
+        return graph
 
 
 class DslDependency(BaseModel):

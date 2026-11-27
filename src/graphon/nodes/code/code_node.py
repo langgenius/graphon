@@ -12,6 +12,7 @@ from graphon.nodes.code.entities import CodeLanguage, CodeNodeData
 from graphon.nodes.code.limits import CodeNodeLimits
 from graphon.nodes.code.protocols import CodeExecutorProtocol
 from graphon.runtime.init_params import InitParams
+from graphon.runtime.read_only_wrappers import ReadOnlyRuntimeStateWrapper
 from graphon.runtime.runtime_state import RuntimeState
 from graphon.variables.segments import ArrayFileSegment
 from graphon.variables.types import SegmentType
@@ -73,7 +74,7 @@ class CodeNode(Node[CodeNodeData]):
         data: CodeNodeData,
         *,
         init_params: InitParams,
-        runtime_state: RuntimeState,
+        runtime_state: RuntimeState | ReadOnlyRuntimeStateWrapper,
         code_executor: CodeExecutorProtocol,
         code_limits: CodeNodeLimits,
     ) -> None:

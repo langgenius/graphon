@@ -7,14 +7,13 @@ from typing import Any, Literal, override
 
 import pytest
 
-from graphon.engine import Engine
+from graphon.engine import Engine, FrameGraph
 from graphon.engine.frame import ExecutionFrame, FrameRegistry
 from graphon.engine_events.base import NodeEvent
 from graphon.engine_events.node import NodeRunFailedEvent, NodeRunVariableUpdatedEvent
 from graphon.entities.base_node_data import BaseNodeData
 from graphon.entities.graph_config import NodeConfigDict, NodeConfigDictAdapter
 from graphon.enums import NodeExecutionType, WorkflowNodeExecutionStatus
-from graphon.graph import Graph
 from graphon.node_events.base import NodeRunResult
 from graphon.node_events.node import StreamCompletedEvent
 from graphon.nodes.base.node import Node
@@ -31,12 +30,18 @@ from graphon.nodes.iteration.iteration_node import IterationNode
 from graphon.nodes.iteration.iteration_start_node import IterationStartNode
 from graphon.nodes.start.start_node import StartNode
 from graphon.nodes.variable_assigner.v2.node import VariableAssignerNode
-from graphon.runtime import InitParams, RuntimeState, VariablePool
+from graphon.runtime import (
+    InitParams,
+    ReadOnlyRuntimeStateWrapper,
+    RuntimeState,
+    VariablePool,
+)
 from graphon.runtime.container_state import (
     ContainerFrameState,
     CustomContainerFrameState,
 )
 from graphon.runtime.ready_queue import ResumeTask
+from tests.helpers.frame_graph import build_linear_frame_graph
 from tests.helpers.workflow_events import final_outputs
 
 
@@ -80,11 +85,13 @@ class _WaitNode(Node[BaseNodeData]):
 
 @dataclass(frozen=True)
 class _NodeFactory:
-    state: RuntimeState
+    state: ReadOnlyRuntimeStateWrapper
     signals: Mapping[str, Event]
     graph_config: Mapping[str, Any] = field(default_factory=dict)
 
-    def with_runtime_state(self, runtime_state: RuntimeState) -> _NodeFactory:
+    def with_runtime_state(
+        self, runtime_state: ReadOnlyRuntimeStateWrapper
+    ) -> _NodeFactory:
         return replace(self, state=runtime_state)
 
     def with_graph_config(self, graph_config: Mapping[str, Any]) -> _NodeFactory:
@@ -252,9 +259,9 @@ class _WorkflowHandler:
                 "edges": [_build_edge_config("start", self.sibling_node_id)],
             }
         )
-        graph = Graph.init(
+        graph = FrameGraph.init(
             graph_config=graph_config,
-            node_factory=_NodeFactory(state, self.signals),
+            node_factory=_NodeFactory(state.read_only_view, self.signals),
             root_node_id="start",
         )
         frame = self.frames.create(
@@ -321,7 +328,7 @@ class _WorkflowHandler:
 
 def _run_workflow(
     *,
-    root_graph_kind: Literal["builder", "config"] = "config",
+    root_graph_source: Literal["nodes", "config"] = "config",
     root_node_id: str = "source",
     inherit_pool: bool = False,
     serialize_pool: bool = False,
@@ -358,15 +365,15 @@ def _run_workflow(
             _build_edge_config(root_node_id, "sibling-tool"),
             _build_edge_config("sibling-tool", "end"),
         ])
-    factory = _NodeFactory(state, signals)
-    if root_graph_kind == "builder":
+    factory = _NodeFactory(state.read_only_view, signals)
+    if root_graph_source == "nodes":
         start, tool, end = [
             factory.create_node(NodeConfigDictAdapter.validate_python(node_config))
             for node_config in node_configs
         ]
-        graph = Graph.new().add_root(start).add_node(tool).add_node(end).build()
+        graph = build_linear_frame_graph(start, tool, end)
     else:
-        graph = Graph.init(
+        graph = FrameGraph.init(
             graph_config={"nodes": node_configs, "edges": edge_configs},
             node_factory=factory,
             root_node_id=root_node_id,
@@ -393,13 +400,13 @@ def _run_workflow(
     return outputs
 
 
-@pytest.mark.parametrize("root_graph_kind", ["builder", "config"])
+@pytest.mark.parametrize("root_graph_source", ["nodes", "config"])
 @pytest.mark.parametrize("serialize_pool", [False, True])
 def test_iteration_preserves_inherited_node_variables(
-    root_graph_kind: Literal["builder", "config"], serialize_pool: bool
+    root_graph_source: Literal["nodes", "config"], serialize_pool: bool
 ) -> None:
     outputs = _run_workflow(
-        root_graph_kind=root_graph_kind,
+        root_graph_source=root_graph_source,
         root_node_id="session",
         inherit_pool=True,
         serialize_pool=serialize_pool,

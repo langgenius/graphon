@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from graphon.file import file_manager
 from graphon.file.enums import FileAttribute
 from graphon.file.models import File
+from graphon.variables.address import VariableAddress
 from graphon.variables.consts import SELECTORS_LENGTH
 from graphon.variables.factory import (
     build_segment,
@@ -35,14 +36,7 @@ class VariablePool(BaseModel):
     # Node namespaces retain their ownership across pool copies and snapshots.
     node_ids: frozenset[str] = Field(default_factory=frozenset)
 
-    # Variable dictionary is a dictionary for looking up variables by their selector.
-    # The first element of the selector is the node id.
-    # It's the first-level key in the dictionary.
-    # Other elements of the selector are keys in the second-level dictionary.
-    # To get the key, we hash the elements of the selector except the first one.
-    #
-    # The `variable_dictionary` is the source of truth for the runtime
-    # value of variables.
+    # Stored variables are indexed by scope, then by name.
     variable_dictionary: defaultdict[
         str,
         Annotated[dict[str, Variable], Field(default_factory=dict)],
@@ -144,53 +138,10 @@ class VariablePool(BaseModel):
             self.add((self._RAG_PIPELINE_VARIABLE_NODE_ID, node_id), value)
 
     def add(self, selector: Sequence[str], value: Any, /) -> None:
-        """Add a variable to the variable pool.
-
-        This method accepts a selector path and a value, converting the value
-        to a Variable object if necessary before storing it in the pool.
-
-        Args:
-            selector: A two-element sequence containing [node_id, variable_name].
-                     The selector must have exactly 2 elements to be valid.
-            value: The value to store. Can be a Variable, Segment, or any value
-                  that can be converted to a Segment (str, int, float,
-                  dict, list, File).
-
-        Raises:
-            ValueError: If selector length is not exactly 2 elements.
-
-        Note:
-            While non-Segment values are currently accepted and automatically
-            converted, it's recommended to pass Segment or Variable objects directly.
-
-        """
-        if len(selector) != SELECTORS_LENGTH:
-            msg = (
-                f"Invalid selector: expected {SELECTORS_LENGTH} elements "
-                f"(node_id, variable_name), got {len(selector)} elements"
-            )
-            raise ValueError(msg)
-
-        match value:
-            case Segment():
-                variable = segment_to_variable(segment=value, selector=selector)
-            case _:
-                segment = build_segment(value)
-                variable = segment_to_variable(segment=segment, selector=selector)
-
-        node_id, name = self._selector_to_keys(selector)
-        self.variable_dictionary[node_id][name] = variable
-
-    @classmethod
-    def _selector_to_keys(cls, selector: Sequence[str]) -> tuple[str, str]:
-        return selector[0], selector[1]
-
-    def _has(self, selector: Sequence[str]) -> bool:
-        node_id, name = self._selector_to_keys(selector)
-        return (
-            node_id in self.variable_dictionary
-            and name in self.variable_dictionary[node_id]
-        )
+        """Bind a variable, segment or Python value at the address (scope, name)."""
+        address = VariableAddress.from_selector(selector)
+        variable = segment_to_variable(segment=build_segment(value), selector=address)
+        self.variable_dictionary[address.scope][address.name] = variable
 
     def get(self, selector: Sequence[str], /) -> Segment | None:
         """Retrieve a variable's value from the pool as a Segment.
@@ -211,12 +162,7 @@ class VariablePool(BaseModel):
             file attribute is requested.
 
         """
-        if len(selector) < SELECTORS_LENGTH:
-            return None
-
-        node_id, name = self._selector_to_keys(selector)
-        node_map = self.variable_dictionary.get(node_id)
-        segment = node_map.get(name) if node_map is not None else None
+        segment = self.get_variable(selector[:SELECTORS_LENGTH])
         if segment is None or len(selector) == SELECTORS_LENGTH:
             return segment
 
@@ -235,11 +181,11 @@ class VariablePool(BaseModel):
 
     def get_variable(self, selector: Sequence[str], /) -> Variable | None:
         """Retrieve a stored top-level variable without attribute traversal."""
-        if len(selector) != SELECTORS_LENGTH:
-            return None
-        node_id, name = self._selector_to_keys(selector)
-        node_map = self.variable_dictionary.get(node_id)
-        return node_map.get(name) if node_map is not None else None
+        match selector:
+            case [str(scope), str(name)]:
+                return self.variable_dictionary.get(scope, {}).get(name)
+            case _:
+                return None
 
     def _get_file_attribute_segment(
         self,
@@ -306,19 +252,13 @@ class VariablePool(BaseModel):
         return result
 
     def remove(self, selector: Sequence[str], /) -> None:
-        """Remove variables from the variable pool based on the given selector.
+        """Remove the single variable at this address, if present."""
+        scope, name = VariableAddress.from_selector(selector)
+        self.variable_dictionary.get(scope, {}).pop(name, None)
 
-        Args:
-            selector (Sequence[str]): A sequence of strings representing the selector.
-
-        """
-        if not selector:
-            return
-        if len(selector) == 1:
-            self.variable_dictionary[selector[0]] = {}
-            return
-        key, hash_key = self._selector_to_keys(selector)
-        self.variable_dictionary[key].pop(hash_key, None)
+    def clear_scope(self, scope: str, /) -> None:
+        """Remove all variables in this scope, retaining its node ownership."""
+        self.variable_dictionary.pop(scope, None)
 
     def get_file(self, selector: Sequence[str], /) -> FileSegment | None:
         segment = self.get(selector)

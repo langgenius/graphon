@@ -42,23 +42,29 @@ def source_directory(tmp_path: Path) -> Path:
 
 
 @pytest.mark.parametrize(
-    ("lower_package", "higher_package"),
-    [("file", "runtime"), ("runtime", "engine")],
+    ("importer", "imported"),
+    [
+        ("file", "runtime"),
+        ("runtime", "engine"),
+        ("graph", "graph_builder"),
+        ("dsl", "graph_builder"),
+        ("graph_builder", "dsl"),
+    ],
 )
-def test_layers_reject_upward_type_checking_imports(
-    source_directory: Path, lower_package: str, higher_package: str
+def test_layers_reject_disallowed_type_checking_imports(
+    source_directory: Path, importer: str, imported: str
 ) -> None:
-    module_path = source_directory / "graphon" / lower_package / "upward_import.py"
+    module_path = source_directory / "graphon" / importer / "disallowed_import.py"
     module_path.write_text(
         f"from typing import TYPE_CHECKING\n"
-        f"if TYPE_CHECKING:\n    import graphon.{higher_package}\n"
+        f"if TYPE_CHECKING:\n    import graphon.{imported}\n"
     )
 
     result = run_import_linter(source_directory)
 
     assert result.returncode == 1, result.stdout + result.stderr
-    assert f"graphon.{lower_package}.upward_import" in result.stdout
-    assert f"graphon.{higher_package}" in result.stdout
+    assert f"graphon.{importer}.disallowed_import" in result.stdout
+    assert f"graphon.{imported}" in result.stdout
 
 
 def test_new_top_level_modules_require_a_layer(source_directory: Path) -> None:

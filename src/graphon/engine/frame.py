@@ -6,13 +6,13 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Literal, final
 
+from graphon.engine.frame_graph import FrameGraph
 from graphon.engine_events.frame import (
     FrameFinishedEvent,
     FrameStartedEvent,
     FrameVariablesUpdatedEvent,
 )
 from graphon.entities.workflow_start_reason import WorkflowStartReason
-from graphon.graph.graph import Graph
 from graphon.runtime.container_state import CustomContainerFrameState, FrameRuntimeData
 from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.runtime_state import RuntimeState
@@ -27,7 +27,7 @@ from .scheduler import Scheduler
 @dataclass(frozen=True, slots=True)
 class ExecutionFrame:
     frame_id: str
-    graph: Graph
+    graph: FrameGraph
     state: RuntimeState
     scheduler: Scheduler
     failure_handler: NodeFailureHandler
@@ -242,7 +242,7 @@ class FrameRegistry:
         *,
         frame_id: str,
         container_id: str,
-        graph: Graph,
+        graph: FrameGraph,
         state: RuntimeState,
     ) -> ExecutionFrame:
         """Create and register a fully wired frame.
@@ -255,7 +255,7 @@ class FrameRegistry:
         Args:
             frame_id: Unique frame ID used by scheduled tasks.
             container_id: Direct owning container node ID; root uses ``""``.
-            graph: Graph structure executable by this frame.
+            graph: FrameGraph structure executable by this frame.
             state: Mutable runtime state owned by this graph execution.
 
         Returns:
@@ -370,11 +370,10 @@ class FrameRegistry:
         root_node_id: str,
         state: RuntimeState,
     ) -> ExecutionFrame:
-        """Build a scoped child graph around an already prepared state.
+        """Build the child frame's graph and bind its nodes to the child's state.
 
-        The parent's retained graph config and node factory are the only graph
-        construction inputs. Rebinding the factory prevents child nodes from
-        observing the parent's mutable runtime state.
+        For a shared Graph, resolve the body called by the container. For a
+        host-supplied graph config, build the body from the parent's subtree.
 
         Args:
             frame_id: Unique ID for the new child frame.
@@ -400,13 +399,25 @@ class FrameRegistry:
             msg = "Parent graph does not carry node_factory for frame creation."
             raise RuntimeError(msg)
 
-        rebound_factory = node_factory.with_runtime_state(state)
-        graph = Graph.init(
-            graph_config=graph_config,
-            node_factory=rebound_factory,
-            root_node_id=root_node_id,
-            container_id=container_id,
-        )
+        rebound_factory = node_factory.with_runtime_state(state.read_only_view)
+        if (
+            isinstance(parent_graph, FrameGraph)
+            and parent_graph.definition is not None
+            and parent_graph.frame_graph_factory is not None
+        ):
+            child = parent_graph.frame_graph_factory.resolve_call_target(
+                parent_graph.definition.node(container_id)
+            )
+            graph = parent_graph.frame_graph_factory.create(
+                child, rebound_factory, root_node_id, container_id
+            )
+        else:
+            graph = FrameGraph.init(
+                graph_config=graph_config,
+                node_factory=rebound_factory,
+                root_node_id=root_node_id,
+                container_id=container_id,
+            )
         state.variable_pool.node_ids |= self[
             parent_frame_id
         ].state.variable_pool.node_ids

@@ -6,6 +6,7 @@ import contextlib
 from datetime import UTC, datetime
 from typing import final
 
+from graphon.engine.frame_graph import FrameGraph
 from graphon.engine_events.base import NodeEvent
 from graphon.engine_events.node import (
     NodeRunFailedEvent,
@@ -107,6 +108,26 @@ class LoopContainerHandler:
             msg = f"loop handler cannot continue {run_state.kind} run"
             raise TypeError(msg)
         parent_frame = self._frame_registry[run_state.frame_id]
+        graph = parent_frame.graph
+        if (
+            isinstance(graph, FrameGraph)
+            and graph.definition is not None
+            and graph.frame_graph_factory is not None
+        ):
+            body = graph.frame_graph_factory.resolve_call_target(
+                graph.definition.node(run_state.node_id)
+            )
+            loop_node_ids = frozenset(
+                node_id
+                for scope, _ in graph.frame_graph_factory.walk_graphs(
+                    body, stop_at_node_type=BuiltinNodeTypes.LOOP
+                )
+                for node_id in scope.nodes
+            )
+            request = request.model_copy(update={"loop_node_ids": loop_node_ids})
+            run_state = run_state.model_copy(update={"loop_node_ids": loop_node_ids})
+            self._root_runtime_state().put_container_run(run_state)
+
         node = parent_frame.graph.nodes[run_state.node_id]
         if not isinstance(node, LoopNode):
             msg = f"node {run_state.node_id} cannot handle loop await requests"
@@ -343,7 +364,7 @@ class LoopContainerHandler:
             deep=True,
         )
         for node_id in request.loop_node_ids:
-            variable_pool.remove([node_id])
+            variable_pool.clear_scope(node_id)
         # The parent pool is authoritative: loop assignments are written back as
         # events, and external commands may update it between completed rounds.
         # ``run_state.outputs`` is only a reporting snapshot of the prior round.
