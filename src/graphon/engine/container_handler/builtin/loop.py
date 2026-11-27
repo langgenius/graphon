@@ -364,7 +364,7 @@ class LoopContainerHandler:
             deep=True,
         )
         for node_id in request.loop_node_ids:
-            variable_pool.remove([node_id])
+            variable_pool.clear_scope(node_id)
         # The parent pool is authoritative: loop assignments are written back as
         # events, and external commands may update it between completed rounds.
         # ``run_state.outputs`` is only a reporting snapshot of the prior round.

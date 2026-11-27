@@ -1,5 +1,5 @@
 <!-- knowledge
-last_checked: "2026-11-26T03:21:10Z"
+last_checked: "2026-11-27T06:38:54Z"
 -->
 # Architecture
 
@@ -233,6 +233,13 @@ boundary between a graph and a run.
 [Variable pools](src/graphon/runtime/variable_pool.py) preserve node ownership through copies and serialization for both configured graphs and frames built from host-supplied nodes.
 Iteration writes host variables already present in the parent pool back to that parent, while keeping inherited node variables private to each round.
 Each Graph execution with a fresh pool tracks its own variables, even when ancestor or sibling Graphs reuse node IDs.
+
+A stored variable has a two-string address `(scope, name)`. `VariablePool.add()`
+and `remove()` require this pair. Reads can follow a longer path to an object
+field or a file attribute, as in `pool.get(("start", "profile", "name"))`.
+`pool.clear_scope("start")` removes every variable in that scope and preserves
+its node ownership. See the [address definition](src/graphon/variables/address.py)
+and [variable pool tests](tests/runtime/test_variable_pool.py).
 
 The executable contracts below are authoritative for validation, lifecycle, and
 compatibility details:

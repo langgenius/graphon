@@ -1,3 +1,4 @@
+from .address import VariableAddress
 from .factory import (
     TypeMismatchError,
     UnsupportedSegmentTypeError,
@@ -76,6 +77,7 @@ __all__ = [
     "TypeMismatchError",
     "UnsupportedSegmentTypeError",
     "Variable",
+    "VariableAddress",
     "VariableBase",
     "VariableEntity",
     "VariableEntityType",
