@@ -87,13 +87,13 @@ public surface.
   still emits the deprecated `HitlRequired` reason. See
   [human-input tests](../tests/nodes/human_input/) for the event contract.
 - For new integrations, yield `PauseRequestedEvent` with
-  [`ExternalWait`](../src/graphon/entities/pause_reason.py), the general-purpose
+  [`Wait`](../src/graphon/entities/pause_reason.py), the general-purpose
   pause reason for waits such as human input or an external service result. It requires
   a `wait_type` of one or more dot-separated ASCII identifiers and an opaque
   `wait_id` string whose meaning the host defines. Reserve `dify.*` for upstream
   Dify producers. Include `node_id` and `node_title` to identify the node in the
   graph, and `node_execution_id` and `frame_id` to identify the execution that
-  requested the pause. See the [round-trip tests](../tests/runtime/test_external_wait.py).
+  requested the pause. See the [round-trip tests](../tests/runtime/test_wait.py).
 
 ## Validate the behavior you changed
 

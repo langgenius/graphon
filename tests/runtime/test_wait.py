@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 from graphon.engine_events.graph import GraphRunPausedEvent
 from graphon.engine_events.node import NodeRunPauseRequestedEvent
-from graphon.entities.pause_reason import ExternalWait
+from graphon.entities.pause_reason import Wait
 from graphon.node_events.node import PauseRequestedEvent
 from graphon.runtime import RuntimeState, VariablePool
 
@@ -13,7 +13,7 @@ from graphon.runtime import RuntimeState, VariablePool
 @pytest.fixture
 def reason_payload() -> dict[str, str]:
     return {
-        "TYPE": "external_wait",
+        "TYPE": "wait",
         "wait_type": "dify.hitl",
         "wait_id": "form-1",
         "node_id": "worker",
@@ -33,17 +33,17 @@ def reason_payload() -> dict[str, str]:
         ("_owner.Custom_2", "job:2"),
     ],
 )
-def test_external_wait_preserves_opaque_id(
+def test_wait_preserves_opaque_id(
     reason_payload: dict[str, str], wait_type: str, wait_id: str
 ) -> None:
     reason_payload.update(wait_type=wait_type, wait_id=wait_id)
     pause_request = PauseRequestedEvent.model_validate({"reason": reason_payload})
 
-    assert isinstance(pause_request.reason, ExternalWait)
+    assert isinstance(pause_request.reason, Wait)
     assert pause_request.reason.model_dump(mode="json") == reason_payload
 
 
-def test_external_wait_reads_events_with_unknown_fields(
+def test_wait_reads_events_with_unknown_fields(
     reason_payload: dict[str, str],
 ) -> None:
     event = PauseRequestedEvent.model_validate({
@@ -65,7 +65,7 @@ def test_external_wait_reads_events_with_unknown_fields(
         "dify.hitl\n",
     ],
 )
-def test_external_wait_type_requires_dot_separated_ascii_identifiers(
+def test_wait_type_requires_dot_separated_ascii_identifiers(
     reason_payload: dict[str, str], wait_type: str
 ) -> None:
     reason_payload["wait_type"] = wait_type
@@ -79,9 +79,7 @@ def test_external_wait_type_requires_dot_separated_ascii_identifiers(
     "field_name",
     ["wait_type", "wait_id", "node_id", "node_title", "node_execution_id", "frame_id"],
 )
-def test_external_wait_requires_field(
-    reason_payload: dict[str, str], field_name: str
-) -> None:
+def test_wait_requires_field(reason_payload: dict[str, str], field_name: str) -> None:
     del reason_payload[field_name]
 
     with pytest.raises(ValidationError) as error:
@@ -94,7 +92,7 @@ def test_external_wait_requires_field(
 
 
 @pytest.mark.parametrize("field_name", ["node_id", "node_execution_id", "frame_id"])
-def test_external_wait_rejects_empty_identity(
+def test_wait_rejects_empty_identity(
     reason_payload: dict[str, str], field_name: str
 ) -> None:
     reason_payload[field_name] = ""
@@ -107,7 +105,7 @@ def test_external_wait_rejects_empty_identity(
     )
 
 
-def test_external_wait_round_trips_in_pause_events_and_runtime_snapshot() -> None:
+def test_wait_round_trips_in_pause_events_and_runtime_snapshot() -> None:
     state = RuntimeState(
         workflow_id="workflow", variable_pool=VariablePool(), start_at=0
     )
@@ -119,7 +117,7 @@ def test_external_wait_round_trips_in_pause_events_and_runtime_snapshot() -> Non
             frame_id=frame_id, node_id="worker"
         )
         reason_payload = {
-            "TYPE": "external_wait",
+            "TYPE": "wait",
             "wait_type": wait_type,
             "wait_id": "opaque: / 等待",
             "node_id": "worker",

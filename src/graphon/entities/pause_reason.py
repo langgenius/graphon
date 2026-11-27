@@ -15,10 +15,10 @@ class PauseReasonType(StrEnum):
 
     HITL_REQUIRED = auto()
     SCHEDULED_PAUSE = auto()
-    EXTERNAL_WAIT = auto()
+    WAIT = auto()
 
 
-@deprecated("Use ExternalWait for new pause reasons.", category=None)
+@deprecated("Use Wait for new pause reasons.", category=None)
 class HitlRequired(BaseModel):
     """Deprecated human-input pause reason emitted by the built-in Human Input node."""
 
@@ -36,7 +36,7 @@ class SchedulingPause(BaseModel):
     message: str
 
 
-class ExternalWait(BaseModel):
+class Wait(BaseModel):
     """General-purpose pause reason for a node awaiting a host-managed result.
 
     Nodes can use this reason to wait for human input or an external service.
@@ -46,7 +46,7 @@ class ExternalWait(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    TYPE: Literal[PauseReasonType.EXTERNAL_WAIT] = PauseReasonType.EXTERNAL_WAIT
+    TYPE: Literal[PauseReasonType.WAIT] = PauseReasonType.WAIT
     # Hosts use this type to interpret wait_id. The dify.* namespace is
     # reserved for wait types defined by upstream Dify.
     # PEG grammar for wait_type:
@@ -107,7 +107,7 @@ def _decode_pause_reason(value: object) -> object:
 
 
 type PauseReason = Annotated[
-    HitlRequired | SchedulingPause | ExternalWait,  # ty: ignore[deprecated]
+    HitlRequired | SchedulingPause | Wait,  # ty: ignore[deprecated]
     Field(discriminator="TYPE"),
     BeforeValidator(_decode_pause_reason),
 ]
