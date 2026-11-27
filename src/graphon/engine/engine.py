@@ -237,7 +237,22 @@ class Engine:
                     error = None
         finally:
             with use_workflow_file_runtime(self._file_runtime):
+                self._abort_if_unfinished()
                 events.close()
+
+    def _abort_if_unfinished(self) -> None:
+        """Mark a run the consumer abandoned as aborted rather than finished.
+
+        `GeneratorExit` is not an `Exception`, so closing the generator skips
+        the failure path and the execution would look like a normal end. A
+        paused run is left alone: it is resumable.
+        """
+        execution = self._graph_execution
+        if execution.completed or execution.paused or execution.aborted:
+            return
+        execution.abort(
+            "Engine.run() was closed before the graph reached a terminal state",
+        )
 
     def _run(self) -> Generator[EngineEvent, None, None]:
         try:
