@@ -73,3 +73,22 @@ def test_parse_and_check_json_markdown_requires_expected_keys() -> None:
             """,
             ["present", "missing"],
         )
+
+def test_parse_json_markdown_ignores_a_backtick_after_the_payload() -> None:
+    assert parse_json_markdown('{"a": 1} and `code`') == {"a": 1}
+
+
+def test_parse_json_markdown_ignores_a_lone_backtick_after_the_payload() -> None:
+    assert parse_json_markdown('{"a": 1} then a lone ` backtick') == {"a": 1}
+
+
+def test_parse_json_markdown_ignores_an_inline_code_span_before_the_payload() -> None:
+    assert parse_json_markdown('Use `code` then {"a": 1}') == {"a": 1}
+
+
+def test_parse_json_markdown_returns_the_first_of_two_payloads() -> None:
+    assert parse_json_markdown('{"a": 1} then {"b": 2}') == {"a": 1}
+
+
+def test_parse_json_markdown_keeps_braces_inside_strings() -> None:
+    assert parse_json_markdown('{"a": "```"}') == {"a": "```"}
