@@ -42,10 +42,21 @@ class ExternalWait(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     TYPE: Literal[PauseReasonType.EXTERNAL_WAIT] = PauseReasonType.EXTERNAL_WAIT
+    # Hosts use this type to interpret wait_id. The dify.* namespace is
+    # reserved for wait types defined by upstream Dify.
     wait_type: str = Field(
         pattern=r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$"
     )
+    # Opaque identifier of the work the host is waiting for.
     wait_id: str
+    # ID of the node in the graph definition, shared across its executions.
+    node_id: str = Field(min_length=1)
+    # Display title of the node at the time it requested the pause.
+    node_title: str
+    # ID of the specific node execution that requested the pause.
+    node_execution_id: str = Field(min_length=1)
+    # ID of the execution frame containing that node execution.
+    frame_id: str = Field(min_length=1)
 
 
 class _LegacyHumanInputRequired(BaseModel):

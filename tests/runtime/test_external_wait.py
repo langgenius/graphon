@@ -10,6 +10,19 @@ from graphon.node_events.node import PauseRequestedEvent
 from graphon.runtime import RuntimeState, VariablePool
 
 
+@pytest.fixture
+def reason_payload() -> dict[str, str]:
+    return {
+        "TYPE": "external_wait",
+        "wait_type": "dify.hitl",
+        "wait_id": "form-1",
+        "node_id": "worker",
+        "node_title": "",
+        "node_execution_id": "execution-1",
+        "frame_id": "root",
+    }
+
+
 @pytest.mark.parametrize(
     ("wait_type", "wait_id"),
     [
@@ -20,12 +33,10 @@ from graphon.runtime import RuntimeState, VariablePool
         ("_owner.Custom_2", "job:2"),
     ],
 )
-def test_external_wait_preserves_opaque_id(wait_type: str, wait_id: str) -> None:
-    reason_payload = {
-        "TYPE": "external_wait",
-        "wait_type": wait_type,
-        "wait_id": wait_id,
-    }
+def test_external_wait_preserves_opaque_id(
+    reason_payload: dict[str, str], wait_type: str, wait_id: str
+) -> None:
+    reason_payload.update(wait_type=wait_type, wait_id=wait_id)
     pause_request = PauseRequestedEvent.model_validate({"reason": reason_payload})
 
     assert isinstance(pause_request.reason, ExternalWait)
@@ -46,27 +57,22 @@ def test_external_wait_preserves_opaque_id(wait_type: str, wait_id: str) -> None
     ],
 )
 def test_external_wait_type_requires_dot_separated_ascii_identifiers(
-    wait_type: str,
+    reason_payload: dict[str, str], wait_type: str
 ) -> None:
+    reason_payload["wait_type"] = wait_type
     with pytest.raises(ValidationError) as error:
-        PauseRequestedEvent.model_validate({
-            "reason": {
-                "TYPE": "external_wait",
-                "wait_type": wait_type,
-                "wait_id": "id",
-            },
-        })
+        PauseRequestedEvent.model_validate({"reason": reason_payload})
 
     assert {issue["loc"][-1] for issue in error.value.errors()} == {"wait_type"}
 
 
-@pytest.mark.parametrize("field_name", ["wait_type", "wait_id"])
-def test_external_wait_requires_wait_type_and_wait_id(field_name: str) -> None:
-    reason_payload = {
-        "TYPE": "external_wait",
-        "wait_type": "dify.hitl",
-        "wait_id": "id",
-    }
+@pytest.mark.parametrize(
+    "field_name",
+    ["wait_type", "wait_id", "node_id", "node_title", "node_execution_id", "frame_id"],
+)
+def test_external_wait_requires_field(
+    reason_payload: dict[str, str], field_name: str
+) -> None:
     del reason_payload[field_name]
 
     with pytest.raises(ValidationError) as error:
@@ -78,19 +84,16 @@ def test_external_wait_requires_wait_type_and_wait_id(field_name: str) -> None:
     )
 
 
-def test_external_wait_rejects_frame_id() -> None:
+@pytest.mark.parametrize("field_name", ["node_id", "node_execution_id", "frame_id"])
+def test_external_wait_rejects_empty_identity(
+    reason_payload: dict[str, str], field_name: str
+) -> None:
+    reason_payload[field_name] = ""
     with pytest.raises(ValidationError) as error:
-        PauseRequestedEvent.model_validate({
-            "reason": {
-                "TYPE": "external_wait",
-                "wait_type": "dify.hitl",
-                "wait_id": "id",
-                "frame_id": "root",
-            },
-        })
+        PauseRequestedEvent.model_validate({"reason": reason_payload})
 
     assert any(
-        issue["loc"][-1] == "frame_id" and issue["type"] == "extra_forbidden"
+        issue["loc"][-1] == field_name and issue["type"] == "string_too_short"
         for issue in error.value.errors()
     )
 
@@ -110,6 +113,10 @@ def test_external_wait_round_trips_in_pause_events_and_runtime_snapshot() -> Non
             "TYPE": "external_wait",
             "wait_type": wait_type,
             "wait_id": "opaque: / 等待",
+            "node_id": "worker",
+            "node_title": "Worker",
+            "node_execution_id": execution.execution_id,
+            "frame_id": frame_id,
         }
         pause_request = PauseRequestedEvent.model_validate({"reason": reason_payload})
         node_pause = NodeRunPauseRequestedEvent(

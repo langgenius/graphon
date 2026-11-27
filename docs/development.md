@@ -89,8 +89,9 @@ public surface.
   [`ExternalWait`](../src/graphon/entities/pause_reason.py). The reason requires
   a `wait_type` of one or more dot-separated ASCII identifiers and an opaque
   `wait_id` string whose meaning the host defines. Reserve `dify.*` for upstream
-  Dify producers. `NodeRunPauseRequestedEvent` and runtime state carry execution
-  identity. See the [round-trip tests](../tests/runtime/test_external_wait.py).
+  Dify producers. Include `node_id` and `node_title` to identify the node in the
+  graph, and `node_execution_id` and `frame_id` to identify the execution that
+  requested the pause. See the [round-trip tests](../tests/runtime/test_external_wait.py).
 
 ## Validate the behavior you changed
 
