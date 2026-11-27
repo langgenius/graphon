@@ -2,6 +2,7 @@ from enum import StrEnum, auto
 from typing import Annotated, Literal, cast
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from typing_extensions import deprecated
 
 
 class PauseReasonType(StrEnum):
@@ -17,8 +18,11 @@ class PauseReasonType(StrEnum):
     EXTERNAL_WAIT = auto()
 
 
+@deprecated("Use ExternalWait for new human-input integrations.", category=None)
 class HitlRequired(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    """Deprecated human-input pause reason emitted by the built-in Human Input node."""
+
+    model_config = ConfigDict(extra="forbid", json_schema_extra={"deprecated": True})
 
     TYPE: Literal[PauseReasonType.HITL_REQUIRED] = PauseReasonType.HITL_REQUIRED
     session_id: str
@@ -33,10 +37,11 @@ class SchedulingPause(BaseModel):
 
 
 class ExternalWait(BaseModel):
-    """Identify a wait managed by the host.
+    """General-purpose pause reason for a node awaiting a host-managed result.
 
+    Nodes can use this reason to wait for human input or an external service.
     The host defines the meaning of ``wait_id`` for each ``wait_type`` and
-    resumes the waiting execution when it is ready.
+    resumes the waiting execution when the result is ready.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -99,7 +104,7 @@ def _decode_pause_reason(value: object) -> object:
 
 
 type PauseReason = Annotated[
-    HitlRequired | SchedulingPause | ExternalWait,
+    HitlRequired | SchedulingPause | ExternalWait,  # ty: ignore[deprecated]
     Field(discriminator="TYPE"),
     BeforeValidator(_decode_pause_reason),
 ]

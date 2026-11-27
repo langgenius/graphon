@@ -7,7 +7,7 @@ from typing import cast
 import pytest
 
 from graphon.engine_events.node import NodeRunPauseRequestedEvent, NodeRunSucceededEvent
-from graphon.entities.pause_reason import HitlRequired
+from graphon.entities.pause_reason import HitlRequired  # ty: ignore[deprecated]
 from graphon.nodes.human_input.entities import (
     Completed,
     Expired,
@@ -70,7 +70,7 @@ def test_human_input_pause_uses_callback_context_and_minimal_pause_reason() -> N
             variable_pool=captured_contexts[0].variable_pool,
         )
     ]
-    assert paused.reason == HitlRequired(
+    assert paused.reason == HitlRequired(  # ty: ignore[deprecated]
         session_id="session-1",
         node_id="human-node",
         node_title="Collect Input",

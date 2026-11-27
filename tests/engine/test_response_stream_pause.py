@@ -31,7 +31,7 @@ from graphon.engine_events.node import (
     NodeRunStreamChunkEvent,
     NodeRunSucceededEvent,
 )
-from graphon.entities.pause_reason import HitlRequired, SchedulingPause
+from graphon.entities.pause_reason import HitlRequired, SchedulingPause  # ty: ignore[deprecated]
 from graphon.entities.workflow_start_reason import WorkflowStartReason
 from graphon.nodes.human_input.entities import (
     Completed,
@@ -200,7 +200,7 @@ def test_hitl_snapshots_resume_stream_without_replaying_prefix(
 ) -> None:
     saved = checkpoints.first if paused_at == "first" else checkpoints.second
     assert saved.pause.reasons == [
-        HitlRequired(
+        HitlRequired(  # ty: ignore[deprecated]
             session_id=f"session-{paused_at}",
             node_id=paused_at,
             node_title=f"{paused_at.title()} approval",

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Generator, Mapping, Sequence
 from typing import Any, override
 
-from graphon.entities.pause_reason import HitlRequired
+from graphon.entities.pause_reason import HitlRequired  # ty: ignore[deprecated]
 from graphon.enums import (
     BuiltinNodeTypes,
     NodeExecutionType,
@@ -72,7 +72,7 @@ class HumanInputNode(Node[HumanInputNodeData]):
         match decision:
             case PauseRequested(session_id=session_id):
                 yield PauseRequestedEvent(
-                    reason=HitlRequired(
+                    reason=HitlRequired(  # ty: ignore[deprecated]
                         session_id=session_id,
                         node_id=self.id,
                         node_title=self.title,
