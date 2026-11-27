@@ -34,6 +34,9 @@ class _NodeDefinition:
     id: str
     node_type: NodeType
     execution_type: NodeExecutionType
+    # Mirrors ``Node.promoted_to_branch``: FAIL_BRANCH promoted this node only,
+    # so its normal-path output still streams while it runs.
+    promoted_to_branch: bool = False
     template: Template = field(default_factory=lambda: Template(segments=[]))
     write_selectors: set[Selector] = field(default_factory=set)
     state: NodeState = NodeState.UNKNOWN
@@ -107,9 +110,16 @@ def _build_node_definition(node_id: str, data: Mapping[str, Any]) -> _NodeDefini
     execution_type = (
         node_class.execution_type if node_class else NodeExecutionType.BRANCH
     )
+    promoted_to_branch = False
     if data.get("error_strategy") == ErrorStrategy.FAIL_BRANCH:
+        promoted_to_branch = execution_type is not NodeExecutionType.BRANCH
         execution_type = NodeExecutionType.BRANCH
-    node = _NodeDefinition(node_id, node_type, execution_type)
+    node = _NodeDefinition(
+        node_id,
+        node_type,
+        execution_type,
+        promoted_to_branch=promoted_to_branch,
+    )
     if node_type == BuiltinNodeTypes.ANSWER:
         node.template = Template.from_answer_template(
             AnswerNodeData.model_validate(data).answer

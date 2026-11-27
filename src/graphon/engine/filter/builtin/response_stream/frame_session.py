@@ -22,7 +22,7 @@ from graphon.engine_events.node import (
 )
 from graphon.engine_events.traversal import GraphEdgeSkippedEvent, GraphEdgeTakenEvent
 from graphon.entities.workflow_start_reason import WorkflowStartReason
-from graphon.enums import BuiltinNodeTypes, NodeExecutionType
+from graphon.enums import BuiltinNodeTypes, FailBranchSourceHandle, NodeExecutionType
 from graphon.nodes.base.template import VariableSegment
 from graphon.runtime.execution import ROOT_FRAME_ID
 from graphon.runtime.runtime_state import GraphProtocol
@@ -158,7 +158,13 @@ class _FrameSession:
                 return self._handle_edge_taken(EdgeID(event.edge_id))
             case GraphEdgeSkippedEvent():
                 return self._handle_edge_skipped(event)
-            case NodeRunSucceededEvent() | NodeRunExceptionEvent():
+            case NodeRunExceptionEvent():
+                abandoned = self._abandon_sessions_for_failed_node(
+                    NodeID(event.node_id)
+                )
+                self._template_stream.finish_source(event)
+                return [*abandoned, *self._try_flush(), event]
+            case NodeRunSucceededEvent():
                 self._template_stream.finish_source(event)
                 return [*self._try_flush(), event]
         return [event]
@@ -425,6 +431,17 @@ class _FrameSession:
     ) -> bool:
         edge = self.graph.edges[edge_id]
         source_node = self.graph.nodes[edge.tail]
+        if (
+            source_node.promoted_to_branch
+            and edge.source_handle != FailBranchSourceHandle.FAILED
+        ):
+            # A node promoted to BRANCH only because its FAIL_BRANCH error
+            # strategy reroutes failures still streams its normal-path output
+            # while it runs. Blocking it until completion would hold every
+            # chunk back and burst-deliver them at the end of the node run
+            # (dify#43938). Only the fail-branch edge stays blocking: it
+            # resolves when the node actually fails.
+            return False
         return source_node.execution_type in frozenset((
             NodeExecutionType.BRANCH,
             NodeExecutionType.CONTAINER,
@@ -573,6 +590,15 @@ class _FrameSession:
         if not self._active_session or self._active_session.node_id != node_id:
             return
 
+        self._close_active_session()
+        if self._waiting_sessions:
+            self._active_session = self._waiting_sessions.popleft()
+            self._try_flush()
+
+    def _close_active_session(self) -> None:
+        if self._active_session is None:
+            return
+        node_id = NodeID(self._active_session.node_id)
         reply = self._replies[node_id]
         reply.events.extend(
             self._template_stream.finish_response(
@@ -585,9 +611,51 @@ class _FrameSession:
         else:
             self._completed_sessions[node_id] = self._active_session
         self._active_session = None
+
+    def _abandon_sessions_for_failed_node(self, node_id: NodeID) -> list[EngineEvent]:
+        """Drop sessions whose source node failed before finishing its output.
+
+        Only promoted fail-branch nodes apply: their normal-path sessions start
+        before the node completes (see ``_is_blocking_edge``), and a failure
+        abandons that path, so those sessions must stop waiting and free the
+        active slot for the fail-branch session. Sessions of other nodes keep
+        today's behavior.
+
+        Args:
+            node_id: ID of the node whose run raised.
+
+        Returns:
+            Events produced while releasing the active session.
+
+        """
+        source_node = self.graph.nodes.get(node_id)
+        if source_node is None or not source_node.promoted_to_branch:
+            return []
+
+        abandoned_active = False
+        if self._active_session is not None and self._session_references_node(
+            self._active_session, node_id
+        ):
+            self._close_active_session()
+            abandoned_active = True
+
+        self._waiting_sessions = deque(
+            session
+            for session in self._waiting_sessions
+            if not self._session_references_node(session, node_id)
+        )
+        if not abandoned_active:
+            return []
         if self._waiting_sessions:
             self._active_session = self._waiting_sessions.popleft()
-            self._try_flush()
+        return self._try_flush()
+
+    @staticmethod
+    def _session_references_node(session: _ResponseSession, node_id: NodeID) -> bool:
+        return any(
+            isinstance(segment, VariableSegment) and segment.selector[:1] == [node_id]
+            for segment in session.template.segments
+        )
 
     def _release_displayed_sessions(self) -> None:
         for node_id in list(self._completed_sessions):
