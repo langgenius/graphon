@@ -119,8 +119,12 @@ class TestEncoders:
         assert jsonable_encoder(MockEnum.A) == "a"
 
     def test_jsonable_encoder_path(self) -> None:
-        assert jsonable_encoder(Path("/example/test")) == "/example/test"
-        assert jsonable_encoder(PurePath("/example/test")) == "/example/test"
+        # The encoder maps `Path` to `str`, so the separator is the platform's.
+        expected = str(Path("/example/test"))
+        assert jsonable_encoder(Path("/example/test")) == expected
+        assert jsonable_encoder(PurePath("/example/test")) == str(
+            PurePath("/example/test")
+        )
 
     def test_jsonable_encoder_decimal(self) -> None:
         assert jsonable_encoder(Decimal("1.23")) == "1.23"
