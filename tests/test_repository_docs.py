@@ -34,14 +34,18 @@ def check_document_reviews(root: Path, now: datetime) -> None:
     reviews: list[tuple[datetime, Path]] = []
     for document in sorted(documents):
         path = document.relative_to(root)
+        # Messages read as repository paths, which the assertions and CI on POSIX
+        # assume: `relative_to` alone renders `docs\guide.md` on Windows. The recorded
+        # review keeps the `Path`, so this is only what a message prints.
+        shown = path.as_posix()
         header = re.match(
             r"\A<!-- knowledge\n(.*?)\n-->(?:\n|$)",
             document.read_text(encoding="utf-8"),
             re.DOTALL,
         )
-        assert header, f"{path}: missing leading knowledge metadata with last_checked"
+        assert header, f"{shown}: missing leading knowledge metadata with last_checked"
         error = (
-            f"{path}: last_checked must be a UTC timestamp string: "
+            f"{shown}: last_checked must be a UTC timestamp string: "
             '"YYYY-MM-DDTHH:MM:SSZ"'
         )
         try:
@@ -58,13 +62,15 @@ def check_document_reviews(root: Path, now: datetime) -> None:
             checked_at = datetime.fromisoformat(timestamp)
         except ValueError as exc:
             raise AssertionError(error) from exc
-        assert checked_at <= now, f"{path}: last_checked {timestamp} is in the future"
+        assert checked_at <= now, f"{shown}: last_checked {timestamp} is in the future"
         reviews.append((checked_at, path))
 
     assert reviews, "No knowledge documents found"
     checked_at, oldest_document = min(reviews)
+    oldest_shown = oldest_document.as_posix()
+    checked_shown = checked_at.strftime("%Y-%m-%dT%H:%M:%SZ")
     assert now - checked_at <= timedelta(days=7), (
-        f"{oldest_document}: last_checked {checked_at.strftime('%Y-%m-%dT%H:%M:%SZ')} "
+        f"{oldest_shown}: last_checked {checked_shown} "
         "is more than seven days old; review the document and update its metadata"
     )
 
@@ -228,9 +234,8 @@ def check_document_links(root: Path) -> None:
                     if url.path
                     else document
                 )
-                assert target.exists(), (
-                    f"Broken link: {document.relative_to(root)}:{number}: {destination}"
-                )
+                shown = document.relative_to(root).as_posix()
+                assert target.exists(), f"Broken link: {shown}:{number}: {destination}"
                 if url.fragment and target in anchors_by_document:
                     assert unquote(url.fragment) in anchors_by_document[target], (
                         f"Broken heading: {document.relative_to(root)}:{number}: "
