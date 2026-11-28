@@ -27,6 +27,7 @@ class WorkerPool:
         layers: list[Layer],
         workers: int,
         file_runtime: WorkflowFileRuntimeProtocol | None = None,
+        event_driven_wakeup: bool = False,
     ) -> None:
         """Initialize the fixed-size worker pool.
 
@@ -52,12 +53,21 @@ class WorkerPool:
         self._file_runtime = file_runtime
         self._layers = layers
         self._worker_count = workers
+        self._event_driven_wakeup = event_driven_wakeup
 
         # Worker management
         self._workers: list[Worker] = []
         self._lock = threading.Lock()
         self._task_acquisition_lock = threading.Lock()
+        self._task_acquisition_condition = threading.Condition(
+            self._task_acquisition_lock
+        )
         self._task_acquisition_enabled = threading.Event()
+
+    def notify_task_available(self) -> None:
+        """Wake one idle worker when a task has been placed in the ready queue."""
+        with self._task_acquisition_condition:
+            self._task_acquisition_condition.notify()
 
     def start(self) -> None:
         """Start the worker pool."""
@@ -80,9 +90,13 @@ class WorkerPool:
                 logger.debug("Stopping worker pool: %d workers", worker_count)
 
             # Stop all workers
-            with self._task_acquisition_lock:
+            condition = getattr(self, "_task_acquisition_condition", None)
+            lock = condition if condition is not None else self._task_acquisition_lock
+            with lock:
                 for worker in self._workers:
                     worker.stop()
+                if condition is not None:
+                    condition.notify_all()
 
             # Wait for workers to finish
             for worker in self._workers:
@@ -104,11 +118,15 @@ class WorkerPool:
         """
         with self._lock:
             self._task_acquisition_enabled.clear()
-            with self._task_acquisition_lock:
+            condition = getattr(self, "_task_acquisition_condition", None)
+            lock = condition if condition is not None else self._task_acquisition_lock
+            with lock:
                 pending_tasks = self._ready_queue.take_all()
                 for worker in self._workers:
                     if not worker.has_current_task:
                         worker.stop()
+                if condition is not None:
+                    condition.notify_all()
             return pending_tasks
 
     def has_current_tasks(self) -> bool:
@@ -126,6 +144,11 @@ class WorkerPool:
             file_runtime=self._file_runtime,
             task_acquisition_lock=self._task_acquisition_lock,
             task_acquisition_enabled=self._task_acquisition_enabled,
+            task_acquisition_condition=(
+                self._task_acquisition_condition
+                if self._event_driven_wakeup
+                else None
+            ),
         )
 
         worker.start()
