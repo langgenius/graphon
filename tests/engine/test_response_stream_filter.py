@@ -1413,8 +1413,53 @@ def test_response_stream_filter_repeats_variable_text_within_one_reply(
     text = "".join(
         event.chunk for event in output if isinstance(event, NodeRunStreamChunkEvent)
     )
-    assert text == ("value/value!next:" if streamed else "value/value!next:value")
+    assert text == "value/value!next:value"
     assert list(event_filter.flush()) == []
+
+
+def test_response_stream_filter_replays_closed_stream_for_second_root_answer() -> None:
+    source = _TestNode("llm")
+    first_answer = _TestNode(
+        "first-answer",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template.from_answer_template("first:{{#llm.text#}}|"),
+    )
+    second_answer = _TestNode(
+        "second-answer",
+        execution_type=NodeExecutionType.RESPONSE,
+        template=Template.from_answer_template("next:{{#llm.text#}}"),
+    )
+    graph = _TestGraph(
+        nodes={node.id: node for node in [source, first_answer, second_answer]},
+        edges={
+            "first": _TestEdge("first", "llm", "first-answer"),
+            "second": _TestEdge("second", "first-answer", "second-answer"),
+        },
+        root_node_id="llm",
+    )
+    variable_pool = VariablePool()
+    event_filter = ResponseStreamFilter()
+    event_filter.initialize(_context(graph, variable_pool))
+    output = list(event_filter.on_event(GraphRunStartedEvent()))
+    output.extend(
+        event_filter.on_event(
+            _stream_chunk("val", selector=["llm", "text"], is_final=False)
+        )
+    )
+    output.extend(event_filter.on_event(_stream_chunk("ue", selector=["llm", "text"])))
+    output.extend(
+        event_filter.on_event(
+            _edge_taken(
+                edge_id="second", source_id="first-answer", answer_id="second-answer"
+            )
+        )
+    )
+    output.extend(event_filter.flush())
+
+    text = "".join(
+        event.chunk for event in output if isinstance(event, NodeRunStreamChunkEvent)
+    )
+    assert text == "first:value|next:value"
 
 
 @pytest.mark.parametrize(
