@@ -412,6 +412,9 @@ class _TemplateStream:
             event = self.stream_buffers.pop(selector)
             if event is None:
                 continue
+            session.segment_positions[session.index] = (
+                session.segment_positions.get(session.index, 0) + 1
+            )
 
             if is_non_node_selector:
                 response_node = graph.nodes[session.node_id]
@@ -434,7 +437,7 @@ class _TemplateStream:
             if (
                 not events
                 and buffered_events
-                and selector in session.repeated_selectors
+                and session.segment_positions.get(session.index, 0) == 0
             ):
                 text = "".join(event.chunk for event in buffered_events)
                 events = self._create_response_text_chunks(text, session, graph=graph)
